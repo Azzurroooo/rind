@@ -63,8 +63,10 @@ function validateStep(step, where) {
     }
   }
   if (step.kind === "agents") {
-    assert.ok(step.screen?.snapshot && step.screen?.page, `${where}: management scene required`);
-    assert.deepEqual(JSON.parse(JSON.stringify(step.screen)), step.screen, `${where}: scene must be plain data`);
+    if (step.screen !== null) {
+      assert.ok(step.screen?.snapshot && step.screen?.page, `${where}: management scene required`);
+      assert.deepEqual(JSON.parse(JSON.stringify(step.screen)), step.screen, `${where}: scene must be plain data`);
+    }
   }
   if (step.kind === "turn-done") {
     assert.equal(typeof step.durationMs, "number", `${where}: durationMs required`);
@@ -159,4 +161,6 @@ test("agents lessons cover arbitrary folders, explicit sharing and tracked deliv
   assert.match(text, /does not automatically resume an ordinary direct chat/);
   assert.match(text, /after the parent's turn ends/);
   assert.doesNotMatch(JSON.stringify(tourPages()), /Delegates|team blueprint|\/team\b|bash_output/);
+  assert.ok(pages.every(page => !page.steps.some(step => ["shell", "shell-out"].includes(step.kind))));
+  assert.doesNotMatch(text, /rind agents\b/);
 });

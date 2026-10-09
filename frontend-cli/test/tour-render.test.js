@@ -135,7 +135,7 @@ test("page frame titles the page and wraps every content line", () => {
   }
 });
 
-test("team lessons show ordinary chat with the selected team in its status bar", () => {
+test("agents lessons preserve the startup banner and only show a team label for scoped chat", () => {
   for (const page of tourPages().filter(page => page.id.startsWith("agents."))) {
     const stage = createTourStage();
     for (const [index, step] of page.steps.entries()) {
@@ -144,7 +144,8 @@ test("team lessons show ordinary chat with the selected team in its status bar",
       const view = renderTourPage(stage.snapshot(), { ...pageState("waiting"), page, stepIndex: index }, 120);
       const text = view.lines.map(stripAnsi).join("\n");
       assert.match(text, /Rind v/);
-      assert.match(text, /Team: product/);
+      if (step.info.management_label) assert.match(text, /Team: product/);
+      else assert.doesNotMatch(text, /Team: product/);
     }
   }
 });
@@ -306,12 +307,15 @@ test("all lesson steps, contents and help fit supported terminal sizes", () => {
   }
 });
 
-test("team command history precedes ordinary member chat", () => {
+test("team creation uses forms and returns to the original chat without a shell transcript", () => {
   const page = tourPages().find(page => page.id === "agents.create");
-  const stage = createTourStage(); stage.rebuildTo(page.steps, page.steps.findIndex(step => step.kind === "startup"));
+  const stage = createTourStage(); stage.rebuildTo(page.steps, page.steps.length - 1);
   const text = renderTourPage(stage.snapshot(), { ...pageState("end"), page }, 100).lines.map(stripAnsi).join("\n");
-  assert.ok(text.indexOf("team create product") < text.indexOf("team add product"));
-  assert.ok(text.includes("Team: product"));
+  assert.equal(stage.snapshot().agents, null);
+  assert.match(text, /Rind v/);
+  assert.doesNotMatch(text, /\$|rind agents|Team: product/);
+  assert.ok(page.steps.some(step => step.screen?.dialog?.title === "New team"));
+  assert.ok(page.steps.some(step => step.screen?.dialog?.title === "Add existing folder"));
 });
 
 test("wrapped shell cursor remains on the command and scrollback exposes earlier rows", () => {

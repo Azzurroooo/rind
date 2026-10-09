@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentsScene } from "../lib/tour/pages/agents-demo.js";
+import { agentsScene, agentsSetupScene } from "../lib/tour/pages/agents-demo.js";
 import { agents } from "../lib/tour/pages/steps.js";
-import { findTourPage } from "../lib/tour/pages/index.js";
+import { findTourPage, tourPages } from "../lib/tour/pages/index.js";
+import { createActions } from "../lib/agents-actions.js";
 import { createTourStage } from "../lib/tour/stage.js";
 import { renderTourAgents } from "../lib/tour/agents-view.js";
 import { renderTourPage } from "../lib/tour/render.js";
@@ -11,8 +12,8 @@ import { organizationRows, sidebarRows, teamSessions } from "../lib/agents-model
 import { stripAnsi, textWidth } from "../lib/text-width.js";
 
 test("management scenes stay serializable and rendering does not mutate their replay data", () => {
-  for (const pageId of ["agents.create", "agents.tasks", "agents.sessions"]) {
-    for (const step of findTourPage(pageId).steps.filter(step => step.kind === "agents")) {
+  for (const page of tourPages().filter(page => page.id.startsWith("agents."))) {
+    for (const step of page.steps.filter(step => step.kind === "agents" && step.screen)) {
       const before = structuredClone(step.screen);
       assert.deepEqual(JSON.parse(JSON.stringify(before)), before);
       for (const [width, rows] of [[36, 14], [40, 16], [76, 18], [116, 30]]) {
@@ -93,4 +94,81 @@ test("the tour shows the real task form, report and scrolled evidence without a 
     if (step.screen.reportTaskId && !step.screen.reportOffset) assert.match(text, /Summary[\s\S]*Unicode review complete/);
     if (step.screen.reportOffset) assert.match(text, /Evidence[\s\S]*4 parser tests passed \(simulated\)[\s\S]*unicode\.md/);
   }
+});
+
+test("interactive setup menus and fields match the real Agents actions", async () => {
+  let form, choice;
+  const ui = {
+    view: { snapshot: agentsSetupScene("first-member-menu").snapshot },
+    form(title, fields, submit, options = {}) { form = { title, fields, submit, ...options }; },
+    choose(title, items, options = {}) { choice = { title, items, ...options }; },
+    async request() { throw Object.assign(new Error("Simulated sharing decision"), {
+      code: "WORKSPACE_SHARED", details: { teams: ["operations"] },
+    }); },
+  };
+  const actions = createActions(ui);
+  const fields = values => values.map(field => ({ key: field.key, label: field.label,
+    kind: field.kind || "text", optional: Boolean(field.optional), hint: field.hint, require: field.require || "" }));
+  const menu = items => items.map(({ label, description }) => ({ label, description }));
+  const sameForm = phase => {
+    const dialog = agentsSetupScene(phase).dialog;
+    assert.equal(dialog.title, form.title);
+    assert.deepEqual(fields(dialog.fields), fields(form.fields));
+    assert.deepEqual(dialog.description || [], form.description || []);
+  };
+  actions.createTeam();
+  sameForm("new-team");
+  actions.addMember("product");
+  assert.deepEqual(menu(agentsSetupScene("first-member-menu").dialog.items), menu(choice.items));
+  choice.items[0].action();
+  sameForm("first-member-folder");
+  ui.view.snapshot = agentsScene("created").snapshot;
+  actions.addMember("product", "demo");
+  assert.deepEqual(menu(agentsSetupScene("add-menu").dialog.items), menu(choice.items));
+  choice.items[0].action();
+  sameForm("specialist-folder");
+  await form.submit({ workspace: "~/finance", name: "finance", position: "Finance", responsibility: "Reconcile invoices" });
+  const sharing = agentsSetupScene("share-folder").dialog;
+  assert.equal(choice.title, sharing.title);
+  assert.deepEqual(menu(choice.items), menu(sharing.items));
+  assert.deepEqual(choice.description, sharing.description);
+  actions.addMember("product", "demo");
+  choice.items[2].action();
+  sameForm("worktree-repository");
+});
+
+test("setup forms show the focused field and preserve honest navigation and conversation states", () => {
+  for (const page of tourPages().filter(page => page.id.startsWith("agents."))) {
+    for (const [index, step] of page.steps.entries()) {
+      if (!step.screen) continue;
+      const stage = createTourStage(); stage.rebuildTo(page.steps, index);
+      const state = { page, pageIndex: 0, pageCount: 20, stepIndex: index,
+        stepCount: page.steps.length, phase: "waiting", speed: 1 };
+      const rendered = renderTourPage(stage.snapshot(), state, 80, 24);
+      const text = rendered.lines.map(stripAnsi).join("\n");
+      const dialog = step.screen.dialog;
+      if (dialog?.fields) {
+        const active = dialog.fields[dialog.index ?? 0];
+        assert.ok(text.includes("› " + active.label), `${page.id} step ${index}: focused field`);
+        assert.ok(text.includes(active.value), `${page.id} step ${index}: entered value`);
+      }
+      if (dialog?.kind === "choice") {
+        assert.ok(text.includes(dialog.items[dialog.index].label));
+        assert.match(text, /enter confirm/);
+      }
+      assert.doesNotMatch(text, /rind agents/);
+      assert.equal(rendered.cursor, null);
+    }
+  }
+  const empty = agentsSetupScene("empty-navigation");
+  assert.equal(empty.snapshot.teams.length, 0);
+  const first = agentsSetupScene("first-member-menu");
+  assert.equal(first.snapshot.teams.length, 1);
+  assert.equal(first.snapshot.memberships.length, 0);
+  assert.equal(first.snapshot.teams[0].leaderAgentId, undefined);
+  const member = agentsSetupScene("leader-sessions");
+  assert.equal(member.page.kind, "member");
+  assert.equal(member.snapshot.tasks.length, 0);
+  const worktrees = agentsSetupScene("worktrees").snapshot.agents;
+  assert.equal(new Set(worktrees.map(agent => agent.canonicalWorkspace)).size, 3);
 });

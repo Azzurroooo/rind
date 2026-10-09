@@ -332,7 +332,7 @@ test("introduction survives resize and help, and returns on rewind or replay", a
     assert.match(screen, /TOUR · Any folder/);
     assert.match(screen, /Add a specialist/);
     assert.match(screen, /READY · Enter \/ Space to start/);
-    assert.match(screen, /Step 1\/7/);
+    assert.match(screen, new RegExp(`Step 1/${findTourPage("agents.add").steps.length}`));
     assert.doesNotMatch(screen, /Demo ·|TOUR GUIDE|PAUSED|AUTO|1×/);
     assert.equal(clock.pendingCount, 0);
   };
@@ -353,7 +353,7 @@ test("introduction survives resize and help, and returns on rewind or replay", a
       const screen = (await output.flushAndGetViewport()).join("\n");
       assert.match(screen, /Demo · Any folder/);
       assert.match(screen, /TOUR GUIDE/);
-      assert.match(screen, /PLAYING/);
+      assert.match(screen, /PLAYING|AUTO/);
       assert.doesNotMatch(screen, /READY/);
       input.send(action);
       await assertReady();
@@ -413,4 +413,36 @@ test("Agents tour plays task and report screens, resizes and releases terminal i
   assert.equal(input.isRaw, false);
   assert.equal(input.listenerCount("data"), 0);
   assert.equal(clock.pendingCount, 0);
+});
+
+test("team creation plays navigation, choices and filled forms in the terminal without management commands", async () => {
+  const input = createVirtualInput();
+  const output = createVirtualOutput({ columns: 80, rows: 24 });
+  const clock = fakeClock();
+  const page = findTourPage("agents.create");
+  const running = runTour({ input, output: output.output, startPageId: page.id,
+    schedule: clock.schedule, cancel: clock.cancel, now: clock.now });
+  try {
+    await settle();
+    let position = 0;
+    for (const [title, value] of [["New team", "product"], ["Add member", "Existing folder"], ["Add existing folder", "~/demo"]]) {
+      const target = page.steps.findIndex(step => step.screen?.dialog?.title === title);
+      for (; position < target; position++) input.send("\x1b[C");
+      await settle();
+      const screen = (await output.flushAndGetViewport()).join("\n");
+      assert.ok(screen.includes(title));
+      assert.ok(screen.includes(value));
+      assert.doesNotMatch(screen, /rind agents|\$ /);
+      assert.match(screen, /TOUR GUIDE/);
+    }
+    input.send("r");
+    await settle();
+    assert.match((await output.flushAndGetViewport()).join("\n"), /TOUR · ← Agents/);
+    assert.equal(clock.pendingCount, 0);
+  } finally {
+    input.send("\x03");
+    await running;
+  }
+  assert.equal(input.listenerCount("data"), 0);
+  assert.equal(input.isRaw, false);
 });

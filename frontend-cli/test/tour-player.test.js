@@ -493,37 +493,40 @@ test("every lesson countdown leads to playback, never an explanation pause", () 
   }
 });
 
-test("team creation explains registration before opening ordinary chat", () => {
+test("team creation plays the interactive setup before explaining folder registration", () => {
   const { player, clock, stage } = makePlayer({ topics: TOUR_TOPICS, startPageId: "agents.create" });
   player.start(); player.key(key("space")); clock.advance(60000);
   assert.equal(player.state().phase, "waiting");
   assert.match(stage.snapshot().caption.join(" "), /does not move/);
+  assert.equal(stage.snapshot().agents.snapshot.teams[0].leaderAgentId, "demo");
+  assert.equal(stage.snapshot().shell.blocks.length, 0);
   assert.equal(clock.pendingCount, 0);
   player.dispose();
 });
 
 test("automatic playback presents every management screen instead of skipping to the next note", () => {
-  const page = tourPages().find(page => page.id === "agents.tasks");
-  const stage = createTourStage();
-  const clock = fakeClock();
-  const seen = new Set();
-  let player;
-  player = createTourPlayer({ topics: TOUR_TOPICS, startPageId: page.id, stage,
-    schedule: clock.schedule, cancel: clock.cancel, now: clock.now,
-    onRender: () => {
-      const state = player.state();
-      if (page.steps[state.stepIndex]?.kind === "agents" && stage.snapshot().agents) seen.add(state.stepIndex);
-    } });
-  try {
-    player.start();
-    let transitions = 0;
-    while (player.state().phase !== "end") {
-      assert.ok(transitions++ < 1000, "playback finishes");
-      const state = player.state();
-      if (state.phase === "waiting") player.key(key("space"));
-      else clock.advance(state.remainingMs);
-    }
-    assert.deepEqual([...seen], page.steps.flatMap((step, index) => step.kind === "agents" ? [index] : []));
-    assert.equal(clock.pendingCount, 0);
-  } finally { player.dispose(); }
+  for (const page of tourPages().filter(page => page.id.startsWith("agents."))) {
+    const stage = createTourStage();
+    const clock = fakeClock();
+    const seen = new Set();
+    let player;
+    player = createTourPlayer({ topics: TOUR_TOPICS, startPageId: page.id, stage,
+      schedule: clock.schedule, cancel: clock.cancel, now: clock.now,
+      onRender: () => {
+        const state = player.state();
+        if (page.steps[state.stepIndex]?.kind === "agents" && stage.snapshot().agents) seen.add(state.stepIndex);
+      } });
+    try {
+      player.start();
+      let transitions = 0;
+      while (player.state().phase !== "end") {
+        assert.ok(transitions++ < 1000, "playback finishes");
+        const state = player.state();
+        if (state.phase === "waiting") player.key(key("space"));
+        else clock.advance(state.remainingMs);
+      }
+      assert.deepEqual([...seen], page.steps.flatMap((step, index) => step.kind === "agents" && step.screen ? [index] : []));
+      assert.equal(clock.pendingCount, 0);
+    } finally { player.dispose(); }
+  }
 });
