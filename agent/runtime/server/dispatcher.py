@@ -383,6 +383,9 @@ class RuntimeDispatcher:
             if method == RuntimeMethod.RIND_FOLDER_DEFAULTS_APPLY:
                 await self._apply_folder_defaults(request)
                 return
+            if method == RuntimeMethod.RIND_SESSION_DELIVER:
+                await self._deliver(request)
+                return
             if method in {
                 RuntimeMethod.RIND_GOAL_GET,
                 RuntimeMethod.RIND_GOAL_SET,
@@ -968,6 +971,25 @@ class RuntimeDispatcher:
             # Not a session's event: every observer (the Agents page) refreshes what it shows for folders.
             await self._send_event({"type": "folder_defaults_changed", "turn_id": "", "workspace_root": result["workspace_root"]})
         await self._respond(request, result)
+
+    async def _deliver(self, request: dict[str, Any]) -> None:
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        text = str(params.get("text") or "").strip()
+        if not text:
+            await self._respond_error(request, "A delivery needs text.", "InvalidParams")
+            return
+        if not await self._worker.repository.exists(session_id):
+            await self._respond_error(request, "Conversation not found.", "SessionNotFound")
+            return
+        try:
+            self._worker.execution.deliver(session_id, text)
+        except RuntimeError as exc:
+            await self._respond_error(request, str(exc), "SessionClosed")
+            return
+        await self._respond(request, {"queued": True})
 
     async def _apply_folder_defaults(self, request: dict[str, Any]) -> None:
         """Bring a conversation to its folder's current defaults (a team member's reopened task)."""

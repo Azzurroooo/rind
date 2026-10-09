@@ -58,6 +58,7 @@ class RuntimeMethod:
     RIND_AUTH_UPDATE = "rind/auth/update"
     RIND_SESSION_STEER = "rind/session/steer"
     RIND_SESSION_FOLLOW_UP = "rind/session/follow_up"
+    RIND_SESSION_DELIVER = "rind/session/deliver"
     RIND_SESSION_PROMOTE_FOLLOW_UP = "rind/session/promote_follow_up"
     RIND_SESSION_UNSTEER = "rind/session/unsteer"
     RIND_SESSION_DEQUEUE_FOLLOW_UP = "rind/session/dequeue_follow_up"
@@ -175,6 +176,7 @@ CORE_METHODS = (
     RuntimeMethod.RIND_FOLDER_DEFAULTS_UNSET,
     RuntimeMethod.RIND_FOLDER_DEFAULTS_APPLY,
     RuntimeMethod.RIND_FOLDER_DEFAULTS_RESOLVE,
+    RuntimeMethod.RIND_SESSION_DELIVER,
 )
 
 CAPABILITIES = (

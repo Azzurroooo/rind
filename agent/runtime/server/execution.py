@@ -82,6 +82,9 @@ class ExecutionCoordinator:
         self._starting: dict[str, asyncio.Task] = {}
         self._live: dict[str, dict[str, Any]] = {}
         self._continuations: dict[str, asyncio.Task] = {}
+        # Messages delivered from outside a conversation (a team's results), waiting for their turn.
+        self._deliveries: dict[str, list[str]] = {}
+        self._delivery_runs: dict[str, asyncio.Task] = {}
         self._suppressed: set[str] = set()
         self._pending_wakes: set[str] = set()
         self._scopes: dict[str, _RequestScope] = {}
@@ -284,6 +287,30 @@ class ExecutionCoordinator:
                 self._pending_wakes.discard(session_id)
                 self._schedule_continuation(session_id)
 
+    def deliver(self, session_id: str, text: str) -> None:
+        """Run a message from outside the conversation as its next turn, after any current one.
+
+        Unlike an automatic continuation it is a message to the agent, so it runs even after a stop.
+        """
+        clean = validate_session_id(session_id)
+        if self._closed or clean in self._closed_sessions:
+            raise RuntimeError("This conversation is closed.")
+        self._deliveries.setdefault(clean, []).append(text)
+        if clean not in self._delivery_runs:
+            self._delivery_runs[clean] = asyncio.create_task(self._run_deliveries(clean), name=f"rind-delivery-{clean}")
+
+    async def _run_deliveries(self, session_id: str) -> None:
+        try:
+            while not self._closed and (texts := self._deliveries.pop(session_id, None)):
+                async for _ in self.run_turn(session_id, query="\n\n".join(texts), delivery=True):
+                    pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._emit_to_event_sinks({"type": "task_continuation_failed", "session_id": session_id, "turn_id": "", "error": str(exc)})
+        finally:
+            self._delivery_runs.pop(session_id, None)
+
     def begin_request(self, session_id: str) -> str:
         clean = validate_session_id(session_id)
         if clean in self._scopes:
@@ -443,6 +470,7 @@ class ExecutionCoordinator:
         continuation: bool = False,
         compact: bool = False,
         checkpoint: str | None = None,
+        delivery: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         clean = validate_session_id(session_id)
         if not continuation and not compact:
@@ -512,7 +540,7 @@ class ExecutionCoordinator:
                         self.update_live_event(event_data)
                         if event_data.get("type") == "user_question_requested":
                             self._prepare_user_question(clean, str(event_data.get("tool_call_id") or ""))
-                        if continuation:
+                        if continuation or delivery:
                             await self._emit_to_event_sinks(event_data)
                         yield event_data
                 finally:
@@ -801,7 +829,7 @@ class ExecutionCoordinator:
     async def close(self) -> None:
         async with self._lock:
             self._closed = True
-            goal_tasks = list(self._continuations.values())
+            goal_tasks = [*self._continuations.values(), *self._delivery_runs.values()]
             self._shell_tools.supervisor.set_observer(None)
         if self._starting:
             await asyncio.gather(*self._starting.values(), return_exceptions=True)
@@ -811,6 +839,8 @@ class ExecutionCoordinator:
         if goal_tasks:
             await asyncio.gather(*goal_tasks, return_exceptions=True)
         self._continuations.clear()
+        self._delivery_runs.clear()
+        self._deliveries.clear()
         if self._task_event_pump:
             self._task_event_pump.cancel()
             await asyncio.gather(self._task_event_pump, return_exceptions=True)
