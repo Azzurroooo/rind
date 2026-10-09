@@ -58,6 +58,6 @@ export function text(value: unknown, label: string, limit = 16000): string {
 export const memberKey = (teamId: string, agentId: string) => teamId + "/" + agentId;
 export const activeRun = (run: Run) => ["starting", "running", "unknown"].includes(run.status);
 export interface AdapterInput { agent: Agent; session: Session; task: Task; input: string; instructions: string; externalTools: object }
-export interface AdapterEvent { type: "working" | "needs_input"; sequence: number }
+export interface AdapterEvent { type: "working"; sequence: number }
 export interface AdapterHandle { runtimeSessionId: string; completion: Promise<{ content: string }>; cancel(): Promise<void> }
 export interface Adapter { start(input: AdapterInput, emit: (event: AdapterEvent) => void): Promise<AdapterHandle> }

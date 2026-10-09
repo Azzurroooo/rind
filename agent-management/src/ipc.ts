@@ -196,6 +196,7 @@ export async function startServer(options: { home?: string; python?: string; rep
           requireValue(grant?.host && grant.principal.kind !== "user", "FORBIDDEN", "Only the execution host can publish lifecycle facts.");
           result = await service.request({ kind: "user" }, message.method, { ...message.params, sessionId: grant.principal.sessionId, runtimeSessionId: message.runtimeSessionId });
         } else if (message.method === "subscribe") {
+          requireValue(principal.kind !== "agent", "FORBIDDEN", "Members work through delegate and report.");
           // A connection counts once, however often it resubscribes.
           if (!unsubscribe) watchRuntime(true);
           unsubscribe?.();

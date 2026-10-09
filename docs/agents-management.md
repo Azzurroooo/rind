@@ -83,7 +83,7 @@ The shared Runtime hosts the conversation of every interactive Rind window and e
 | --- | --- |
 | `●` Working | A turn or task is running, whether or not any window shows it. |
 | `↻` Running job | The turn ended, but a job it started (a build, a test run) still runs; it resumes by itself when the job finishes. Rows name the job (`↻ Running job · npm test +1`); the detail says it in full. Nothing for you to do. |
-| `⋯` Delegated | A task handed work to its members and resumes by itself when they deliver. Nothing for you to do. |
+| `⋯` Delegated | A task handed work to its members and runs again by itself, told the results, when they deliver. Nothing for you to do. |
 | `!` Needs input | It stopped to ask a question, or a task is blocked on you. |
 | `?` Unconfirmed | A run's outcome could not be confirmed after a service was lost; confirm the old process stopped before retrying. |
 | `○` Open | Nothing runs, and a Rind window shows it on screen right now. Several terminals can each have one open. |
@@ -225,9 +225,22 @@ When a workspace belongs to multiple teams, a TTY asks which scope to attach. No
 
 Each managed Session keeps one management scope; the shared Worker hosts many isolated Sessions. `/sessions` and `/fork` open the selected history in another CLI connected to the same shared Runtime, preserving the current conversation when you return; a fork also prefills its selected user message. Open another member through the Agents page or resume with `rind --session <runtime-id> --team <team-id>`. A conversation from another workspace or team cannot reuse the current scope. Unregistered ordinary Rind retains its existing session controls. The first adapter is Rind; external Codex/Claude processes are not automatically observed.
 
+## What members can call
+
+A member never reads or changes the organization. It is told who it is, its supervisor and its direct reports, and gets at most two tools:
+
+| Tool | Who gets it | Forms |
+|---|---|---|
+| `delegate` | The leader, and members with direct reports | `{to, brief}` assigns a task to a direct report · `{new, brief}` adds a direct report first: with `new.branch` a Git worktree on a new branch of a team repository, otherwise an empty workspace · `{task, message}` sends a finished or blocked task back · `{task, cancel: true}` cancels it · `{retire}` removes a member it added, once its work is finished and its worktree is clean (never forced; the branch stays) |
+| `report` | A task run | `{outcome, summary, evidence, artifacts}` delivers; `artifacts` are files in the member's workspace, copied for the recipient · `{blocked: {responder, action}}` asks the user, the supervisor or a direct report |
+
+A task run cannot ask the user a question; it reports a blocker instead. Everything else, models included, belongs to the user and the Manager (`agent_management`); the service refuses it from members, and members cannot subscribe to snapshots. An empty-workspace member starts with the model chosen for its creator's folder; a worktree member follows its repository's.
+
+Nobody polls. Whoever delegated hears back once all of its delegated work has settled (delivered, blocked, failed): a parent task runs again and is told the results instead of its brief, and a conversation — a member's or the Manager's — gets them as its next turn through the Runtime's `rind/session/deliver`. A result for a conversation the Runtime does not host waits in the service and arrives when it is hosted again. Delivered files are copied to `state/artifacts/<team>/<recipient>/<task>/<id>/<name>` and named by path in the results; the recipient reads them with `read_file`. The path is guidance, not a sandbox: Rind's file tools have no directory boundary.
+
 ## Boundaries
 
-The service owns authorization, persistence, scheduling, workspace locks, reports and subscriptions. The adapter connects to the shared Runtime and translates lifecycle events. The management service observes session status from the execution host; it never treats closing a CLI as execution completion. Python receives a generic external tool configuration per Session and an optional list of absolute Skill files; it has no Team model. Model credentials cannot publish lifecycle facts, and host credentials cannot call management mutations. Manager sessions receive only the management tool and cannot browse member files.
+The service owns authorization, persistence, scheduling, workspace locks, reports and subscriptions. The adapter connects to the shared Runtime and translates lifecycle events. The management service observes session status from the execution host; it never treats closing a CLI as execution completion. Python receives a generic external tool configuration per Session — each host tool declared with its own name, description and JSON schema — and an optional list of absolute Skill files; it has no Team model. Model credentials cannot publish lifecycle facts, and host credentials cannot call management mutations. Manager sessions receive only the management tool and cannot browse member files.
 
 Reviewing and removing work goes through the same boundary. `reviewTask { taskId, decision: "accept" | "rework", feedback }` is user-only and applies once per delivery; rework is a new task (`reworkOf`) for the same owner. `deleteTeam { teamId, confirmName }` requires the exact name from the user, refuses while the team has a run, and either archives the team (`team.archive`, read through `listArchive`) or, without tasks, removes it. Archived teams are read-only to every method (team reads included) and absent from live snapshots, which list them only as `archivedTeams`; importing a deleted legacy team again makes a new team. A conversation released while a window shows it keeps a teamless registration (`released`) so its turns and detach still work, and is dropped on detach. Only the folders an operation released are unregistered, and only when nothing live refers to them and they have no instructions or skills. The Manager's `deleteTeam` on a team with members, tasks or conversations and its `cancelRun` return `{ approval }` instead of acting; snapshots for the user carry `approvals`, which are removed as soon as their target is gone, and `resolveApproval { approvalId, approve }` (user-only) carries one out or declines it.
 

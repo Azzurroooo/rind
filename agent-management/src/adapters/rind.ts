@@ -10,7 +10,6 @@ export function createRindAdapter(options: { home?: string; python?: string; rep
         externalTools: input.externalTools,
         onMessage: (message: any) => {
           if (message.event?.type === "turn_started") emit({ type: "working", sequence: ++sequence });
-          if (message.event?.type === "user_question_requested") emit({ type: "needs_input", sequence: ++sequence });
         },
       });
       client.start();

@@ -155,10 +155,11 @@ test("agents lessons cover arbitrary folders, explicit sharing and tracked deliv
   const text = JSON.stringify(pages);
   assert.doesNotMatch(text, /agent_create|team blueprint|agents\/main-agent/);
   assert.match(text, /explicitly share/);
-  assert.match(text, /assignTask/);
+  assert.match(text, /delegate/);
+  assert.doesNotMatch(text, /agent_management|assignTask/);
   assert.match(text, /worktree/);
   assert.match(text, /Unconfirmed/);
-  assert.match(text, /does not automatically resume an ordinary direct chat/);
+  assert.match(text, /its result arrives here as a new turn/);
   assert.match(text, /after the parent's turn ends/);
   assert.doesNotMatch(JSON.stringify(tourPages()), /Delegates|team blueprint|\/team\b|bash_output/);
   assert.ok(pages.every(page => !page.steps.some(step => ["shell", "shell-out"].includes(step.kind))));
