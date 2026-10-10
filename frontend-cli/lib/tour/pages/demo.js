@@ -86,7 +86,7 @@ export const PROVIDERS = [
 ];
 
 export const SKILL_SOURCES = [
-  { label: "Rind · built-in", paths: ["~/.rind/app/agent/skills"], enabled: true, importable: false,
+  { label: "Rind · built-in", paths: ["~/.rind/skills/.system"], enabled: true, importable: false,
     skills: [{ name: "skill-creator", description: "Create or improve a Skill", status: "active" }] },
   { label: "Claude · user", paths: ["~/.claude/skills"], enabled: true, importable: true,
     skills: [{ name: "commit-lint", description: "Check commit messages against the repo style", status: "active" }] },

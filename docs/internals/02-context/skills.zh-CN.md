@@ -21,7 +21,7 @@ SkillRepository 读取八个层级；同名（不分大小写）时，后面的�
 
 | 层级 | 目录 | 开关 |
 | --- | --- | --- |
-| Rind · 内置 | 安装目录中的 `agent/skills` | 始终开启 |
+| Rind · 内置 | `RIND_HOME/skills/.system` | 始终开启 |
 | Claude · 用户 | `~/.claude/skills` | `/import` |
 | Codex · 用户 | `~/.codex/skills`，然后 `~/.agents/skills` | `/import` |
 | Rind · 用户 | `RIND_HOME/skills` | 始终开启 |
@@ -30,7 +30,13 @@ SkillRepository 读取八个层级；同名（不分大小写）时，后面的�
 | Rind · 项目 | `<cwd>/.rind/skills` | 始终开启 |
 | 团队 | 分配给该成员的 SKILL.md 文件 | 始终开启 |
 
-每个目录贡献其直接子目录中的 `<name>/SKILL.md`。以 `.` 开头的目录会被跳过，Codex 自带的 `~/.codex/skills/.system` 因此不会读入。符号链接的 Skill 目录会被跟随，Skill 的位置记为真实路径。项目级层级以工作目录为根，和 `RIND.md` 一致，不会上溯到 Git 根。
+每个目录贡献其直接子目录中的 `<name>/SKILL.md`。以 `.` 开头的目录会被跳过，因此 Rind 用户层不会重复列出 `.system`，Codex 自带的 `~/.codex/skills/.system` 也不会读入。符号链接的 Skill 目录会被跟随，Skill 的位置记为真实路径。项目级层级以工作目录为根，和 `RIND.md` 一致，不会上溯到 Git 根。
+
+## 内置 Skill
+
+内置 Skill 随安装包以 `agent/skills` 发布，运行时从 `RIND_HOME/skills/.system` 读取。因此各种安装方式（安装包、npm、便携包、源码）共用同一段代码，不需要任何安装步骤。Worker 启动时，`install_system_skills` 把安装包里文件的 SHA-256 与 `.system` 中的 `.bundle` 标记比较：一致时只是读一个小文件；不一致时（升级后或首次启动），在文件锁内把安装包复制到 `.system` 旁边，再用重命名整体替换，读取方看到的要么是旧版本，要么是新版本，不会是混合状态。中断复制留下的残留目录会被清理。同步失败只记录日志，不会阻止 Worker 启动；`.system` 里没有任何 Skill 时，`/skill` 会报告内置 Skill 缺失。
+
+`.system` 归 Rind 所有，升级时会被替换。在 `RIND_HOME/skills` 放一个同名 Skill，即可覆盖内置 Skill。
 
 ## 解析与问题
 

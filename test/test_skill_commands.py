@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.domain.models import ModelStreamEvent
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.persistence.session_meta import normalize_skill_sources
-from agent.infrastructure.skills import SkillRepository
+from agent.infrastructure.skills import SkillRepository, install_system_skills
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandRouter
 from agent.runtime.server.commands.catalog import build_command_infos
 from agent.runtime.server.dispatcher import RuntimeDispatcher
@@ -49,6 +49,7 @@ def _skill(root: Path, name: str, extra: str = "") -> Path:
 
 
 def _context(tmp_path: Path, session=None, runtime=None, draft=None) -> SlashCommandContext:
+    install_system_skills(tmp_path / "rind")
     repository = SkillRepository(tmp_path / "work", home=tmp_path / "home", rind_home=tmp_path / "rind")
     return SlashCommandContext(runtime=runtime, session=session or Session(), draft=draft, skills=repository)
 

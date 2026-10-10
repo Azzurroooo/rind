@@ -24,7 +24,7 @@ Skill 是一个包含 `SKILL.md` 的目录，frontmatter 里要有 `description`
 | 当前目录 | 工作目录下的 `.rind/skills/<skill-name>/SKILL.md` |
 | 你的所有目录 | `RIND_HOME/skills/<skill-name>/SKILL.md` |
 
-Rind 也会读取你的 Claude Skill（`~/.claude/skills`、`./.claude/skills`）和 Codex Skill（`~/.codex/skills`、`~/.agents/skills` 及对应的 `./` 项目目录）。让 Rind 帮你写一个 Skill 时，它会按内置的 `skill-creator` 来做。
+Rind 也会读取你的 Claude Skill（`~/.claude/skills`、`./.claude/skills`）和 Codex Skill（`~/.codex/skills`、`~/.agents/skills` 及对应的 `./` 项目目录）。让 Rind 帮你写一个 Skill 时，它会按内置的 `skill-creator` 来做。内置 Skill 位于 `RIND_HOME/skills/.system`，升级时会被 Rind 替换；想修改其中一个，就在 `RIND_HOME/skills` 放一个同名 Skill。
 
 每次请求只带**目录**：名称、描述和文件位置。任务匹配某个 Skill 时，模型会读取它的 `SKILL.md`。想马上用一个：
 

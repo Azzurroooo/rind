@@ -21,7 +21,7 @@ SkillRepository reads eight layers. A later layer overrides an earlier one by na
 
 | Layer | Folders | Switch |
 | --- | --- | --- |
-| Rind · built-in | `agent/skills` in the install | always on |
+| Rind · built-in | `RIND_HOME/skills/.system` | always on |
 | Claude · user | `~/.claude/skills` | `/import` |
 | Codex · user | `~/.codex/skills`, then `~/.agents/skills` | `/import` |
 | Rind · user | `RIND_HOME/skills` | always on |
@@ -30,7 +30,13 @@ SkillRepository reads eight layers. A later layer overrides an earlier one by na
 | Rind · project | `<cwd>/.rind/skills` | always on |
 | Team | SKILL.md files assigned to the member | always on |
 
-Each folder contributes its direct `<name>/SKILL.md` children. Folders starting with `.` are skipped, which also leaves out Codex's own `~/.codex/skills/.system`. Symlinked skill folders are followed, and a skill's location is its real path. The project layers are rooted at the working directory, as `RIND.md` is, not at a parent Git root.
+Each folder contributes its direct `<name>/SKILL.md` children. Folders starting with `.` are skipped, so the Rind user layer never lists `.system` again, and Codex's own `~/.codex/skills/.system` is left out. Symlinked skill folders are followed, and a skill's location is its real path. The project layers are rooted at the working directory, as `RIND.md` is, not at a parent Git root.
+
+## Built-in skills
+
+Built-in skills ship in the install as `agent/skills` and are read from `RIND_HOME/skills/.system`, so every way of installing Rind (installer, npm, portable, source) uses the same code and needs no install step. When a Worker starts, `install_system_skills` compares a SHA-256 of the bundled files with the `.bundle` marker in `.system`. A match costs one small read. A mismatch, after an update or on first start, copies the bundle beside `.system` under a file lock and swaps it in by renaming, so a reader sees the old copy or the new one, never a mix. Leftovers of an interrupted copy are removed. A failure is logged and does not stop the Worker; when `.system` holds no skill, `/skill` reports that built-in skills are missing.
+
+`.system` belongs to Rind and is replaced on update. A skill with the same name in `RIND_HOME/skills` overrides a built-in one.
 
 ## Parsing and problems
 

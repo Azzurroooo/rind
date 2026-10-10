@@ -12,7 +12,7 @@ A Skill is a folder with a `SKILL.md`. Its frontmatter is always visible in the 
 - This folder only: `.rind/skills/<name>/SKILL.md` under the current working directory.
 - Every folder for this user: `~/.rind/skills/<name>/SKILL.md`.
 
-Ask which one when the user has not said. To change an existing Skill, edit the `SKILL.md` at its catalog location.
+Ask which one when the user has not said. To change an existing Skill, edit the `SKILL.md` at its catalog location, except under `~/.rind/skills/.system`: Rind installs those built-in Skills and replaces them on update. To change a built-in Skill, create one with the same name in `~/.rind/skills/` instead; it overrides the built-in one.
 
 ## Layout
 

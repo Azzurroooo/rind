@@ -12,7 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.application import SkillTurnCoordinator
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.persistence.session_meta import new_session_id, normalize_skill_catalog, normalize_skill_sources
-from agent.infrastructure.skills import SkillRepository
+from agent.infrastructure.skills import SkillRepository, install_system_skills
 
 
 def _repository(tmp_path: Path) -> SkillRepository:
@@ -23,6 +23,7 @@ def _repository(tmp_path: Path) -> SkillRepository:
     hidden = tmp_path / "work" / ".rind" / "skills" / "manual" / "SKILL.md"
     hidden.parent.mkdir(parents=True)
     hidden.write_text("---\ndescription: Manual\ndisable-model-invocation: true\n---\n", encoding="utf-8")
+    install_system_skills(tmp_path / "rind")
     return SkillRepository(tmp_path / "work", home=tmp_path / "home", rind_home=tmp_path / "rind")
 
 
