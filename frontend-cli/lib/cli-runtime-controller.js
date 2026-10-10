@@ -11,6 +11,7 @@ export function createCliRuntimeController({
   getTaskMonitor,
   getCompactContextState,
   askModelMenu,
+  askSkillImportMenu,
   askEffortMenu = null,
   // A yes/no menu, or null without a terminal UI (a script is never asked).
   askChoice = null,
@@ -47,7 +48,9 @@ export function createCliRuntimeController({
     // has chosen; the conversation will be created with it.
     if (method === methods.commandExecute && !requestParams.session_id && !state.session.info.session_id) {
       const { provider, model, reasoning_effort } = state.session.info;
-      requestParams.draft = Object.fromEntries(Object.entries({ name: state.session.pendingName, provider, model, reasoning_effort }).filter(([, value]) => value));
+      requestParams.draft = Object.fromEntries(Object.entries({
+        name: state.session.pendingName, provider, model, reasoning_effort, skill_sources: state.session.pendingSkillSources,
+      }).filter(([, value]) => value));
     }
     if (turnScopedMethods.has(method) && state.turn.id && !requestParams.turn_id) {
       requestParams.turn_id = state.turn.id;
@@ -66,9 +69,11 @@ export function createCliRuntimeController({
       ...(info.model ? { model_id: info.model } : {}),
       ...(info.reasoning_effort ? { reasoning_effort: info.reasoning_effort } : {}),
       ...(state.session.pendingName ? { name: state.session.pendingName } : {}),
+      ...(state.session.pendingSkillSources ? { skill_sources: state.session.pendingSkillSources } : {}),
     });
     if (!created?.session_id) throw new Error("The Runtime did not create a conversation.");
     state.session.pendingName = "";
+    state.session.pendingSkillSources = null;
     state.session.reservedId = String(created.session_id);
     state.session.info = {
       ...state.session.info, session_id: String(created.session_id),
@@ -481,6 +486,42 @@ export function createCliRuntimeController({
 
   // After /model or /effort: also make the choice what new conversations in
   // this folder start with? Not asked when the folder already has it.
+  // /import: before the first message the window keeps the choice; afterwards
+  // the conversation changes once the cost to its prompt cache is accepted.
+  async function runImportSelector() {
+    let listed;
+    try {
+      listed = await request(methods.commandExecute, { input: "/import" });
+    } catch (error) {
+      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    const sources = Array.isArray(listed?.display?.sources) ? listed.display.sources : [];
+    if (!sources.length) {
+      log(String(listed?.text || "No skill sources to import."));
+      return;
+    }
+    const choices = await askSkillImportMenu(sources);
+    if (!choices || state.runtime.status === "closing") return;
+    if (!hasConversation()) {
+      state.session.pendingSkillSources = choices;
+      log(() => commandResultText("Skill imports chosen.", "they apply when the conversation starts"));
+      return;
+    }
+    const answer = await askChoice?.(
+      "The skill list changes at the next model request, which cannot reuse the prompt cache.",
+      ["Cancel · keep the current skills", "Apply · change the skills now"],
+    );
+    if (!String(answer || "").startsWith("Apply")) return;
+    const changes = Object.entries(choices).map(([source, on]) => `${source}=${on ? "on" : "off"}`).join(" ");
+    try {
+      await request(methods.commandExecute, { input: `/import ${changes}` });
+      log(() => commandResultText("Skill imports updated.", "from the next model request"));
+    } catch (error) {
+      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   async function offerFolderDefault(values, alreadySet, label) {
     const folder = state.session.info.workspace_root;
     if (!askChoice || !folder || state.runtime.status === "closing") return;
@@ -573,6 +614,7 @@ export function createCliRuntimeController({
     printContextReport,
     startCompactCommand,
     runModelSelector,
+    runImportSelector,
     runEffortCommand,
     currentModelEfforts,
   };

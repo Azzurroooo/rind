@@ -37,7 +37,6 @@ test("segmentSummary phrases the remaining kinds", () => {
   assert.equal(phrase(tool("1", "search_web"), tool("2", "search_web")), "Searched the web 2 times")
   assert.equal(phrase(tool("1", "task_control"), tool("2", "bash_output")), "Checked 2 tasks")
   assert.equal(phrase(tool("1", "delegate"), tool("2", "agent_create")), "Delegated 1 task, created 1 agent")
-  assert.equal(phrase(tool("1", "skill_create"), tool("2", "skill"), tool("3", "skill")), "Created 1 skill, loaded 2 skills")
   assert.equal(phrase(tool("1", "update_goal")), "Updated the goal")
   assert.equal(phrase(tool("1", "mcp_lookup"), tool("2", "mcp_lookup")), "Used mcp_lookup 2 times")
   assert.equal(phrase(tool("1", "write_file", { path: "a.ts" }), tool("2", "write_file", { path: "b.ts" })), "Edited 2 files")

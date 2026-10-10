@@ -121,22 +121,16 @@ test("delegate shows agent and task, status, duration and the summary", () => {
   assert.equal(view.body.text, "Looks good.")
 })
 
-test("agent_create and skill_create describe what was created", () => {
+test("agent_create describes what was created", () => {
   const agent = toolView(tool("agent_create", { agent_id: "qa", description: "Runs checks" }, { result: result({}) }))
   assert.equal(agent.verb, "Created agent")
   assert.equal(agent.target, "qa")
   assert.equal(agent.body.text, "**qa**\n\nRuns checks")
-  const skill = toolView(tool("skill_create", { name: "deploy", description: "Ship it" }, { result: result({ overwritten: true }) }))
-  assert.deepEqual(metaText(skill), ["replaced"])
   const bare = toolView(tool("agent_create", { agent_id: "x" }, { result: result({}) }))
   assert.equal(bare.body, undefined)
 })
 
-test("skill and update_goal stay compact", () => {
-  const skill = toolView(tool("skill", { name: "lint" }, { result: result({ name: "lint", content: "long body" }) }))
-  assert.equal(skill.verb, "Loaded skill")
-  assert.equal(skill.target, "lint")
-  assert.equal(skill.body, undefined)
+test("update_goal stays compact", () => {
   const goal = toolView(tool("update_goal", { status: "blocked" }, { result: result({ objective: "Ship v2" }) }))
   assert.deepEqual(goal.meta, [{ text: "blocked", tone: "danger" }])
   assert.equal(goal.body.text, "Ship v2")

@@ -111,8 +111,6 @@ const groupKeys: Record<string, string> = {
   edit_file: "edit",
   delegate: "delegate",
   agent_create: "agent",
-  skill_create: "skillCreate",
-  skill: "skill",
   update_goal: "goal",
 }
 
@@ -147,8 +145,6 @@ function groupPhrase(group: Group): string {
     case "edit": return editPhrase(group.tools)
     case "delegate": return `delegated ${plural(count, "task")}`
     case "agent": return `created ${plural(count, "agent")}`
-    case "skillCreate": return `created ${plural(count, "skill")}`
-    case "skill": return `loaded ${plural(count, "skill")}`
     case "goal": return "updated the goal"
     default: {
       const name = group.key.slice("tool:".length) || "a tool"

@@ -52,6 +52,7 @@ import {
   authSecretFrame,
   modelMenuText,
   themeMenuText,
+  skillImportMenuText,
   questionMenuFrame,
   sessionMenuText,
   promptPlaceholderText,
@@ -322,6 +323,7 @@ const runtimeController = createCliRuntimeController({
   getTaskMonitor: () => taskMonitorController,
   getCompactContextState: () => compactContextState,
   askModelMenu: (...args) => inputActions.askModelMenu(...args),
+  askSkillImportMenu: (...args) => inputActions.askSkillImportMenu(...args),
   askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
   askChoice: tui ? (...args) => inputActions.askAuthChoice(...args) : null,
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
@@ -364,6 +366,7 @@ commandController = createCommandController({
     runGoalCommand: runtimeController.runGoalCommand,
     runRename: (argument) => runtimeController.runRename(argument),
     runModelSelector: runtimeController.runModelSelector,
+    runImportSelector: runtimeController.runImportSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
     runLogin: (providerId) => runLogin(providerId),
     runLogout: (providerId) => runLogout(providerId),
@@ -888,6 +891,15 @@ function composeFrame(width = process.stdout.columns || 80) {
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: themeMenuText(session.themeState.items(), session.themeState.selectedIndex()).trimEnd(),
+    };
+  }
+  if (session.mode === "import") {
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
+      inputText: session.inputText,
+      cursor: { line: 0, column: session.inputText.length },
+      menuText: skillImportMenuText(session.importState.items(), session.importState.selectedIndex()).trimEnd(),
     };
   }
   if (session.mode === "question") {

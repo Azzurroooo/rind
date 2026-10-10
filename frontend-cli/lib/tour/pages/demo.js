@@ -85,7 +85,13 @@ export const PROVIDERS = [
   "+ Add a named endpoint · OpenAI-compatible URL and key",
 ];
 
-export const SKILLS = [
-  { name: "release-notes", scope: "project", description: "Draft release notes from the JSONL log", path: "~/demo/.rind/skills/release-notes/SKILL.md" },
-  { name: "commit-lint", scope: "user", description: "Check commit messages against the repo style", path: "~/.rind/skills/commit-lint/SKILL.md" },
+export const SKILL_SOURCES = [
+  { label: "Rind · built-in", paths: ["~/.rind/app/agent/skills"], enabled: true, importable: false,
+    skills: [{ name: "skill-creator", description: "Create or improve a Skill", status: "active" }] },
+  { label: "Claude · user", paths: ["~/.claude/skills"], enabled: true, importable: true,
+    skills: [{ name: "commit-lint", description: "Check commit messages against the repo style", status: "active" }] },
+  { label: "Codex · user", paths: ["~/.codex/skills", "~/.agents/skills"], enabled: false, importable: true,
+    skills: [{ name: "pdf", description: "Fill PDF forms", status: "off" }] },
+  { label: "Rind · project", paths: ["~/demo/.rind/skills"], enabled: true, importable: false,
+    skills: [{ name: "release-notes", description: "Draft release notes from the JSONL log", status: "active" }] },
 ];

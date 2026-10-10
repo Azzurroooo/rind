@@ -55,8 +55,6 @@ const formatters: Record<string, Formatter> = {
   fetch_web_page: fetchPage,
   delegate,
   agent_create: agentCreate,
-  skill_create: skillCreate,
-  skill: loadSkill,
   update_goal: updateGoal,
 }
 
@@ -219,7 +217,7 @@ function terminalBody(tool: ToolEntry, data: Record<string, unknown>): ToolBody 
   return lines.length ? { type: "terminal", lines, preview: bodyCaps.terminalPreview, max: bodyCaps.terminalMax } : undefined
 }
 
-// ---------- agents, skills, goals ----------
+// ---------- agents, goals ----------
 
 function delegate(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
   const data = rec(tool.result?.data)
@@ -239,17 +237,6 @@ function agentCreate(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
   const name = str(data.name) || str(tool.arguments.agent_id)
   const description = str(data.description) || str(tool.arguments.description)
   return { verb: "Created agent", target: name, path: false, meta: [], body: describe(name, description) }
-}
-
-function skillCreate(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
-  const data = rec(tool.result?.data)
-  const name = str(data.name) || str(tool.arguments.name)
-  const meta: MetaPart[] = data.overwritten === true ? [{ text: "replaced" }] : []
-  return { verb: "Created skill", target: name, path: false, meta, body: describe(name, str(tool.arguments.description)) }
-}
-
-function loadSkill(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
-  return { verb: "Loaded skill", target: str(rec(tool.result?.data).name) || str(tool.arguments.name), path: false, meta: [] }
 }
 
 function updateGoal(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {

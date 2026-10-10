@@ -2,6 +2,7 @@ import { createLineEditor } from "./line-editor.js";
 import { createChoiceMenuState } from "./choice-menu-state.js";
 import { createModelMenuState } from "./model-menu-state.js";
 import { createThemeMenuState } from "./theme-menu-state.js";
+import { createSkillImportMenuState } from "./skill-import-menu-state.js";
 import { createQuestionMenuState } from "./question-menu-state.js";
 import { createSlashMenuState } from "./slash-menu-state.js";
 import { REASONING_EFFORTS, runtimeMethods } from "./runtime-protocol.js";
@@ -349,6 +350,10 @@ export function createCliInputActions({
       handleThemeInput(session, event);
       return;
     }
+    if (session.mode === "import") {
+      handleImportInput(session, event);
+      return;
+    }
     if (session.mode === "question") {
       handleQuestionInput(session, event);
       return;
@@ -413,7 +418,7 @@ export function createCliInputActions({
       return;
     }
     const session = state.input.session;
-    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "sessions" || session.mode === "fork" || session.mode === "context-board") {
+    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "import" || session.mode === "sessions" || session.mode === "fork" || session.mode === "context-board") {
       return;
     }
     if (session.mode === "question" && !session.questionState.isEditing()) {
@@ -465,6 +470,32 @@ export function createCliInputActions({
       return;
     }
     if (!modified && session.themeState.handleKey(key)) output.redraw();
+  }
+
+  function askSkillImportMenu(sources) {
+    return new Promise((resolve) => {
+      const importState = createSkillImportMenuState(sources);
+      const session = { mode: "import", inputText: "/import", importState, resolve };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, null, false);
+      output.redraw(true);
+    });
+  }
+
+  // Enter applies only a real change; otherwise it closes like esc.
+  function handleImportInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (!modified && (key.name === "enter" || key.name === "return")) {
+      const changed = session.importState.changed();
+      completeTtyInput(session, changed ? session.importState.choices() : null, changed, "", "/import");
+      return;
+    }
+    if (!modified && key.name === "escape") {
+      completeTtyInput(session, null, false);
+      return;
+    }
+    if (!modified && session.importState.handleKey(key)) output.redraw();
   }
 
   function submitTtyInput(session) {
@@ -759,6 +790,7 @@ export function createCliInputActions({
     askModelMenu,
     askEffortMenu,
     askThemeMenu,
+    askSkillImportMenu,
     askSessionMenu,
     askForkPointMenu,
     askContextBoard,

@@ -70,3 +70,23 @@ test("command results escape structured display fields and keep unknown output r
   const fallback = renderCommandResult({ command: "/unknown", content: "<b>runtime text</b>", display: { type: "other" } })
   assert.match(fallback, /&lt;b&gt;runtime text&lt;\/b&gt;/)
 })
+
+test("skills are grouped by layer; an import that is off stays one row", () => {
+  const html = renderCommandResult({
+    command: "/skill", content: "fallback",
+    display: { type: "skills",
+      sources: [
+        { label: "Rind · project", paths: ["/work/.rind/skills"], enabled: true, importable: false, skills: [
+          { name: "deploy", description: "Ship it", status: "active" },
+          { name: "manual", description: "Release", status: "hidden" },
+        ] },
+        { label: "Claude · user", paths: ["/home/.claude/skills"], enabled: false, importable: true, skills: [{ name: "pdf", description: "Forms", status: "off" }] },
+        { label: "Codex · user", paths: ["/home/.codex/skills"], enabled: true, importable: true, skills: [] },
+      ],
+      problems: [{ location: "/work/.rind/skills/bad/SKILL.md", message: "missing description." }],
+    },
+  })
+  for (const text of ["Rind · project", "/work/.rind/skills", "deploy", "Ship it", "only via /skill:name", "1 skill · /import to enable", "missing description."]) assert.ok(html.includes(text), text)
+  assert.ok(!html.includes("Codex · user"), "an enabled layer without skills is left out")
+  assert.ok(!html.includes("Forms"), "skills of a switched-off layer are only counted")
+})

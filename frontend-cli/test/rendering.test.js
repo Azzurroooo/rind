@@ -606,48 +606,48 @@ test("slashDisplayText renders sessions and skills payloads", () => {
       "  resume: /sessions",
     ].join("\n"),
   );
-  assert.equal(
-    slashDisplayText({
-      type: "skills",
-      skills: [{
-        name: "demo",
-        scope: "project",
-        description: "Demo skill",
-        path: "E:\\project\\.rind\\skills\\demo\\SKILL.md",
-      }],
-    }),
-    [
-      `  ── Skills · 1 available ${"─".repeat(70)}`,
-      "  demo          [project]  Demo skill",
-      "      E:\\project\\.rind\\skills\\demo",
-    ].join("\n"),
-  );
 });
 
-test("slashDisplayText clips long slash command fields", () => {
+test("slashDisplayText groups skills by layer with overrides, imports and problems", () => {
   const text = slashDisplayText({
     type: "skills",
-    skills: [{
-      name: "debugging",
-      scope: "project",
-      description: "x".repeat(140),
-      path: `E:\\${"deep\\".repeat(20)}SKILL.md`,
-    }],
+    sources: [
+      { label: "Rind · built-in", paths: ["E:\\rind\\agent\\skills"], enabled: true, importable: false,
+        skills: [{ name: "skill-creator", description: "Create skills", status: "active" }] },
+      { label: "Claude · user", paths: ["E:\\home\\.claude\\skills"], enabled: false, importable: true,
+        skills: [{ name: "pdf", description: "Forms", status: "off" }] },
+      { label: "Codex · user", paths: ["E:\\home\\.codex\\skills", "E:\\home\\.agents\\skills"], enabled: true, importable: true, skills: [] },
+      { label: "Rind · project", paths: ["E:\\work\\.rind\\skills"], enabled: true, importable: false, skills: [
+        { name: "manual", description: "Release", status: "hidden" },
+        { name: "skill-creator", description: "Mine", status: "overridden", overridden_by: "E:\\work\\.rind\\skills\\x\\SKILL.md" },
+      ] },
+    ],
+    problems: [{ location: "E:\\work\\.rind\\skills\\bad\\SKILL.md", message: "missing description." }],
   });
 
-  assert.match(text, /x{68}\.\.\./);
-  assert.match(text, /E:\\deep\\deep\\deep.*\.\.\.$/);
+  assert.equal(text, [
+    `  ── Skills · 2 available ${"─".repeat(70)}`,
+    "  Rind · built-in  E:\\rind\\agent\\skills",
+    "    skill-creator  Create skills",
+    "  Claude · user  off · 1 skill · /import to enable",
+    "  Rind · project  E:\\work\\.rind\\skills",
+    "    manual         only via /skill:name · Release",
+    "    skill-creator  overridden by E:\\work\\.rind\\skills\\x",
+    "  Problems",
+    "    E:\\work\\.rind\\skills\\bad  missing description.",
+  ].join("\n"));
 });
 
-test("skill locations collapse the home directory and drop SKILL.md", () => {
-  const homeSkill = path.join(homedir(), ".rind", "skills", "calc", "SKILL.md");
+test("skill paths collapse the home directory and long descriptions are clipped", () => {
   const text = slashDisplayText({
     type: "skills",
-    skills: [{ name: "calc", scope: "user", description: "math", path: homeSkill }],
+    sources: [{ label: "Rind · user", paths: [path.join(homedir(), ".rind", "skills")], enabled: true, importable: false,
+      skills: [{ name: "calc", description: "x".repeat(140), status: "active" }] }],
+    problems: [],
   });
 
-  assert.match(text, /~[\\/]\.rind[\\/]skills[\\/]calc$/m);
-  assert.doesNotMatch(text, /SKILL\.md/);
+  assert.match(text, /Rind · user  ~[\\/]\.rind[\\/]skills$/m);
+  assert.match(text, /x+\.\.\.$/m);
 });
 
 test("slashResultText prefers structured display and falls back to raw text", () => {

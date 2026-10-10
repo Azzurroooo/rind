@@ -71,6 +71,10 @@ export function createCommandController({
       await input.runModelSelector();
       return;
     }
+    if (isBareImportCommand(text) && input.isTerminal && input.runImportSelector) {
+      await input.runImportSelector();
+      return;
+    }
     if (isEffortCommand(text)) {
       await input.runEffortCommand?.(effortArgument(text));
       return;
@@ -177,6 +181,10 @@ function renameArgument(value) {
 
 function isBareModelCommand(value) {
   return String(value || "").trim().toLowerCase() === "/model";
+}
+
+function isBareImportCommand(value) {
+  return String(value || "").trim().toLowerCase() === "/import";
 }
 
 function isEffortCommand(value) {
