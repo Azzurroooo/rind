@@ -34,6 +34,7 @@ messages.forEach((message, index) => { message.ts = new Date(Date.UTC(2026, 9, 1
 
 export const session = { id: 'unicode-demo', title: 'Unicode regression tests', workspace_root: '/projects/unicode-parser', updated_at: '2026-10-10T09:30:24Z' };
 export const info = { session_id: session.id, workspace_root: session.workspace_root, cwd: '~/unicode-parser', model: 'zai/glm-4.7', reasoning_effort: 'high', version: '0.10.0' };
+export const cliInfo = { ...info, model: 'GPT-6-Astra' };
 export function rpcResult(method) {
   if (method === 'initialize' || method === 'session/switch') return info;
   if (method === 'session/list') return { sessions: [session] };

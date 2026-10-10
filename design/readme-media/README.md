@@ -3,6 +3,10 @@
 The README leads with a 15-second CLI task recording, then shows the existing
 native Agents Management capture and a Desktop / Web / App triptych.
 
+The CLI simulation displays `GPT-6-Astra` via `cliInfo`; the separate client
+collage retains its original model fixtures. This is a presentation label, not
+a real-provider run or a claim about model availability.
+
 All conversations are fictional. CLI frames use the current output controller,
 question menu, composer and xterm cells—not a hand-written terminal imitation.
 The Desktop capture uses the website's built real-renderer preview. Web and App

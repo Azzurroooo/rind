@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prompt, question, answer, source, additions, calls, fileChange, messages, rpcResult } from './fixtures.mjs';
+import { prompt, question, answer, source, additions, calls, fileChange, messages, rpcResult, cliInfo } from './fixtures.mjs';
 import { normalizeHistoryMessages, reduceConversation, emptyConversationState } from '../../frontend-web/src/state/conversationReducer.js';
 import { toolView } from '../../frontend-web/src/lib/toolDisplay.js';
 
@@ -13,6 +13,7 @@ test('the example project really supports the four test cases shown', () => {
 });
 
 test('the question, answer, tool results and final report tell one coherent story', () => {
+  assert.equal(cliInfo.model, 'GPT-6-Astra');
   assert.ok(prompt.includes('Unicode'));
   assert.equal(answer, question.options[1].label);
   assert.deepEqual(calls.map(call => call.tool_name), ['read_file', 'ask_user_question', 'edit_file', 'bash']);

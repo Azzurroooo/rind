@@ -19,12 +19,20 @@ assert.match(cli.evidence['4'], /Which Unicode cases/);
 assert.match(cli.evidence['6'], /› Emoji, combining marks/);
 assert.match(cli.evidence['14'], /A: Emoji, combining marks & CJK/);
 assert.match(cli.evidence['14'], /4 tests pass/);
+for (const frame of Object.values(cli.evidence)) {
+  assert.match(frame, /GPT-6-Astra/);
+  assert.doesNotMatch(frame, /glm-4\.7/);
+}
 const documents = {};
 for (const name of ['README.md', 'README.zh-CN.md']) {
   const text = await readFile(resolve(root, name), 'utf8');
   assert.ok(text.indexOf('rind-cli-demo.gif') < text.indexOf('agents-management.png'));
   assert.ok(text.indexOf('agents-management.png') < text.indexOf('rind-clients.png'));
   assert.ok(!text.includes('rind agents team create'));
+  assert.doesNotMatch(text, /<details>|<summary>/);
+  assert.match(text, /python -m pip install -r requirements-runtime\.txt/);
+  assert.match(text, /npm run build --prefix agent-management/);
+  assert.match(text, /node frontend-cli\/bin\/rind\.js/);
   for (const match of text.matchAll(/(?:\]\(|(?:href|src)=")([^\s"\)]+)/g)) {
     const link = match[1];
     if (/^(https?:|#)/.test(link)) continue;

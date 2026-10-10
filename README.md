@@ -86,7 +86,11 @@ Rind supports OpenAI account sign-in alongside API-key connections to OpenAI, An
 
 ## Get started
 
-**CLI — open your project and start a conversation.**
+### Install the CLI
+
+**Open your project and start a conversation.**
+
+Requires Node.js 18+. Supports Windows, macOS and Linux.
 
 ```bash
 npm install -g @rind-ai/cli
@@ -98,28 +102,53 @@ Inside Rind, use `/login` to connect a provider and `/model` to choose a model. 
 
 Want a quick look first? [Explore the interactive demos](https://rindai.dev/#tour), or open `/tour` inside Rind. The built-in tour needs no API key.
 
-<details>
-<summary>CLI requirements, standalone downloads and source setup</summary>
+### Standalone downloads
 
-The npm CLI requires Node.js 18+ and supports Windows, macOS and Linux. Standalone CLI packages are available on [Releases](https://github.com/Azzurroooo/rind/releases).
+Prefer a standalone package? Download CLI 0.10.0 from [Releases](https://github.com/Azzurroooo/rind/releases/tag/v0.10.0). Desktop 0.9.0 downloads are linked in the multi-client section above.
 
-To run from source, install Python 3.12+, Node.js 18+ and Git, then follow the [source setup guide](docs/internals/07-surfaces/interactive-cli.md#running-from-source).
+### Start from source
 
-</details>
+Requires Python 3.12+, Node.js 18+ and Git. Clone the repository and create a Python environment:
+
+```bash
+git clone https://github.com/Azzurroooo/rind.git
+cd rind
+python -m venv .venv
+```
+
+Activate it with `source .venv/bin/activate` on macOS/Linux, or `.\.venv\Scripts\Activate.ps1` in Windows PowerShell. Then install the runtime dependencies, build Agents Management, and start the CLI:
+
+```bash
+python -m pip install -r requirements-runtime.txt
+npm install --prefix agent-management
+npm run build --prefix agent-management
+npm install --prefix frontend-cli
+node frontend-cli/bin/rind.js
+```
+
+To work in another project, run `node /absolute/path/to/rind/frontend-cli/bin/rind.js` from that project's directory. [Source setup and configuration →](docs/internals/07-surfaces/interactive-cli.md#running-from-source)
 
 ## More ways to work
 
-- **Bring Rind into your channels.** Connect [Telegram, Discord, Slack and Feishu](docs/internals/07-surfaces/gateway.md).
-- **Automate when it helps.** Use `rind run` for scripts and CI, or `rind send` to steer a running conversation. Team management also has a command-line API.
+### Bring Rind into your channels
 
-<details>
-<summary>For developers: extend Rind or reuse its parts</summary>
+Talk to your agent through **Telegram, Discord, Slack or Feishu**. The gateway connects your channels to the same host-side runtime. [Gateway setup →](docs/internals/07-surfaces/gateway.md)
+
+### Use Rind in scripts and CI
+
+Use `rind run` for non-interactive work. The final answer goes to stdout; progress and diagnostics go to stderr, so the result is ready for your pipeline:
+
+```bash
+rind run --prompt "Review the current diff and identify actionable issues." > review.md
+```
+
+Use `rind send` to steer a running conversation from another terminal. Team management also exposes a command-line API alongside its interactive interface.
+
+### Extend Rind. Reuse its parts.
 
 Rind separates the runtime from its interfaces. Build another client on the [runtime protocol](agent/runtime/server/protocol.py), add a [tool](agent/infrastructure/tools/spec.py), or reuse the standalone [Agents Management service](agent-management).
 
 Explore the [internals](docs/README.md), [system map](docs/internals/00-architecture/system-map.md) and [development guide](docs/internals/08-engineering/verification.md).
-
-</details>
 
 ## Contributing
 

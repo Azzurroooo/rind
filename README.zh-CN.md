@@ -86,7 +86,11 @@ Rind 支持 OpenAI 账号登录，以及 OpenAI、Anthropic、Google、DeepSeek 
 
 ## 开始使用
 
-**CLI：进入项目，直接开聊。**
+### 安装 CLI
+
+**进入项目，直接开聊。**
+
+需要 Node.js 18+，支持 Windows、macOS 与 Linux。
 
 ```bash
 npm install -g @rind-ai/cli
@@ -98,28 +102,53 @@ rind
 
 想先看看？[体验官网交互演示](https://rindai.dev/zh/#tour)，或在 Rind 中打开 `/tour`。内置教学无需 API key。
 
-<details>
-<summary>CLI 运行要求、独立下载与源码运行</summary>
+### 独立安装包
 
-npm 安装需要 Node.js 18+，支持 Windows、macOS 和 Linux。独立 CLI 安装包见 [Releases](https://github.com/Azzurroooo/rind/releases)。
+更喜欢独立安装包？从 [Releases 下载 CLI 0.10.0](https://github.com/Azzurroooo/rind/releases/tag/v0.10.0)。Desktop 0.9.0 下载入口见上方多端章节。
 
-源码运行需要 Python 3.12+、Node.js 18+ 与 Git，步骤见[源码运行指南](docs/internals/07-surfaces/interactive-cli.zh-CN.md#从源码运行)。
+### 从源码启动
 
-</details>
+需要 Python 3.12+、Node.js 18+ 与 Git。先克隆仓库，创建 Python 虚拟环境：
+
+```bash
+git clone https://github.com/Azzurroooo/rind.git
+cd rind
+python -m venv .venv
+```
+
+macOS / Linux 用 `source .venv/bin/activate` 激活环境，Windows PowerShell 用 `.\.venv\Scripts\Activate.ps1`。然后安装运行依赖，构建 Agents Management，并启动 CLI：
+
+```bash
+python -m pip install -r requirements-runtime.txt
+npm install --prefix agent-management
+npm run build --prefix agent-management
+npm install --prefix frontend-cli
+node frontend-cli/bin/rind.js
+```
+
+要在其他项目中工作，进入该项目目录，再用绝对路径执行 `node /absolute/path/to/rind/frontend-cli/bin/rind.js`。[源码启动与配置指南 →](docs/internals/07-surfaces/interactive-cli.zh-CN.md#从源码运行)
 
 ## 更多工作方式
 
-- **接入常用渠道。** 支持 [Telegram、Discord、Slack、飞书](docs/internals/07-surfaces/gateway.zh-CN.md)。
-- **需要时，再自动化。** 用 `rind run` 接入脚本与 CI，用 `rind send` 给运行中的会话补充指令。团队管理也提供命令行接口。
+### 把 Rind 带进你的沟通渠道
 
-<details>
-<summary>开发者：扩展 Rind，或复用其中的模块</summary>
+通过 **Telegram、Discord、Slack 或飞书** 与 Agent 交流。Gateway 将沟通渠道接入同一套主机执行内核。[Gateway 配置指南 →](docs/internals/07-surfaces/gateway.zh-CN.md)
+
+### 接入脚本与 CI
+
+用 `rind run` 完成非交互任务。最终回答写入 stdout，进度与诊断写入 stderr，结果可直接进入你的流水线：
+
+```bash
+rind run --prompt "Review the current diff and identify actionable issues." > review.md
+```
+
+用 `rind send` 从另一终端给正在运行的会话补充指令。除交互界面外，团队管理也提供命令行 API。
+
+### 扩展 Rind，复用它的能力
 
 Rind 将执行引擎与交互界面分开。你可以基于 [Runtime 协议](agent/runtime/server/protocol.py) 构建新客户端，添加[工具](agent/infrastructure/tools/spec.py)，或复用独立的 [Agents Management 服务](agent-management)。
 
 进一步阅读[内部原理](docs/README.zh-CN.md)、[系统地图](docs/internals/00-architecture/system-map.zh-CN.md)与[开发指南](docs/internals/08-engineering/verification.zh-CN.md)。
-
-</details>
 
 ## 参与贡献
 

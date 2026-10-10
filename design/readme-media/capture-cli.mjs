@@ -11,7 +11,7 @@ import { promptText, promptPlaceholderText, inputHintText, questionMenuFrame, tu
 import { CURSOR_MARKER } from '../../frontend-cli/lib/tui/tui.js';
 import { textWidth, stripAnsi } from '../../frontend-cli/lib/text-width.js';
 import { setTheme } from '../../frontend-cli/lib/theme.js';
-import { prompt, question, answer, calls, delivery, fileChange, info } from './fixtures.mjs';
+import { prompt, question, answer, calls, delivery, fileChange, cliInfo as info } from './fixtures.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const option = name => process.argv.find(arg => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
