@@ -86,13 +86,13 @@ const preview = `<!doctype html>
 <main>
   <header><div class="lockup"><img src="../assets/rind.svg" alt=""/><strong>Rind</strong></div><span class="eyebrow">ONE MARK · EVERY SURFACE</span></header>
   <h1>同一切面，自然展开。</h1>
-  <p class="intro">保留官网的深绿与浅黄绿。静态清晰，动态克制。</p>
+  <p class="intro">采用 Rind 的深绿与浅黄绿。静态清晰，动态克制。</p>
   <div class="grid">
     <section class="card"><div class="card-heading"><strong>静态标志</strong><span>01 / STILL</span></div><div class="stage">${staticSvg}</div><p class="card-note">圆角外壳与内芯，一道斜切面。小尺寸也保持辨识。</p></section>
     <section class="card motion" id="motion"><div class="card-heading"><strong>切面展开</strong><span>02 / MOTION</span></div><div class="stage">${animatedSvg}</div><div class="controls"><button id="pause" type="button">暂停</button><button id="replay" type="button">重播</button><select id="speed" aria-label="播放速度"><option value="1">1× 速度</option><option value="0.1">0.1× 慢放</option></select></div><p class="card-note" id="motion-note">内芯沿切面轻轻向外移动，再回到原位。每轮 3.6 秒；减少动态时保持静态。</p></section>
   </div>
   <div class="sizes">${[16, 32, 48, 64].map((size) => `<div class="size"><img src="../assets/rind.svg" alt="${size} 像素 Rind 标志" width="${size}" height="${size}"/><span>${size} px</span></div>`).join("")}<div class="palette"><span><i class="swatch" style="background:var(--shell)"></i>${COLORS.shell}</span><span><i class="swatch" style="background:var(--core)"></i>${COLORS.core}</span></div></div>
-  <footer><span>Rind · 官网与应用共用一个标志</span><span><a href="../assets/rind.svg">静态 SVG</a> · <a href="../assets/rind-animated.svg">动效 SVG</a> · <a href="icons/rind-512.png">PNG</a> · <a href="cli-logo/preview.html">终端预览</a></span></footer>
+  <footer><span>Rind · 应用标志</span><span><a href="../assets/rind.svg">静态 SVG</a> · <a href="../assets/rind-animated.svg">动效 SVG</a> · <a href="icons/rind-512.png">PNG</a> · <a href="cli-logo/preview.html">终端预览</a></span></footer>
 </main>
 <script>
   const stage = document.querySelector('#motion .stage svg');

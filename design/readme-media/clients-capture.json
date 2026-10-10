@@ -1,6 +1,6 @@
 {
   "source": "e929745fd8deaca1c3aa879caac57cebb162d38b",
-  "desktop": "rind-web/public/demos/desktop (real Desktop renderer, sample preload API)",
+  "desktop": "desktop/src/renderer/index.ts (real Desktop renderer, sample preload API)",
   "web": "frontend-web/src/main.jsx",
   "app": "mobile/src/main.jsx (Capacitor browser renderer, local ticket/socket fixtures)",
   "mobileNativeCapabilitiesTested": false,

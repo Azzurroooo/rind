@@ -1,5 +1,5 @@
 /* Design tokens v2.
-   Palette and typography come from the Rind website (rind-web global.css);
+   Palette and typography follow the shared Rind visual identity;
    the spacing, radius and control ladder follow LobeHub's layout tokens.
    Components reference tokens only; a theme re-tunes this block and never
    touches component rules.

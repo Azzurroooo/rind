@@ -1,6 +1,6 @@
 # Shared Rind logo
 
-The mark matches the website favicon: a 32 × 32 deep-green rounded tile (`#243d2e`, radius 8), a pale-green core (`#d6df9a`, inset 4, radius 4), and the diagonal from `(22, 4)` to `(4, 22)`. No stroke, filter, or glow.
+The mark is a 32 × 32 deep-green rounded tile (`#243d2e`, radius 8), a pale-green core (`#d6df9a`, inset 4, radius 4), and the diagonal from `(22, 4)` to `(4, 22)`. No stroke, filter, or glow.
 
 - [Static SVG](../assets/rind.svg)
 - [Animated SVG](../assets/rind-animated.svg)

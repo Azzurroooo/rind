@@ -15,28 +15,28 @@ side padding, rather than adding unused space on one side.
 
 All conversations are fictional. CLI frames use the current output controller,
 question menu, composer and xterm cells—not a hand-written terminal imitation.
-The Desktop capture uses the website's built real-renderer preview. Web and App
+The Desktop capture uses a built native-renderer preview. Web and App
 mount their actual entry points with local ticket / WebSocket fixture responses,
 including protocol tool events. No model, Worker, credentials or user workspace
 is connected. The App image captures the mobile renderer in Chromium; it is not
 an Android/iOS native-capability acceptance test.
 
 The collage retains each client's native styling. Its paper background, neutral
-image outlines, quiet window frames and restrained labels follow the website's
-visual language. No client UI is drawn or altered for the collage.
+image outlines, quiet window frames and restrained labels follow Rind's
+visual identity. No client UI is drawn or altered for the collage.
 
 ## Reproduce
 
 Install the existing dependencies in `frontend-cli`, `frontend-web`, `mobile`
-and the neighboring `rind-web` project. Build the website's Desktop demo if
-`rind-web/public/demos/desktop` is unavailable. Supply an installed FFmpeg binary;
+and a local package with Playwright. Supply a built native Desktop preview
+and an installed FFmpeg binary;
 FFmpeg is a development-only media tool, not an application dependency.
 
 ```powershell
-node design/readme-media/capture-cli.mjs --browser-package=../rind-web/package.json --ffmpeg=/path/to/ffmpeg.exe
-node design/readme-media/capture-clients.mjs --website=../rind-web
+node design/readme-media/capture-cli.mjs --browser-package=/path/to/playwright/package.json --ffmpeg=/path/to/ffmpeg.exe
+node design/readme-media/capture-clients.mjs --desktop-preview=/path/to/built/desktop-preview --browser-package=/path/to/playwright/package.json
 node --test design/readme-media/fixtures.test.mjs
-node design/readme-media/verify.mjs --browser-package=../rind-web/package.json
+node design/readme-media/verify.mjs --browser-package=/path/to/playwright/package.json
 ```
 
 Outputs are `assets/rind-cli-demo.mp4`, `assets/rind-cli-demo.gif` and

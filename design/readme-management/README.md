@@ -13,7 +13,7 @@ join at cell boundaries, as in a terminal. No panel text or layout is handwritte
 Regenerate after installing `frontend-cli` dependencies and Playwright Chromium:
 
 ```sh
-node design/readme-management/capture.mjs --browser-package=../rind-web/package.json
+node design/readme-management/capture.mjs --browser-package=/path/to/playwright/package.json
 ```
 
 The browser package can be any local package with `@playwright/test` installed.

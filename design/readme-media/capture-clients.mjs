@@ -9,9 +9,9 @@ import { rpcResult, delivery, calls, session } from './fixtures.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const option = name => process.argv.find(arg => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
-if (!option('website')) throw new Error('Pass --website=/path/to/rind-web (built native Desktop demo and Playwright dependency).');
-const website = resolve(option('website'));
-const { chromium } = createRequire(resolve(website, 'package.json'))('@playwright/test');
+if (!option('desktop-preview') || !option('browser-package')) throw new Error('Pass --desktop-preview=/path/to/built/desktop-preview and --browser-package=/path/to/package.json (with Playwright installed).');
+const desktopPreview = resolve(option('desktop-preview'));
+const { chromium } = createRequire(resolve(option('browser-package')))('@playwright/test');
 const webRequire = createRequire(resolve(root, 'frontend-web/package.json'));
 const { createServer: createViteServer } = await import(pathToFileURL(webRequire.resolve('vite')).href);
 const scratch = resolve(root, '.docs/readme-client-captures');
@@ -42,7 +42,7 @@ function replayToolEvents(socket) {
   send({ type: 'turn_completed', duration_ms: 12800 });
 }
 try {
-  desktopServer = await serve(resolve(website, 'public/demos/desktop'));
+  desktopServer = await serve(desktopPreview);
   web = await createViteServer({ root: resolve(root, 'frontend-web'), configFile: resolve(root, 'frontend-web/vite.config.js'), server: { host: '127.0.0.1', port: 0, open: false }, logLevel: 'warn' });
   mobile = await createViteServer({ root: resolve(root, 'mobile'), configFile: resolve(root, 'mobile/vite.config.js'), server: { host: '127.0.0.1', port: 0, open: false }, logLevel: 'warn' });
   await web.listen(); await mobile.listen();
@@ -115,7 +115,7 @@ try {
     <section><div class="label"><h2>App</h2><small>MOBILE</small></div><div class="phone"><img src="${imageOrigin}/app.png" /></div><p class="caption">Your workspace,<br />within reach.</p></section></main><footer><span>RIND · LIGHT BY DESIGN</span><span>Actual client renderers · sample conversations · mobile browser capture</span></footer></body></html>`);
   await collage.locator('img').evaluateAll(images => Promise.all(images.map(image => image.decode())));
   await collage.screenshot({ path: resolve(root, 'assets/rind-clients.png'), animations: 'disabled' });
-  await writeFile(new URL('clients-capture.json', import.meta.url), JSON.stringify({ source: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), desktop: 'rind-web/public/demos/desktop (real Desktop renderer, sample preload API)', web: 'frontend-web/src/main.jsx', app: 'mobile/src/main.jsx (Capacitor browser renderer, local ticket/socket fixtures)', mobileNativeCapabilitiesTested: false, modelCalls: 0, rpcMethods: [...rpcMethods], resolution: [2160, 1100], delivery }, null, 2) + '\n');
+  await writeFile(new URL('clients-capture.json', import.meta.url), JSON.stringify({ source: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), desktop: 'desktop/src/renderer/index.ts (real Desktop renderer, sample preload API)', web: 'frontend-web/src/main.jsx', app: 'mobile/src/main.jsx (Capacitor browser renderer, local ticket/socket fixtures)', mobileNativeCapabilitiesTested: false, modelCalls: 0, rpcMethods: [...rpcMethods], resolution: [2160, 1100], delivery }, null, 2) + '\n');
   process.stdout.write('Captured Desktop / Web / App collage.\n');
 } finally {
   await browser?.close();
