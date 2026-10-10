@@ -45,8 +45,11 @@ are recorded alongside these scripts. Disposable frames and component captures
 live only under the ignored `.docs/readme-*` directories; remove those exact
 owned directories after inspecting the results.
 
-The MP4 is H.264/yuv420p with fast-start metadata. The GIF is the same 15-second
-sequence, downscaled and palette-compressed for inline README compatibility.
+The MP4 is H.264/yuv420p with fast-start metadata. The looping GIF is encoded
+directly from the lossless PNG frames at the same native 16:9 resolution
+(1536 × 864), not from the MP4. A shared 256-color palette without patterned
+dithering preserves clean terminal text edges; GIF palette quantization still
+applies, but neither downsampling nor H.264 compression is added to this path.
 The README links to the local MP4 rather than relying on an unsupported local
 HTML video embed or creating an external GitHub attachment during local work.
 

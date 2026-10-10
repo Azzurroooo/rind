@@ -20,6 +20,9 @@ assert.equal(cli.chrome, 'terminal-tab-and-window-controls');
 assert.deepEqual(cli.overlays, []);
 const captureSource = await readFile(new URL('capture-cli.mjs', import.meta.url), 'utf8');
 assert.doesNotMatch(captureSource, /RIND CLI \/ UNICODE TESTS|SIMULATED DEMO/);
+const gifEncoder = captureSource.split('\n').find(line => line.startsWith('execFileSync(ffmpeg,') && line.includes('assets/rind-cli-demo.gif'));
+assert.ok(gifEncoder?.includes("resolve(scratch, '%04d.png')"), 'GIF must be encoded directly from lossless frames');
+assert.doesNotMatch(gifEncoder, /scale=|assets\/rind-cli-demo\.mp4/, 'GIF must not be downscaled or transcoded from MP4');
 assert.match(cli.evidence['4'], /Which Unicode cases/);
 assert.match(cli.evidence['6'], /› Emoji, combining marks/);
 assert.match(cli.evidence['14'], /A: Emoji, combining marks & CJK/);
@@ -71,7 +74,7 @@ try {
     await page.goto(`${base}/${name}`);
     await page.locator('img').evaluateAll(images => Promise.all(images.map(image => image.decode())));
     const demo = await page.locator('img[src="assets/rind-cli-demo.gif"]').evaluate(image => ({ width: image.naturalWidth, height: image.naturalHeight }));
-    assert.deepEqual(demo, { width: 960, height: 540 }, 'Inline CLI demo must be 16:9');
+    assert.deepEqual([demo.width, demo.height], cli.resolution, 'Inline CLI demo must preserve the full-resolution 16:9 frames');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name} overflows at ${width}px`);
     await page.screenshot({ path: resolve(scratch, `${name}-${width}.png`), fullPage: true });
   }

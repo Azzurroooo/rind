@@ -141,6 +141,8 @@ try {
 
 const ffmpeg = resolve(option('ffmpeg'));
 execFileSync(ffmpeg, ['-y', '-loglevel', 'error', '-framerate', String(fps), '-i', resolve(scratch, '%04d.png'), '-c:v', 'libx264', '-preset', 'slow', '-crf', '22', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', resolve(root, 'assets/rind-cli-demo.mp4')]);
-execFileSync(ffmpeg, ['-y', '-loglevel', 'error', '-i', resolve(root, 'assets/rind-cli-demo.mp4'), '-filter_complex', '[0:v]fps=12,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle', '-loop', '0', resolve(root, 'assets/rind-cli-demo.gif')]);
+// Encode directly from lossless frames at native resolution. Avoid an H.264
+// round trip, downsampling, and patterned dithering around terminal text.
+execFileSync(ffmpeg, ['-y', '-loglevel', 'error', '-framerate', String(fps), '-i', resolve(scratch, '%04d.png'), '-filter_complex', '[0:v]split[a][b];[a]palettegen=stats_mode=full:reserve_transparent=0[p];[b][p]paletteuse=dither=none:diff_mode=rectangle', '-loop', '0', resolve(root, 'assets/rind-cli-demo.gif')]);
 await writeFile(new URL('cli-capture.json', import.meta.url), JSON.stringify({ source: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), duration, fps, columns, rows, resolution, chrome: 'terminal-tab-and-window-controls', overlays: [], renderer: 'frontend-cli/lib/cli-output-controller.js + questionMenuFrame + ComposerArea + xterm cells', simulated: true, evidence }, null, 2) + '\n');
 process.stdout.write('Captured 15-second native CLI demo (MP4 + GIF).\n');
