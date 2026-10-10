@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, symlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
@@ -24,14 +24,17 @@ function rind(home, cwd, ...args) {
 test("rind agents commands work in a fresh home and read relative folders from where they run", { timeout: 60000 }, async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), "rind-agents-commands-"));
   const home = path.join(root, "home");
-  const work = path.join(root, "work");
-  await mkdir(path.join(work, "lead"), { recursive: true });
-  await mkdir(path.join(work, "nested", "reviewer"), { recursive: true });
+  const physicalWork = path.join(root, "work");
+  const work = path.join(root, "work-alias");
   t.after(async () => {
     await rind(home, root, "agents", "stop", "--all");
     await removeRindHome(home);
     await removeRindHome(root);
   });
+  await mkdir(path.join(physicalWork, "lead"), { recursive: true });
+  await mkdir(path.join(physicalWork, "nested", "reviewer"), { recursive: true });
+  // Exercise real filesystem aliases, including the short paths used by Windows runners.
+  await symlink(physicalWork, work, process.platform === "win32" ? "junction" : "dir");
 
   // The very first command starts the service; it must not fail on credentials the service is still writing.
   const created = await rind(home, path.join(work, "lead"), "agents", "team", "create", "notes");
@@ -43,9 +46,13 @@ test("rind agents commands work in a fresh home and read relative folders from w
   const reviewer = await rind(home, path.join(work, "nested"), "agents", "team", "add", "notes", "./reviewer");
   assert.equal(reviewer.code, 0, reviewer.stderr);
   const listed = await rind(home, root, "agents", "list", "--json");
-  const folders = JSON.parse(listed.stdout).agents.map(agent => agent.canonicalWorkspace.toLowerCase());
-  assert.ok(folders.includes(path.join(work, "lead").toLowerCase()), folders.join(", "));
-  assert.ok(folders.includes(path.join(work, "nested", "reviewer").toLowerCase()), folders.join(", "));
+  assert.equal(listed.code, 0, listed.stderr);
+  const folders = JSON.parse(listed.stdout).agents.map(agent => agent.canonicalWorkspace);
+  for (const relative of ["lead", path.join("nested", "reviewer")]) {
+    const absolute = await realpath(path.join(work, relative));
+    const expected = process.platform === "win32" ? absolute.toLowerCase() : absolute;
+    assert.ok(folders.includes(expected), `Expected ${expected}; got ${folders.join(", ")}`);
+  }
 });
 
 test("rind agents stop also stops a shared Runtime that only plain conversations started", { timeout: 60000 }, async t => {
