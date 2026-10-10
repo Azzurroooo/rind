@@ -2,6 +2,8 @@
 
 English | [简体中文](README.zh-CN.md)
 
+Want to use the CLI first? Read **[Getting work done: a CLI guide organized by scenario](guide/README.md)**. The pages below explain how the engine itself works.
+
 **[Open the full reading map: 9 groups, 52 articles](internals/README.md)**
 
 This series explains how Rind's current code works from five angles — system structure, execution timeline, data projection, capability extension, and reliability. Each article includes a Mermaid diagram, a mechanism explanation, and source-code and test entry points.
