@@ -48,7 +48,7 @@ class AgentRuntime:
         turn_runner: TurnRunner,
         session_store: SessionStore,
         goal_enabled: bool = False,
-        skill_repository=None,
+        skills: SkillTurnCoordinator | None = None,
         runtime_system_messages: list[dict] | None = None,
     ):
         self._turn_runner = turn_runner
@@ -61,11 +61,8 @@ class AgentRuntime:
         self._steering_queue: deque[QueuedInput] = deque()
         self._follow_up_queue: deque[QueuedInput] = deque()
         self._goal_enabled = bool(goal_enabled)
-        self._skill_repository = skill_repository
         self._runtime_system_messages = tuple(dict(message) for message in (runtime_system_messages or []))
-        self._skill_turn_coordinator = (
-            SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
-        )
+        self._skills = skills
 
     async def initialize(self) -> None:
         """Initialize or load the session state. Safe to call multiple times."""
@@ -83,17 +80,12 @@ class AgentRuntime:
                     f"Failed to initialize session store: {exc}",
                     code=type(exc).__name__,
                 ) from exc
-            await self._sync_skill_catalog()
             self._initialized = True
 
-    async def _sync_skill_catalog(self) -> None:
-        if self._skill_turn_coordinator is not None:
-            await self._skill_turn_coordinator.sync_catalog(self._session_store)
-
-    @property
-    def skill_repository(self):
-        """Expose the resolved repository to read-only interface commands."""
-        return self._skill_repository
+    async def sync_skill_catalog(self) -> None:
+        """Rescan Skills into the session catalog; the next model request sees the result."""
+        if self._skills is not None:
+            await self._skills.sync_catalog(self._session_store)
 
     @property
     def turn_active(self) -> bool:
@@ -283,6 +275,7 @@ class AgentRuntime:
             try:
                 if query and not resume:
                     await self._persist_user_input(query)
+                await self.sync_skill_catalog()
 
                 started_event = TurnStartedEvent(
                     **event_meta(self._session_store, turn_id),
@@ -466,9 +459,9 @@ class AgentRuntime:
         return bool(cancellation_token and cancellation_token.is_cancelled)
 
     async def _persist_user_input(self, content: str) -> None:
-        if self._skill_turn_coordinator is not None:
+        if self._skills is not None:
             try:
-                await self._skill_turn_coordinator.persist_user_input(self._session_store, content)
+                await self._skills.persist_user_input(self._session_store, content)
                 return
             except asyncio.CancelledError:
                 raise

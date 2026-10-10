@@ -1,140 +1,123 @@
-"""Filesystem-backed Rind Skill discovery and loading."""
+"""Filesystem-backed Skill discovery across Rind, Claude and Codex folders."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
-from agent.domain.skills import LoadedSkill, SkillMetadata, parse_skill_markdown, parse_skill_metadata
-from agent.infrastructure.paths import resolve_project_root, resolve_rind_home
+from agent.domain.skills import LoadedSkill, SkillMetadata, parse_skill_metadata, split_frontmatter
+from agent.infrastructure.paths import resolve_rind_home
 
 
-class SkillRepository:
-    """Discover effective metadata and load Skill bodies on explicit demand."""
+BUILTIN_SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 
-    def __init__(
-        self,
-        project_root: str | None = None,
-        user_home: str | None = None,
-        project_skill_dir: str | None = None,
-        user_skill_dir: str | None = None,
-        skill_files: tuple[str, ...] = (),
-    ):
-        project_base = Path(project_root).expanduser().resolve() if project_root else resolve_project_root()
-        user_base = Path(user_home).expanduser().resolve() / ".rind" if user_home else resolve_rind_home()
-        self._project_skill_dir = (
-            Path(project_skill_dir).expanduser().resolve()
-            if project_skill_dir
-            else project_base / ".rind" / "skills"
-        )
-        self._user_skill_dir = (
-            Path(user_skill_dir).expanduser().resolve()
-            if user_skill_dir
-            else user_base / "skills"
-        )
-        self._skill_files = tuple(Path(file).resolve() for file in skill_files)
 
-    def list_skills(self) -> list[SkillMetadata]:
-        """Return effective metadata without loading Skill bodies."""
-        skills_by_name: dict[str, SkillMetadata] = {}
-        for root, scope in (
-            (self._user_skill_dir, "user"),
-            (self._project_skill_dir, "project"),
-        ):
-            for skill in self._scan_dir(root, scope):
-                skills_by_name[skill.name.lower()] = skill
-        for file in self._skill_files:
-            metadata = parse_skill_metadata(_read_frontmatter(file), str(file), file.parent.name, "agent")
-            skills_by_name[metadata.name.lower()] = metadata
-        return sorted(skills_by_name.values(), key=lambda item: item.name.lower())
+@dataclass(frozen=True, slots=True)
+class SkillSource:
+    """Skill folders (or assigned SKILL.md files) read as one layer, in precedence order."""
 
-    def get_skill(self, name: str) -> SkillMetadata | None:
-        target = str(name or "").strip().lower()
-        if not target:
-            return None
-        return next((skill for skill in self.list_skills() if skill.name.lower() == target), None)
+    id: str
+    label: str
+    paths: tuple[Path, ...]
 
-    def load_skill(self, name: str) -> LoadedSkill | None:
-        """Load and validate one effective Skill body by name."""
-        metadata = self.get_skill(name)
-        if metadata is None:
-            return None
-        declared_file = Path(metadata.path)
-        if declared_file.is_symlink():
-            raise ValueError("SKILL.md must remain inside its Skill scope root.")
-        root = declared_file.parent if declared_file in self._skill_files else self.skill_root(metadata.scope)
-        skill_file = _ensure_within_root(declared_file, root)
-        if skill_file.is_symlink() or not skill_file.is_file():
-            raise ValueError("SKILL.md must remain inside its Skill scope root.")
-        text = skill_file.read_text(encoding="utf-8", errors="replace")
-        return parse_skill_markdown(
-            text=text,
-            path=metadata.path,
-            fallback_name=skill_file.parent.name,
-            scope=metadata.scope,
-        )
 
-    def skill_root(self, scope: str) -> Path:
-        normalized = str(scope or "").strip().lower()
-        roots = {
-            "user": self._user_skill_dir,
-            "project": self._project_skill_dir,
-        }
-        root = roots.get(normalized)
-        if root is None:
-            raise ValueError("Skill scope must be user or project.")
-        return root
+@dataclass(frozen=True, slots=True)
+class SkillProblem:
+    location: str
+    message: str
 
-    def _scan_dir(self, root: Path | None, scope: str) -> list[SkillMetadata]:
-        if root is None or not root.is_dir():
-            return []
 
-        skills: list[SkillMetadata] = []
-        seen: set[str] = set()
-        for child in sorted(root.iterdir(), key=lambda item: item.name.lower()):
-            if child.is_symlink() or not child.is_dir() or child.name.lower() in seen:
-                continue
-            try:
-                resolved_child = _ensure_within_root(child, root)
-            except ValueError:
-                continue
-            skill_file = child / "SKILL.md"
-            if skill_file.is_symlink() or not skill_file.is_file():
-                continue
-            try:
-                resolved_file = _ensure_within_root(skill_file, root)
-            except ValueError:
-                continue
-            try:
-                frontmatter = _read_frontmatter(skill_file)
-                metadata = parse_skill_metadata(
-                    text=frontmatter,
-                    path=str(resolved_file),
-                    fallback_name=resolved_child.name,
-                    scope=scope,
-                )
-            except Exception:
-                continue
-            seen.add(metadata.name.lower())
-            skills.append(metadata)
+@dataclass(frozen=True, slots=True)
+class ScannedSource:
+    source: SkillSource
+    enabled: bool
+    skills: tuple[SkillMetadata, ...]
+    problems: tuple[SkillProblem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SkillScan:
+    sources: tuple[ScannedSource, ...]
+
+    def effective(self) -> dict[str, SkillMetadata]:
+        """Skills by lowercase name; a later enabled layer overrides an earlier one."""
+        skills: dict[str, SkillMetadata] = {}
+        for scanned in self.sources:
+            if scanned.enabled:
+                skills.update((skill.name.lower(), skill) for skill in scanned.skills)
         return skills
 
 
-def _read_frontmatter(path: Path) -> str:
-    """Read only the frontmatter prefix; body validation belongs to ``load_skill``."""
-    lines: list[str] = []
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            lines.append(line)
-            if len(lines) > 1 and line.rstrip("\r\n") == "---":
-                break
-    return "".join(lines)
+class SkillRepository:
+    """Scan every Skill layer of one workspace; ``imports`` switches the Claude and Codex layers."""
+
+    def __init__(
+        self,
+        workspace: str | Path,
+        *,
+        home: str | Path | None = None,
+        rind_home: str | Path | None = None,
+        skill_files: tuple[str, ...] = (),
+    ):
+        project = Path(workspace).expanduser().resolve()
+        user = Path(home).expanduser().resolve() if home else Path.home()
+        rind = Path(rind_home).expanduser().resolve() if rind_home else resolve_rind_home()
+        self._sources = (
+            SkillSource("builtin", "Rind · built-in", (BUILTIN_SKILLS_DIR,)),
+            SkillSource("claude_user", "Claude · user", (user / ".claude" / "skills",)),
+            SkillSource("codex_user", "Codex · user", (user / ".codex" / "skills", user / ".agents" / "skills")),
+            SkillSource("rind_user", "Rind · user", (rind / "skills",)),
+            SkillSource("claude_project", "Claude · project", (project / ".claude" / "skills",)),
+            SkillSource("codex_project", "Codex · project", (project / ".codex" / "skills", project / ".agents" / "skills")),
+            SkillSource("rind_project", "Rind · project", (project / ".rind" / "skills",)),
+            SkillSource("agent", "Team", tuple(Path(file).resolve() for file in skill_files)),
+        )
+
+    def scan(self, imports: Mapping[str, bool]) -> SkillScan:
+        return SkillScan(tuple(
+            ScannedSource(source, imports.get(source.id, True), *_scan_source(source))
+            for source in self._sources
+        ))
+
+    def list_skills(self, imports: Mapping[str, bool]) -> list[SkillMetadata]:
+        return sorted(self.scan(imports).effective().values(), key=lambda skill: skill.name.lower())
+
+    def load_skill(self, name: str, imports: Mapping[str, bool]) -> LoadedSkill | None:
+        metadata = self.scan(imports).effective().get(str(name or "").strip().lower())
+        if metadata is None:
+            return None
+        _frontmatter, body = split_frontmatter(Path(metadata.location).read_text(encoding="utf-8", errors="replace"))
+        return LoadedSkill(metadata=metadata, body=body)
 
 
-def _ensure_within_root(path: Path, root: Path) -> Path:
-    resolved_root = root.resolve()
-    resolved_path = path.resolve()
+def _scan_source(source: SkillSource) -> tuple[tuple[SkillMetadata, ...], tuple[SkillProblem, ...]]:
+    skills: list[SkillMetadata] = []
+    problems: list[SkillProblem] = []
+    for path in source.paths:
+        for file in _skill_files(path):
+            try:
+                text = file.read_text(encoding="utf-8", errors="replace")
+                metadata, warning = parse_skill_metadata(text, str(file.resolve()), file.parent.name, source.id)
+            except (OSError, ValueError) as exc:
+                problems.append(SkillProblem(str(file), str(exc)))
+                continue
+            skills.append(metadata)
+            if warning:
+                problems.append(SkillProblem(str(file), warning))
+    return tuple(skills), tuple(problems)
+
+
+def _skill_files(path: Path) -> list[Path]:
+    """An assigned SKILL.md itself, or each visible `<name>/SKILL.md` below a Skill folder."""
+    if path.name == "SKILL.md":
+        return [path]
     try:
-        resolved_path.relative_to(resolved_root)
-    except ValueError as exc:
-        raise ValueError(f"Skill path escapes its scope root: {path}") from exc
-    return resolved_path
+        children = sorted(path.iterdir(), key=lambda child: child.name.lower())
+    except OSError:
+        return []
+    return [
+        child / "SKILL.md"
+        for child in children
+        if not child.name.startswith(".") and (child / "SKILL.md").is_file()
+    ]

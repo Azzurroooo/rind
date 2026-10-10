@@ -50,45 +50,46 @@ class SkillInvocationParser:
 
 
 class SkillTurnCoordinator:
-    """Resolve explicit Skill mentions and persist their immutable snapshots."""
+    """Keep a session's Skill catalog current and snapshot explicitly invoked Skills.
 
-    def __init__(self, repository, parser: SkillInvocationParser | None = None):
+    ``catalog`` is False when the session cannot read files, so it gets no catalog.
+    """
+
+    def __init__(self, repository, *, catalog: bool):
         self._repository = repository
-        self._parser = parser or SkillInvocationParser()
+        self._catalog = catalog
+        self._parser = SkillInvocationParser()
 
     async def persist_user_input(self, session, text: str) -> list[SkillInvocation]:
         invocations = self._parser.parse(text)
+        imports = await session.get_skill_sources() if invocations else {}
         loaded: list[tuple[SkillInvocation, LoadedSkill]] = []
         for invocation in invocations:
-            skill = self._repository.load_skill(invocation.name)
+            skill = self._repository.load_skill(invocation.name, imports)
             if skill is None:
                 if invocation.syntax == "slash":
                     raise ValueError(f"Unknown Skill: {invocation.name}")
                 continue
             loaded.append((invocation, skill))
 
-        mention_meta = None
         if loaded:
-            mention_meta = {
+            await session.persist_user_input(text, meta={
                 "kind": "user_prompt",
                 "skill_invocations": [
-                    {"name": skill.name, "syntax": invocation.syntax}
+                    {"name": skill.metadata.name, "syntax": invocation.syntax}
                     for invocation, skill in loaded
                 ],
-            }
-        if mention_meta is None:
-            await session.persist_user_input(text)
+            })
         else:
-            await session.persist_user_input(text, meta=mention_meta)
+            await session.persist_user_input(text)
         for invocation, skill in loaded:
             await session.persist_message(
                 "user",
                 render_skill_content(skill),
                 meta={
                     "kind": "skill_snapshot",
-                    "name": skill.name,
-                    "scope": skill.scope,
-                    "path": skill.path,
+                    "name": skill.metadata.name,
+                    "location": skill.metadata.location,
                     "syntax": invocation.syntax,
                 },
             )
@@ -97,7 +98,8 @@ class SkillTurnCoordinator:
     async def sync_catalog(self, session) -> None:
         """Refresh the session's Skill catalog; keep the previous one on failure."""
         try:
-            entries = [skill.to_catalog_entry() for skill in self._repository.list_skills()]
+            skills = self._repository.list_skills(await session.get_skill_sources()) if self._catalog else []
+            entries = [skill.to_catalog_entry() for skill in skills if skill.model_invocable]
         except asyncio.CancelledError:
             raise
         except Exception:

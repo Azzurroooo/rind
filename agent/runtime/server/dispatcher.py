@@ -11,6 +11,7 @@ from typing import Any
 import uuid
 
 from agent.infrastructure.paths import validate_session_id
+from agent.infrastructure.skills import SkillRepository
 from agent.runtime.core import InputQueueError
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.runtime.server import folder_defaults
@@ -430,7 +431,7 @@ class RuntimeDispatcher:
         A name that is no command goes to the router too, which reports it as
         unknown (or, for a skill, turns it into the first message).
         """
-        if not command or (command not in {"sessions", "status"} and self._slash_router.knows(command)):
+        if not command or (command not in {"sessions", "status", "skill", "import"} and self._slash_router.knows(command)):
             await self._respond_slash_result(request, SlashCommandResult(
                 f"/{command} needs a conversation. Send your first message to start one." if command else "Send your first message to start a conversation."))
             return
@@ -438,9 +439,12 @@ class RuntimeDispatcher:
         store = self._worker.repository.listing_store(root)
         raw_draft = params.get("draft")
         draft = {key: str(raw_draft[key]) for key in ("name", "provider", "model", "reasoning_effort") if raw_draft.get(key)} if isinstance(raw_draft, dict) else None
+        if draft is not None and isinstance(raw_draft.get("skill_sources"), dict):
+            draft["skill_sources"] = raw_draft["skill_sources"]
         result = await self._slash_router.execute(raw_input, SlashCommandContext(
             runtime=None, session=store, debug=self._debug, workspace_root=root, compact_context=None, draft=draft,
-            explain_selection=lambda selection, source: folder_defaults.explain_selection(self._worker, root, selection, source)))
+            explain_selection=lambda selection, source: folder_defaults.explain_selection(self._worker, root, selection, source),
+            skills=SkillRepository(root)))
         await self._respond_slash_result(request, result)
 
     async def _auth_list(self, request: dict[str, Any]) -> None:
@@ -909,6 +913,7 @@ class RuntimeDispatcher:
                 compact_context=lambda: self._worker.execution.compact_context(session_id),
                 explain_selection=lambda selection, source: folder_defaults.explain_selection(
                     self._worker, str(getattr(store, "workspace_root", "") or self._worker.workspace_root), selection, source),
+                skills=self._skill_repository(session_id, store),
             ),
         )
         await self._respond_slash_result(request, result)
@@ -918,6 +923,13 @@ class RuntimeDispatcher:
         if renamed:
             # Every window showing it, and the lists, follow the new name.
             await self._send_event({"type": "session_renamed", "session_id": session_id, "turn_id": "", "name": renamed["name"], "title": renamed["title"]})
+
+    def _skill_repository(self, session_id: str, store) -> SkillRepository:
+        external_tool = self._worker.execution.external_tool(session_id)
+        return SkillRepository(
+            str(getattr(store, "workspace_root", "") or self._worker.workspace_root),
+            skill_files=external_tool.skill_files if external_tool else (),
+        )
 
     async def _session_store(self, session_id: str):
         """The store a running execution holds, so its next turn sees a change; else one opened for it."""

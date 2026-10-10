@@ -72,7 +72,7 @@ class TurnRunner:
         tool_schemas: list[dict],
         context_manager: ContextManager,
         compaction_service: CompactionService | None = None,
-        skill_repository=None,
+        skills: SkillTurnCoordinator | None = None,
         usage_recorder: Callable[[dict], Any] | None = None,
         prepare_messages=None,
         image_input: bool | None = None,
@@ -88,9 +88,7 @@ class TurnRunner:
         self._prepare_messages = prepare_messages
         self._image_input = image_input
         self._task_notifications = task_notifications
-        self._skill_turn_coordinator = (
-            SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
-        )
+        self._skills = skills
 
     @property
     def image_input(self) -> bool | None:
@@ -495,8 +493,8 @@ class TurnRunner:
         self, session: SessionStore, turn_id: str, item: tuple[str, str],
     ) -> QueuedInputDeliveredEvent:
         input_id, text = item
-        if self._skill_turn_coordinator is not None:
-            await self._skill_turn_coordinator.persist_user_input(session, text)
+        if self._skills is not None:
+            await self._skills.persist_user_input(session, text)
         else:
             await session.persist_user_input(text)
         return QueuedInputDeliveredEvent(
@@ -613,8 +611,8 @@ class TurnRunner:
         return TurnCancelledEvent(**event_meta(session, turn_id), reason=reason)
 
     async def _sync_skill_catalog(self, session: SessionStore) -> None:
-        if self._skill_turn_coordinator is not None:
-            await self._skill_turn_coordinator.sync_catalog(session)
+        if self._skills is not None:
+            await self._skills.sync_catalog(session)
 
     async def _persist_message(self, session: SessionStore, role: str, content: str, **kwargs) -> None:
         try:

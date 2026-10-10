@@ -55,7 +55,7 @@ def _find_command_info(command_infos: tuple[SlashCommandInfo, ...], name: str) -
 HELP_GROUPS = (
     ("Operate", ("status", "plan", "draft", "compact")),
     ("Explore", ("sessions", "skill", "help")),
-    ("Configure", ("model", "login")),
+    ("Configure", ("model", "login", "import")),
 )
 
 

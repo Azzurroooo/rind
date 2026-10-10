@@ -10,7 +10,6 @@ from agent.infrastructure.tools.goal import create_goal_tool_spec
 from agent.infrastructure.tools.planning import create_plan_tool_spec
 from agent.infrastructure.tools.shell.specs import build_shell_tool_specs
 from agent.infrastructure.tools.shell.tool import ShellTools
-from agent.infrastructure.tools.skill import build_skill_tool_specs
 from agent.infrastructure.tools.spec import ToolSpec
 from agent.infrastructure.tools.user_question import TOOL_SPECS as USER_QUESTION_TOOL_SPECS
 from agent.infrastructure.tools.web import build_web_tool_specs
@@ -25,7 +24,6 @@ def build_builtin_tool_specs(
     enable_goal: bool = False,
     enable_user_question: bool = True,
     set_goal_status: Callable[[str], Awaitable[dict[str, str]]] | None = None,
-    skill_repository=None,
     workspace_root: str | None = None,
     allowed_roots: Collection[str] | None = None,
     shared_root: str | None = None,
@@ -42,7 +40,6 @@ def build_builtin_tool_specs(
         specs[0:0] = USER_QUESTION_TOOL_SPECS
     specs.extend(build_shell_tool_specs(shell_tools, workspace_root))
     specs.append(create_plan_tool_spec(session_base_provider))
-    specs.extend(build_skill_tool_specs(skill_repository))
     specs.extend(build_web_tool_specs(web_sessions))
     if enable_goal:
         if set_goal_status is None:

@@ -39,6 +39,7 @@ from agent.infrastructure.persistence.session_meta import (
     normalize_auto_compact_window,
     normalize_name,
     normalize_skill_catalog,
+    normalize_skill_sources,
     session_index_entry,
     sync_session_counts,
 )
@@ -778,6 +779,21 @@ class JsonlSessionStore(SessionStore):
                     return
                 self._session_meta["skill_catalog"] = normalized
                 self._persist_meta_sync(self._session_meta.get("updated_at"))
+
+            await asyncio.to_thread(_persist)
+
+    async def get_skill_sources(self) -> dict[str, bool]:
+        async with self._write_lock:
+            return normalize_skill_sources(self._session_meta.get("skill_sources") if isinstance(self._session_meta, dict) else None)
+
+    async def set_skill_sources(self, sources: dict[str, bool]) -> None:
+        normalized = normalize_skill_sources(sources)
+        async with self._write_lock:
+            def _persist() -> None:
+                meta = self._session_meta if isinstance(self._session_meta, dict) else {}
+                meta["skill_sources"] = normalized
+                self._session_meta = meta
+                self._persist_meta_sync(meta.get("updated_at"))
 
             await asyncio.to_thread(_persist)
 

@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from agent.domain.skills import SKILL_NAME_PATTERN
+from agent.domain.skills import IMPORT_SOURCES, SKILL_NAME_PATTERN
 
 
 NAME_LIMIT = 80
@@ -91,33 +91,23 @@ def normalize_auto_compact_window(window: Any) -> dict[str, Any]:
 def normalize_skill_catalog(value: Any) -> list[dict[str, str]]:
     if not isinstance(value, list):
         return []
-    entries: list[dict[str, str]] = []
-    seen: set[str] = set()
+    entries: dict[str, dict[str, str]] = {}
     for item in value:
         if not isinstance(item, dict):
             continue
-        raw_name = item.get("name")
-        raw_description = item.get("description")
-        raw_scope = item.get("scope")
-        if not all(isinstance(field, str) for field in (raw_name, raw_description, raw_scope)):
+        name, description, location = (item.get(key) for key in ("name", "description", "location"))
+        if not all(isinstance(field, str) and field.strip() for field in (name, description, location)):
             continue
-        name = raw_name.strip()
-        description = raw_description.strip()
-        scope = raw_scope.strip().lower()
-        key = name.lower()
-        if (
-            not SKILL_NAME_PATTERN.fullmatch(name)
-            or not description
-            or "\n" in description
-            or "\r" in description
-            or scope not in {"user", "project", "agent"}
-            or key in seen
-        ):
+        if not SKILL_NAME_PATTERN.fullmatch(name) or "\n" in description or "\r" in description:
             continue
-        seen.add(key)
-        entries.append({"name": name, "description": description, "scope": scope})
-    entries.sort(key=lambda item: item["name"].lower())
-    return entries
+        entries.setdefault(name.lower(), {"name": name, "description": description, "location": location})
+    return sorted(entries.values(), key=lambda item: item["name"].lower())
+
+
+def normalize_skill_sources(value: Any) -> dict[str, bool]:
+    """Which Claude and Codex Skill layers a session reads; absent means all of them."""
+    chosen = value if isinstance(value, dict) else {}
+    return {source: chosen.get(source) is not False for source in IMPORT_SOURCES}
 
 
 def new_session_meta(

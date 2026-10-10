@@ -145,9 +145,11 @@ class RuntimeWorker:
             raise ValueError("This conversation already exists.")
         info = await self.repository.create(str(root), selection=selection, selection_source=source, defer_persistence=True, session_id=proposed)
         session_id = info["session_id"]
+        # Chosen before the first message; that message saves them with the conversation.
         if params.get("name"):
-            # A name chosen before the first message; that message saves it with the conversation.
             await (await self.repository.open_store(session_id)).set_name(str(params["name"]))
+        if isinstance(params.get("skill_sources"), dict):
+            await (await self.repository.open_store(session_id)).set_skill_sources(params["skill_sources"])
         if "external_tools" in params or "enable_user_question" in params:
             tool = ExternalTool.from_json(json.dumps(params["external_tools"])) if params.get("external_tools") else None
             await self.execution.configure_session(session_id, tool, params.get("enable_user_question") is not False)

@@ -11,6 +11,7 @@ from typing import Any
 
 from agent.application.context import CompactionService, ContextEstimator, ContextManager
 from agent.application.ports.session_store import SessionStore
+from agent.application.skill_selection import SkillTurnCoordinator
 from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultNormalizer
 from agent.infrastructure.environment import get_system_info
 from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore
@@ -51,7 +52,6 @@ class AgentContainer:
     tool_result_normalizer: ToolResultNormalizer
     tool_processor: ToolCallProcessor
     stream_parser: MessageStreamParser
-    skill_repository: SkillRepository
     context_manager: ContextManager
     compaction_service: CompactionService
     turn_runner: TurnRunner
@@ -78,7 +78,6 @@ def build_agent_container(
     owner_agent_id: str | None = None,
     session_type: str | None = None,
     parent_session_id: str | None = None,
-    skill_project_dir: str | None = None,
     shared_resources: SharedRuntimeResources | None = None,
     shell_tools: ShellTools | None = None,
     web_sessions: WebSessions | None = None,
@@ -111,8 +110,7 @@ def build_agent_container(
     if callable(trace_setter) and not inspect.iscoroutinefunction(trace_setter):
         trace_setter(lambda: session_store.session_id)
     skill_repository = SkillRepository(
-        project_root=prompt_workspace,
-        project_skill_dir=skill_project_dir,
+        prompt_workspace,
         skill_files=external_tool.skill_files if external_tool else (),
     )
     runtime_system_messages: list[dict] = []
@@ -140,7 +138,6 @@ def build_agent_container(
         enable_goal=enable_goal,
         enable_user_question=enable_user_question,
         set_goal_status=session_store.set_goal_status if enable_goal else None,
-        skill_repository=skill_repository,
         workspace_root=workspace_root,
         session_output_root=session_output_root,
         shell_tools=shell_tools,
@@ -163,6 +160,7 @@ def build_agent_container(
             raise ValueError(f"Unknown enabled tool(s): {', '.join(unknown)}")
         tool_specs = tuple(spec for spec in catalog if spec.name in requested)
     tool_registry = DefaultToolRegistry(tool_specs)
+    skills = SkillTurnCoordinator(skill_repository, catalog=any(spec.name == "read_file" for spec in tool_specs))
     tool_executor = ToolExecutor(registry=tool_registry)
     tool_result_normalizer = shared_resources.tool_result_normalizer if shared_resources else ToolResultNormalizer()
     tool_processor = ToolCallProcessor(
@@ -191,14 +189,14 @@ def build_agent_container(
         context_manager=context_manager,
         task_notifications=task_notifications,
         compaction_service=compaction_service,
-        skill_repository=skill_repository,
+        skills=skills,
         usage_recorder=usage_recorder,
     )
     runtime = AgentRuntime(
         turn_runner=turn_runner,
         session_store=session_store,
         goal_enabled=enable_goal,
-        skill_repository=skill_repository,
+        skills=skills,
         runtime_system_messages=runtime_system_messages,
     )
     return AgentContainer(
@@ -210,7 +208,6 @@ def build_agent_container(
         tool_result_normalizer=tool_result_normalizer,
         tool_processor=tool_processor,
         stream_parser=stream_parser,
-        skill_repository=skill_repository,
         context_manager=context_manager,
         compaction_service=compaction_service,
         turn_runner=turn_runner,
