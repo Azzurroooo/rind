@@ -1,6 +1,9 @@
+import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -9,10 +12,14 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent.domain.models import ModelStreamEvent
+from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.persistence.session_meta import normalize_skill_sources
 from agent.infrastructure.skills import SkillRepository
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandRouter
 from agent.runtime.server.commands.catalog import build_command_infos
+from agent.runtime.server.dispatcher import RuntimeDispatcher
+from agent.runtime.server.worker import RuntimeWorker
 
 
 class Session:
@@ -121,3 +128,52 @@ async def test_import_rejects_unknown_sources_and_values(tmp_path: Path, argumen
 
     assert result.text.startswith("Usage: /import")
     assert session.sources == normalize_skill_sources(None)
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_conversation_keeps_its_import_choice_from_the_window_to_the_catalog(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "rind"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    _skill(tmp_path / "home" / ".claude" / "skills", "claude-only")
+
+    async def stream(*args, **kwargs):
+        yield ModelStreamEvent(kind="text_delta", text="done")
+        yield ModelStreamEvent(kind="completed", stop_reason="stop")
+
+    worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
+    monkeypatch.setattr(worker.provider_service, "create_chat_client", AsyncMock(return_value=SimpleNamespace(stream=stream, close=AsyncMock())))
+    messages = []
+
+    async def send(payload):
+        messages.append(payload)
+
+    server = RuntimeDispatcher(worker, writer=SimpleNamespace(send=send))
+
+    async def request(method, **params):
+        await server.dispatch({"request_id": method, "method": method, "params": params})
+        response = next(message for message in reversed(messages) if message.get("request_id") == method)
+        assert "error" not in response, response
+        return response["result"]
+
+    def catalog_names(session_id):
+        meta = JsonlSessionStore.load_session_metadata(session_id, str(tmp_path / "sessions"))
+        return [entry["name"] for entry in meta["skill_catalog"]]
+
+    try:
+        await request("initialize")
+        choice = {"claude_user": False}
+        listed = await request("rind/command/execute", input="/import", workspace_root=str(tmp_path), draft={"skill_sources": choice})
+        assert [source["enabled"] for source in listed["display"]["sources"]][0] is False
+        session_id = (await request("session/create", workspace_root=str(tmp_path), skill_sources=choice))["session_id"]
+        await request("session/prompt", session_id=session_id, input="hello")
+        assert catalog_names(session_id) == ["skill-creator"], "a new conversation has its catalog from the first message"
+
+        updated = await request("rind/command/execute", session_id=session_id, input="/import claude_user=on")
+        assert "cannot reuse the prompt cache" in updated["text"]
+        await request("session/prompt", session_id=session_id, input="again")
+        assert catalog_names(session_id) == ["claude-only", "skill-creator"]
+        assert "claude-only" in json.dumps(await request("rind/command/execute", session_id=session_id, input="/skill"))
+    finally:
+        server.close()
+        await worker.close()

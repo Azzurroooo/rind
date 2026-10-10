@@ -80,7 +80,7 @@ This group answers "what does the model actually see", separating context assemb
 | [Context budget](02-context/context-budget.md) | How do local estimation, server-usage anchors, window headroom, and context inspect avoid blind stuffing? | Budget allocation diagram |
 | [When to compact](02-context/compaction-triggers.md) | Why do manual, automatic, and context-overflow recovery share a pipeline, yet different callers decide whether sampling continues? | Trigger state diagram |
 | [The compaction handoff](02-context/compaction-handoff.md) | How do the history summary, the most recent messages kept verbatim, tool pairing, failure fallback, and boundary checks guarantee resumability? | Before/after compaction comparison diagram |
-| [Progressive disclosure of Skills](02-context/skills.md) | How do metadata discovery, scope overrides, explicit activation, and snapshot persistence avoid loading the full text every turn? | Discovery and activation sequence diagram |
+| [Progressive disclosure of Skills](02-context/skills.md) | How do layered discovery across Rind, Claude and Codex folders, a catalog the model reads with read_file, and explicit snapshots avoid loading the full text every turn? | Discovery and activation diagram |
 | [Images entering the context](02-context/image-input.md) | How are user-uploaded and tool images snapshotted, stored, capability-checked, and adapted to the model request? | Image data-flow diagram |
 
 ## 03 · Persistence and the source of truth (5 articles)

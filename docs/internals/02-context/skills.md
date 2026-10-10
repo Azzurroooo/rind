@@ -1,31 +1,61 @@
-# Skill: the catalog appears first, the body enters on demand
+# Skill: the catalog appears first, the model reads the file when it needs it
 
 English | [简体中文](skills.zh-CN.md)
 
-Rind does not put every SKILL.md into every model request. It first tells the model "what capabilities exist", and loads specific content only when the user explicitly invokes it or a tool reads it.
+Rind does not put every SKILL.md into every model request. The catalog tells the model which skills exist and where each file is; the model reads a file with `read_file` when a task matches it. A user's explicit invocation puts the body into the conversation directly. There is no skill-specific tool.
 
 ~~~mermaid
 flowchart LR
-    U["User-level skills"] --> SCAN["Scan frontmatter only"]
-    P["Project-level skills"] --> SCAN
-    A["Agent-level skills"] --> SCAN
-    SCAN --> INDEX["Session Skill catalog"]
-    INDEX --> CM["ContextManager injects a short index"]
-    CALL["$name / /skill:name"] --> LOAD["Load the effective SKILL.md"]
-    LOAD --> SNAP[("Session skill_snapshot")]
+    LAYERS["Eight layers, in precedence order"] --> SCAN["Parse frontmatter with PyYAML"]
+    IMPORTS["Session skill_sources"] --> SCAN
+    SCAN --> INDEX["Session catalog: name · description · location"]
+    INDEX --> CM["ContextManager injects available_skills"]
+    CM --> READ["Model: read_file location"]
+    CALL["$name / /skill:name"] --> SNAP[("Session skill_snapshot")]
     SNAP --> CM
 ~~~
 
-SkillRepository scans the user, project, and Agent scopes; when names collide, the later, more specific scope overrides the earlier one. Scanning reads only frontmatter, while the body is parsed in full at load_skill, after checking that the path still lies inside its scope. A catalog sync failure keeps the previous catalog, so a scan error does not strip existing Skill information from the current turn.
+## Layers
 
-Explicit invocation is parsed by SkillTurnCoordinator when user input is persisted to disk: an unknown /skill:name raises an error, while an ordinary $name is not treated as an invocation if no Skill of that name exists. The body of a successful invocation is stored in the session as a skill_snapshot, so later recovery does not depend on the on-disk Skill file happening to remain unchanged. The model can also read specified content on its own initiative through the skill tool.
+SkillRepository reads eight layers. A later layer overrides an earlier one by name, case-insensitively:
 
-## File discovery and execution permission are two different things
+| Layer | Folders | Switch |
+| --- | --- | --- |
+| Rind · built-in | `agent/skills` in the install | always on |
+| Claude · user | `~/.claude/skills` | `/import` |
+| Codex · user | `~/.codex/skills`, then `~/.agents/skills` | `/import` |
+| Rind · user | `RIND_HOME/skills` | always on |
+| Claude · project | `<cwd>/.claude/skills` | `/import` |
+| Codex · project | `<cwd>/.codex/skills`, then `<cwd>/.agents/skills` | `/import` |
+| Rind · project | `<cwd>/.rind/skills` | always on |
+| Team | SKILL.md files assigned to the member | always on |
 
-The default user directory is RIND_HOME/skills and the project directory is <project root>/.rind/skills; the Agent scope is passed in at assembly time. The repository scans the direct subdirectories of each directory, reads the SKILL.md inside, and merges them by name, ignoring case. Both discovery and loading check the scope boundary; symlinked directories or SKILL.md files are not a shortcut for out-of-scope reads.
+Each folder contributes its direct `<name>/SKILL.md` children. Folders starting with `.` are skipped, which also leaves out Codex's own `~/.codex/skills/.system`. Symlinked skill folders are followed, and a skill's location is its real path. The project layers are rooted at the working directory, as `RIND.md` is, not at a parent Git root.
 
-A Skill's body is instructions loaded on demand, not a new Python executor, and it does not automatically give the Agent unregistered tools. Once a capability is written into a SKILL.md, it can still only be implemented through the tools the current container already has. The catalog index solves discoverability, the session snapshot makes this activation traceable, and the two carry different responsibilities.
+## Parsing and problems
 
-Code entry points: [SkillRepository](../../../agent/infrastructure/skills.py), [activation coordination](../../../agent/application/skill_selection.py), [Skill tool](../../../agent/infrastructure/tools/skill.py). Verification: [Skill repository](../../../test/test_skill_repository.py), [activation events](../../../test/test_skill_activation_event.py).
+The frontmatter is YAML and is read with `yaml.safe_load`. A value with an unquoted `key: a: b` colon is quoted and parsed again. Only three top-level fields count:
+
+- `name` defaults to the folder name and must use letters, digits, hyphens and underscores. A name that differs from its folder only warns.
+- `description` is required. Whitespace, including the lines of a `|` or `>` block, is joined into one line. The catalog shows at most 1024 characters.
+- `disable-model-invocation: true` keeps the skill out of the catalog; `/skill:name` still uses it.
+
+Other fields (`metadata`, `allowed-tools`, …) are ignored and never replace the top-level ones. A file that fails to parse or lacks a description is skipped. Every problem and warning is kept with its location, and `/skill` lists them.
+
+## Catalog and session state
+
+At the start of every turn, SkillTurnCoordinator rescans the layers and writes the effective, model-invocable skills to the session's `skill_catalog`. A turn after compaction is rescanned too. The write happens only when the entries changed, so the catalog's system message stays stable for the prompt cache. A new conversation gets its catalog from its first message, and a skill written during a turn appears from the next one. A session whose tools do not include `read_file` gets no catalog; the Manager is one.
+
+`skill_sources` in the session metadata records which Claude and Codex layers the conversation reads. It is absent, meaning all on, until `/import` changes it. A fork inherits it, and a window's choice before the first message is saved with that message. When `/import` changes it for a hosted conversation, the catalog is synced at once, so the next model request already uses it, and that request cannot reuse the prompt cache.
+
+## Explicit invocation
+
+SkillTurnCoordinator parses `/skill:name` and `$name` when user input is persisted, against the layers the session currently reads. An unknown `/skill:name` raises an error. A `$name` that names no skill is left as text. A successful invocation stores its body as a `skill_snapshot` with its location, so later recovery does not depend on the file staying unchanged.
+
+## Discovery is not permission
+
+A skill body is instructions, not an executor, and it grants no tools. What a SKILL.md describes can still only be done through the tools the container already has, and `read_file` has no directory boundary. Project-level `.claude` and `.agents` folders in a cloned repository enter the catalog like `RIND.md` does; `/skill` shows where each skill comes from, and `/import` switches those layers off. The built-in `skill-creator` skill explains how to write one.
+
+Code entry points: [SkillRepository](../../../agent/infrastructure/skills.py), [parsing and catalog](../../../agent/domain/skills.py), [catalog and invocation](../../../agent/application/skill_selection.py), [/skill](../../../agent/runtime/server/commands/skill.py), [/import](../../../agent/runtime/server/commands/import_skills.py). Verification: [Skill repository](../../../test/test_skill_repository.py), [catalog and session](../../../test/test_skill_catalog_session.py), [commands](../../../test/test_skill_commands.py).
 
 [Back to the series map](../README.md)
