@@ -1,0 +1,21 @@
+{
+  "source": "e929745fd8deaca1c3aa879caac57cebb162d38b",
+  "desktop": "rind-web/public/demos/desktop (real Desktop renderer, sample preload API)",
+  "web": "frontend-web/src/main.jsx",
+  "app": "mobile/src/main.jsx (Capacitor browser renderer, local ticket/socket fixtures)",
+  "mobileNativeCapabilitiesTested": false,
+  "modelCalls": 0,
+  "rpcMethods": [
+    "initialize",
+    "session/switch",
+    "session/replay",
+    "model/list",
+    "session/subscribe",
+    "session/list"
+  ],
+  "resolution": [
+    2160,
+    1100
+  ],
+  "delivery": "Added **3 Unicode regression tests**. All **4 tests pass**.\nThe tokenizer implementation is unchanged."
+}

@@ -20,16 +20,69 @@
 </p>
 
 <p align="center">
-  <a href="assets/agents-management.png"><img src="assets/agents-management.png" alt="Rind CLI 的 Agents Management 面板：左侧选择团队，中间展示开发、测试、审查成员及工作状态，右侧查看所选成员的工作区与活动。" width="1200" /></a><br />
-  <sub>Rind CLI · Agents Management · 示例团队 · 点击放大</sub>
+  <a href="assets/rind-cli-demo.mp4"><img src="assets/rind-cli-demo.gif" alt="15 秒 Rind CLI 演示：读取代码，询问测试范围，接收用户选择，修改测试，运行测试并汇报结果。" width="1200" /></a><br />
+  <sub>读代码，问清楚，改文件，跑测试，交结果。· 15 秒模拟 CLI 会话 · <a href="assets/rind-cli-demo.mp4">观看视频</a></sub>
 </p>
 
 **给团队一个目标。看清工作进展。验收最终交付。**
 
-- **轻量，从设计开始。** 共享执行引擎，会话按需加载，历史保存在磁盘。本地运行，无需维护数据库。
-- **目录即智能体。** 每位队友都有自己的工作区、文件、指令与技能。已有目录直接加入，也能用 Git worktree 并行开展工作。
-- **看得见的多 Agent 协作。** 主 Agent 分工，成员各自推进，结果汇总交回。Agents Management 在一个交互界面中呈现团队、会话与进度。
-- **模型，由你选择。** 支持 ChatGPT 账号登录，也能通过 API key 接入 OpenAI、Anthropic、Google、DeepSeek 及其他兼容服务商。
+小改动，交给一个 Agent。大目标，交给一个团队。工作留在你的目录里，工具过程看得见，你始终可以参与其中。
+
+## Team Agents Management · 多智能体协作
+
+### 目录即智能体。每个目录，都是一位队友。
+
+**把工作区加入团队，让每个 Agent 在自己的目录里工作。**
+
+工作区，是 Agent 的工作现场：文件提供上下文，`RIND.md` 定义长期指令，技能沉淀可复用的经验。赋予职责，接入团队，让不同专长并行推进。已有目录可以留在原处；需要独立代码副本时，也能用 Git worktree 分开工作。
+
+<p align="center">
+  <a href="assets/agents-management.png"><img src="assets/agents-management.png" alt="Rind CLI 的 Agents Management 面板：左侧选择团队，中间展示开发、测试、审查成员及工作状态，右侧查看所选成员的工作区与活动。" width="1200" /></a><br />
+  <sub>Rind CLI · Agents Management · 示例团队 · 点击放大</sub>
+</p>
+
+- **一个目标，各尽所长。** 主 Agent 分工，成员实现、测试、审查，结果逐级汇总，由主 Agent 检查后交付给你。
+- **协作，不是黑箱。** Organization 呈现团队与汇报关系，Tasks 跟踪工作，Inbox 汇集提问与交付，Background 展示持续运行的工作。
+- **结构，由你定义。** 开发团队、投研小组、个人助理网络。职责、目录与汇报关系，都按你的工作方式组织。
+
+目录是 Agent 的家，会话是它的一段工作。加入团队，不意味着每位成员都要常驻一套执行引擎。
+
+[了解 Agents Management →](docs/agents-management.zh-CN.md)
+
+## 轻量，从设计开始。按需工作。
+
+**留下工作，卸下负担。**
+
+Rind 将长期上下文与临时执行分开：会话历史保存在磁盘文件中，不只存在于一个常驻 Agent 的内存里。有工作时，共享 Worker 组装执行上下文；一轮工作结束、没有待处理输入时，释放执行容器与模型客户端。下一轮，从保存的上下文重新加载。
+
+- **共享基础设施，独立工作现场。** 会话复用 Worker 服务，不为每段保存的对话常驻一个执行容器。
+- **执行可释放，历史不丢失。** 回来就能接着聊，无需让旧执行对象一直占着内存，也无需维护数据库服务。
+- **后台工作，有自己的生命周期。** 托管的 Shell 进程可以在一轮执行释放后继续运行，输出、状态与取消仍由 Worker 管理。
+
+这里的「无状态」指持久会话上下文可从磁盘恢复，**不是 Worker 完全没有运行状态**。活跃进程、队列与取消都有明确归属。低负载来自**需要时加载，空闲时释放**，而不是丢掉你的历史。
+
+[了解轻量 Worker 内核 →](docs/internals/01-runtime/resource-ownership.zh-CN.md)
+
+## 一个内核，多种入口。
+
+**桌前、浏览器里、手机上。工作始终在你的主机。**
+
+<p align="center">
+  <a href="assets/rind-clients.png"><img src="assets/rind-clients.png" alt="Rind 三端示例拼图：带项目侧栏的 Desktop、浏览器中的 Web，以及连接电脑的移动 App。使用真实客户端渲染器展示示例编码会话。" width="1200" /></a><br />
+  <sub>Desktop · Web · App · 真实客户端渲染，示例数据 · 点击放大</sub>
+</p>
+
+- **Desktop：** 本地图形工作台，集中处理会话、项目文件与工具结果。[下载 v0.9.0：Windows / macOS / Linux](https://github.com/Azzurroooo/rind/releases/tag/v0.9.0)。
+- **Web：** 通过 Desktop 远程访问，在浏览器里连接工作区；也能搭配独立 Worker 自托管。[Web 部署指南 →](docs/internals/07-surfaces/web-and-mobile.zh-CN.md)
+- **App：** 在手机上继续主机里的会话。移动端连接电脑或服务器，模型、工具与文件仍在主机上执行与保存。[Android / iOS 源码与构建指南 →](mobile/README.md)
+
+多端共享执行内核，**并不代表功能完全一致**。目前 **Team Agents Management 在 CLI 0.10.0 中提供**。移动端是远程客户端，不是在手机上运行编码内核；原生构建需要对应平台工具链。
+
+## 模型，由你选择。
+
+**接入 ChatGPT 订阅，也支持自备 API key。**
+
+Rind 支持 OpenAI 账号登录，以及 OpenAI、Anthropic、Google、DeepSeek 等服务商的 API key 接入。按工作选择模型，继续使用 Rind 的工具与本地工作区。订阅可用模型与额度取决于你的账号和方案。
 
 ## 开始使用
 
@@ -43,8 +96,6 @@ rind
 
 进入 Rind 后，用 `/login` 连接服务商，用 `/model` 选择模型。使用 ChatGPT 订阅时，选择 **OpenAI → Sign in with an account**，在浏览器中完成登录。可用模型与额度取决于你的账号和订阅。
 
-**Desktop：在图形界面中处理会话、文件与工具结果。** [下载 Windows、macOS 或 Linux 桌面端](https://github.com/Azzurroooo/rind/releases/tag/v0.9.0)。组建与管理多 Agent 团队，请使用下方的 CLI Agents Management。
-
 想先看看？[体验官网交互演示](https://rindai.dev/zh/#tour)，或在 Rind 中打开 `/tour`。内置教学无需 API key。
 
 <details>
@@ -56,30 +107,9 @@ npm 安装需要 Node.js 18+，支持 Windows、macOS 和 Linux。独立 CLI 安
 
 </details>
 
-## 在界面里，组建你的团队
-
-1. **打开 Agents Management。** CLI 输入框为空时，按 <kbd>←</kbd>。
-2. **选择 New team，再 Add member。** 加入已有目录、新建工作区，或创建 Git worktree。为成员分配角色，首位成员成为主 Agent。
-3. **选中主 Agent，布置任务。** 按 <kbd>t</kbd>，说清楚你想要的结果。
-
-> 完成登录页。让前端和后端负责实现，测试验证功能，Reviewer 审查改动。把完成的代码和验证结果一起交回来。
-
-也可以打开 **Manager**，直接用自然语言描述你想组建的团队。
-
-**随时参与，随时掌握。** 打开任一成员即可直接交流；在 **Organization** 看团队，在 **Tasks** 看工作，在 **Inbox** 处理提问与交付。**Background** 展示离开终端后仍在继续的工作。报告交回后，由你验收，或提出反馈继续修改。
-
-[了解 Agents Management →](docs/agents-management.zh-CN.md)
-
-## 你的目录，你的团队
-
-一个工作区，就是一位有职责的队友。文件提供上下文，`RIND.md` 保存长期指令，技能沉淀可复用的经验。角色与汇报关系由你安排，目录可以留在原来的位置。
-
-**开发团队、投研小组、个人助理。** 结构由你定义。从一个 Agent 开始，随工作需要加入更多专家。
-
 ## 更多工作方式
 
-- **接着上次继续。** 会话历史持久保存，回来就能继续推进。
-- **从更多地方连接。** 支持 [Web 与移动端](docs/internals/07-surfaces/web-and-mobile.zh-CN.md)，以及 [Telegram、Discord、Slack、飞书](docs/internals/07-surfaces/gateway.zh-CN.md)。
+- **接入常用渠道。** 支持 [Telegram、Discord、Slack、飞书](docs/internals/07-surfaces/gateway.zh-CN.md)。
 - **需要时，再自动化。** 用 `rind run` 接入脚本与 CI，用 `rind send` 给运行中的会话补充指令。团队管理也提供命令行接口。
 
 <details>

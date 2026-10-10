@@ -20,16 +20,69 @@
 </p>
 
 <p align="center">
-  <a href="assets/agents-management.png"><img src="assets/agents-management.png" alt="Rind CLI Agents Management: team navigation on the left, a live organization tree with development, testing and review in the center, and the selected member's workspace and activity on the right." width="1200" /></a><br />
-  <sub>Rind CLI · Agents Management · example team · click to enlarge</sub>
+  <a href="assets/rind-cli-demo.mp4"><img src="assets/rind-cli-demo.gif" alt="A 15-second Rind CLI demo: read code, ask the user which tests to add, receive an answer, edit the tests, run them and report the result." width="1200" /></a><br />
+  <sub>Read. Ask. Edit. Test. Deliver. · 15-second simulated CLI session · <a href="assets/rind-cli-demo.mp4">Watch the video</a></sub>
 </p>
 
 **Give your team a goal. Follow the work. Review the delivery.**
 
-- **Light by design.** A shared worker, sessions loaded on demand, history saved on disk. Your agent runs locally without a database to manage.
-- **Folders are agents.** Each teammate works in its own workspace, with its own files, instructions and skills. Bring existing folders or create Git worktrees for parallel work.
-- **Multi-agent collaboration you can see.** The lead delegates, specialists work, and reports return for review. Agents Management brings the team, conversations and progress into one interactive view.
-- **Your models, your choice.** Sign in with your ChatGPT account, or connect OpenAI, Anthropic, Google, DeepSeek and other compatible providers with API keys.
+One agent for a quick fix. A team for a bigger goal. Rind keeps the work in your workspaces, the tools visible, and you in the conversation.
+
+## Team Agents Management
+
+### Folders are agents. Every folder is a teammate.
+
+**Add workspaces to your team. Let each agent work in its own folder.**
+
+A workspace gives an agent a place to work: files for context, `RIND.md` for standing instructions, and skills for reusable expertise. Give it a role, connect it to the team, and let specialists work in parallel. Your existing directories can stay where they are; Git worktrees offer separate working copies when you need them.
+
+<p align="center">
+  <a href="assets/agents-management.png"><img src="assets/agents-management.png" alt="Rind CLI Agents Management: team navigation on the left, a live organization tree with development, testing and review in the center, and the selected member's workspace and activity on the right." width="1200" /></a><br />
+  <sub>Rind CLI · Agents Management · example team · click to enlarge</sub>
+</p>
+
+- **One goal. Different responsibilities.** The lead delegates, specialists implement, test and review, and reports return for the lead to check before delivery to you.
+- **Coordination you can see.** Organization shows the team and reporting relationships; Tasks tracks the work; Inbox brings questions and deliveries to you. Background keeps ongoing work visible.
+- **Your structure, not a template.** A development team, research desk or personal assistant network. Choose the roles, workspaces and reporting lines that fit your work.
+
+The folder is the agent's home; a conversation is one session of its work. Team membership does not require a permanently loaded execution engine for every member.
+
+[Explore Agents Management →](docs/agents-management.md)
+
+## Light by design. Work on demand.
+
+**Keep the work. Release the weight.**
+
+Rind separates lasting context from temporary execution. Conversation history lives in files on disk, not only in a resident agent's memory. When a session has work, the shared Worker assembles its execution context; when the turn is idle and nothing is queued, it releases the execution container and model client. The next turn reloads the saved context.
+
+- **Shared infrastructure, independent workspaces.** Sessions reuse Worker services without keeping an execution container alive for every saved conversation.
+- **History outlives execution.** Resume a conversation without needing its old execution objects to remain in memory. No database service to maintain.
+- **Background work has its own lifetime.** Managed shell processes can continue after a turn's container is released; the Worker still owns their output, status and cancellation.
+
+“Stateless” describes how persistent session context is restored—not a Worker with no live state. Active processes, queues and cancellation still have clear owners. Low load comes from **loading what is needed and releasing what is idle**, not from discarding your history.
+
+[Inside the lightweight Worker →](docs/internals/01-runtime/resource-ownership.md)
+
+## One core. More ways to work.
+
+**At your desk. In your browser. On your phone.**
+
+<p align="center">
+  <a href="assets/rind-clients.png"><img src="assets/rind-clients.png" alt="Three actual Rind client views side by side: Desktop with its project sidebar, Web in a browser, and the mobile App connected to a computer. All show an example coding conversation." width="1200" /></a><br />
+  <sub>Desktop · Web · App · real client renderers with sample data · click to enlarge</sub>
+</p>
+
+- **Desktop.** A local visual workspace for conversations, project files and tool results. [Download v0.9.0 for Windows, macOS or Linux](https://github.com/Azzurroooo/rind/releases/tag/v0.9.0).
+- **Web.** Connect from a browser through Desktop remote access, or self-host the Web surface with a standalone Worker. [Web setup →](docs/internals/07-surfaces/web-and-mobile.md)
+- **App.** Continue host-side sessions from your phone. The mobile client connects to your computer or server; models, tools and files stay on the host. [Android / iOS source and build guide →](mobile/README.md)
+
+The interfaces share a runtime, not an identical feature set. **Team Agents Management is currently available in CLI 0.10.0.** Mobile is a remote client, not an on-device coding runtime; native builds require the platform toolchains.
+
+## Your models, your choice.
+
+**Use your ChatGPT subscription. Or bring your own API keys.**
+
+Rind supports OpenAI account sign-in alongside API-key connections to OpenAI, Anthropic, Google, DeepSeek and other compatible providers. Choose the model that fits the work; keep using Rind's tools and local workspaces. Available subscription models and usage depend on your account and plan.
 
 ## Get started
 
@@ -43,8 +96,6 @@ rind
 
 Inside Rind, use `/login` to connect a provider and `/model` to choose a model. For a ChatGPT subscription, choose **OpenAI → Sign in with an account** and complete the browser sign-in. Available models and usage depend on your account and plan.
 
-**Desktop — a visual workspace for your conversations, files and tool results.** [Download for Windows, macOS or Linux](https://github.com/Azzurroooo/rind/releases/tag/v0.9.0). For team setup and coordination, use the CLI's Agents Management below.
-
 Want a quick look first? [Explore the interactive demos](https://rindai.dev/#tour), or open `/tour` inside Rind. The built-in tour needs no API key.
 
 <details>
@@ -56,30 +107,9 @@ To run from source, install Python 3.12+, Node.js 18+ and Git, then follow the [
 
 </details>
 
-## Build your team in the interface
-
-1. **Open Agents Management.** With the CLI input empty, press <kbd>←</kbd>.
-2. **Choose New team, then Add member.** Pick an existing folder, a fresh workspace or a Git worktree. Give each member a role; the first member becomes the lead.
-3. **Select the lead and assign a task.** Press <kbd>t</kbd> and describe the result you want.
-
-> Ship the login page. Have Frontend and Backend implement it, QA verify it, and Reviewer check the changes. Bring back the finished work and verification results.
-
-You can also open **Manager** and describe the team you want in plain language.
-
-**Stay in the conversation.** Open any member to talk directly. Follow the team in **Organization**, inspect work in **Tasks**, and handle questions and deliveries in **Inbox**. **Background** shows work that keeps running after you leave the terminal. Review the returned report, accept it, or request another pass.
-
-[Explore Agents Management →](docs/agents-management.md)
-
-## Your folders. Your team.
-
-A teammate is a workspace with a job to do. Its files provide context, `RIND.md` gives standing instructions, and skills provide reusable expertise. You choose the roles and reporting relationships; your folders can stay where they are.
-
-**Development team. Research desk. Personal assistant.** The structure is yours. Start with one agent and add specialists as the work grows.
-
 ## More ways to work
 
-- **Continue where you left off.** Persistent conversations keep the work available across sessions.
-- **Reach your workspace from more places.** [Web and mobile](docs/internals/07-surfaces/web-and-mobile.md), plus [Telegram, Discord, Slack and Feishu](docs/internals/07-surfaces/gateway.md).
+- **Bring Rind into your channels.** Connect [Telegram, Discord, Slack and Feishu](docs/internals/07-surfaces/gateway.md).
 - **Automate when it helps.** Use `rind run` for scripts and CI, or `rind send` to steer a running conversation. Team management also has a command-line API.
 
 <details>
