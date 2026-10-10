@@ -69,9 +69,21 @@ function frameAt(time) {
 
 const browser = await chromium.launch();
 const evidence = {};
+let resolution;
 try {
-  const page = await browser.newPage({ viewport: { width: 1152, height: 856 }, deviceScaleFactor: 1 });
-  await page.setContent('<html><body style="margin:0"><canvas width="1152" height="856"></canvas></body></html>');
+  const page = await browser.newPage({ deviceScaleFactor: 1 });
+  await page.setContent('<html><body style="margin:0"><canvas></canvas></body></html>');
+  const size = await page.evaluate(columns => {
+    const canvas = document.querySelector('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.font = '17px Consolas, "Liberation Mono", monospace';
+    // Size the window to its actual cells, with equal terminal padding.
+    const width = Math.ceil((columns * ctx.measureText('M').width + 48) / 2) * 2;
+    canvas.width = width; canvas.height = 856;
+    return { width, height: canvas.height };
+  }, columns);
+  resolution = [size.width, size.height];
+  await page.setViewportSize(size);
   const terminal = new Terminal({ cols: columns, rows, allowProposedApi: true });
   for (let frame = 0; frame < fps * duration; frame++) {
     const time = frame / fps;
@@ -84,14 +96,26 @@ try {
       if (cell) cells.push({ x, y, text: cell.getChars(), fg: cell.isFgRGB() ? cell.getFgColor() : null, bg: cell.isBgRGB() ? cell.getBgColor() : null, bold: !!cell.isBold(), dim: !!cell.isDim() });
     }
     await page.evaluate(({ cells, cursor }) => {
-      const ctx = document.querySelector('canvas').getContext('2d');
-      ctx.fillStyle = '#1e1e2e'; ctx.fillRect(0, 0, 1152, 856);
-      ctx.fillStyle = '#181825'; ctx.fillRect(0, 0, 1152, 42);
-      ctx.font = '13px Consolas, monospace'; ctx.fillStyle = '#a6adc8';
-      ctx.fillText('RIND CLI / UNICODE TESTS', 28, 26);
-      ctx.textAlign = 'right'; ctx.fillText('SIMULATED DEMO · 15s', 1124, 26); ctx.textAlign = 'left';
+      const canvas = document.querySelector('canvas');
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width, height = canvas.height;
+      ctx.fillStyle = '#1e1e2e'; ctx.fillRect(0, 0, width, height);
+      // Only the terminal host's tab and window controls sit above Rind.
+      ctx.fillStyle = '#181825'; ctx.fillRect(0, 0, width, 40);
+      ctx.fillStyle = '#1e1e2e'; ctx.beginPath(); ctx.roundRect(12, 7, 238, 33, [6, 6, 0, 0]); ctx.fill();
+      ctx.fillStyle = '#cdd6f4'; ctx.font = '14px Consolas, monospace'; ctx.fillText('>_', 27, 28);
+      ctx.font = '13px "Segoe UI", sans-serif'; ctx.fillText('rind', 58, 28);
+      ctx.strokeStyle = '#a6adc8'; ctx.lineWidth = 1;
+      const line = (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+      line(228, 20, 235, 27); line(235, 20, 228, 27);
+      line(272, 19, 272, 29); line(267, 24, 277, 24);
+      line(299, 22, 303, 26); line(303, 26, 307, 22);
+      line(width - 114, 23, width - 104, 23);
+      ctx.strokeRect(width - 69, 18, 10, 10);
+      line(width - 24, 18, width - 14, 28); line(width - 14, 18, width - 24, 28);
+      ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.strokeRect(.5, .5, width - 1, height - 1);
       const font = '17px Consolas, "Liberation Mono", monospace'; ctx.font = font;
-      const cw = ctx.measureText('M').width, ch = 23, left = 36, top = 56;
+      const cw = ctx.measureText('M').width, ch = 23, left = 24, top = 56;
       const hex = color => `#${color.toString(16).padStart(6, '0')}`;
       const box = { '│': 'ud', '─': 'lr', '├': 'udr', '└': 'ur', '┌': 'dr', '┐': 'dl', '┘': 'ul', '┬': 'dlr', '┴': 'ulr', '┼': 'udlr' };
       for (const cell of cells) {
@@ -116,5 +140,5 @@ try {
 const ffmpeg = resolve(option('ffmpeg'));
 execFileSync(ffmpeg, ['-y', '-loglevel', 'error', '-framerate', String(fps), '-i', resolve(scratch, '%04d.png'), '-c:v', 'libx264', '-preset', 'slow', '-crf', '22', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', resolve(root, 'assets/rind-cli-demo.mp4')]);
 execFileSync(ffmpeg, ['-y', '-loglevel', 'error', '-i', resolve(root, 'assets/rind-cli-demo.mp4'), '-filter_complex', '[0:v]fps=12,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle', '-loop', '0', resolve(root, 'assets/rind-cli-demo.gif')]);
-await writeFile(new URL('cli-capture.json', import.meta.url), JSON.stringify({ source: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), duration, fps, columns, rows, resolution: [1152, 856], renderer: 'frontend-cli/lib/cli-output-controller.js + questionMenuFrame + ComposerArea + xterm cells', simulated: true, evidence }, null, 2) + '\n');
+await writeFile(new URL('cli-capture.json', import.meta.url), JSON.stringify({ source: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), duration, fps, columns, rows, resolution, chrome: 'terminal-tab-and-window-controls', overlays: [], renderer: 'frontend-cli/lib/cli-output-controller.js + questionMenuFrame + ComposerArea + xterm cells', simulated: true, evidence }, null, 2) + '\n');
 process.stdout.write('Captured 15-second native CLI demo (MP4 + GIF).\n');

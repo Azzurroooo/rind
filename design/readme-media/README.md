@@ -7,6 +7,12 @@ The CLI simulation displays `GPT-6-Astra` via `cliInfo`; the separate client
 collage retains its original model fixtures. This is a presentation label, not
 a real-provider run or a claim about model availability.
 
+The recording is framed as a terminal window: a `rind` tab, new-tab control,
+and window buttons. There are no promotional headers or demo labels inside
+the video; the README caption and capture metadata still identify it as a
+simulation. Window width follows the actual terminal cell size with equal
+side padding, rather than adding unused space on one side.
+
 All conversations are fictional. CLI frames use the current output controller,
 question menu, composer and xterm cells—not a hand-written terminal imitation.
 The Desktop capture uses the website's built real-renderer preview. Web and App

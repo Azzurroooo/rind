@@ -1,13 +1,15 @@
 {
-  "source": "75ed47b8ca4391cf29a739195392bc690b8d5cc2",
+  "source": "dc25cf7303db22608f1dda1d2d5e02e868b1686c",
   "duration": 15,
   "fps": 12,
   "columns": 104,
   "rows": 34,
   "resolution": [
-    1152,
+    1022,
     856
   ],
+  "chrome": "terminal-tab-and-window-controls",
+  "overlays": [],
   "renderer": "frontend-cli/lib/cli-output-controller.js + questionMenuFrame + ComposerArea + xterm cells",
   "simulated": true,
   "evidence": {
