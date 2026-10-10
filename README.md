@@ -5,11 +5,12 @@
 <h1 align="center">Rind</h1>
 
 <p align="center">
-  <strong>A lightweight local coding agent — automate it, delegate to it, extend it, reach it from anywhere.</strong>
+  <strong>Light by design. Folders are agents.</strong><br />
+  A lightweight, open-source coding agent. Work locally. Build with a team.
 </p>
 
 <p align="center">
-  <a href="https://rindai.dev/">Website</a> · English | <a href="README.zh-CN.md">简体中文</a>
+  <a href="https://rindai.dev/">Website & demos</a> · <a href="https://rindai.dev/docs/">Docs</a> · English | <a href="README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
@@ -18,31 +19,21 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" /></a>
 </p>
 
-Rind is a **lightweight, open-source AI coding agent** with persistent specialist workspaces, scriptable sessions, and a shared runtime for terminal, desktop, browser, and messaging clients. It runs on your machine and connects to your chosen model provider.
-
-[See Rind in action on the website](https://rindai.dev/#tour): watch the CLI, built-in guide, specialist teams, and one-shot runs before installing.
-
-- **[Build a reusable team](#persistent-multi-agent-teams).** Give specialists a lasting role, a working directory, and files they can build on across tasks.
-- **[Put sessions into your workflow](#programmable-sessions).** Run an agent from a script or send new instructions into a live terminal session.
-- **[Build on a lean worker](#a-lean-worker-independent-of-the-interface).** Separate the interface from execution, load sessions on demand, and extend the engine through clear interfaces.
-
 <p align="center">
-  <img src="assets/rind-architecture.svg" alt="Rind core design: CLI, desktop, web and gateway; separate CLI surface and worker processes; on-demand execution with disk-backed sessions; built-in guide, persistent specialist workspaces and run/send automation" width="1000" />
+  <a href="assets/agents-management.png"><img src="assets/agents-management.png" alt="Rind CLI Agents Management: team navigation on the left, a live organization tree with development, testing and review in the center, and the selected member's workspace and activity on the right." width="1200" /></a><br />
+  <sub>Rind CLI · Agents Management · example team · click to enlarge</sub>
 </p>
 
----
+**Give your team a goal. Follow the work. Review the delivery.**
+
+- **Light by design.** A shared worker, sessions loaded on demand, history saved on disk. Your agent runs locally without a database to manage.
+- **Folders are agents.** Each teammate works in its own workspace, with its own files, instructions and skills. Bring existing folders or create Git worktrees for parallel work.
+- **Multi-agent collaboration you can see.** The lead delegates, specialists work, and reports return for review. Agents Management brings the team, conversations and progress into one interactive view.
+- **Your models, your choice.** Sign in with your ChatGPT account, or connect OpenAI, Anthropic, Google, DeepSeek and other compatible providers with API keys.
 
 ## Get started
 
-Choose one of three ways to install the CLI:
-
-### GitHub Releases
-
-Download the installer for **Windows x64, macOS Intel / Apple Silicon, or Linux x64** from [Releases](https://github.com/Azzurroooo/rind/releases). After installation, open a terminal in your project and run `rind`.
-
-### npm
-
-Requires **Node.js 18+**:
+**CLI — open your project and start a conversation.**
 
 ```bash
 npm install -g @rind-ai/cli
@@ -50,133 +41,58 @@ cd your-project
 rind
 ```
 
-### From source
+Inside Rind, use `/login` to connect a provider and `/model` to choose a model. For a ChatGPT subscription, choose **OpenAI → Sign in with an account** and complete the browser sign-in. Available models and usage depend on your account and plan.
 
-Requires **Python 3.12+, Node.js 18+, and Git**:
+**Desktop — a visual workspace for your conversations, files and tool results.** [Download for Windows, macOS or Linux](https://github.com/Azzurroooo/rind/releases/tag/v0.9.0). For team setup and coordination, use the CLI's Agents Management below.
 
-```bash
-git clone https://github.com/Azzurroooo/rind.git
-cd rind
-python -m venv .venv
-```
+Want a quick look first? [Explore the interactive demos](https://rindai.dev/#tour), or open `/tour` inside Rind. The built-in tour needs no API key.
 
-Activate the environment with `source .venv/bin/activate` on macOS/Linux or `.\.venv\Scripts\Activate.ps1` in Windows PowerShell, then:
+<details>
+<summary>CLI requirements, standalone downloads and source setup</summary>
 
-```bash
-python -m pip install -r requirements-runtime.txt
-node frontend-cli/bin/rind.js
-```
+The npm CLI requires Node.js 18+ and supports Windows, macOS and Linux. Standalone CLI packages are available on [Releases](https://github.com/Azzurroooo/rind/releases).
 
-For the examples below, source users can substitute `node /absolute/path/to/rind/frontend-cli/bin/rind.js` for `rind`.
+To run from source, install Python 3.12+, Node.js 18+ and Git, then follow the [source setup guide](docs/internals/07-surfaces/interactive-cli.md#running-from-source).
 
-Inside Rind, run `/login` to connect a provider, then `/model` to choose a model. Built-in adapters cover OpenAI, Anthropic, Google, DeepSeek, and more; custom OpenAI-compatible endpoints are configurable too. See the [implementation and setup guide](docs/internals/README.md) for configuration and other clients.
+</details>
 
-**Explore before spending tokens.** The interactive tour demonstrates real CLI layouts with simulated tasks: pause, rewind, and jump straight to a feature. It makes no model calls and needs no API key.
+## Build your team in the interface
 
-```bash
-rind tour agents.create
-rind tour agents.tasks
-rind tour login.account
-```
+1. **Open Agents Management.** With the CLI input empty, press <kbd>←</kbd>.
+2. **Choose New team, then Add member.** Pick an existing folder, a fresh workspace or a Git worktree. Give each member a role; the first member becomes the lead.
+3. **Select the lead and assign a task.** Press <kbd>t</kbd> and describe the result you want.
 
-Run `rind tour` for the catalog, or `/tour` inside a session. Use the [source setup](docs/internals/07-surfaces/interactive-cli.md#running-from-source) to preview the tutorials on your current development branch.
+> Ship the login page. Have Frontend and Backend implement it, QA verify it, and Reviewer check the changes. Bring back the finished work and verification results.
 
----
+You can also open **Manager** and describe the team you want in plain language.
 
-## Persistent multi-agent teams
+**Stay in the conversation.** Open any member to talk directly. Follow the team in **Organization**, inspect work in **Tasks**, and handle questions and deliveries in **Inbox**. **Background** shows work that keeps running after you leave the terminal. Review the returned report, accept it, or request another pass.
 
-**Connect any folders into a team, then let its leader coordinate delivery.** A finance member keeps its invoices; a developer works in a feature worktree. Workspaces, skills and files persist between assignments.
+[Explore Agents Management →](docs/agents-management.md)
 
-Press **← from an empty prompt** for the team overview, member chats, tasks and reports. Select **Manager** on this page to assemble and schedule teams. Ordinary member chats remain ordinary Rind sessions, with their team shown in the status bar.
+## Your folders. Your team.
 
-```sh
-rind agents team create product
-rind agents team add product /path/to/project
-rind agents team add product /path/to/reviewer --position Reviewer
-rind agents task product project "Ask the reviewer to inspect the changes and deliver a concise report with evidence."
-```
+A teammate is a workspace with a job to do. Its files provide context, `RIND.md` gives standing instructions, and skills provide reusable expertise. You choose the roles and reporting relationships; your folders can stay where they are.
 
-The first member becomes leader; use `rind agents team leader <team> <agent>` to change it. Team members need no manifest or prescribed directory tree. Add a shared folder only after explicitly choosing a copy or sharing. Shared directories run serially; separate worktrees can run in parallel. Child reports resume the leader automatically, while blockers name the person or member who must respond.
+**Development team. Research desk. Personal assistant.** The structure is yours. Start with one agent and add specialists as the work grows.
 
-Delivery requires a report and confirmed execution completion. Uncertain runs stay marked **Unconfirmed** until reconciled. Private conversations stay private; files are shared through explicit artifact publication.
+## More ways to work
 
-See [Agents Management](docs/agents-management.md) for source setup, worktrees, migration and recovery. `rind agents --help` lists the scriptable commands (`--json` supported).
+- **Continue where you left off.** Persistent conversations keep the work available across sessions.
+- **Reach your workspace from more places.** [Web and mobile](docs/internals/07-surfaces/web-and-mobile.md), plus [Telegram, Discord, Slack and Feishu](docs/internals/07-surfaces/gateway.md).
+- **Automate when it helps.** Use `rind run` for scripts and CI, or `rind send` to steer a running conversation. Team management also has a command-line API.
 
----
+<details>
+<summary>For developers: extend Rind or reuse its parts</summary>
 
-## Programmable sessions
+Rind separates the runtime from its interfaces. Build another client on the [runtime protocol](agent/runtime/server/protocol.py), add a [tool](agent/infrastructure/tools/spec.py), or reuse the standalone [Agents Management service](agent-management).
 
-**Let a script start the work—or contribute to work already in progress.** Rind exposes both paths:
+Explore the [internals](docs/README.md), [system map](docs/internals/00-architecture/system-map.md) and [development guide](docs/internals/08-engineering/verification.md).
 
-```bash
-# Produce an answer that another program can consume.
-rind run --prompt "Review the current diff for breaking API changes" > review.md
-
-# Send an update from another terminal to an open Rind CLI session.
-rind send --session <id> "The integration tests failed; investigate before continuing."
-```
-
-`run` writes the final answer to **stdout**, progress to **stderr**, and a Markdown run summary to `logs/` in the launching directory. User questions are disabled; failures return a nonzero exit code. Add `--session <id>` to continue a saved session or `--dir <absolute-path>` to choose the workspace.
-
-With a current Worker, `run` waits for its managed background tasks and necessary follow-up turns, including tasks started during those turns, then prints one final answer. Long commands automatically release their initial waiting window and report completion without polling. Services started with `notify="manual"` do not hold the request open and stop when the Worker exits. Older Workers report that automatic background continuation is unavailable.
-
-`send` addresses a session on the same machine through the shared Runtime. The window that most recently showed the session receives the prompt as if typed there: it starts a turn when idle and steers the current turn when busy. With no window open, a turn that is still running takes it as a follow-up, and `send` says so. Find the session ID in the startup banner or `/status`. Delivery is acknowledged immediately. This lets a test watcher or local script contribute findings without taking over your terminal.
-
----
-
-## A lean worker, independent of the interface
-
-**The interface handles interaction. The worker runs the agent.** In the CLI, these are two separate processes: a Node.js surface and a Python worker, connected by JSONL requests and streamed events. The desktop app also launches the worker separately from its UI; Web and gateway clients connect to a long-lived worker over WebSocket.
-
-This boundary keeps rendering and input handling out of the execution loop. A new client implements the protocol and reuses the engine's model calls, tools and cancellation.
-
-**The worker is stateless with respect to durable session history.** Disk is the source of truth; active execution and coordination live in memory:
-
-- **Load on demand.** A turn loads its session and creates the model client and execution objects it needs.
-- **Release when idle.** Once a session has no active or queued work, its execution container is released and its model client is closed. Saved sessions do not each require a resident agent.
-- **Keep the work on disk.** Messages and tool-call history persist as JSONL; subsequent turns reopen the saved session. Shared runtime services are reused across executions.
-
-The result is a small idle execution footprint and clear extension boundaries: add clients, tools, or providers without coupling them to the UI. Running tasks still retain transient state for queues, cancellation, and live updates.
-
-### One runtime, multiple clients
-
-**Choose where you work; reuse the agent underneath.** The clients share the session protocol and runtime implementation:
-
-| Client | What it gives you | Start here |
-| --- | --- | --- |
-| **CLI** | Direct terminal work and script integration | `rind` |
-| **Desktop** | A visual workspace for multiple projects | [Run from source](docs/internals/07-surfaces/desktop.md#build-and-remote-access) |
-| **Web** | Browser access to a long-lived worker | [Docker or local setup](docs/internals/07-surfaces/web-and-mobile.md#two-remote-entry-points) |
-| **Mobile** | Android/iOS remote access to Rind on your computer | [Build and connect](mobile/README.md) |
-| **Messaging gateway** | Work through Telegram, Discord, Slack, Feishu, and other adapters | [Gateway setup](docs/internals/07-surfaces/gateway.md#configuration-entry-points) |
-
-With the Web client, closing the browser leaves the worker running; reconnecting restores the session view. Local clients can reopen saved sessions when configured to use the same session store.
-
----
-
-## Build on Rind
-
-Rind separates clients, execution, and infrastructure. A custom interface consumes requests and `session/update` events; a new capability plugs into the tool registry.
-
-| Extend | Entry point |
-| --- | --- |
-| Client or integration | [Runtime protocol](agent/runtime/server/protocol.py) |
-| Model-facing tool | [ToolSpec](agent/infrastructure/tools/spec.py) and [tool registry](agent/infrastructure/tools/registry.py) |
-| Provider or storage adapter | [Application ports](agent/application/ports) |
-| Context assembly and compaction | [Context services](agent/application/context) |
-
-For the design behind these boundaries, see [Architecture](docs/internals/00-architecture/layers-and-composition.md), [CLI rendering](docs/internals/07-surfaces/interactive-cli.md), and [Tour internals](docs/internals/07-surfaces/interactive-cli.md#tour-a-real-renderer-simulated-execution). For commands and shortcuts, use `/help` and `?` inside Rind.
-
-The [development guide](docs/internals/08-engineering/verification.md) covers setup and tests.
-
----
+</details>
 
 ## Contributing
 
-Keep contributions lightweight and complete, with clear interfaces, one-way dependencies, and no redundant code. Read the [contribution guidelines](CONTRIBUTING.md) before opening a pull request; [issues](https://github.com/Azzurroooo/rind/issues) are welcome too.
+Contributions and [issues](https://github.com/Azzurroooo/rind/issues) are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
----
-
-## License
-
-[MIT](LICENSE)
+[MIT License](LICENSE)
