@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Light by design. Folders are agents.</strong><br />
-  A lightweight, open-source coding agent. Work locally. Build with a team.
+  Turn your folders into a team. Let each agent work in its own workspace.
 </p>
 
 <p align="center">

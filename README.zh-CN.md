@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>轻装上阵。目录即智能体。</strong><br />
-  轻量、开源的编码 Agent。在本地工作，让团队协作。
+  把目录组成团队，让每个 Agent 在自己的工作区里协作。
 </p>
 
 <p align="center">
