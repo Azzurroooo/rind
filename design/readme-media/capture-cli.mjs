@@ -21,7 +21,7 @@ const { Terminal } = createRequire(resolve(root, 'frontend-cli/package.json'))('
 Object.defineProperty(process.stdout, 'isTTY', { value: true });
 delete process.env.NO_COLOR;
 setTheme('catppuccin-mocha');
-const columns = 104, rows = 34, fps = 12, duration = 15;
+const columns = 158, rows = 34, fps = 12, duration = 15;
 const scratch = resolve(root, '.docs/readme-media-frames');
 await mkdir(scratch, { recursive: true });
 
@@ -73,15 +73,17 @@ let resolution;
 try {
   const page = await browser.newPage({ deviceScaleFactor: 1 });
   await page.setContent('<html><body style="margin:0"><canvas></canvas></body></html>');
-  const size = await page.evaluate(columns => {
+  const size = await page.evaluate(({ columns, rows }) => {
     const canvas = document.querySelector('canvas');
     const ctx = canvas.getContext('2d');
     ctx.font = '17px Consolas, "Liberation Mono", monospace';
-    // Size the window to its actual cells, with equal terminal padding.
-    const width = Math.ceil((columns * ctx.measureText('M').width + 48) / 2) * 2;
-    canvas.width = width; canvas.height = 856;
+    // Fit the terminal cells in a 16:9 frame. A multiple of 32 keeps both
+    // dimensions even for H.264/yuv420p without resizing the text.
+    const width = Math.ceil((columns * ctx.measureText('M').width + 48) / 32) * 32;
+    canvas.width = width; canvas.height = width * 9 / 16;
+    if (56 + rows * 23 + 24 > canvas.height) throw new Error('Terminal rows exceed the widescreen frame.');
     return { width, height: canvas.height };
-  }, columns);
+  }, { columns, rows });
   resolution = [size.width, size.height];
   await page.setViewportSize(size);
   const terminal = new Terminal({ cols: columns, rows, allowProposedApi: true });
@@ -95,7 +97,7 @@ try {
       const cell = terminal.buffer.active.getLine(y)?.getCell(x);
       if (cell) cells.push({ x, y, text: cell.getChars(), fg: cell.isFgRGB() ? cell.getFgColor() : null, bg: cell.isBgRGB() ? cell.getBgColor() : null, bold: !!cell.isBold(), dim: !!cell.isDim() });
     }
-    await page.evaluate(({ cells, cursor }) => {
+    await page.evaluate(({ cells, cursor, columns }) => {
       const canvas = document.querySelector('canvas');
       const ctx = canvas.getContext('2d');
       const width = canvas.width, height = canvas.height;
@@ -115,7 +117,7 @@ try {
       line(width - 24, 18, width - 14, 28); line(width - 14, 18, width - 24, 28);
       ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.strokeRect(.5, .5, width - 1, height - 1);
       const font = '17px Consolas, "Liberation Mono", monospace'; ctx.font = font;
-      const cw = ctx.measureText('M').width, ch = 23, left = 24, top = 56;
+      const cw = ctx.measureText('M').width, ch = 23, left = (width - columns * cw) / 2, top = 56;
       const hex = color => `#${color.toString(16).padStart(6, '0')}`;
       const box = { '│': 'ud', '─': 'lr', '├': 'udr', '└': 'ur', '┌': 'dr', '┐': 'dl', '┘': 'ul', '┬': 'dlr', '┴': 'ulr', '┼': 'udlr' };
       for (const cell of cells) {
@@ -130,7 +132,7 @@ try {
         ctx.globalAlpha = 1;
       }
       if (cursor) { ctx.fillStyle = '#cdd6f4'; ctx.fillRect(left + cursor.x * cw, top + cursor.y * ch + 19, cw, 2); }
-    }, { cells, cursor });
+    }, { cells, cursor, columns });
     await page.screenshot({ path: resolve(scratch, `${String(frame).padStart(4, '0')}.png`) });
     if ([0, 48, 72, 102, 132, 168].includes(frame)) evidence[time] = lines.map(stripAnsi).join('\n');
   }

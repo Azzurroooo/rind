@@ -15,6 +15,7 @@ const scratch = resolve(root, '.docs/readme-preview');
 await mkdir(scratch, { recursive: true });
 const cli = JSON.parse(await readFile(new URL('cli-capture.json', import.meta.url), 'utf8'));
 assert.equal(cli.duration, 15);
+assert.equal(cli.resolution[0] * 9, cli.resolution[1] * 16, 'CLI video must be 16:9');
 assert.equal(cli.chrome, 'terminal-tab-and-window-controls');
 assert.deepEqual(cli.overlays, []);
 const captureSource = await readFile(new URL('capture-cli.mjs', import.meta.url), 'utf8');
@@ -69,6 +70,8 @@ try {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`${base}/${name}`);
     await page.locator('img').evaluateAll(images => Promise.all(images.map(image => image.decode())));
+    const demo = await page.locator('img[src="assets/rind-cli-demo.gif"]').evaluate(image => ({ width: image.naturalWidth, height: image.naturalHeight }));
+    assert.deepEqual(demo, { width: 960, height: 540 }, 'Inline CLI demo must be 16:9');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name} overflows at ${width}px`);
     await page.screenshot({ path: resolve(scratch, `${name}-${width}.png`), fullPage: true });
   }
@@ -80,6 +83,7 @@ try {
     return { duration: video.duration, width: video.videoWidth, height: video.videoHeight };
   });
   assert.equal(video.duration, 15);
+  assert.equal(video.width * 9, video.height * 16, 'Encoded CLI video must be 16:9');
   assert.deepEqual([video.width, video.height], cli.resolution);
   process.stdout.write(`README links, media order, English/Chinese 1060px/390px layouts, and H.264 playback verified: ${JSON.stringify(video)}\n`);
 } finally { await browser?.close(); await new Promise(done => server.close(done)); }
