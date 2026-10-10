@@ -1,6 +1,8 @@
-# 自动续接：完成、投递、消费是三件事
+# Automatic continuation: completion, delivery, and consumption are three separate things
 
-后台命令结束，不应立刻把一段输出塞进尚未闭合的工具对话。Rind 先保存进程终态，再确认初始工具结果已提交，最后在安全边界投递通知。
+English | [简体中文](task-notifications.zh-CN.md)
+
+When a background command ends, its output must not be pushed straight into a tool conversation that has not yet closed. Rind first persists the process's terminal state, then confirms that the initial tool result has been committed, and finally delivers the notification at a safe boundary.
 
 ~~~mermaid
 sequenceDiagram
@@ -9,32 +11,32 @@ sequenceDiagram
     participant T as ToolCallProcessor
     participant N as TaskNotifications
     participant R as TurnRunner
-    par 进程独立推进
-        P->>J: 终态 + 稳定 event_id
-    and 工具提交独立推进
-        T->>J: 初始工具结果已提交：committed
+    par The process advances independently
+        P->>J: Terminal state + stable event_id
+    and Tool submission advances independently
+        T->>J: Initial tool result committed: committed
     end
-    N->>N: 工具调用配对闭合？
-    N->>R: 持久化 task_notification
+    N->>N: Tool call pairing closed?
+    N->>R: Persist task_notification
     N->>J: delivered
-    R->>R: 模型成功处理含任务引用的上下文
+    R->>R: Model successfully handled the context containing task references
     R->>J: consumed
 ~~~
 
-通知资格要求有 event_id、committed、handoff、notify=on_exit，且尚未 delivered、状态不是 cancelled。通知作为 user-role 内部消息落盘，meta.kind=task_notification；进程事实与 untrusted_process_output 分开，输出不会成为系统指令。稳定 ID 让恢复时能发现已写入消息但尚未确认的通知。
+A notification is eligible when it has an event_id, is committed, has been handed off, has notify=on_exit, is not yet delivered, and is not cancelled. The notification is persisted to disk as an internal user-role message with meta.kind=task_notification; the process facts are kept separate from untrusted_process_output, so output can never become a system instruction. The stable ID lets recovery find notifications whose message has already been written but has not yet been acknowledged.
 
-delivered 只证明通知已进入会话；consumed 在模型步骤成功后标记。如果模型失败，未消费引用和 continuation_error 仍保留。压缩也把活跃或未消费任务引用加入 handoff，避免长任务被摘要抹掉。
+delivered proves only that the notification has entered the session; consumed is marked after the model step succeeds. If the model fails, the unconsumed references and the continuation_error are kept. Compaction also copies active or unconsumed task references into the handoff, so long-running tasks are not erased by summarization.
 
-空闲会话由 ExecutionCoordinator 唤醒，同一会话仍只能运行一轮；中断会抑制续接，暂停/受阻的 Goal 也会挡住它。模型重试耗尽后停止自动推进，等待新用户输入。已通过终态工具结果交付的任务不再重复发送完成通知。
+An idle session is woken by the ExecutionCoordinator, and that session still runs only one turn. Interruption suppresses continuation, and so does a paused or blocked Goal. Once model retries are exhausted, automatic advancement stops and waits for new user input. Tasks already delivered through a terminal-state tool result do not receive a duplicate completion notification.
 
-## 两个竞争场景
+## Two race scenarios
 
-**进程先结束，工具结果后提交。** 终态可以先记入日志，但没有 committed 资格就不注入通知；否则模型上下文会在调用/结果中间插入一条新用户消息。
+**The process ends first; the tool result is committed later.** The terminal state can be recorded in the journal first, but without the committed qualification no notification is injected; otherwise a new user message would appear in the model context between the call and the result.
 
-**通知已写入，模型采样失败。** delivered 已成立，consumed 尚未成立；系统保留引用和错误，避免把“送到上下文”当作“成功处理”。再次恢复时凭稳定 event_id 识别原通知，压缩也保留尚未消费的任务引用。
+**The notification has been written; model sampling failed.** delivered already holds while consumed does not: the system keeps the references and the error instead of treating "delivered to the context" as "successfully handled". On the next recovery, the stable event_id identifies the original notification, and compaction also retains task references that have not yet been consumed.
 
-这套顺序降低重复和丢失风险，但不承诺业务动作全局恰好一次。外部进程的副作用是否发生，仍可能在崩溃边界变得不确定，任务日志用 lost 等状态诚实表达。
+This ordering reduces the risk of duplication and loss, but it does not promise that business actions execute exactly once globally. Whether an external process's side effects actually happened can still be uncertain at crash boundaries, and the task journal is honest about that with statuses such as lost.
 
-代码入口：[TaskNotifications](../../../agent/application/task_notifications.py)、[续接协调](../../../agent/runtime/server/execution.py)。验证：[通知投递](../../../test/test_task_delivery.py)、[自动续接](../../../test/test_task_continuation.py)。
+Code entry points: [TaskNotifications](../../../agent/application/task_notifications.py), [continuation coordination](../../../agent/runtime/server/execution.py). Verification: [notification delivery](../../../test/test_task_delivery.py), [automatic continuation](../../../test/test_task_continuation.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

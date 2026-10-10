@@ -1,30 +1,32 @@
-# ContextManager：把会话事实变成模型请求
+# ContextManager: turning session facts into model requests
 
-ContextManager 的输入不是 UI 屏幕文字，而是 SessionStore 对历史的投影。它叠加动态指令、计算预算，再输出不含内部标记的模型消息。
+English | [简体中文](context-manager.zh-CN.md)
+
+ContextManager does not take UI screen text as its input; it takes SessionStore's projection of history. It overlays dynamic instructions, computes the budget, and emits model messages free of internal markers.
 
 ~~~mermaid
 flowchart LR
-    STORE[("持久会话")] --> PROJECT["消息投影"]
-    PROJECT --> MERGE["合并 pending 与系统注入"]
-    DOC["RIND.md / Skill 目录 / 临时系统消息"] --> MERGE
+    STORE[("Persisted session")] --> PROJECT["Message projection"]
+    PROJECT --> MERGE["Merge pending and system injections"]
+    DOC["RIND.md / Skill catalog / transient system messages"] --> MERGE
     MERGE --> EST["ContextEstimator"]
     EST --> STATS["stats + decisions"]
-    EST --> STRIP["去掉内部 _context_kind"]
-    STRIP --> MODEL["模型消息"]
+    EST --> STRIP["Strip internal _context_kind"]
+    STRIP --> MODEL["Model messages"]
 ~~~
 
-build_messages_async 先取包括内部消息的会话切片，再加 pending overlay；RIND.md、临时系统消息、Skill 目录插在第一条 system 之后。带 _context_kind 的副本用于上下文分区快照，真正发给模型前剥掉内部字段。结果同时给出消息、统计和决策，例如系统/会话/工具估算量与是否触发自动压缩。
+build_messages_async first takes a session slice that includes internal messages, then adds the pending overlay. RIND.md, transient system messages, and the Skill catalog are inserted after the first system message. A copy tagged with _context_kind serves the composition snapshot, and those internal fields are stripped before the result is actually sent to the model. The result carries messages, stats, and decisions together: system, conversation, and tool estimates, for instance, plus whether automatic compaction is triggered.
 
-正常路径不会凭旧消息太长就悄悄丢弃用户要求。只有上下文超长恢复明确启用 allow_rescue 时，才以占位文本替换最早的冷消息，并保留末尾热消息；这不是常规压缩，也不改写磁盘历史。
+On the normal path, no user request is silently dropped just because earlier messages run long. Only when context-overflow recovery explicitly enables allow_rescue are the oldest cold messages replaced with placeholder text, while the trailing hot messages are kept; this is not regular compaction, and it does not rewrite on-disk history.
 
-## 一份内容，两份输出
+## One composition, two outputs
 
-ContextBuildResult 同时携带 messages、internal_messages、stats 和 decisions：messages 发给模型，internal_messages 保留来源标签供检查，stats 给出预算读数，decisions 说明注入与恢复选择。检查面板与真实请求出自同一次组装，减少“面板估算了一套，实际又发另一套”的偏差。
+ContextBuildResult carries messages, internal_messages, stats, and decisions at once: messages go to the model, internal_messages retain their source labels for inspection, stats give the budget readings, and decisions explain the injection and recovery choices. The inspection panel and the real request come from the same composition, which reduces the drift of a panel that estimates one set of numbers while another set is actually sent.
 
-例如工作区规则改了，但旧对话没变：下次组装重新加载 RIND.md 注入，不需要把新规则冒充为旧历史消息。反过来，已经激活的 Skill 正文有会话快照，不能因为原 SKILL.md 后来变化就悄悄替换过去那次调用的内容。
+For example, if the workspace rules change but the old conversation does not, the next composition reloads RIND.md for injection; the new rules do not have to be passed off as old history messages. Conversely, an already activated Skill body has a session snapshot, and the content of that past invocation must not be quietly replaced just because the original SKILL.md later changed.
 
-历史读取失败会变成 PersistenceError；不能把读取异常当作“这是一个空会话”继续执行。这是投影入口的关键失败边界。
+A history read failure becomes a PersistenceError; a read exception must not be treated as "this is an empty session" and execution simply continued. This is the key failure boundary at the projection entry point.
 
-代码入口：[ContextManager](../../../agent/application/context/manager.py)、[会话投影](../../../agent/infrastructure/persistence/message_projector.py)、[上下文快照](../../../agent/application/context/snapshot.py)。验证：[ContextManager 测试](../../../test/test_context_manager.py)、[上下文快照](../../../test/test_context_snapshot.py)。
+Code entry points: [ContextManager](../../../agent/application/context/manager.py), [session projection](../../../agent/infrastructure/persistence/message_projector.py), [context snapshot](../../../agent/application/context/snapshot.py). Verification: [ContextManager tests](../../../test/test_context_manager.py), [context snapshot](../../../test/test_context_snapshot.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

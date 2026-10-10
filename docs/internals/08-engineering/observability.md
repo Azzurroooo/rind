@@ -1,36 +1,38 @@
-# 看见内核：先找事实层，再看传输层
+# Seeing the kernel: look for the fact layer first, then the transport layer
 
-界面少了一段内容，可能是模型没生成、Worker 没提交、事件没送达，也可能只是 Surface 没画出来。Rind 的观测入口覆盖这些不同阶段，不能只看终端最后一屏。
+English | [简体中文](observability.zh-CN.md)
+
+Content missing from the interface could mean the model never generated it, the Worker never committed it, the event never arrived, or simply that the Surface did not draw it. Rind's observability entry points cover these different stages; you cannot read the situation from the terminal's final screen alone.
 
 ~~~mermaid
 flowchart LR
-    C["上下文组装"] --> I["context inspect<br/>来源与 token 估算"]
-    C --> M["模型调用"]
-    M --> L["Chat 原始 trace（显式开启）"]
-    M --> P["消息 / 工具结果 / 用量落盘"]
-    P --> E["运行时事件"]
-    E --> S["Surface 状态与渲染"]
-    P --> R["历史投影 / replay"]
+    C["Context assembly"] --> I["context inspect<br/>sources and token estimation"]
+    C --> M["Model call"]
+    M --> L["Raw Chat trace (explicitly enabled)"]
+    M --> P["Messages / tool results / usage on disk"]
+    P --> E["Runtime events"]
+    E --> S["Surface state and rendering"]
+    P --> R["History projection / replay"]
 ~~~
 
-| 想回答的问题 | 优先查看 | 读数边界 |
+| Question to answer | Check first | Limits of the reading |
 | --- | --- | --- |
-| 模型究竟看到了哪些输入？ | context inspect、上下文来源标签 | 本地估算不等于供应商实测输入 token |
-| 工具有没有真正提交结果？ | tool_calls.jsonl、消息投影、task journal | UI 的开始/增量事件不能代替结果事实 |
-| 为什么断线后缺少文字？ | 会话历史、订阅 after_cursor、当前回合快照 | 连接 sequence 与历史 cursor 不是同一个序号 |
-| token 花在回答还是压缩？ | usage.jsonl 的调用分类 | 用量账本不计算货币价格 |
-| SDK 返回了什么？ | 启用后的原始 LLM trace | 当前只有 OpenAI Chat 适配器调用 make_trace |
+| What inputs did the model actually see? | context inspect, context source labels | Local estimation is not the provider's measured input tokens |
+| Did the tool really commit its result? | tool_calls.jsonl, message projection, task journal | UI start/delta events cannot stand in for the result facts |
+| Why is text missing after a disconnect? | Session history, subscribing after_cursor, the current turn snapshot | The connection sequence and the history cursor are not the same number |
+| Are tokens spent on answering or on compaction? | The call categories in usage.jsonl | The usage ledger does not compute monetary prices |
+| What did the SDK return? | The raw LLM trace, once enabled | Currently only the OpenAI Chat adapter calls make_trace |
 
-## Trace 的精度来自它靠近供应商
+## The trace's precision comes from being close to the provider
 
-`RIND_TRACE_LLM=1` 或启动 `--trace-llm` 后，每个被接入的调用在 RIND_HOME/sessions/session_id/_llm_trace 下写一份 JSONL：request、原始 response chunk、end。记录逐行 flush，因此中途失败也可能留下定位材料；未取得 session_id 时不创建 trace。
+After `RIND_TRACE_LLM=1` or a startup with `--trace-llm`, every hooked call writes a JSONL file under RIND_HOME/sessions/session_id/_llm_trace: request, raw response chunk, end. Records flush line by line, so a mid-way failure can still leave material for locating the problem; when no session_id has been obtained yet, no trace is created.
 
-trace 在模型流进入内核解析前记录，适合区分“供应商没发 tool call”和“解析/呈现漏了”。它会省略图片 bytes、base64 和 data URL 内容，但普通提示词和响应仍保留。不要将这项特性写成所有适配器都有的全链路追踪。
+The trace is recorded before the model stream enters the kernel's parsing, which makes it suitable for distinguishing "the provider did not send the tool call" from "parsing/presentation dropped it". It omits image bytes, base64, and data URL content, but ordinary prompts and responses are kept. Do not write this feature up as end-to-end tracing available in every adapter.
 
-## 一条实用排查顺序
+## A practical troubleshooting order
 
-先用 session_id、turn_id、tool_call_id 或 task_id 定位持久记录，再看订阅事件与 Surface。只有问题确实在模型边界时才启用 trace 复现。启动与协议诊断走 stderr；stdio 的 stdout 必须仍是合法协议流，混入一行日志就会破坏消费者。
+First locate the persisted records by session_id, turn_id, tool_call_id, or task_id, then look at subscribed events and the Surface. Enable the trace to reproduce the problem only when it really lies at the model boundary. Startup and protocol diagnostics go to stderr; the stdio stdout must remain a valid protocol stream, and a single log line mixed in will break the consumer.
 
-源码：[context inspect 分派](../../../agent/runtime/server/dispatcher.py)、[trace](../../../agent/infrastructure/llm/trace.py)、[Chat 接入点](../../../agent/infrastructure/llm/openai_chat.py)、[启动诊断](../../../agent/runtime/server/app_server.py)。验证：[上下文检查](../../../test/test_runtime_server_context.py)、[trace](../../../test/test_llm_trace.py)。关联：[事件](../01-runtime/event-system.md)、[用量账本](../03-persistence/usage-ledger.md)。
+Source code: [context inspect dispatch](../../../agent/runtime/server/dispatcher.py), [trace](../../../agent/infrastructure/llm/trace.py), [Chat hook point](../../../agent/infrastructure/llm/openai_chat.py), [startup diagnostics](../../../agent/runtime/server/app_server.py). Verification: [context inspection](../../../test/test_runtime_server_context.py), [trace](../../../test/test_llm_trace.py). Related: [events](../01-runtime/event-system.md), [usage ledger](../03-persistence/usage-ledger.md).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

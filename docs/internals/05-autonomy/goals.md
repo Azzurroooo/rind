@@ -1,31 +1,33 @@
-# Goal：跨回合保留“还没完成”
+# Goal: preserving "not done yet" across turns
 
-Goal 是会话 meta 中的 objective 与 status。回合结束只说明这一轮执行停下，不等于用户目标已实现；active Goal 可以安排新的检查点继续。
+English | [简体中文](goals.zh-CN.md)
+
+A Goal is the objective and status recorded in the session meta. A turn ending only means that this round of execution has stopped; it does not mean the user's objective has been achieved. An active Goal can schedule new checkpoints to carry on.
 
 ~~~mermaid
 stateDiagram-v2
-    [*] --> Active: 用户设置目标
-    Active --> Active: 回合结束，检查点续接
-    Active --> Paused: 用户暂停或回合取消
-    Active --> Blocked: 模型标记受阻或回合失败
+    [*] --> Active: User sets the objective
+    Active --> Active: Turn ends, checkpoint continues
+    Active --> Paused: User pause or turn cancellation
+    Active --> Blocked: Model marks blocked or turn failure
     Active --> Complete: update_goal complete
-    Paused --> Active: 用户恢复
-    Blocked --> Active: 用户恢复
-    Complete --> [*]: 清除或结束
+    Paused --> Active: User resumes
+    Blocked --> Active: User resumes
+    Complete --> [*]: Cleared or finished
 ~~~
 
-目标文本限制 4,000 字符。协议提供 get、set、status、clear；模型工具 update_goal 只能置 complete 或 blocked，不能自己创建目标。策略提示要求按目标逐项查证后再宣布完成，但内核不自动证明业务成果；它保证状态机和调度边界。
+The objective text is limited to 4,000 characters. The protocol provides get, set, status, and clear; the model tool update_goal can only set complete or blocked, and it cannot create a goal on its own. The policy prompt requires checking the objective item by item before declaring completion, but the kernel does not automatically prove business outcomes; it guarantees the state machine and the scheduling boundaries.
 
-协调器优先处理待交付任务通知。若仍有 on_exit 后台任务等待完成，就不靠重复 Goal 检查点忙转；没有待处理通知、没有等待任务且 Goal 仍 active 时，写入内部 goal_checkpoint 并通过普通 run_turn 执行。失败和中断抑制继续，手动 compact 不应重启已经停止的目标。
+The coordinator handles pending task notifications first. While on_exit background tasks are still awaiting completion, it does not spin on repeated Goal checkpoints. When there are no pending notifications, no waiting tasks, and the Goal is still active, it writes an internal goal_checkpoint and executes it through an ordinary run_turn. Failures and interruptions suppress continuation, and a manual compact must not restart a goal that has already stopped.
 
-当前公开 Goal 模型只有 active、paused、blocked、complete，没有 token_budget 字段或可设置的 budget_exhausted 状态。协调器中存在该名称的防御性判断，不能据此在文档宣称已实现 Goal 预算产品功能。
+The current public Goal model has only active, paused, blocked, and complete, with no token_budget field and no settable budget_exhausted status. A defensive check by that name exists in the coordinator, but it must not be used to claim in documentation that the Goal budget feature has been implemented.
 
-## Goal、Plan 和后台任务如何配合
+## How Goal, Plan, and background tasks work together
 
-Plan 保存当前步骤，Goal 保存整体目标，Task 保存真实进程状态。三者不相互代替：步骤全标 completed 不会自动证明 Goal 完成；Goal active 也不能让模型忽略仍在运行的测试；测试退出成功则只是一个事实，需要模型结合目标判断。
+A Plan holds the current step, a Goal the overall objective, and a Task the real process state. The three are not interchangeable: marking every step completed does not prove the Goal is complete; an active Goal does not let the model ignore tests that are still running; and a test exiting successfully is only a fact, which the model must judge against the objective.
 
-例如目标是“修复并验证”，模型启动测试后可以结束当前回合。若还有 on_exit 测试任务，协调器等待通知而不是不停发“继续”；测试终态送达后走普通回合，模型据结果修复或调用 update_goal。省下空转来自门控条件，而不是强迫模型永远保持一条长连接。
+For example, given the objective "fix and verify", the model may end the current turn once it has started the tests. If an on_exit test task remains, the coordinator waits for the notification instead of repeatedly sending "continue"; once the test's terminal state arrives, it runs an ordinary turn, and the model either fixes the issue or calls update_goal based on the result. The saved busy-waiting comes from these gating conditions, not from forcing the model to keep a single long connection alive forever.
 
-代码入口：[Goal 模型](../../../agent/domain/goal.py)、[Goal 工具](../../../agent/infrastructure/tools/goal.py)、[检查点提示](../../../agent/prompts.py)、[调度](../../../agent/runtime/server/execution.py)。验证：[运行时流程](../../../test/test_async_runtime.py)、[续接与 Goal](../../../test/test_task_continuation.py)。
+Code entry points: [Goal model](../../../agent/domain/goal.py), [Goal tool](../../../agent/infrastructure/tools/goal.py), [checkpoint prompt](../../../agent/prompts.py), [scheduling](../../../agent/runtime/server/execution.py). Verification: [runtime flow](../../../test/test_async_runtime.py), [continuation and Goal](../../../test/test_task_continuation.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

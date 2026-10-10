@@ -1,36 +1,38 @@
-# 压缩交接：替换模型视图，不销毁原始历史
+# Compaction handoff: replace the model view, do not destroy the original history
 
-压缩的关键不是“写一段摘要”，而是形成一个能继续工具循环的边界：旧历史变成 handoff，最近一段对话原样留在后面。
+English | [简体中文](compaction-handoff.zh-CN.md)
+
+The key to compaction is not "writing a summary" but forming a boundary that lets the tool loop continue: the old history becomes a handoff, while the most recent stretch of conversation stays behind as-is.
 
 ~~~mermaid
 flowchart LR
-    RAW["原始消息<br/>旧历史 + 最近消息"] --> CUT{"按会话单元切分"}
-    CUT --> OLD["待概括历史"]
-    CUT --> RECENT["最近消息原样保留"]
-    OLD --> SUMMARY["模型摘要 / 确定性回退"]
-    SUMMARY --> PAIR["user 续接消息 + assistant handoff"]
-    PAIR --> VIEW["新的模型视图"]
+    RAW["Original messages<br/>old history + recent messages"] --> CUT{"Split by conversation unit"}
+    CUT --> OLD["History to summarize"]
+    CUT --> RECENT["Recent messages kept as-is"]
+    OLD --> SUMMARY["Model summary / deterministic fallback"]
+    SUMMARY --> PAIR["user continuation message + assistant handoff"]
+    PAIR --> VIEW["New model view"]
     RECENT --> VIEW
-    RAW --> DISK[("原始 JSONL 保留")]
+    RAW --> DISK[("Original JSONL retained")]
 ~~~
 
-切分单位不能拆开 assistant tool_calls 与对应 tool 结果。摘要请求把 history 和 retained_recent_messages 分开，保留后者供参考却不在 handoff 中重复。预算预检只会缩短超长工具正文，不删用户文本或工具参数；仍放不下就拒绝提交。取消也在模型返回后、提交前再次检查。
+The split unit must not break apart an assistant tool_calls and its corresponding tool results. The summary request keeps history and retained_recent_messages separate, retaining the latter for reference without duplicating it in the handoff. The budget precheck only shortens over-long tool bodies; it never deletes user text or tool arguments. If the input still does not fit, the commit is rejected. Cancellation is also rechecked after the model returns but before the commit.
 
-成功 handoff 和确定性回退都记录策略。空摘要或非成功结束原因不能当作完整交接；Provider 用量即使摘要被丢弃也会记录。落盘时写 compactions.jsonl 和 compact_boundary，下一次投影用“用户续接消息 + 助手 handoff + 最近消息”替换旧上下文，并校验消息边界；原始历史仍可用于重放。
+Both successful handoffs and the deterministic fallback record their strategy. An empty summary or a non-success finish reason cannot be treated as a complete handoff, and Provider usage is recorded even when the summary is discarded. On disk, compactions.jsonl and compact_boundary are written, and the next projection replaces the old context with "user continuation message + assistant handoff + recent messages" and validates the message boundary; the original history remains usable for replay.
 
-## 摘要自己也必须放进窗口
+## The summary itself must fit in the window
 
-摘要请求预留 min(8,192, 窗口/10) 的输出预算，再留窗口 5% 的余量。超长工具正文可缩成头 2,000 字符和尾 2,000 字符，中间标出省略量；用户约束与工具参数不走这种缩短。预检仍放不下就失败，不能先截掉用户要求再宣称压缩成功。
+The summary request reserves an output budget of min(8,192, window/10) and then leaves 5% of the window as headroom. Over-long tool bodies can be compressed to their first 2,000 characters and last 2,000 characters, with the omitted amount marked in between; user constraints and tool arguments are exempt from this shortening. If the precheck still does not fit, it fails: you cannot cut out user requirements first and then declare the compaction a success.
 
-| 压缩产物 | 作用 |
+| Compaction artifact | Purpose |
 | --- | --- |
-| 续接 user + assistant handoff | 建立可继续对话的消息边界 |
-| 最近完整会话单元 | 保留工具调用和结果的近处细节 |
-| Plan 快照、活跃/未消费任务引用 | 从当前控制状态补回待办与后台工作 |
-| 图片快照路径 | 告诉后续模型从哪里重新读取证据 |
+| Continuation user + assistant handoff | Establish the message boundary from which the conversation can continue |
+| Most recent complete conversation units | Preserve the near-field details of tool calls and results |
+| Plan snapshot, active/unconsumed task references | Restore TODOs and background work from the current control state |
+| Image snapshot paths | Tell the next model where to re-read the evidence |
 
-摘要模型的 reasoning 不作为新的业务推理历史保留；投影为 handoff 使用固定的非空 reasoning 标记满足相应兼容要求。压缩记录与边界消息分开落盘，只有匹配的有效对才被采用；这不是跨文件 ACID 事务，详见[会话存储](../03-persistence/session-store.md)。
+The summary model's reasoning is not retained as new business reasoning history; when it is projected into a handoff, a fixed non-empty reasoning marker is used to satisfy the corresponding compatibility requirement. Compaction records and boundary messages are persisted separately, and only matching valid pairs are adopted; this is not a cross-file ACID transaction. See [session structure](../03-persistence/session-store.md) for details.
 
-代码入口：[压缩服务](../../../agent/application/context/compaction.py)、[handoff 构造](../../../agent/application/context/handoff.py)、[投影](../../../agent/infrastructure/persistence/message_projector.py)。验证：[压缩服务](../../../test/test_compaction_service.py)、[边界恢复](../../../test/test_compact_pipeline.py)。
+Code entry points: [compaction service](../../../agent/application/context/compaction.py), [handoff construction](../../../agent/application/context/handoff.py), [projection](../../../agent/infrastructure/persistence/message_projector.py). Verification: [compaction service](../../../test/test_compaction_service.py), [boundary recovery](../../../test/test_compact_pipeline.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

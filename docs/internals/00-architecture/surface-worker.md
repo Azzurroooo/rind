@@ -1,36 +1,38 @@
-# Surface 与 Worker：交互和执行分开
+# Surface and Worker: interaction and execution separated
 
-同一轮任务可以从终端、桌面、浏览器或手机发起，因为这些入口只负责把用户行为翻译成协议请求，并把事件翻译成可读界面。
+English | [简体中文](surface-worker.zh-CN.md)
+
+The same task can be started from a terminal, the desktop, a browser, or a phone, because each of these entry points only translates user actions into protocol requests, and translates events back into a readable interface.
 
 ~~~mermaid
 flowchart TB
-    subgraph Surface["Surface：交互进程"]
-        I["编辑输入 / 菜单"] --> C["Runtime Client"]
-        C --> V["事件驱动的界面状态"]
+    subgraph Surface["Surface: interaction process"]
+        I["Edit input / menu"] --> C["Runtime Client"]
+        C --> V["Event-driven interface state"]
     end
-    C -->|"request_id + method"| B["协议边界"]
+    C -->|"request_id + method"| B["Protocol boundary"]
     B -->|"response / session/update"| C
-    subgraph Worker["Worker：Python 进程"]
+    subgraph Worker["Worker: Python process"]
         B --> S["Runtime Server"]
-        S --> R["执行内核"]
-        R --> F[("会话文件")]
+        S --> R["Execution kernel"]
+        R --> F[("Session files")]
     end
 ~~~
 
-CLI 的 [runtime-client.js](../../../frontend-cli/lib/runtime-client.js) 启动或连接 Worker；输入缓冲、光标、TTY 渲染留在 Node。Desktop 的 Electron main 管 Worker 子进程，renderer 只能通过 preload 暴露的方法调用。Web 连接 WebSocket；Mobile 复用 Web Surface，以 Capacitor 提供配对和原生能力，手机上没有 Python 内核。
+The CLI's [runtime-client.js](../../../frontend-cli/lib/runtime-client.js) starts or connects to the Worker; input buffering, the cursor, and TTY rendering all stay in Node. On the desktop, Electron main owns the Worker subprocess, and the renderer can only call through the methods exposed by preload. Web connects over WebSocket; Mobile reuses the Web Surface, with Capacitor providing pairing and native capabilities, so there is no Python kernel on the phone.
 
-**边界的收益是职责清楚。** 换一种界面不用复制模型循环；修改工具语义也不必把业务判断散落到多个 Surface。协议响应表示请求结束，独立的事件表示执行中的变化；界面不能把两者当作两次回答。
+**The benefit of the boundary is clear responsibilities.** Switching to a different interface does not require copying the model loop; changing tool semantics does not require scattering business decisions across multiple Surfaces. A protocol response marks the end of a request, while independent events represent changes during execution; an interface must not treat the two as two separate answers.
 
-## 交互状态与业务状态的分界
+## Where interaction state and business state divide
 
-| 留在 Surface | 留在 Worker |
+| Stays in the Surface | Stays in the Worker |
 | --- | --- |
-| 输入缓冲、光标、展开/折叠状态 | 已接受输入队列、消息提交、回合终态 |
-| 菜单选择、任务卡片、通知呈现 | 工具执行、后台任务事实、Goal 调度 |
-| 连接中、重连中、错误提示 | 会话存储、模型调用、压缩边界 |
+| Input buffer, cursor, expand/collapse state | Accepted input queue, message commit, turn end state |
+| Menu selection, task cards, notification presentation | Tool execution, background task facts, Goal scheduling |
+| Connecting, reconnecting, error messages | Session storage, model calls, compaction boundary |
 
-这不是要求前端“没有状态”。前端必须有足够状态让输入与渲染稳定，但执行事实以 Worker 和持久记录为准。例如用户正在编辑的草稿不应因一条后台更新消失；反过来，客户端显示任务已完成，也不能替代 Worker 的任务终态。
+This does not require the frontend to be "stateless". The frontend must hold enough state to keep input and rendering stable, but execution facts are governed by the Worker and the persistent record. For example, a draft the user is editing should not disappear because of one background update; conversely, a client showing a task as completed cannot replace the Worker's task end state.
 
-代码入口：[CLI 客户端](../../../frontend-cli/lib/runtime-client.js)、[Desktop Worker 管理](../../../desktop/src/main/runtime.ts)、[Web 客户端](../../../frontend-web/src/runtimeClient.js)。验证：[CLI 协议测试](../../../frontend-cli/test/runtime-client.test.js)、[Web 协议测试](../../../frontend-web/src/runtimeClient.test.js)。
+Code entry points: [CLI client](../../../frontend-cli/lib/runtime-client.js), [Desktop Worker management](../../../desktop/src/main/runtime.ts), [Web client](../../../frontend-web/src/runtimeClient.js). Verification: [CLI protocol tests](../../../frontend-cli/test/runtime-client.test.js), [Web protocol tests](../../../frontend-web/src/runtimeClient.test.js).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

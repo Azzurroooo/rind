@@ -1,49 +1,51 @@
-# 配置与凭证：先选配置，再解析秘密
+# Configuration and credentials: choose the configuration first, then resolve the secrets
 
-Rind 分开保存模型设置与登录凭证。设置只来自用户自己的 RIND_HOME/settings.json；凭证按当前供应商独立解析。
+English | [简体中文](authentication-and-settings.zh-CN.md)
+
+Rind stores model settings and login credentials in separate places. Settings come only from the user's own RIND_HOME/settings.json; credentials are resolved independently for the current provider.
 
 ~~~mermaid
 flowchart TD
-    U["RIND_HOME/settings.json"] --> S["有效 AppSettings"]
-    S --> K{"当前供应商的 apiKey 可解析？"}
-    K -->|"是"| C["客户端凭证"]
-    K -->|"否"| A["auth.json 中的供应商凭证"]
-    A -->|"存在"| C
-    A -->|"不存在"| E["供应商对应的环境变量"]
+    U["RIND_HOME/settings.json"] --> S["effective AppSettings"]
+    S --> K{"the current provider's apiKey resolvable?"}
+    K -->|"yes"| C["client credentials"]
+    K -->|"no"| A["the provider's credentials in auth.json"]
+    A -->|"present"| C
+    A -->|"absent"| E["the environment variable for that provider"]
     E --> C
 ~~~
 
-## 项目目录不提供配置
+## Project folders do not supply configuration
 
-项目里的 .rind/settings.json 不被读取。仓库内容是不可信输入：如果它能决定 baseUrl，就能把已登录的密钥和代码上下文引到任意地址；如果它能决定 serverToken，就能预设 Web 运行时的认证口令。项目 .rind/ 下的 Skill 与 RIND.md 不受影响。
+A .rind/settings.json inside a project is not read. Repository content is untrusted input: if it could decide baseUrl, it could point an already-signed-in key and its code context at any address; if it could decide serverToken, it could preset the authentication passphrase for the web runtime. Skill and RIND.md under the project's .rind/ are unaffected.
 
-RIND_HOME 默认是 ~/.rind，统一改变设置、凭证、会话等用户数据的位置。会话中的模型选择还可通过协议更改；磁盘默认设置与当前会话选择是不同职责。
+RIND_HOME defaults to ~/.rind, which changes where all user data — settings, credentials, sessions, and the like — is stored. A session's model selection can also be changed through the protocol; the default settings on disk and the current session's selection are different responsibilities.
 
-## 连接：选择指向谁
+## Connections: choosing what they point at
 
-会话保存的 provider 是一个连接 id。内置供应商各是一个同名连接，登录后即可使用；用户也可以在 /login 里选择 "Add a named endpoint"，填写名字、OpenAI 兼容的 Base URL、可选的模型 id 和 API key，得到一个命名连接（id 由名字生成，不能与内置供应商重名）。命名连接与它的 key 一起存在 auth.json，从不写入项目目录；再次 /login 同一连接只替换 key，/logout 删除整个连接。
+The provider a session saves is a connection id. Each built-in provider is a connection with the same name, usable as soon as you sign in to it. A user can also choose "Add a named endpoint" in /login, fill in a name, an OpenAI-compatible Base URL, and an optional model id and API key, and get a named connection; the id is generated from the name and must not duplicate a built-in provider's. A named connection is stored with its key in auth.json and is never written into the project folder. Signing in again with /login on the same connection replaces only the key, and /logout deletes the entire connection.
 
-连接的地址与凭证在每次组装客户端时重新解析，所以换 key 或重新登录从下一轮生效。会话引用的连接不存在时，回合直接失败并说明原因（提示 /login 或 /model），不会悄悄换成另一个端点。模型在两轮之间切换时，客户端与该模型的图片能力一起替换。
+A connection's address and credentials are resolved again every time a client is assembled, so changing the key or signing in again takes effect from the next turn. When a connection referenced by a session does not exist, the turn fails outright with the reason, pointing to /login or /model; it is not silently switched to another endpoint. When the model is switched between two turns, the client and that model's image capability are replaced together.
 
-## 新对话从哪里取模型
+## Where a new conversation gets its model
 
-会话创建时查一次默认，结果写进会话 meta；之后每一轮只读 meta。查找顺序（模型组与 effort 各自取第一个设置过的值）：
+The default is looked up once when a session is created, and the result is written into the session meta; after that, every turn only reads the meta. Lookup order (the model group and the effort each take the first value that has been set):
 
-1. 此文件夹的默认（RIND_HOME/workspaces.json，以规范化真实路径为键）；
-2. 若此文件夹是 Git worktree：主仓库文件夹的默认（从 .git 文件的 gitdir 找到主仓库，不启动 git）；
-3. settings.json。
+1. This folder's default (RIND_HOME/workspaces.json, keyed by normalized real path);
+2. If this folder is a Git worktree: the main repository folder's default (found from the .git file's gitdir, without launching git);
+3. settings.json.
 
-模型组是连接加模型，总是一起设置；effort 单独设置。文件夹默认只影响之后新建的对话，已有对话保持自己的选择。会话 meta 的 selection_source 记录两部分各自来自 session、folder、main_repository 还是 settings，/status 据此标注来源。设置文件夹默认时会校验：连接已配置、模型在它的列表里、effort 是该模型支持的级别。协议方法为 rind/folder_defaults/get（含清除自身设置后会继承的值 inherited）、set、unset、一次解析多个文件夹的 resolve，以及把一个已有对话同步到文件夹当前默认的 apply。set 与 unset 会广播 folder_defaults_changed，Agents 页据此重新读取它显示的文件夹默认。
+A model group is a connection plus a model, and the two are always set together; effort is set separately. A folder default only affects conversations created afterwards; existing conversations keep their own selection. The session meta's selection_source records whether each of the two parts came from session, folder, main_repository, or settings, and /status labels the source accordingly. Setting a folder default validates that the connection is configured, the model is in its list, and the effort is a level that model supports. The protocol methods are rind/folder_defaults/get (including inherited, the value that applies once its own setting is cleared), set, unset, resolve for parsing several folders at once, and apply for syncing an existing conversation to the folder's current default. set and unset broadcast folder_defaults_changed, and the Agents page re-reads the folder defaults it displays.
 
-## 用 ChatGPT 账号登录
+## Signing in with a ChatGPT account
 
-/login 先问登录方式："Sign in with an account" 或 "Sign in with an API key"，再列出支持该方式的供应商（命名连接只在 API key 一侧）；/login <provider> 只在该供应商有两种方式时才问。OpenAI 除 API key 外还可以用 ChatGPT 账号登录，用 ChatGPT 订阅调用 OpenAI Responses API。流程是公开客户端的 PKCE：Rind 在 127.0.0.1:1455 接收浏览器回调并打开授权页；授权页地址也会显示出来，浏览器无法回调时可以粘贴最终的重定向地址。浏览器回调到达后，授权码立即兑换（它很快过期），终端里的等待提示随之自动关闭，无需按键。令牌以 oauth 类型存入 auth.json，连同签发的 client_id；每次请求前若五分钟内到期，就在 auth.json 的锁内刷新并保存新的 refresh token。订阅令牌的请求带 store:false，不发送 max_output_tokens。端口被占用时（例如另一个未完成的登录或 Codex CLI）登录直接说明原因。
+/login first asks for the login method — "Sign in with an account" or "Sign in with an API key" — and then lists the providers that support that method (named connections are only on the API key side); /login <provider> only asks when that provider has both methods. Besides an API key, OpenAI also supports signing in with a ChatGPT account, which calls the OpenAI Responses API with a ChatGPT subscription. The flow is PKCE with a public client: Rind receives the browser callback on 127.0.0.1:1455 and opens the authorization page; the authorization page address is also displayed, so the final redirect address can be pasted when the browser cannot call back. Once the browser callback arrives, the authorization code is exchanged immediately (it expires quickly), and the waiting prompt in the terminal closes by itself, with no keypress needed. The token is stored in auth.json with the oauth type, together with the issued client_id; before each request, if it expires within five minutes, it is refreshed inside auth.json's lock and the new refresh token is saved. Subscription-token requests carry store:false and do not send max_output_tokens. When the port is occupied (for example by another unfinished sign-in or by the Codex CLI), /login states the reason directly.
 
-## 最小配置与登录
+## Minimal configuration and login
 
-CLI 中用 /login 保存供应商 API key，用 /model 选择模型，/effort 调整支持的推理级别。/model 与 /effort 先改当前对话（下一轮生效），随后只追加一个问题：是否也作为此文件夹新对话的默认（文件夹已是该值时不问；没有终端 UI 时不问）。Ctrl+T 只切换当前对话的 effort，从不询问。没有"所有新对话"的选项：其余文件夹的默认只来自手动编辑的 settings.json。非交互时用 rind config set model|effort <值> --folder [目录]、rind config unset model|effort --folder [目录]。交互式登录支持 API key，以及 OpenAI 的 ChatGPT 账号登录。
+In the CLI, /login saves a provider API key, /model selects the model, and /effort adjusts the supported reasoning level. /model and /effort first change the current conversation (taking effect from the next turn), then ask exactly one follow-up question: whether to also use that value as the default for new conversations in this folder. The question is skipped when the folder is already set to that value, and it is skipped when there is no terminal UI. Ctrl+T only switches the current conversation's effort and never asks anything. There is no "all new conversations" option: the defaults for other folders come only from a manually edited settings.json. When not interactive, use rind config set model|effort <value> --folder [directory] and rind config unset model|effort --folder [directory]. Interactive login supports API keys, as well as OpenAI's ChatGPT account sign-in.
 
-通用 Chat Completions 端点可使用以下 settings.json；将 MY_MODEL_KEY 设置为本机环境变量：
+A generic Chat Completions endpoint can use the following settings.json; set MY_MODEL_KEY as a local environment variable:
 
 ~~~json
 {
@@ -55,10 +57,10 @@ CLI 中用 /login 保存供应商 API key，用 /model 选择模型，/effort �
 }
 ~~~
 
-## 保存方式的真实边界
+## The real limits of how credentials are stored
 
-auth.json 是本地 JSON 文件，使用文件锁、临时文件替换和尽力设置的文件权限；它没有操作系统密钥链或加密存储承诺。单次读写有锁，也不等于整个读—改—写事务一直持锁。移动端的安全存储保存的是远程连接凭证，与 Python 供应商凭证不是同一个系统。
+auth.json is a local JSON file that uses a file lock, temporary-file replacement, and best-effort file permissions; there is no OS keychain or encrypted-storage promise. A single read or write is locked, but that does not mean the whole read-modify-write transaction holds the lock throughout. The mobile secure storage holds remote connection credentials and is a different system from the Python provider credentials.
 
-源码：[设置加载](../../../agent/infrastructure/settings.py)、[文件夹默认](../../../agent/infrastructure/workspace_defaults.py)、[凭证存储](../../../agent/infrastructure/credentials.py)、[ChatGPT 登录](../../../agent/infrastructure/llm/chatgpt_oauth.py)、[解析和登录](../../../agent/infrastructure/llm/provider_service.py)。验证：[设置加载](../../../test/test_settings_loader.py)、[文件夹默认](../../../test/test_workspace_defaults.py)、[协议](../../../test/test_folder_defaults_protocol.py)、[供应商认证](../../../test/test_provider_auth.py)、[ChatGPT 登录](../../../test/test_chatgpt_oauth.py)、[协议认证交互](../../../test/test_runtime_server_auth.py)。
+Source code: [settings loading](../../../agent/infrastructure/settings.py), [folder defaults](../../../agent/infrastructure/workspace_defaults.py), [credential storage](../../../agent/infrastructure/credentials.py), [ChatGPT sign-in](../../../agent/infrastructure/llm/chatgpt_oauth.py), [resolution and login](../../../agent/infrastructure/llm/provider_service.py). Verification: [settings loading](../../../test/test_settings_loader.py), [folder defaults](../../../test/test_workspace_defaults.py), [the protocol](../../../test/test_folder_defaults_protocol.py), [provider authentication](../../../test/test_provider_auth.py), [ChatGPT sign-in](../../../test/test_chatgpt_oauth.py), [protocol authentication interaction](../../../test/test_runtime_server_auth.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

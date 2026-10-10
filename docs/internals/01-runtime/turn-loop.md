@@ -1,36 +1,38 @@
-# 一个回合是一条可重复采样的循环
+# A turn is a loop of repeated sampling
 
-一次用户输入只产生一个 turn_id，却可能多次请求模型：模型提出工具调用，工具结果进入历史，下一次采样才能看到结果。
+English | [简体中文](turn-loop.zh-CN.md)
+
+One user input produces a single turn_id but may request the model several times: the model proposes a tool call, the tool result enters history, and only the next sampling can see the result.
 
 ~~~mermaid
 flowchart TD
-    U["用户输入落盘"] --> B["构造上下文"]
-    B --> M["模型流式采样"]
-    M --> A["助手消息落盘"]
-    A --> Q{"有工具调用？"}
-    Q -->|"有"| T["执行并提交工具结果"]
+    U["User input persisted"] --> B["Build the context"]
+    B --> M["Model streaming sampling"]
+    M --> A["Assistant message persisted"]
+    A --> Q{"Any tool calls?"}
+    Q -->|"Yes"| T["Execute and commit tool results"]
     T --> B
-    Q -->|"无"| I{"有已接受的后续输入？"}
-    I -->|"有"| B
-    I -->|"无"| E["回合终态落盘"]
+    Q -->|"No"| I{"Any accepted follow-up input?"}
+    I -->|"Yes"| B
+    I -->|"No"| E["Turn terminal state persisted"]
 ~~~
 
-AgentRuntime 持有该会话的 turn lock、输入队列、turn_id 和运行状态；TurnRunner 负责构造上下文、采样、解析模型流、执行工具步骤。一个 follow-up 在前一采样正常完成后可继续同一回合；steering 在下一次模型采样前送入。回合内多次采样并不意味着创建多个会话。
+AgentRuntime holds the turn lock, input queues, turn_id, and running state for that session; TurnRunner handles building the context, sampling, parsing the model stream, and executing tool steps. A follow-up can continue the same turn once the previous sampling completes normally; steering is delivered before the next model sampling. Multiple samplings within one turn do not create multiple sessions.
 
-工具调用和助手消息先形成可恢复的记录；模型失败、取消或完成才写终态。模型继续前验证消息边界，确保 assistant 的工具调用与 tool 结果配对。Surface 看到的增量文字只是展示，最终依据落盘消息和回合终态恢复。
+Tool calls and assistant messages first become recoverable records; the terminal state is written only when the model fails, is cancelled, or completes. Before the model continues, the message boundary is validated so that the assistant's tool calls pair correctly with tool results. The incremental text a Surface sees is for display only; recovery ultimately relies on the persisted messages and the turn's terminal state.
 
-## “一轮”不等于“一次模型请求”
+## "One turn" is not "one model request"
 
-设模型先读取文件，再修改文件，最后回答：同一个 turn_id 内会出现“采样 → read_file → 采样 → edit_file → 采样 → 最终文本”。每次采样都重新构造上下文，所以刚落盘的工具结果、已投递输入和新的压缩边界才会进入下一次请求。
+Suppose the model first reads a file, then modifies it, and finally answers: within the same turn_id you will see "sampling -> read_file -> sampling -> edit_file -> sampling -> final text". Each sampling rebuilds the context, so freshly persisted tool results, already-delivered inputs, and a new compaction boundary only enter the next request.
 
-| 边界 | 必须成立的条件 |
+| Boundary | Condition that must hold |
 | --- | --- |
-| 执行工具前 | assistant 工具调用已保存，可按 call ID 找到来源 |
-| 再次请求模型前 | 上一步调用与结果闭合，上下文视图有效 |
-| 报告终态时 | 持久 turn_state 能解释完成、失败或取消 |
+| Before executing a tool | The assistant tool call is saved, and its source can be found by call ID |
+| Before requesting the model again | The previous call and result are closed, and the context view is valid |
+| When reporting the terminal state | The persisted turn_state can explain completion, failure, or cancellation |
 
-follow-up 可在同一回合继续采样；后台任务通知或 Goal 由协调器另发起续接。把二者分开，才能解释为什么 UI 一次提交可能有很多增量事件，却不应显示成很多重复用户请求。
+A follow-up can continue sampling within the same turn; background task notifications or Goals have the coordinator start a separate continuation. Only by keeping the two apart can one explain why a single UI submission can produce many incremental events yet should not be rendered as many repeated user requests.
 
-代码入口：[AgentRuntime.run_turn](../../../agent/runtime/core/runtime.py)、[TurnRunner.run_turn](../../../agent/runtime/core/turn_runner.py)。验证：[异步运行时](../../../test/test_async_runtime.py)、[用户流程回归](../../../test/test_journeys_user.py)。
+Code entry points: [AgentRuntime.run_turn](../../../agent/runtime/core/runtime.py), [TurnRunner.run_turn](../../../agent/runtime/core/turn_runner.py). Verification: [the async runtime](../../../test/test_async_runtime.py), [user journey regression](../../../test/test_journeys_user.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

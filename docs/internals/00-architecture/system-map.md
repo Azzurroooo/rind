@@ -1,39 +1,41 @@
-# 一张图看懂 Rind
+# Rind at a glance
 
-Rind 的核心不是某个界面，而是一条可复用的执行路径：Surface 把输入交给协议，Worker 协调会话与执行，内核调用模型和工具，结果落盘并以事件返回。
+English | [简体中文](system-map.zh-CN.md)
+
+The core of Rind is not any particular interface, but one reusable execution path: the Surface hands input to the protocol, the Worker coordinates the session and its execution, the kernel calls models and tools, and results are written to disk and returned as events.
 
 ~~~mermaid
 flowchart TB
-    S["CLI / Desktop / Web / Mobile / Gateway"] --> P["协议连接"]
+    S["CLI / Desktop / Web / Mobile / Gateway"] --> P["Protocol connection"]
     P --> D["RuntimeDispatcher"]
     D --> W["RuntimeWorker"]
-    W --> SS["SessionService<br/>读持久会话"]
-    W --> EC["ExecutionCoordinator<br/>管活跃执行"]
-    EC --> A["AgentContainer<br/>按需装配"]
+    W --> SS["SessionService<br/>reads persistent sessions"]
+    W --> EC["ExecutionCoordinator<br/>manages active executions"]
+    EC --> A["AgentContainer<br/>assembled on demand"]
     A --> R["AgentRuntime + TurnRunner"]
     R --> C["ContextManager"]
-    R --> M["模型适配器"]
-    R --> T["工具处理器"]
-    C --> F[("JSONL 会话")]
+    R --> M["Model adapter"]
+    R --> T["Tool handler"]
+    C --> F[("JSONL session")]
     T --> F
     R --> E["RuntimeEvent"]
     E --> D --> P --> S
 ~~~
 
-Server 和执行内核在**同一个 Python Worker 进程**里；两者之间没有第二层 RPC。CLI、Desktop 通过 stdio JSONL 连接，Web/Mobile 走 WebSocket，Gateway 通过自己的 WorkerClient 接入同一协议。Surface 负责输入、呈现和连接状态；Python 负责会话、上下文、模型、工具与任务。
+The Server and the execution kernel live in the **same Python Worker process**; no second layer of RPC sits between them. The CLI and Desktop connect over stdio JSONL, Web and Mobile go over WebSocket, and the Gateway attaches to the same protocol through its own WorkerClient. The Surface is responsible for input, presentation, and connection state; Python is responsible for sessions, context, models, tools, and tasks.
 
-这张图还有一条不该省略的反向边：会话事实写在磁盘，下一次执行重新读取。Worker 可以保留正在运行的任务和共享服务，却不为每个历史会话常驻一套 Agent。阅读后续文章时，始终区分**持久事实、当前执行、界面视图**三种状态。
+The diagram also has a reverse edge that is easy to leave out: session facts are written to disk, and the next execution reads them back. A Worker can keep running tasks and shared services, but it does not keep a standing Agent for every historical session. As you read the articles that follow, keep the three states distinct: **persistent facts, current execution, and Surface view**.
 
-## 同一个会话的三种形态
+## Three forms of the same session
 
-| 形态 | 放在哪里 | 存在多久 |
+| Form | Where it lives | How long it lasts |
 | --- | --- | --- |
-| 持久事实 | messages、tool_calls、meta、tasks 等文件 | 跨回合、跨 Worker 重启 |
-| 当前执行 | 容器、模型连接、队列、取消信号 | 执行活跃期间 |
-| 界面视图 | Surface 的 transcript、输入框与任务面板 | 由客户端生命周期决定，可重建 |
+| Persistent facts | Files such as messages, tool_calls, meta, tasks | Across turns and across Worker restarts |
+| Current execution | Containers, model connections, queues, cancellation signals | While execution is active |
+| Surface view | The Surface's transcript, input box, and task panel | Determined by the client lifecycle; can be rebuilt |
 
-例如浏览器刷新只丢掉第三层；Worker 仍可执行，重新订阅后从历史与快照恢复。Worker 重启会丢掉第二层，持久会话仍可打开，但旧进程不能凭一个 task_id 自动恢复为可控进程。沿这三层判断问题，比把“会话还在”理解为“所有状态都还在”更准确。
+For example, refreshing the browser loses only the third layer: the Worker keeps executing, and once the client resubscribes, the view is rebuilt from history and snapshots. A Worker restart loses the second layer: the persistent session can still be opened, but the old process cannot automatically recover into a controllable process from a task_id alone. It is more accurate to judge problems along these three layers than to read "the session is still there" as "all state is still there".
 
-代码入口：[main.py](../../../main.py)、[RuntimeWorker](../../../agent/runtime/server/worker.py)、[装配根](../../../agent/bootstrap/container.py)。验证：[架构边界测试](../../../test/test_agent_architecture.py)。
+Code entry points: [main.py](../../../main.py), [RuntimeWorker](../../../agent/runtime/server/worker.py), [assembly root](../../../agent/bootstrap/container.py). Verification: [architecture boundary tests](../../../test/test_agent_architecture.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

@@ -1,34 +1,36 @@
-# 信任边界：每一层只保证自己检查过的事情
+# Trust boundaries: each layer only guarantees what it checked itself
 
-Rind 能访问宿主机文件与进程。协议认证、文件路径约束、外部内容标记分别解决不同问题；它们没有合成为一个操作系统沙箱。
+English | [简体中文](trust-boundaries.zh-CN.md)
+
+Rind can access host files and processes. Protocol authentication, file path constraints, and external content labeling solve different problems; together they do not form an operating-system sandbox.
 
 ~~~mermaid
 flowchart TD
-    U["远程用户"] --> A["连接认证<br/>server token / 一次性 ticket"]
-    A --> W["Worker 协议方法"]
-    W --> F["文件工具<br/>路径解析 / Capsule allowed roots"]
-    W --> S["Shell<br/>宿主机进程权限"]
-    X["网页与进程输出"] --> N["工具结果 / 不可信内容标记"]
-    N --> M["模型上下文"]
+    U["Remote user"] --> A["Connection authentication<br/>server token / one-time ticket"]
+    A --> W["Worker protocol methods"]
+    W --> F["File tools<br/>path resolution / Capsule allowed roots"]
+    W --> S["Shell<br/>host process permissions"]
+    X["Web pages and process output"] --> N["Tool results / untrusted content labeling"]
+    N --> M["Model context"]
     M --> W
 ~~~
 
-## 三条需要分清的界线
+## Three boundaries to keep distinct
 
-| 边界 | 实际检查 | 不应推导出的保证 |
+| Boundary | What is actually checked | Guarantees that must not be inferred |
 | --- | --- | --- |
-| 远程连接 | Python Web server 无 token 时只允许回环绑定；配置 token 后校验认证，支持一次性 ticket | 连上服务后每条 shell 命令还会独立申请操作系统权限 |
-| 文件与 Capsule | 解析路径、校验适用的 allowed roots；Team 文件工具限制在自己的 Capsule 与 shared 等允许区域 | Shell、外部编辑器和其他 Worker 也受同一目录隔离 |
-| 内容进入模型 | 任务通知把可信任务事实与 untrusted_process_output 分开，工具结果保持来源 | 文本标记能从机制上阻止所有提示注入 |
+| Remote connection | Without a token, the Python Web server allows only loopback binding; once a token is configured, authentication is verified and one-time tickets are supported | Once connected, each shell command still requests operating-system permissions on its own |
+| Files and Capsule | Resolve paths and check the applicable allowed roots; Team file tools are confined to their own Capsule and permitted regions such as shared | The Shell, external editors, and other Workers obey the same directory isolation |
+| Content entering the model | Task notifications separate trusted task facts from untrusted_process_output, and tool results keep their source | Text labeling can mechanically prevent all prompt injection |
 
-Python Web server 支持 Bearer、token/ticket 等认证路径，Origin 检查约束浏览器来源；Desktop Gateway 自己维护访问码、票据和来源规则。两套入口共享运行时协议，却不应被描述成同一套认证实现。[消息渠道 Gateway](../07-surfaces/gateway.md) 另有 allowlist、pairing 和群提及门控。
+The Python Web server supports authentication paths such as Bearer and token/ticket, with an Origin check constraining browser origins; the Desktop Gateway maintains its own access code, tickets, and origin rules. The two entry points share the runtime protocol but must not be described as the same authentication implementation. The [messaging channel Gateway](../07-surfaces/gateway.md) additionally has allowlist, pairing, and group-mention gating.
 
-文件改写队列只协调当前 Worker 的受管写入；预映像检查能发现部分并发修改，但检查和替换之间不是原子 compare-and-swap。Shell 的 BashPolicy 是有限禁止规则，不是容器或沙箱。授权远程使用 Worker，实质上也在授权其已暴露的宿主机工具能力。
+The file rewrite queue coordinates only the current Worker's managed writes. A pre-image check can detect some concurrent modifications, but the check and the replacement are not an atomic compare-and-swap. The Shell's BashPolicy is a finite set of prohibition rules, not a container or a sandbox. Authorizing remote use of a Worker effectively also authorizes the host tool capabilities it has already exposed.
 
-## 秘密和诊断也有归属
+## Secrets and diagnostics have owners too
 
-供应商凭证存于本机 auth.json，界面拿到的是公开设置和认证状态；原始 LLM trace 会保留普通提示与模型文本，仅对图片数据做特殊省略。诊断材料不能一概视为已经脱敏。
+Provider credentials live in the local auth.json, and the interface receives only public settings and authentication status. The raw LLM trace keeps ordinary prompts and model text, applying a special omission only to image data. Diagnostic material must not be assumed to be already redacted.
 
-源码：[Python Web 认证](../../../agent/runtime/server/websocket.py)、[Desktop Gateway](../../../desktop/src/main/gateway/server.ts)、[凭证](../../../agent/infrastructure/credentials.py)、[任务通知](../../../agent/application/task_notifications.py)。验证：[Web 运行时](../../../test/test_web_runtime.py)、[网关安全](../../../test/test_gateway_security.py)。细节：[文件工具](../04-tools/file-tools.md)、[Team](../05-autonomy/teams.md)、[观测](observability.md)。
+Source code: [Python Web authentication](../../../agent/runtime/server/websocket.py), [Desktop Gateway](../../../desktop/src/main/gateway/server.ts), [credentials](../../../agent/infrastructure/credentials.py), [task notifications](../../../agent/application/task_notifications.py). Verification: [Web runtime](../../../test/test_web_runtime.py), [gateway security](../../../test/test_gateway_security.py). Details: [file tools](../04-tools/file-tools.md), [Team](../05-autonomy/teams.md), [observability](observability.md).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

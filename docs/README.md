@@ -1,21 +1,23 @@
-# Inside Rind：读懂 Worker 内核
+# Inside Rind: Understanding the Worker kernel
 
-**[打开完整阅读地图：9 组、52 篇](internals/README.md)**
+English | [简体中文](README.zh-CN.md)
 
-从系统结构、执行时序、数据投影、能力扩展和可靠性五个角度，解释 Rind 当前代码如何工作。每篇都有 Mermaid 图、机制说明和源码/测试入口。
+**[Open the full reading map: 9 groups, 52 articles](internals/README.md)**
 
-| 主题 | 从这里进入 |
+This series explains how Rind's current code works from five angles — system structure, execution timeline, data projection, capability extension, and reliability. Each article includes a Mermaid diagram, a mechanism explanation, and source-code and test entry points.
+
+| Topic | Start here |
 | --- | --- |
-| 系统全景与边界 · 5 篇 | [系统地图](internals/00-architecture/system-map.md) |
-| Worker 与执行内核 · 9 篇 | [Worker 生命周期](internals/01-runtime/worker-lifecycle.md) |
-| 上下文与压缩 · 7 篇 | [提示来源](internals/02-context/prompt-assembly.md) |
-| 持久化 · 5 篇 | [会话结构](internals/03-persistence/session-store.md) |
-| 工具系统 · 8 篇 | [工具注册](internals/04-tools/tool-registry.md) |
-| 长任务与协作 · 5 篇 | [后台任务](internals/05-autonomy/managed-tasks.md) |
-| 模型 · 3 篇 | [供应商适配](internals/06-models/provider-adapters.md) |
-| Surface · 6 篇 | [交互式 CLI](internals/07-surfaces/interactive-cli.md) |
-| 横切工程 · 4 篇 | [信任边界](internals/08-engineering/trust-boundaries.md) |
+| System overview and boundaries · 5 articles | [System map](internals/00-architecture/system-map.md) |
+| Worker and the execution kernel · 9 articles | [Worker lifecycle](internals/01-runtime/worker-lifecycle.md) |
+| Context and compaction · 7 articles | [Prompt assembly](internals/02-context/prompt-assembly.md) |
+| Persistence · 5 articles | [Session structure](internals/03-persistence/session-store.md) |
+| Tool system · 8 articles | [Tool registry](internals/04-tools/tool-registry.md) |
+| Long-running tasks and collaboration · 5 articles | [Managed tasks](internals/05-autonomy/managed-tasks.md) |
+| Models · 3 articles | [Provider adapters](internals/06-models/provider-adapters.md) |
+| Surfaces · 6 articles | [Interactive CLI](internals/07-surfaces/interactive-cli.md) |
+| Cross-cutting engineering · 4 articles | [Trust boundaries](internals/08-engineering/trust-boundaries.md) |
 
-想先抓住设计要点：读[资源所有权](internals/01-runtime/resource-ownership.md)、[压缩交接](internals/02-context/compaction-handoff.md)、[工具结果双视图](internals/04-tools/tool-results.md)、[任务通知与续接](internals/05-autonomy/task-notifications.md)、[one-shot 请求作用域](internals/07-surfaces/one-shot.md)。
+Want the design essentials first? Read [Resource ownership](internals/01-runtime/resource-ownership.md), [Compaction handoff](internals/02-context/compaction-handoff.md), [Dual views of tool results](internals/04-tools/tool-results.md), [Task notifications and continuation](internals/05-autonomy/task-notifications.md), [one-shot request scope](internals/07-surfaces/one-shot.md).
 
-需要启动项目：读[CLI 源码运行](internals/07-surfaces/interactive-cli.md#从源码运行)、[配置与凭证](internals/06-models/authentication-and-settings.md)、[Desktop](internals/07-surfaces/desktop.md)、[Web/Mobile](internals/07-surfaces/web-and-mobile.md)、[消息网关](internals/07-surfaces/gateway.md)。
+Need to run the project? Read [Running the CLI from source](internals/07-surfaces/interactive-cli.md#running-from-source), [Configuration and credentials](internals/06-models/authentication-and-settings.md), [Desktop](internals/07-surfaces/desktop.md), [Web/Mobile](internals/07-surfaces/web-and-mobile.md), [Messaging gateway](internals/07-surfaces/gateway.md).

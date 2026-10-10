@@ -1,6 +1,8 @@
-# Worker 的一生
+# The life of a Worker
 
-Worker 是常驻的协议服务，不是一个永远占着模型客户端的会话对象。初始化可以读会话和模型信息；真正执行时才装配 AgentContainer。
+English | [简体中文](worker-lifecycle.zh-CN.md)
+
+A Worker is a long-lived protocol server, not a session object that permanently occupies a model client. Initialization can read session and model information; the AgentContainer is assembled only when real execution happens.
 
 ~~~mermaid
 sequenceDiagram
@@ -9,26 +11,26 @@ sequenceDiagram
     participant SS as SessionService
     participant EC as ExecutionCoordinator
     S->>W: initialize
-    W->>SS: 解析现有会话或保留启动草稿
+    W->>SS: resolve the existing session or keep the startup draft
     W-->>S: session_id / methods / capabilities
     S->>W: session/prompt
     W->>EC: start(session_id)
-    EC->>EC: 装配活跃容器
-    EC-->>W: 回合结束后释放容器
+    EC->>EC: assemble the active container
+    EC-->>W: release the container once the turn ends
     S->>W: shutdown
-    W->>W: 停止接单并关闭拥有的资源
+    W->>W: stop accepting work and close owned resources
 ~~~
 
-[RuntimeWorker](../../../agent/runtime/server/worker.py) 创建 SessionService、ExecutionCoordinator、共享的解析/归一化/压缩服务、ShellTools 和 WebSessions。首次 initialize 才启动一次过期模型目录刷新；关闭时取消并等待刷新任务，还要关闭活跃执行和 Shell 进程，最后关闭 Web 会话。
+[RuntimeWorker](../../../agent/runtime/server/worker.py) creates SessionService, ExecutionCoordinator, the shared parsing/normalization/compaction services, ShellTools, and WebSessions. Only the first initialize starts a single refresh of the stale model catalog; on shutdown it cancels and awaits the refresh task, then closes active executions and Shell processes, and finally closes Web sessions.
 
-启动时保留稳定的 session_id，但默认草稿无需立即生成会话目录；第一条用户任务或显式 Goal 才使它落盘。浏览会话列表、模型、状态和重放不需要创建活跃 AgentContainer。这样“打开应用”不等于“启动一个 Agent 回合”。
+A stable session_id is retained at startup, but the default draft does not need a session directory right away: only the first user task or an explicit Goal persists it to disk. Browsing the session list, models, status, and replay does not create an active AgentContainer. This way "opening the app" is not the same as "starting an Agent turn".
 
-## 初始化可以重复，副作用不能重复启动
+## Initialization can repeat, but side effects must not start twice
 
-initialize 使用锁保护首次初始化：清理工具输出、决定初始会话、设置 initialized 标记，再启动后台目录刷新。后续 initialize 读取当前 info 与 live_turn，不重复创建刷新任务或执行容器。这里的轻量是“不启动模型回合”，不是“完全没有文件 I/O”。
+initialize uses a lock to guard the one-time setup: it cleans up tool output, decides the initial session, sets the initialized flag, and then starts the background catalog refresh. Later initialize calls read the current info and live_turn and do not recreate the refresh task or an execution container. The lightness here is "no model turn is started", not "no file I/O at all".
 
-关闭先让 supervisor 停止接收新任务，再取消刷新、关闭执行与受管资源。这样资源拥有者仍在时就能进行清理，不让正在退出的 Worker 继续接收一条新的进程启动请求。正常退出可保存可解释的终态；强制杀进程只能依赖后续恢复识别不确定状态。
+Shutdown first has the supervisor stop accepting new tasks, then cancels the refresh and closes executions and managed resources. This way cleanup happens while the resource owners still exist, and an exiting Worker does not keep accepting new process-start requests. A normal exit can persist an explainable terminal state; force-killing the process can only rely on later recovery to identify the uncertain state.
 
-代码入口：[Worker](../../../agent/runtime/server/worker.py)、[会话服务](../../../agent/runtime/server/session_service.py)。验证：[Worker 生命周期](../../../test/test_runtime_worker.py)、[启动草稿](../../../test/test_startup_session.py)。
+Code entry points: [Worker](../../../agent/runtime/server/worker.py), [the session service](../../../agent/runtime/server/session_service.py). Verification: [Worker lifecycle](../../../test/test_runtime_worker.py), [the startup draft](../../../test/test_startup_session.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

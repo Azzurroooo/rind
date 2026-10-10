@@ -1,24 +1,26 @@
-# 文件工具：连续地读，串行地改
+# File Tools: Read Consecutively, Mutate Serially
 
-读取要说明“究竟读到了哪里”；修改要保证“本次替换基于哪个文件内容”。这两件事分别由分页契约和逐路径写队列承担。
+English | [简体中文](file-tools.zh-CN.md)
+
+Reading must state "exactly how far was read"; mutation must guarantee "which file contents this replacement is based on". These two concerns are carried by the paging contract and the per-path write queue, respectively.
 
 ~~~mermaid
 flowchart LR
-    READ["read_file(path, offset, limit)"] --> PAGE["连续完整行 + next_offset"]
-    EDIT["edit_file / write_file"] --> RESOLVE["解析绝对路径"]
-    RESOLVE --> LOCK["FileMutationQueue：按路径排队"]
-    LOCK --> CHECK["读取并校验当前内容"]
-    CHECK --> STAGE["同目录临时文件"]
-    STAGE --> VERIFY["确认读取后未被外部修改"]
+    READ["read_file(path, offset, limit)"] --> PAGE["consecutive complete lines + next_offset"]
+    EDIT["edit_file / write_file"] --> RESOLVE["resolve the absolute path"]
+    RESOLVE --> LOCK["FileMutationQueue: queue by path"]
+    LOCK --> CHECK["read and verify the current contents"]
+    CHECK --> STAGE["temporary file in the same directory"]
+    STAGE --> VERIFY["confirm no external modification since the read"]
     VERIFY --> REPLACE["os.replace"]
 ~~~
 
-read_file 默认从第 1 行读取，原始读取结果还有 50 KiB 上限；模型投影进一步受 25 KiB 约束。一整行都放不下时返回 LineTooLong，不能生成一个跳过半行的伪游标。glob 和 grep 返回有界匹配；grep 优先使用 rg，另有本地实现路径。
+read_file reads from line 1 by default, and the raw read result also has a 50 KiB limit; the model projection is further bounded to 25 KiB. When even a single line will not fit, it returns LineTooLong rather than producing a fake cursor that skips half a line. glob and grep return bounded matches; grep prefers rg, with a local implementation path as an alternative.
 
-edit_file 要求 old_str 在当前文件中恰好出现一次，包括重叠匹配也不能歧义；write_file 是整文件替换。两者都保留原权限、临时暂存、替换前检查。Worker 共享 FileMutationQueue，使不同会话和 Team 子任务对同一路径的修改串行；不同路径可以独立进行。
+edit_file requires old_str to appear exactly once in the current file, and even overlapping matches must not be ambiguous; write_file is a whole-file replacement. Both preserve the original permissions, stage in a temporary file, and check before replacement. The Worker shares FileMutationQueue, so modifications to the same path from different sessions and Team subtasks are serialized; different paths may proceed independently.
 
-队列只协调这个 Worker 内走文件工具的写入。编辑器、其他 Worker、Shell 和硬链接别名不受它统一控制；替换前检查也不是文件系统原子 compare-and-swap。取消等待者不会写入，已启动的文件线程必须结束后才能释放锁。
+The queue only coordinates writes that go through the file tools inside this Worker. Editors, other Workers, Shell, and hard-link aliases are not uniformly controlled by it, and neither is the check-before-replace step an atomic file-system compare-and-swap. Cancelling a waiter writes nothing, and the lock cannot be released until the file thread that has already started finishes.
 
-代码入口：[文件定义与路径](../../../agent/infrastructure/tools/files/specs.py)、[读工具](../../../agent/infrastructure/tools/files/queries.py)、[修改](../../../agent/infrastructure/tools/files/mutations.py)、[写队列](../../../agent/infrastructure/tools/files/mutation_queue.py)。验证：[修改回归](../../../test/test_file_mutation_tools.py)、[队列回归](../../../test/test_file_mutation_queue.py)。
+Code entry points: [file definitions and paths](../../../agent/infrastructure/tools/files/specs.py), [read tools](../../../agent/infrastructure/tools/files/queries.py), [mutations](../../../agent/infrastructure/tools/files/mutations.py), [write queue](../../../agent/infrastructure/tools/files/mutation_queue.py). Verification: [mutation regression](../../../test/test_file_mutation_tools.py), [queue regression](../../../test/test_file_mutation_queue.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

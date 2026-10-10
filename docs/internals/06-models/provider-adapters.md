@@ -1,11 +1,13 @@
-# 模型适配：把供应商协议收束为两种调用
+# Model adapters: narrowing provider protocols into two kinds of calls
 
-执行内核只依赖 ChatClient：create 返回完整 ModelCompletion，stream 产生 ModelStreamEvent，close 释放连接。普通回合走流式调用；压缩摘要可以使用带请求级输出上限的完整调用。供应商的消息格式、工具参数和终止原因在适配层转换。
+English | [简体中文](provider-adapters.zh-CN.md)
+
+The execution kernel depends only on ChatClient: `create` returns a complete `ModelCompletion`, `stream` produces `ModelStreamEvent`s, and `close` releases the connection. Ordinary turns use the streaming call; a compaction summary can use the complete call with a request-level output cap. The provider's message format, tool arguments, and finish reasons are converted in the adapter layer.
 
 ~~~mermaid
 flowchart LR
-    R["TurnRunner / 压缩服务"] --> I["ChatClient<br/>create · stream · close"]
-    P["ProviderService<br/>凭证 + 端点 + 模型选择"] --> I
+    R["TurnRunner / compaction service"] --> I["ChatClient<br/>create · stream · close"]
+    P["ProviderService<br/>credentials + endpoint + model selection"] --> I
     I --> C["OpenAI Chat"]
     I --> O["OpenAI Responses"]
     I --> A["Anthropic Messages"]
@@ -14,21 +16,21 @@ flowchart LR
     E --> R
 ~~~
 
-## 一次调用经过什么
+## What one call goes through
 
-1. ProviderService 解析凭证、端点、模型与 reasoning effort，按供应商定义的 api 创建客户端。
-2. 适配器把内部消息和工具声明转成远端格式；图片在这里转换为供应商需要的数据，远端不接收本机文件路径。
-3. 流式增量统一交给内核解析；工具参数可以分块到达，不能把每个片段当成一次完整调用。
-4. 完成原因、用量和错误回到统一模型类型；容器释放时关闭客户端。
+1. ProviderService resolves the credentials, endpoint, model, and reasoning effort, then creates the client according to the api the provider defines.
+2. The adapter converts internal messages and tool declarations into the remote format; images are converted here into the data the provider needs, and the remote side never sees local file paths.
+3. Streaming increments are handed to the kernel to parse uniformly; tool arguments can arrive in chunks, and no single fragment may be treated as a complete tool call.
+4. Finish reasons, usage, and errors return as unified model types; the client is closed when the container is released.
 
-统一接口不代表所有供应商功能相同。图像能力、上下文窗口和支持的 effort 来自[模型目录](model-catalog.md)；LongCat 会清空通用 reasoning_effort，避免发送不支持的字段。当前创建客户端的分支看 definition.api；通用设置中的 api 还用于目录元数据及刷新判断，不能据此推断任意 api 值都能切换适配器。
+A unified interface does not mean every provider offers the same features. Image capability, context window, and the supported efforts come from the [model catalog](model-catalog.md); LongCat clears the generic reasoning_effort to avoid sending an unsupported field. The branch that creates the client looks at definition.api; the api in the general settings is also used for catalog metadata and refresh decisions, so one cannot infer that any api value can switch adapters.
 
-## 取消与重试各有边界
+## Cancellation and retries each have their own boundary
 
-公共取消辅助器同时等待下一项和取消信号，取消与数据同时就绪时优先取消；退出后清理活跃读取任务和订阅。这样上层无需为每种 SDK 重写取消竞争逻辑。
+The shared cancellation helper waits on the next item and the cancellation signal at the same time, and when both are ready, cancellation wins; on exit, it cleans up the active read task and the subscription. This way, upper layers do not have to rewrite the cancellation race logic for every SDK.
 
-重试策略仍有供应商差异：Chat 客户端的 OpenAI SDK 配置 max_retries=14，Responses 使用默认构造参数 2；模型目录刷新另设 0 次 SDK 重试和 10 秒总时限。这些不能合并成“内核统一重试 N 次”。协议兼容也不保证模型会正确调用工具，行为验证仍需区分本地模拟与真实供应商。
+Retry policy still differs by provider: the Chat client's OpenAI SDK is configured with max_retries=14, while Responses uses the default constructor value of 2; model catalog refresh separately uses 0 SDK retries and a 10-second overall limit. These cannot be merged into a claim that "the kernel retries N times uniformly". Protocol compatibility also does not guarantee that a model calls tools correctly; behavior verification still has to distinguish local simulation from real providers.
 
-源码：[端口](../../../agent/application/ports/chat_client.py)、[客户端装配](../../../agent/infrastructure/llm/provider_service.py)、[Chat](../../../agent/infrastructure/llm/openai_chat.py)、[Responses](../../../agent/infrastructure/llm/openai_responses.py)、[Anthropic](../../../agent/infrastructure/llm/anthropic_messages.py)、[Google](../../../agent/infrastructure/llm/google_generative_ai.py)、[取消辅助器](../../../agent/infrastructure/llm/cancellation.py)。验证：[供应商生命周期](../../../test/test_provider_lifecycle.py)、[模拟供应商集成](../../../test/test_provider_e2e.py)。
+Source code: [the port](../../../agent/application/ports/chat_client.py), [client assembly](../../../agent/infrastructure/llm/provider_service.py), [Chat](../../../agent/infrastructure/llm/openai_chat.py), [Responses](../../../agent/infrastructure/llm/openai_responses.py), [Anthropic](../../../agent/infrastructure/llm/anthropic_messages.py), [Google](../../../agent/infrastructure/llm/google_generative_ai.py), [the cancellation helper](../../../agent/infrastructure/llm/cancellation.py). Verification: [provider lifecycle](../../../test/test_provider_lifecycle.py), [fake provider integration](../../../test/test_provider_e2e.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

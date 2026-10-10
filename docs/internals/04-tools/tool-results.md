@@ -1,28 +1,30 @@
-# 工具结果：同一事实，不同阅读预算
+# Tool Results: One Fact, Different Reading Budgets
 
-模型需要足够做下一步的证据；终端需要可扫读的结果；大型输出还需要能继续查阅的文件。Rind 在结果边界生成不同投影，避免三者互相拖累。
+English | [简体中文](tool-results.zh-CN.md)
+
+The model needs enough evidence for its next step; the terminal needs a scannable result; and large output also needs a file that can be consulted further. Rind generates different projections at the result boundary, so that the three do not drag on each other.
 
 ~~~mermaid
 flowchart TB
-    RAW["工具结构化结果"] --> N["ToolResultNormalizer"]
-    N --> UI["terminal_content<br/>展示预算"]
-    N --> MODEL["model_content<br/>模型预算"]
-    N --> DISK[("必要时写 tool-output<br/>返回文件引用")]
-    MODEL --> HISTORY[("保存模型投影")]
-    HISTORY --> NEXT["下一次模型上下文"]
+    RAW["tool structured result"] --> N["ToolResultNormalizer"]
+    N --> UI["terminal_content<br/>display budget"]
+    N --> MODEL["model_content<br/>model budget"]
+    N --> DISK[("write tool-output when needed<br/>return a file reference")]
+    MODEL --> HISTORY[("save the model projection")]
+    HISTORY --> NEXT["next model context"]
 ~~~
 
-统一 payload 使用 ok、tool、data 或 error，并可带 error_type、meta、attachments。Normalizer 默认终端预算 8 KiB，模型预览 25 KiB / 2,000 行；限制按最终 UTF-8 JSON 计量。附件引用单独保留，不因为正文截断丢失图片。
+The unified payload uses ok, tool, data or error, and may carry error_type, meta, and attachments. The Normalizer defaults to a terminal budget of 8 KiB and a model preview of 25 KiB / 2,000 lines; limits are measured on the final UTF-8 JSON. Attachment references are preserved separately, so that an image is never lost to body truncation.
 
-| 结果类型 | 特殊规则 |
+| Result type | Special rules |
 | --- | --- |
-| read_file | 只保留连续完整行，next_offset 指向首个未显示行；不能用首尾拼接假装读过中间部分。 |
-| edit_file / write_file | 模型拿位置与修改统计；有界 diff 留在工具记录和展示路径，避免重复占用上下文。 |
-| 受管任务 | 状态、task_id、输出路径与分页提示一起保留；预览缩短后不保留误导性的续读位置。 |
-| 一般超长结果 | 可写输出文件，预览明确标记截断并给出继续读取路径。 |
+| read_file | Only consecutive complete lines are kept, and next_offset points to the first line not displayed; head and tail must not be spliced together to pretend that the middle was read. |
+| edit_file / write_file | The model gets locations and change statistics; the bounded diff stays in the tool record and on the display path, so that context is not consumed repeatedly. |
+| Managed task | Status, task_id, output path, and paging notice are preserved together; after the preview is shortened, no misleading resume position is kept. |
+| Generically oversized results | An output file may be written; the preview clearly marks the truncation and gives a path for continued reading. |
 
-已保存的 model_content 是重放依据，后续显示规则变化不会重新裁剪旧会话。完整输出也不是无限保证：Shell 有独立输出配额和过期清理，缺失时必须报告原因。
+The saved model_content is the basis for replay; later changes to the display rules do not re-truncate old sessions. Complete output is not guaranteed indefinitely either: Shell has its own output quota and expiry cleanup, and when output is missing the reason must be reported.
 
-代码入口：[结果归一化](../../../agent/application/tools/result_normalizer.py)、[结果契约](../../../agent/domain/tool_result.py)、[输出存储](../../../agent/infrastructure/persistence/tool_output_store.py)。验证：[归一化测试](../../../test/test_tool_result_normalizer.py)、[文件分页](../../../test/test_file_paging.py)。
+Code entry points: [result normalization](../../../agent/application/tools/result_normalizer.py), [result contract](../../../agent/domain/tool_result.py), [output storage](../../../agent/infrastructure/persistence/tool_output_store.py). Verification: [normalization tests](../../../test/test_tool_result_normalizer.py), [file paging](../../../test/test_file_paging.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

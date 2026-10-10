@@ -1,35 +1,37 @@
-# 同一协议，不同连接寿命
+# One protocol, different connection lifetimes
 
-传输层只负责把协议消息送达，不重新实现 Agent 行为。最重要的差异是**谁拥有 Worker 的寿命**。
+English | [简体中文](transports.zh-CN.md)
+
+The transport layer only delivers protocol messages; it does not reimplement Agent behavior. The most important difference is **who owns the Worker's lifetime**.
 
 ~~~mermaid
 flowchart TB
-    CLI["CLI Node 进程"] -->|"stdio / JSONL"| WS["StdioRuntimeServer"]
+    CLI["CLI Node process"] -->|"stdio / JSONL"| WS["StdioRuntimeServer"]
     DESK["Electron main"] -->|"stdio / JSONL"| WS
     WEB["Web / Mobile"] -->|"WebSocket"| WW["WebRuntimeServer"]
-    GATE["Gateway WorkerClient"] -->|"stdio 或 WebSocket"| X["协议连接"]
+    GATE["Gateway WorkerClient"] -->|"stdio or WebSocket"| X["Protocol connection"]
     WS --> D["RuntimeDispatcher"]
     WW --> D
     X --> D
     D --> W["RuntimeWorker"]
 ~~~
 
-stdio 连接与其启动的 Worker 绑定：CLI 和 Gateway 的本地连接关闭 stdin、等待 stdout 排空与进程退出；正常 shutdown 要等待 Worker 自己停止拥有的任务。WebSocket 连接则可以断开和重连，浏览器关闭不会自动杀掉常驻 Worker。Desktop 通过 Electron main 隔离子进程，preload 限制 renderer 可调用的方法。
+A stdio connection is bound to the Worker it starts: local connections from the CLI and Gateway close stdin and wait for stdout to drain and the process to exit; a normal shutdown waits for the Worker to stop the tasks it owns itself. A WebSocket connection, on the other hand, can disconnect and reconnect, and closing the browser does not automatically kill a long-lived Worker. Desktop isolates the subprocess through Electron main, and preload limits the methods the renderer can call.
 
-WebSocket 入口还要验证连接凭证；它不是“把 stdio 换成网络端口”这么简单。协议层的订阅、重放和快照让长连接中断后仍能恢复视图，而执行语义保持在 Worker 内。
+The WebSocket entry point also validates connection credentials; it is not as simple as "swapping stdio for a network port". Subscription, replay, and snapshots at the protocol layer let the view be restored once a long-lived connection drops, while execution semantics stay inside the Worker.
 
-## 连接断开以后，谁还活着
+## After a connection drops, who is still alive
 
-| 入口 | 传输与拥有者 | 断开后的判断 |
+| Entry point | Transport and owner | What to conclude after a disconnect |
 | --- | --- | --- |
-| 本地 CLI / one-shot | Surface 启动 stdio 子进程 | Surface 负责发起正常关闭并等待退出 |
-| Desktop 本地界面 | renderer → preload → main → stdio | main 拥有 Worker，不由单个 UI 组件持有 |
-| 独立 Web | WebSocket → Python WebRuntimeServer | 单个 socket 关闭不等于服务退出 |
-| Desktop 远程访问 | WebSocket → Electron Gateway → 本地 Worker | 远程入口撤销可以保留本地执行 |
-| 消息 Gateway | 自有 WorkerClient 选择 stdio 或 WebSocket | 自己启动的进程与仅连接的服务有不同清理责任 |
+| Local CLI / one-shot | The Surface starts the stdio subprocess | The Surface initiates a normal shutdown and waits for exit |
+| Desktop local interface | renderer → preload → main → stdio | main owns the Worker, not a single UI component |
+| Standalone Web | WebSocket → Python WebRuntimeServer | Closing a single socket is not a service exit |
+| Desktop remote access | WebSocket → Electron Gateway → local Worker | Revoking a remote entry point can preserve local execution |
+| Messaging Gateway | Its own WorkerClient chooses stdio or WebSocket | A process you start yourself and a service you merely connect to carry different cleanup responsibilities |
 
-图中的 WebRuntimeServer 是独立 Python Web 模式；Desktop 远程 Gateway 则是另一条桥接路线。它们共用协议语义，不能据此把认证、进程归属和退出流程画成完全相同的实现。
+The WebRuntimeServer in the diagram is the standalone Python Web mode; the Desktop remote Gateway is a different bridging route. They share protocol semantics, but that does not make authentication, process ownership, and exit flows the same implementation.
 
-代码入口：[stdio](../../../agent/runtime/server/stdio.py)、[WebSocket](../../../agent/runtime/server/websocket.py)、[Desktop bridge](../../../desktop/src/preload/types.ts)。验证：[Web Runtime 测试](../../../test/test_web_runtime.py)、[stdio 关闭测试](../../../test/test_gateway_stdio_shutdown.py)。
+Code entry points: [stdio](../../../agent/runtime/server/stdio.py), [WebSocket](../../../agent/runtime/server/websocket.py), [Desktop bridge](../../../desktop/src/preload/types.ts). Verification: [Web Runtime tests](../../../test/test_web_runtime.py), [stdio shutdown tests](../../../test/test_gateway_stdio_shutdown.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

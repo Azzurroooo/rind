@@ -69,7 +69,7 @@ node frontend-cli/bin/rind.js
 
 阅读下方示例时，源码用户可用 `node /absolute/path/to/rind/frontend-cli/bin/rind.js` 替换 `rind`。
 
-进入 Rind 后，用 `/login` 连接模型供应商，再用 `/model` 选择模型。内置适配支持 OpenAI、Anthropic、Google、DeepSeek 等供应商，也可配置自定义 OpenAI 兼容端点。详细配置与其他客户端的启动方式见[安装与配置指南](docs/internals/README.md)。
+进入 Rind 后，用 `/login` 连接模型供应商，再用 `/model` 选择模型。内置适配支持 OpenAI、Anthropic、Google、DeepSeek 等供应商，也可配置自定义 OpenAI 兼容端点。详细配置与其他客户端的启动方式见[安装与配置指南](docs/internals/README.zh-CN.md)。
 
 **先看懂，再动手。** 交互导览用真实 CLI 布局演示模拟任务，支持暂停、回看和直接跳转到某个功能；不调用模型，也不需要 API Key。
 
@@ -77,7 +77,7 @@ node frontend-cli/bin/rind.js
 rind tour team.create
 ```
 
-导览已合并到 `main`，尚未包含在 v0.8.0 中；现在可通过[源码安装](docs/internals/07-surfaces/interactive-cli.md#从源码运行)体验。运行 `rind tour` 打开目录，也可在会话内输入 `/tour`。
+导览已合并到 `main`，尚未包含在 v0.8.0 中；现在可通过[源码安装](docs/internals/07-surfaces/interactive-cli.zh-CN.md#从源码运行)体验。运行 `rind tour` 打开目录，也可在会话内输入 `/tour`。
 
 ---
 
@@ -98,7 +98,7 @@ rind agents task product project "请安排 reviewer 检查修改，汇总简洁
 
 交付需要有效回执和宿主确认执行结束；失联运行标为 **Unconfirmed（待确认）**，避免自动重复执行。私有对话不广播，交付文件需显式发布。
 
-详见 [Agents Management 使用说明](docs/agents-management.md)，涵盖源码构建、worktree、旧 Team 导入和异常恢复。脚本命令见 `rind agents --help`，支持 `--json`。
+详见 [Agents Management 使用说明](docs/agents-management.zh-CN.md)，涵盖源码构建、worktree、旧 Team 导入和异常恢复。脚本命令见 `rind agents --help`，支持 `--json`。
 
 ---
 
@@ -141,10 +141,10 @@ rind send --session <id> "集成测试失败了，请先排查再继续。"
 | 客户端 | 适用场景 | 从这里开始 |
 | --- | --- | --- |
 | **CLI** | 终端交互、脚本集成 | `rind` |
-| **Desktop** | 可视化管理多个项目 | [从源码启动](docs/internals/07-surfaces/desktop.md#构建与远程访问) |
-| **Web** | 通过浏览器连接常驻 worker | [Docker 或本地部署](docs/internals/07-surfaces/web-and-mobile.md#两种远程入口) |
+| **Desktop** | 可视化管理多个项目 | [从源码启动](docs/internals/07-surfaces/desktop.zh-CN.md#构建与远程访问) |
+| **Web** | 通过浏览器连接常驻 worker | [Docker 或本地部署](docs/internals/07-surfaces/web-and-mobile.zh-CN.md#两种远程入口) |
 | **Mobile** | Android／iOS 远程连接电脑上的 Rind | [手机 App 构建与连接](mobile/README.md) |
-| **消息网关** | 通过 Telegram、Discord、Slack、飞书等适配器工作 | [网关配置](docs/internals/07-surfaces/gateway.md#配置入口) |
+| **消息网关** | 通过 Telegram、Discord、Slack、飞书等适配器工作 | [网关配置](docs/internals/07-surfaces/gateway.zh-CN.md#配置入口) |
 
 使用 Web 端时，关闭浏览器不会终止 worker 中的任务；重新连接后恢复会话视图。本地客户端配置为使用同一个会话存储目录时，也可以重新打开已有会话。
 
@@ -161,9 +161,9 @@ Rind 将客户端、执行过程和基础设施分开。自定义界面收发请
 | 模型或存储适配器 | [应用层接口](agent/application/ports) |
 | 上下文组装与压缩 | [上下文服务](agent/application/context) |
 
-设计细节见[架构](docs/internals/00-architecture/layers-and-composition.md)、[CLI 渲染](docs/internals/07-surfaces/interactive-cli.md)与[导览实现](docs/internals/07-surfaces/interactive-cli.md#tour真实渲染器模拟执行)。完整命令和快捷键可在 Rind 内通过 `/help` 和 `?` 查看。
+设计细节见[架构](docs/internals/00-architecture/layers-and-composition.zh-CN.md)、[CLI 渲染](docs/internals/07-surfaces/interactive-cli.zh-CN.md)与[导览实现](docs/internals/07-surfaces/interactive-cli.zh-CN.md#tour真实渲染器模拟执行)。完整命令和快捷键可在 Rind 内通过 `/help` 和 `?` 查看。
 
-开发环境和测试命令见[开发指南](docs/internals/08-engineering/verification.md)。
+开发环境和测试命令见[开发指南](docs/internals/08-engineering/verification.zh-CN.md)。
 
 ---
 

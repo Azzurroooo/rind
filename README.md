@@ -79,7 +79,7 @@ rind tour agents.tasks
 rind tour login.account
 ```
 
-Run `rind tour` for the catalog, or `/tour` inside a session. Use the [source setup](docs/internals/07-surfaces/interactive-cli.md#从源码运行) to preview the tutorials on your current development branch.
+Run `rind tour` for the catalog, or `/tour` inside a session. Use the [source setup](docs/internals/07-surfaces/interactive-cli.md#running-from-source) to preview the tutorials on your current development branch.
 
 ---
 
@@ -145,10 +145,10 @@ The result is a small idle execution footprint and clear extension boundaries: a
 | Client | What it gives you | Start here |
 | --- | --- | --- |
 | **CLI** | Direct terminal work and script integration | `rind` |
-| **Desktop** | A visual workspace for multiple projects | [Run from source](docs/internals/07-surfaces/desktop.md#构建与远程访问) |
-| **Web** | Browser access to a long-lived worker | [Docker or local setup](docs/internals/07-surfaces/web-and-mobile.md#两种远程入口) |
+| **Desktop** | A visual workspace for multiple projects | [Run from source](docs/internals/07-surfaces/desktop.md#build-and-remote-access) |
+| **Web** | Browser access to a long-lived worker | [Docker or local setup](docs/internals/07-surfaces/web-and-mobile.md#two-remote-entry-points) |
 | **Mobile** | Android/iOS remote access to Rind on your computer | [Build and connect](mobile/README.md) |
-| **Messaging gateway** | Work through Telegram, Discord, Slack, Feishu, and other adapters | [Gateway setup](docs/internals/07-surfaces/gateway.md#配置入口) |
+| **Messaging gateway** | Work through Telegram, Discord, Slack, Feishu, and other adapters | [Gateway setup](docs/internals/07-surfaces/gateway.md#configuration-entry-points) |
 
 With the Web client, closing the browser leaves the worker running; reconnecting restores the session view. Local clients can reopen saved sessions when configured to use the same session store.
 
@@ -165,7 +165,7 @@ Rind separates clients, execution, and infrastructure. A custom interface consum
 | Provider or storage adapter | [Application ports](agent/application/ports) |
 | Context assembly and compaction | [Context services](agent/application/context) |
 
-For the design behind these boundaries, see [Architecture](docs/internals/00-architecture/layers-and-composition.md), [CLI rendering](docs/internals/07-surfaces/interactive-cli.md), and [Tour internals](docs/internals/07-surfaces/interactive-cli.md#tour真实渲染器模拟执行). For commands and shortcuts, use `/help` and `?` inside Rind.
+For the design behind these boundaries, see [Architecture](docs/internals/00-architecture/layers-and-composition.md), [CLI rendering](docs/internals/07-surfaces/interactive-cli.md), and [Tour internals](docs/internals/07-surfaces/interactive-cli.md#tour-a-real-renderer-simulated-execution). For commands and shortcuts, use `/help` and `?` inside Rind.
 
 The [development guide](docs/internals/08-engineering/verification.md) covers setup and tests.
 

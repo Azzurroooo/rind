@@ -1,28 +1,30 @@
-# ToolSpec：把工具实现和公开契约绑在一起
+# ToolSpec: Binding Tool Implementation to the Public Contract
 
-模型看到的是 schema，执行器调用的是函数。ToolSpec 把两者绑定到同一个定义，避免“文档说能传，函数却不接受”的两套接口。
+English | [简体中文](tool-registry.zh-CN.md)
+
+The model sees the schema; the executor calls the function. ToolSpec binds both to a single definition, avoiding the split contract implied by "the docs say you can pass it, but the function does not accept it".
 
 ~~~mermaid
 flowchart LR
-    F["handler + 参数说明"] --> S["ToolSpec<br/>schema / is_async / normalize_arguments"]
+    F["handler + parameter descriptions"] --> S["ToolSpec<br/>schema / is_async / normalize_arguments"]
     S --> C["build_builtin_tool_specs"]
     C --> R["DefaultToolRegistry"]
-    R --> M["advertised schema → 模型"]
-    R --> V["归一化 → 参数校验 → handler"]
+    R --> M["advertised schema → model"]
+    R --> V["normalize → validate arguments → handler"]
 ~~~
 
-ToolSpec 从函数签名生成参数结构，记录是否异步，以及允许传入的参数。注册表拒绝同名工具；advertised=false 的工具仍可被历史调用恢复，但不会作为新能力公布。bash_output 就通过这条窄兼容边界继续支持旧会话。
+ToolSpec derives the argument structure from the function signature, records whether the handler is async, and records which arguments may be passed in. The registry rejects tools with the same name; a tool with advertised=false can still be recovered by historical calls, but it is never published as a new capability. bash_output continues to support old sessions through exactly this narrow compatibility boundary.
 
-参数先过 normalize_arguments，再检查 required 和 unknown。公共参数错误返回 InvalidArguments，并列出 missing、unknown、allowed；运行时注入的 _session_id、_cancellation_token 等不成为模型 schema。这个顺序让旧 file_path 等别名能在校验前转换，又不让未知字段悄悄穿过。
+Arguments first pass through normalize_arguments, and only then are required and unknown checked. Public argument errors return InvalidArguments and list the missing, unknown, and allowed fields; runtime-injected parameters such as _session_id and _cancellation_token never become part of the model schema. This order lets legacy aliases such as file_path be converted before validation, while still preventing unknown fields from slipping through.
 
-工具是否存在取决于装配：Goal 工具只在启用时注册，受管运行由适配器限定可用工具，one-shot 可以关闭用户问答。添加一个工具的正常路径是定义 ToolSpec、在 catalog 中显式装配、覆盖参数和结果契约测试；无需在 TurnRunner 添加同名分支。
+Whether a tool exists depends on assembly: Goal tools are registered only when enabled, managed runs restrict the available tools through an adapter, and one-shot can disable user questions. The normal path for adding a tool is to define a ToolSpec, assemble it explicitly in the catalog, and cover the argument and result contract tests; there is no need to add a same-named branch to TurnRunner.
 
-## 扩展点同时承担约束
+## Extension Points Are Also Constraints
 
-公开 schema 决定模型能请求什么，handler 签名决定执行器能传什么，advertised 决定新回合能看到什么。历史兼容可以只保留执行能力，不继续鼓励模型选择旧工具；运行时私有参数则由系统注入，不允许模型任意覆盖。
+The advertised schema determines what the model can request; the handler signature determines what the executor can pass; advertised determines what new turns can see. Historical compatibility can preserve execution capability only, without continuing to encourage the model to choose the old tool; runtime private parameters are injected by the system, and the model may not override them arbitrarily.
 
-因此新增工具不仅是写一个函数，还要回答三件事：参数如何归一化，成功与失败如何构成结构化结果，在哪种容器配置下暴露。结果大或带图片时再走统一归一化与附件路径，避免一个工具绕开整个系统的输出预算。
+Adding a tool is therefore not only writing a function; it must also answer three questions: how the arguments are normalized, how success and failure form a structured result, and under which container configuration the tool is exposed. Large results and results carrying images then go through the unified normalization and attachment path, so that a single tool cannot bypass the whole system's output budget.
 
-代码入口：[ToolSpec](../../../agent/infrastructure/tools/spec.py)、[catalog](../../../agent/infrastructure/tools/catalog.py)、[registry](../../../agent/infrastructure/tools/registry.py)。验证：[注册表测试](../../../test/test_tool_registry.py)。
+Code entry points: [ToolSpec](../../../agent/infrastructure/tools/spec.py), [catalog](../../../agent/infrastructure/tools/catalog.py), [registry](../../../agent/infrastructure/tools/registry.py). Verification: [registry tests](../../../test/test_tool_registry.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

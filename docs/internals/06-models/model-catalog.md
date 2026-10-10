@@ -1,38 +1,40 @@
-# 模型目录：选择模型，也解析能力
+# Model catalog: choose a model, and resolve capabilities
 
-目录既服务于 /model 菜单，也给内核提供 image_input 和 context_window。模型名称相似不足以证明能力相同；端点和精确模型 ID 才是匹配依据。
+English | [简体中文](model-catalog.zh-CN.md)
+
+The catalog serves the /model menu and also gives the kernel image_input and context_window. Similar model names are not proof of identical capabilities: a match is based on the endpoint and the exact model ID.
 
 ~~~mermaid
 flowchart TD
-    S["当前 provider + endpoint + model ID"] --> C{"同端点缓存含有效能力？"}
-    C -->|"是"| V["采用缓存字段"]
-    C -->|"缺失字段"| B{"官方端点与内建 ID 精确匹配？"}
-    B -->|"是"| F["补充内建能力"]
-    B -->|"否"| U["保留 unknown"]
-    V & F & U --> R["模型能力<br/>图像过滤 / 上下文预算"]
-    T["显式刷新 / 首次初始化后台刷新"] --> N["远端 models.list"]
-    N -->|"成功且非空"| W["替换对应目录缓存"]
-    N -->|"失败或无效"| K["保留已有缓存"]
+    S["current provider + endpoint + model ID"] --> C{"same-endpoint cache with valid capabilities?"}
+    C -->|"yes"| V["use the cached fields"]
+    C -->|"missing field"| B{"exact match on official endpoint and built-in ID?"}
+    B -->|"yes"| F["fill in the built-in capabilities"]
+    B -->|"no"| U["keep unknown"]
+    V & F & U --> R["model capabilities<br/>image filtering / context budget"]
+    T["explicit refresh / background refresh on first initialization"] --> N["remote models.list"]
+    N -->|"success and non-empty"| W["replace that catalog's cache"]
+    N -->|"failure or invalid"| K["keep the existing cache"]
 ~~~
 
-## 读取和刷新分开
+## Reads and refreshes are separate
 
-普通 list_models 不发 HTTP 请求；显式 refresh 才主动拉取，初始化还会安排一次过期缓存刷新。24 小时 TTL 是刷新条件，**不是读取截止时间**：只要端点匹配，过期缓存仍能提供目录。刷新失败返回提示并继续显示已存模型。
+An ordinary list_models sends no HTTP request; only an explicit refresh pulls actively, and initialization also schedules one refresh for a stale cache. The 24-hour TTL is a refresh condition, **not a read deadline**: as long as the endpoint matches, an expired cache still serves the catalog. A failed refresh returns a notice and keeps showing the already-saved models.
 
-成功刷新以新列表为准，远端删除的模型不继续混入列表。旧能力字段只在同端点、同 ID 下补用；空列表、异常和无效 ID 不覆盖旧缓存。即使当前选中的模型不在枚举列表中，目录仍补入该选择，便于展示自定义模型。
+A successful refresh treats the new list as authoritative, and models the remote side deleted are no longer mixed in. Old capability fields are reused only under the same endpoint and the same ID; an empty list, exceptions, and invalid IDs do not overwrite the old cache. Even when the currently selected model is not in the enumerated list, the catalog still adds that selection, so custom models can be displayed.
 
-## 三态能力比猜测更可靠
+## Three-state capabilities are more reliable than guessing
 
-| 字段 | 已知值的作用 | 未知时 |
+| Field | What a known value does | When unknown |
 | --- | --- | --- |
-| image_input | false 时省略图片；true 时允许适配器提交 | 保留尝试路径，不按名称认定支持 |
-| context_window | 为会话上下文预算提供窗口 | 使用内核默认窗口 |
-| reasoning_efforts | 约束菜单和适配器可用级别 | 不凭模型名字补造级别 |
+| image_input | false omits images; true lets the adapter submit them | Keeps the attempt path; does not assume support from the name |
+| context_window | Provides the window for the session context budget | Uses the kernel's default window |
+| reasoning_efforts | Constrains the levels available to the menu and the adapter | Does not invent levels from the model name |
 
-远端字段按供应商已实现的格式读取：例如 OpenRouter 的 architecture.input_modalities/context_length、Mistral 的 capabilities.vision/max_context_length、Groq 的 context_window。内建回退要求官方端点匹配；通用兼容端点也可匹配已知官方目录，DeepSeek 根端点另有 /v1 归一化。换成代理端点后，不应自动继承同名模型的能力。
+Remote fields are read in the formats each provider already implements: for example OpenRouter's architecture.input_modalities/context_length, Mistral's capabilities.vision/max_context_length, and Groq's context_window. The built-in fallback requires the official endpoint to match; a generic compatible endpoint can also match a known official catalog, and the DeepSeek root endpoint additionally has /v1 normalization. After switching to a proxy endpoint, a same-named model must not automatically inherit its capabilities.
 
-这让目录的失效方式保持局部：一次网络刷新失败不阻止离线打开模型菜单，未知能力也不会伪装成确定承诺。
+This keeps the catalog's failure modes local: one failed network refresh does not prevent the model menu from being opened offline, and unknown capabilities do not masquerade as definite promises.
 
-源码：[内建定义](../../../agent/infrastructure/llm/catalog.py)、[缓存和能力解析](../../../agent/infrastructure/llm/provider_service.py)。验证：[目录](../../../test/test_model_catalog.py)、[刷新与端点隔离](../../../test/test_model_cache_refresh.py)。关联：[上下文预算](../02-context/context-budget.md)、[图片输入](../02-context/image-input.md)。
+Source code: [built-in definitions](../../../agent/infrastructure/llm/catalog.py), [cache and capability resolution](../../../agent/infrastructure/llm/provider_service.py). Verification: [catalog](../../../test/test_model_catalog.py), [refresh and endpoint isolation](../../../test/test_model_cache_refresh.py). Related: [context budget](../02-context/context-budget.md), [image input](../02-context/image-input.md).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

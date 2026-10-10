@@ -1,25 +1,27 @@
-# Shell 工具：返回控制权，进程仍有主人
+# Shell Tools: Control Is Returned, the Process Still Has an Owner
 
-bash 的 yield_time_ms 是“等多久再把控制权还给模型”，timeout_ms 才是进程的运行期限。到达前者不会自动杀掉命令。
+English | [简体中文](shell-tools.zh-CN.md)
+
+For bash, yield_time_ms is "how long to wait before returning control to the model"; timeout_ms is the process's runtime deadline. Reaching the former does not automatically kill the command.
 
 ~~~mermaid
 flowchart TD
-    B["bash(command, cwd, yield_time_ms, timeout_ms, notify)"] --> P["命令过滤 + ShellState"]
+    B["bash(command, cwd, yield_time_ms, timeout_ms, notify)"] --> P["command filter + ShellState"]
     P --> S["ProcessSupervisor"]
-    S --> J[("先记启动意图")]
-    J --> OS["启动非交互进程树"]
-    OS --> W{"等待窗口内结束？"}
-    W -->|"是"| RESULT["返回终态"]
-    W -->|"否"| TASK["返回 task_id；同一进程继续"]
-    TASK --> CONTROL["task_control：list / read / wait / cancel"]
+    S --> J[("record the start intent first")]
+    J --> OS["start a non-interactive process tree"]
+    OS --> W{"finished inside the wait window?"}
+    W -->|"yes"| RESULT["return a terminal state"]
+    W -->|"no"| TASK["return task_id; the same process continues"]
+    TASK --> CONTROL["task_control: list / read / wait / cancel"]
 ~~~
 
-默认等待 10 秒，允许 0–60 秒；timeout_ms 可为空，表示无运行期限。ShellState 按会话保留工作目录、环境与 shell 选择，但每次命令都是新进程：命令里的 cd 或 export 不会成为下一次命令的持久 Shell 状态。cwd 覆盖只作用于本次调用。
+The default wait is 10 seconds, and 0–60 seconds is allowed; timeout_ms may be null, meaning no runtime deadline. ShellState keeps the working directory, environment, and shell choice per session, but every command is a new process: cd or export inside a command does not become persistent Shell state for the next command. A cwd override applies only to the current call.
 
-stdin 为 DEVNULL，因此不支持交互式输入。Windows 用 Job Object 管进程树，Unix 用新的进程会话/进程组；取消针对拥有的进程树。输出一边排空一边落盘，读游标绑定 task_id，多读者各自推进，不抢走彼此输出。
+stdin is DEVNULL, so interactive input is not supported. Windows uses Job Objects to manage process trees, and Unix uses a new process session/process group; cancellation targets the owned process tree. Output is drained while it is written to disk, read cursors are bound to task_id, and multiple readers each advance independently without stealing each other's output.
 
-BashPolicy 是少量危险命令的调用过滤，不是脚本沙箱。Worker 关闭要停止 owned tasks；交给后台也不意味着可以留下独立守护进程。
+BashPolicy is a call filter for a small number of dangerous commands, not a script sandbox. Worker shutdown must stop owned tasks; handing a command to the background does not mean an independent daemon may be left behind.
 
-代码入口：[ShellTools](../../../agent/infrastructure/tools/shell/tool.py)、[进程监督](../../../agent/infrastructure/tools/shell/supervisor.py)、[进程树](../../../agent/infrastructure/tools/shell/process_tree.py)。验证：[Shell 参数与生命周期](../../../test/test_shell_tasks.py)、[进程监督](../../../test/test_process_supervisor.py)。
+Code entry points: [ShellTools](../../../agent/infrastructure/tools/shell/tool.py), [process supervision](../../../agent/infrastructure/tools/shell/supervisor.py), [process tree](../../../agent/infrastructure/tools/shell/process_tree.py). Verification: [shell arguments and lifecycle](../../../test/test_shell_tasks.py), [process supervision](../../../test/test_process_supervisor.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

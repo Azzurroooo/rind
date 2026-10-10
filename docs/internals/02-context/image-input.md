@@ -1,20 +1,22 @@
-# 图片是会话快照，不是临时路径
+# Images are session snapshots, not temporary paths
 
-用户上传和 read_file 读出的图片都经过会话快照边界。模型适配器拿到的是经过处理的字节，不会在稍后重新打开工作区原图。
+English | [简体中文](image-input.zh-CN.md)
+
+Both user uploads and images read out by read_file pass through the session snapshot boundary. What the model adapter receives is the processed bytes; it never reopens the original workspace image at a later point.
 
 ~~~mermaid
 flowchart LR
-    SRC["本地图片 / uploads 引用 / read_file"] --> PROC["解码 · 方向修正 · 缩放"]
-    PROC --> SNAP[("会话 attachments 快照")]
-    SNAP --> REF["消息中的附件引用"]
-    REF --> LOAD["请求前读取快照"]
-    LOAD --> ADAPTER["Provider 图片块"]
+    SRC["Local images / uploads references / read_file"] --> PROC["Decode - orientation fix - scale"]
+    PROC --> SNAP[("Session attachments snapshot")]
+    SNAP --> REF["Attachment references in messages"]
+    REF --> LOAD["Read the snapshot before the request"]
+    LOAD --> ADAPTER["Provider image block"]
 ~~~
 
-支持 PNG、JPEG、WebP、GIF、BMP；动画取首帧。源文件最多 20 MiB、4,000 万像素，处理后最长边 2,000 像素且输出不超过 3 MiB。一次模型请求最多 8 张、编码后总量最多 16 MiB。明确不支持图像的模型不发送图片并给出提示；能力未知时提示后尝试，不能把未知写成支持。
+PNG, JPEG, WebP, GIF, and BMP are supported; animated images use the first frame. Source files are at most 20 MiB and 40 million pixels; after processing, the longest edge is 2,000 pixels and the output does not exceed 3 MiB. One model request allows at most 8 images and at most 16 MiB in total after encoding. Models that explicitly do not support images are not sent any and get a notice; when the capability is unknown, the system gives a notice and then tries, and an unknown capability must never be recorded as support.
 
-附件跟随消息和工具结果持久化；fork 会复制相关快照。压缩后旧图片不会自动再次附着到模型请求，handoff 保存引用供后续 read_file 查看。图片 I/O 在线程中进行，取消要等待已开始的 Pillow 操作收尾；trace 会遮盖图片字节。
+Attachments are persisted along with messages and tool results, and a fork copies the relevant snapshots. After compaction, old images are not automatically attached to model requests again; the handoff saves references for later inspection with read_file. Image I/O runs on a thread, and cancellation must wait for started Pillow operations to finish; trace masks the image bytes.
 
-代码入口：[图片处理](../../../agent/infrastructure/images.py)、[请求准备](../../../agent/application/images.py)、[附件存储](../../../agent/infrastructure/persistence/image_attachments.py)。验证：[图片附件](../../../test/test_image_attachments.py)、[请求序列化](../../../test/test_image_requests.py)。
+Code entry points: [image processing](../../../agent/infrastructure/images.py), [request preparation](../../../agent/application/images.py), [attachment storage](../../../agent/infrastructure/persistence/image_attachments.py). Verification: [image attachments](../../../test/test_image_attachments.py), [request serialization](../../../test/test_image_requests.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

@@ -1,25 +1,27 @@
-# Web 工具：检索与正文提取分开
+# Web Tools: Search and Body Extraction Are Separate
 
-search_web 给出候选链接，fetch_web_page 提取页面正文。二者共享 Worker 的 WebSessions，仍通过普通工具结果边界进入模型。
+English | [简体中文](web-tools.zh-CN.md)
+
+search_web provides candidate links, and fetch_web_page extracts the page body. The two share the Worker's WebSessions, yet still reach the model through the ordinary tool result boundary.
 
 ~~~mermaid
 flowchart TB
-    Q["检索词"] --> LANG{"含中文？"}
-    LANG -->|"是"| B["Baidu → Bing → DDG"]
-    LANG -->|"否"| E["Bing → Baidu → DDG"]
-    B --> LINKS["首个有结果的引擎"]
+    Q["search query"] --> LANG{"contains Chinese?"}
+    LANG -->|"yes"| B["Baidu → Bing → DDG"]
+    LANG -->|"no"| E["Bing → Baidu → DDG"]
+    B --> LINKS["the first engine with results"]
     E --> LINKS
     LINKS --> FETCH["fetch_web_page"]
-    FETCH --> EXTRACT["trafilatura → 宽松提取 → BS4"]
-    EXTRACT --> N["统一结果归一化"]
+    FETCH --> EXTRACT["trafilatura → relaxed extraction → BS4"]
+    EXTRACT --> N["unified result normalization"]
 ~~~
 
-搜索结果数量限制在 1–10，默认 5。失败或无结果时尝试下一个引擎；全部无结果返回空列表，并在 meta 中保留引擎错误。这个回退提高可用性，却不是对实时搜索成功率的保证。
+The number of search results is limited to 1–10, with a default of 5. On failure, or when a given engine returns no results, the next engine is tried; when all engines return nothing, an empty list is returned and the engine errors are preserved in meta. This fallback improves availability, but it is not a guarantee of the real-time search success rate.
 
-抓取用流式下载限制正文到 10 MiB，最多跟随 5 次重定向，单次 HTTP 请求 timeout=15。trafilatura 先精确提取含表格的 Markdown，失败再降低精度，最后用 BeautifulSoup 去除脚本、导航等标签提取文字。解析得到的长正文交给通用 ToolResultNormalizer 处理。
+Fetching uses a streaming download bounded to a 10 MiB body, follows at most 5 redirects, and uses timeout=15 for a single HTTP request. trafilatura first precisely extracts Markdown including tables; on failure it drops precision, and finally BeautifulSoup strips script, navigation, and similar tags to extract the text. The long extracted body is then handed to the generic ToolResultNormalizer.
 
-Web 内容仍是外部数据，不因为转成 Markdown 就变成可信指令。取消在下载块、重定向及提取阶段边界检查；同步网络调用正在等待时，响应速度仍受请求 timeout 约束。
+Web content is still external data, and does not become a trusted instruction just because it was converted to Markdown. Cancellation is checked at the download-chunk, redirect, and extraction stage boundaries; while a synchronous network call is waiting, the response speed is still constrained by the request timeout.
 
-代码入口：[搜索](../../../agent/infrastructure/tools/web/search.py)、[抓取](../../../agent/infrastructure/tools/web/fetch.py)、[会话池](../../../agent/infrastructure/tools/web/session_pool.py)。验证：[本地 Web 工具回归](../../../test/test_web_tool.py)。
+Code entry points: [search](../../../agent/infrastructure/tools/web/search.py), [fetch](../../../agent/infrastructure/tools/web/fetch.py), [session pool](../../../agent/infrastructure/tools/web/session_pool.py). Verification: [local web tool regression](../../../test/test_web_tool.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

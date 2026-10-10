@@ -1,32 +1,34 @@
-# 受管任务：命令、等待和通知各有状态
+# Managed tasks: the command, the wait, and the notification each have their own state
 
-一个命令可以仍在运行，而调用它的工具已经返回。Rind 用 task_id 跟踪同一进程，handoff 记录它是否已交给后台，notify 决定结束后怎样继续。
+English | [简体中文](managed-tasks.zh-CN.md)
+
+A command can still be running after the tool call that started it has already returned. Rind tracks the process itself with task_id, handoff records whether it has been moved to the background, and notify decides how to continue once it ends.
 
 ~~~mermaid
 stateDiagram-v2
-    [*] --> Starting: 先保存启动意图
-    Starting --> Running: 启动成功
-    Starting --> Failed: 启动失败
-    Running --> Running: 等待超时或 release_wait，交回控制权
-    Running --> Completed: 退出码为 0
-    Running --> Failed: 非零退出或执行错误
-    Running --> Cancelled: 显式取消
-    Running --> TimedOut: 到达运行期限
-    Running --> Lost: 失去可确认的进程所有权
+    [*] --> Starting: Persist the startup intent first
+    Starting --> Running: Startup succeeded
+    Starting --> Failed: Startup failed
+    Running --> Running: Wait timeout or release_wait hands back control
+    Running --> Completed: Exit code is 0
+    Running --> Failed: Non-zero exit or execution error
+    Running --> Cancelled: Explicit cancellation
+    Running --> TimedOut: Run deadline reached
+    Running --> Lost: Confirmable process ownership lost
 ~~~
 
-| 控制 | 改变什么 | 不代表什么 |
+| Control | What it changes | What it does not mean |
 | --- | --- | --- |
-| yield_time_ms | 首次工具调用的等待窗口 | 进程运行期限 |
-| timeout_ms | 命令允许运行的期限 | 模型请求超时 |
-| task_control read / wait | 查看输出或有界等待 | 领取并移除输出 |
-| rind/task/release_wait | 提前释放当前等待 | 终止进程 |
-| task_control cancel | 终止拥有的进程树 | 删除历史任务记录 |
+| yield_time_ms | The wait window for the first tool call | The process run deadline |
+| timeout_ms | How long the command may run | The model request timeout |
+| task_control read / wait | View output or a bounded wait | Claim and remove output |
+| rind/task/release_wait | Release the current wait early | Terminate the process |
+| task_control cancel | Terminate the owned process tree | Delete historical task records |
 
-notify=on_exit 用于结束后还要处理结果的命令；notify=manual 适合服务或 watcher，需自行检查就绪，不能靠进程还活着证明服务可用。UI 的 background_wait 只统计当前 Worker 已提交并交给后台的 on_exit 任务，且受中断、Goal 和请求作用域约束；它不是“所有后台进程个数”。
+notify=on_exit is for commands whose results still need handling after they end; notify=manual suits services and watchers, which must check readiness themselves and cannot treat a still-running process as proof that the service is available. The UI's background_wait counts only the on_exit tasks the current Worker has committed and handed to the background, and is bounded by interruption, Goal, and request scope; it is not a count of "all background processes".
 
-默认 ProcessSupervisor 最多保留 8 个受管理的进程记录，结束后符合条件的记录会退休，持久事实仍在日志中。任务监视与模型回合分开，因此模型空闲时仍能收到输出和终态。
+ProcessSupervisor keeps at most 8 managed-process records by default; once a process ends, eligible records are retired, while the durable facts remain in the journal. Task monitoring runs separately from the model turn, so output and the terminal state can still arrive while the model is idle.
 
-代码入口：[监督器](../../../agent/infrastructure/tools/shell/supervisor.py)、[任务状态](../../../agent/domain/tasks.py)、[background_wait](../../../agent/runtime/server/execution.py)。验证：[Shell 任务](../../../test/test_shell_tasks.py)、[后台等待](../../../test/test_bash_background_wait.py)。
+Code entry points: [supervisor](../../../agent/infrastructure/tools/shell/supervisor.py), [task state](../../../agent/domain/tasks.py), [background_wait](../../../agent/runtime/server/execution.py). Verification: [Shell tasks](../../../test/test_shell_tasks.py), [background wait](../../../test/test_bash_background_wait.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

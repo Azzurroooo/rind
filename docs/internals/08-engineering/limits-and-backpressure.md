@@ -1,37 +1,39 @@
-# 有界系统：在数据放大的地方设置出口
+# A bounded system: exits where data is amplified
 
-低常驻负载靠按需容器，高峰负载则靠局部上限。模型流、输入队列、工具结果和进程输出使用不同策略：该等待的等待，该截断的截断，该拒绝的明确失败。
+English | [简体中文](limits-and-backpressure.zh-CN.md)
+
+Low resident load is carried by on-demand containers, peak load by local bounds. The model stream, input queues, tool results, and process output use different strategies: wait where waiting is needed, truncate where truncation is needed, and fail explicitly where input must be rejected.
 
 ~~~mermaid
 flowchart TB
-    M["模型流"] --> Q["256 events / 1 MiB<br/>满时等待"]
-    Q --> C["文字合批<br/>25ms / 8KiB"]
-    C --> T["CLI stdout<br/>write=false 等 drain"]
-    P["Shell 输出"] --> D["磁盘配额<br/>32MiB 含索引"]
-    D --> R["分页读取 / 有界结果"]
-    R --> X["ContextManager<br/>预算 / 压缩"]
+    M["Model stream"] --> Q["256 events / 1 MiB<br/>wait when full"]
+    Q --> C["Text batching<br/>25ms / 8KiB"]
+    C --> T["CLI stdout<br/>write=false waits for drain"]
+    P["Shell output"] --> D["Disk quota<br/>32MiB including the index"]
+    D --> R["Paginated reads / bounded results"]
+    R --> X["ContextManager<br/>budget / compaction"]
     X --> M
 ~~~
 
-| 位置 | 当前上限或默认值 | 达到边界后的行为 |
+| Location | Current bound or default | Behavior at the boundary |
 | --- | --- | --- |
-| 模型流事件队列 | 256 个事件、1 MiB；单事件不能超过 1 MiB | 生产者等待空间；超大单事件报错 |
-| 文本与工具参数增量 | 每片最多 2,048 字符 | 限制一次事件的尺寸，不丢内容 |
-| steering / follow-up | 每队列 4 项、合计 8,000 字符 | 拒绝新输入，保留已有队列 |
-| 工具投影 | terminal 8 KiB；model 25 KiB / 2,000 行 | 归一化与截断，按契约读取完整输出 |
-| Shell supervisor | 默认 8 个未退役任务记录 | 达到容量后拒绝新任务 |
-| 进程输出落盘 | 默认 32 MiB，包含索引 | 记录超限信息，继续排空并丢弃超额输出 |
-| 普通文件 read | 一次源内容最多 50 KiB | 分页；不同于模型投影上限 |
-| 图片 | 单源 20 MiB / 4,000 万像素；规范化后 3 MiB | 拒绝或缩放；请求另限 8 张 / 16 MiB 编码数据 |
+| Model stream event queue | 256 events, 1 MiB; a single event may not exceed 1 MiB | Producers wait for space; an oversized single event raises an error |
+| Text and tool argument deltas | At most 2,048 characters per piece | Bounds the size of one event without dropping content |
+| steering / follow-up | 4 items per queue, 8,000 characters in total | Rejects new input and keeps the existing queues |
+| Tool projection | terminal 8 KiB; model 25 KiB / 2,000 lines | Normalization and truncation; the full output is read per the contract |
+| Shell supervisor | 8 not-yet-retired task records by default | Rejects new tasks once capacity is reached |
+| Process output to disk | 32 MiB by default, including the index | Records the over-limit information, keeps draining, and discards output beyond the bound |
+| Ordinary file read | At most 50 KiB of source content per call | Paginates; different from the model projection bound |
+| Images | 20 MiB / 40 million pixels per source; 3 MiB after normalization | Rejected or scaled; a request is separately limited to 8 images / 16 MiB of encoded data |
 
-这些值分别属于不同单位：字符、UTF-8 字节、行和 token 不可互换；一条 2,048 字符的 CJK 文本可能远大于 2 KiB。表中默认值也不是整机内存的总上限。
+These values are in different units: characters, UTF-8 bytes, lines, and tokens are not interchangeable, and a 2,048-character CJK text can be far larger than 2 KiB. The defaults in the table are also not a total memory bound for the whole machine.
 
-## 为什么不能只有一个总开关
+## Why there cannot be a single master switch
 
-如果输出超限后停止读取子进程管道，子进程可能因管道写满而卡住，因此 supervisor 继续排空。如果把“取消”也塞进已满事件队列，取消就会等待消费；stream pump 用队列外的任务取消和完成唤醒解除这一依赖。
+If reading from the child process pipe stopped as soon as output exceeded the limit, the child could stall because the pipe filled up, so the supervisor keeps draining. If "cancellation" were also pushed into an already full event queue, the cancellation would wait for consumption; the stream pump therefore uses out-of-queue task cancellation and completion wakeups to remove that dependency.
 
-同样，低负载不意味着任何缓存都清零：Worker 仍保有受管任务、有限会话/任务缓存和连接；磁盘任务日志需要维护才能缩减。应从资源拥有者和退役条件分析上限，不能只看一个数组长度。
+Likewise, low load does not mean every cache is cleared: the Worker still holds managed tasks, bounded session/task caches, and connections, and the on-disk task journal needs maintenance to shrink. Bounds should be analyzed from the resource owner and the retirement conditions, not from a single array length.
 
-源码：[流式背压](../../../agent/runtime/core/stream_pump.py)、[CLI drain](../../../frontend-cli/lib/tui/tui.js)。机制与测试入口：[输入队列](../01-runtime/input-queues.md)、[结构化结果](../04-tools/tool-results.md)、[后台任务](../05-autonomy/managed-tasks.md)、[图片](../02-context/image-input.md)。验证：[流 pump](../../../test/test_stream_pump.py)、[运行时流](../../../test/test_runtime_stream_pump.py)。
+Source code: [stream backpressure](../../../agent/runtime/core/stream_pump.py), [CLI drain](../../../frontend-cli/lib/tui/tui.js). Mechanisms and test entry points: [input queues](../01-runtime/input-queues.md), [structured results](../04-tools/tool-results.md), [managed tasks](../05-autonomy/managed-tasks.md), [images](../02-context/image-input.md). Verification: [stream pump](../../../test/test_stream_pump.py), [runtime stream](../../../test/test_runtime_stream_pump.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

@@ -1,33 +1,35 @@
-# Plan：保存步骤状态，压缩时保住进度
+# Plan: Persist Step State, Preserve Progress During Compaction
 
-计划是当前会话的控制状态。update_plan 每次提交完整列表，避免增删单个步骤时产生难以追踪的局部变更。
+English | [简体中文](plan.zh-CN.md)
+
+The plan is the current session's control state. update_plan submits a complete list every time, avoiding hard-to-track partial changes when individual steps are added or removed.
 
 ~~~mermaid
 flowchart LR
-    M["update_plan：完整有序列表"] --> V["normalize_plan"]
-    V --> F[("会话 plan.json")]
+    M["update_plan: complete ordered list"] --> V["normalize_plan"]
+    V --> F[("session plan.json")]
     F --> S["build_plan_snapshot"]
-    S --> H["压缩 handoff 附加计划快照"]
+    S --> H["compaction handoff attaches the plan snapshot"]
     M --> E["plan_updated / tool_result"]
-    E --> UI["Surface 计划视图"]
+    E --> UI["Surface plan view"]
 ~~~
 
-每项包含 step 和 status；状态是 pending、in_progress、completed、cancelled，最多一个 in_progress。数组顺序就是显示与执行优先级；空列表清空计划。文件写入使用同目录临时文件和替换，要求会话已经持久化。
+Each item contains step and status; the statuses are pending, in_progress, completed, and cancelled, with at most one in_progress. Array order is the display and execution priority; an empty list clears the plan. File writes use a temporary file in the same directory and a replacement, and require the session to already be persisted.
 
-压缩时，CompactionService 读取当前 plan.json 的有界摘要并附到 handoff，因此模型不只依赖对话中很早以前的 update_plan 调用。计划描述“还要做什么”，不应承载事实研究笔记。
+During compaction, CompactionService reads a bounded summary of the current plan.json and attaches it to the handoff, so the model does not depend solely on an update_plan call from much earlier in the conversation. A plan describes "what still needs to be done" and should not carry factual research notes.
 
-plan_updated 事件在 TurnRunner 解析模型调用时就会发出；它不能单独证明 plan.json 写入成功，最终要看 tool_result。这个区别也适用于 UI：声明准备更新和已提交更新是不同阶段。
+The plan_updated event is emitted as soon as TurnRunner parses the model's call; by itself it cannot prove that the plan.json write succeeded, and in the end it is the tool_result that counts. This distinction also applies to the UI: declaring that an update is about to happen and having committed an update are different stages.
 
-## 同一个计划只有一份当前值
+## One Plan Has Only One Current Value
 
 ~~~json
-{"plan":[{"step":"定位失败","status":"completed"},{"step":"修复并运行回归","status":"in_progress"}]}
+{"plan":[{"step":"Locate the failure","status":"completed"},{"step":"Fix and run the regression","status":"in_progress"}]}
 ~~~
 
-这是 update_plan 的参数形状，不是 plan.json 的完整磁盘格式；磁盘文件还带 schema_version。下一次提交必须给出完整的新列表，旧步骤若不在列表中就不属于当前计划。写入时的 schema 与状态校验防止 UI 和模型各自猜测一套计划结构。
+This is the shape of update_plan's arguments, not the complete on-disk format of plan.json; the on-disk file also carries schema_version. The next submission must provide a complete new list; an old step that is not in the list is not part of the current plan. The schema and status validation performed at write time prevents the UI and the model from each guessing their own plan structure.
 
-计划文件损坏时不能把它默认为“任务都完成了”。读取错误需要明确报告，压缩附加计划采用尽力读取；即使计划缺席，原始工具与消息事实仍可用于追溯，但新 handoff 不应虚构进度。
+A corrupted plan file must not be treated by default as "all tasks are done". Read errors must be reported clearly, and attaching the plan during compaction uses best-effort reading; even when the plan is absent, the original tool and message facts remain available for tracing, but a new handoff must not fabricate progress.
 
-代码入口：[计划工具](../../../agent/infrastructure/tools/planning.py)、[计划存储](../../../agent/infrastructure/persistence/plan.py)、[计划规范](../../../agent/domain/planning.py)。验证：[计划工具](../../../test/test_plan_tool.py)、[会话隔离](../../../test/test_plan_session_isolation.py)、[压缩摘要](../../../test/test_plan_context_summary.py)。
+Code entry points: [plan tools](../../../agent/infrastructure/tools/planning.py), [plan storage](../../../agent/infrastructure/persistence/plan.py), [plan specification](../../../agent/domain/planning.py). Verification: [plan tools](../../../test/test_plan_tool.py), [session isolation](../../../test/test_plan_session_isolation.py), [compaction summary](../../../test/test_plan_context_summary.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

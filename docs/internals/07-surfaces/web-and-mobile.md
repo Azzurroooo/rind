@@ -1,28 +1,30 @@
-# Web 与 Mobile：共享 Surface，替换平台能力
+# Web and Mobile: sharing a Surface, swapping platform capabilities
 
-Web Surface 使用 React/Vite 和一个可重连的 WebSocket runtime client。Mobile 复用同一套 React 组件，通过 `SurfacePlatform` 注入 Capacitor 能力：安全存储、扫码、系统生命周期、原生 HTTP 与分享。
+English | [简体中文](web-and-mobile.zh-CN.md)
+
+The Web Surface uses React/Vite and a reconnectable WebSocket runtime client. Mobile reuses the same React components, injecting Capacitor capabilities through `SurfacePlatform`: secure storage, code scanning, system lifecycle, native HTTP, and sharing.
 
 ~~~mermaid
 flowchart LR
-    UI["共享 React Surface"] --> P["SurfacePlatform"]
-    P --> B["浏览器：fetch + sessionStorage"]
-    P --> N["Mobile：Capacitor secure storage / native HTTP"]
+    UI["Shared React Surface"] --> P["SurfacePlatform"]
+    P --> B["Browser: fetch + sessionStorage"]
+    P --> N["Mobile: Capacitor secure storage / native HTTP"]
     B & N --> T["ticket / credential provider"]
     T --> WS["WebSocket runtime client"]
-    WS --> W["Worker app-server --web 或 Desktop Gateway"]
+    WS --> W["Worker app-server --web or Desktop Gateway"]
 ~~~
 
-client 为请求分配 request_id，区分 event 与 response；连接建立后每 10 秒 ping，25 秒没有存活信号就关闭。断线按 500ms 起步、最多 8 秒的退避重连，未完成请求被拒绝；401/403 或 4401 进入 unauthorized，不盲目重试。长请求（prompt、compact、command）默认 15 分钟，普通请求 30 秒。
+The client assigns a request_id to each request and distinguishes events from responses. Once the connection is established it pings every 10 seconds and closes if no sign of life appears within 25 seconds. Reconnection after a disconnect uses backoff starting at 500ms and capped at 8 seconds, and unfinished requests are rejected; a 401/403 or a 4401 moves the client to unauthorized, with no blind retries. Long requests (prompt, compact, command) default to 15 minutes, and ordinary requests to 30 seconds.
 
-Web 的 ticket 存在 sessionStorage；移动端通过原生 ticketFetch 禁止重定向，要求 HTTPS（本地配对地址除外）并使用有限超时。Desktop Gateway 的一次性 ticket 有 60 秒有效期，WebSocket 连接数和订阅数都有上限；Origin 只是来源校验，仍必须消费 ticket。
+On the Web the ticket is stored in sessionStorage; on mobile, the native ticketFetch forbids redirects, requires HTTPS (except for local pairing addresses), and uses a bounded timeout. A Desktop Gateway one-time ticket is valid for 60 seconds, and both the WebSocket connection count and the subscription count are capped. Origin is only a source check; a ticket must still be consumed.
 
-Mobile 不运行 Python、模型或 shell；它是远程 Surface。前端配置的 Worker 地址必须是显式 ws/wss URL，不能携带用户名、密码、query 或 hash，避免把旧链接当成隐式重定向。
+Mobile does not run Python, models, or shell; it is a remote Surface. The Worker address configured in the frontend must be an explicit ws/wss URL with no username, password, query, or hash, so that an old link cannot be treated as an implicit redirect.
 
-## 两种远程入口
+## Two remote entry points
 
-Desktop 远程访问直接复用其存活 Worker；独立部署则运行 Python app-server --web，浏览器关闭后服务继续存活。连接恢复后上层重新初始化、订阅并结合历史光标恢复视图，客户端不会自动重新发送所有失败请求，以免重复副作用。见[重放](../01-runtime/replay-and-resubscribe.md)。
+Desktop remote access reuses its live Worker directly; a standalone deployment runs Python app-server --web, and the service stays alive after the browser is closed. After the connection is restored the upper layer re-initializes, resubscribes, and restores the view together with the historical cursor; the client does not automatically resend every failed request, to avoid duplicate side effects. See [replay](../01-runtime/replay-and-resubscribe.md).
 
-独立 Docker 部署在仓库根目录的 .env 中设置：
+A standalone Docker deployment sets, in .env at the repository root:
 
 ~~~dotenv
 RIND_SERVER_TOKEN=replace-with-a-long-random-token
@@ -30,10 +32,10 @@ RIND_WORKSPACE=/absolute/path/to/project
 RIND_HOME=/absolute/path/to/rind-data
 ~~~
 
-将供应商 settings.json 放入选定数据目录，再执行 `docker compose up -d --build`，访问 http://localhost:8080。Compose 强制要求 RIND_SERVER_TOKEN，默认浏览器入口只绑定 127.0.0.1。RIND_WEB_PORT、RIND_WEB_BIND 可改变入口；公网使用需配套 TLS 代理。
+Place the provider settings.json in the chosen data directory, then run `docker compose up -d --build` and visit http://localhost:8080. Compose makes RIND_SERVER_TOKEN mandatory, and the default browser entry binds only to 127.0.0.1. RIND_WEB_PORT and RIND_WEB_BIND can change the entry; public use requires a matching TLS proxy.
 
-Mobile 的开发构建、原生平台前置条件见 [mobile/README](../../../mobile/README.md)，Web 本地 Vite 代理见 [frontend-web/README](../../../frontend-web/README.md#local-development)。设备验收与模拟浏览器回归按[验证篇](../08-engineering/verification.md)区分，不能用 Web 通过推断扫码、键盘或系统分享已通过。
+For Mobile's development build and native platform prerequisites, see [mobile/README](../../../mobile/README.md); for Web's local Vite proxy, see [frontend-web/README](../../../frontend-web/README.md#local-development). Device acceptance and simulated browser regression are separated by the [verification article](../08-engineering/verification.md): a pass on Web does not imply that code scanning, the keyboard, or system sharing has also passed.
 
-源码：[Web runtime client](../../../frontend-web/src/runtimeClient.js)、[平台注入](../../../frontend-web/src/platform.jsx)、[ticket](../../../frontend-web/src/ticket.js)、[Mobile native bridge](../../../mobile/src/native.js)、[Mobile app](../../../mobile/src/MobileApp.jsx)、[Compose](../../../docker-compose.yml)。验证：[Web 客户端](../../../frontend-web/src/runtimeClient.test.js)、[Mobile ticket](../../../mobile/src/native.test.js)、[Mobile pairing](../../../mobile/src/MobileApp.test.jsx)。
+Source: [Web runtime client](../../../frontend-web/src/runtimeClient.js), [platform injection](../../../frontend-web/src/platform.jsx), [ticket](../../../frontend-web/src/ticket.js), [Mobile native bridge](../../../mobile/src/native.js), [Mobile app](../../../mobile/src/MobileApp.jsx), [Compose](../../../docker-compose.yml). Verification: [Web client](../../../frontend-web/src/runtimeClient.test.js), [Mobile ticket](../../../mobile/src/native.test.js), [Mobile pairing](../../../mobile/src/MobileApp.test.jsx).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

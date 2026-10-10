@@ -1,24 +1,26 @@
-# 取消与恢复：停止当前动作，保住已提交事实
+# Cancellation and recovery: stop the current action, keep the committed facts
 
-取消不是删除历史。它通过 token 打断模型或工具读取，保留已经落盘的消息与任务事实；恢复则从未闭合的边界继续，而不是盲目重做。
+English | [简体中文](cancellation-and-recovery.zh-CN.md)
+
+Cancellation is not deleting history. It uses a token to interrupt model or tool reads, keeping already-persisted messages and task facts; recovery continues from the unclosed boundary instead of blindly redoing work.
 
 ~~~mermaid
 flowchart TD
     C["session/cancel"] --> T["CancellationToken"]
-    T --> M["取消模型当前读取"]
-    T --> X["通知工具等待"]
-    M --> END["turn_cancelled 落盘"]
+    T --> M["Cancel the model's current read"]
+    T --> X["Notify tools to wait"]
+    M --> END["turn_cancelled persisted"]
     X --> END
-    R["恢复 running 回合"] --> P{"有未闭合工具调用？"}
-    P -->|"有"| D["检查已提交结果并补完"]
-    P -->|"无"| S["重新构造上下文"]
+    R["Resume a running turn"] --> P{"Any unclosed tool calls?"}
+    P -->|"Yes"| D["Check committed results and complete them"]
+    P -->|"No"| S["Rebuild the context"]
     D --> S
 ~~~
 
-TurnRunner 对 stream_interrupted 有有界的步骤重试，并持久化重试次数；工具处理器按 call ID 复用已保存的结果，包括失败结果。恢复时若调用缺失结果，会记录“可能执行过也可能未执行”的明确占位，不能假装恰好一次。取消中的文件线程会等待已经开始的写入结束；后台进程需要独立的任务取消或 Worker 关闭处理。
+TurnRunner has a bounded step retry for stream_interrupted and persists the retry count; the tool processor reuses saved results by call ID, including failed results. If a call is missing its result during recovery, an explicit placeholder is written noting that it "may have executed or may not have", and it must not pretend to be exactly once. File threads under cancellation wait for already-started writes to finish; background processes need separate task cancellation or handling during Worker shutdown.
 
-用户中断会抑制自动续接，活跃 Goal 改为 paused；失败会令活跃 Goal blocked。Worker 正常关闭要尝试终止自己拥有的进程并等监视任务结束；强制杀死无响应 Worker 不能保证所有子进程都已清理。
+A user interruption suppresses automatic continuation and sets the active Goal to paused; a failure sets the active Goal to blocked. A normal Worker shutdown tries to terminate the processes it owns and wait for monitor tasks to end; force-killing an unresponsive Worker cannot guarantee that every child process has been cleaned up.
 
-代码入口：[取消 token](../../../agent/domain/cancellation.py)、[TurnRunner](../../../agent/runtime/core/turn_runner.py)、[执行协调](../../../agent/runtime/server/execution.py)。验证：[取消测试](../../../test/test_cancellation_token.py)、[任务恢复](../../../test/test_task_continuation.py)、[失败边界](../../../test/test_failure_boundaries.py)。
+Code entry points: [the cancellation token](../../../agent/domain/cancellation.py), [TurnRunner](../../../agent/runtime/core/turn_runner.py), [the execution coordinator](../../../agent/runtime/server/execution.py). Verification: [cancellation tests](../../../test/test_cancellation_token.py), [task recovery](../../../test/test_task_continuation.py), [failure boundaries](../../../test/test_failure_boundaries.py).
 
-[返回系列地图](../README.md)
+[Back to the series map](../README.md)

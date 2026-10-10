@@ -1,5 +1,7 @@
 # Agents Management
 
+English | [简体中文](agents-management.zh-CN.md)
+
 Agents Management is the local control plane for persistent workers. It is an independent TypeScript package; Rind is only its first execution adapter. A future Codex or Claude Code adapter uses the same task and run contract.
 
 ## Start
