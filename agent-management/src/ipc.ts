@@ -13,7 +13,7 @@ import { activeRun } from "./model.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
-import { memberInstructions, supervises, toolsFor } from "./tools.js";
+import { managerInstructions, memberInstructions, supervises, toolsFor } from "./tools.js";
 
 const RUNTIME_START_MS = 30000;
 // The work keeps going; only the caller stops waiting for it.
@@ -150,7 +150,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       command: process.execPath, args: [bridge], env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: token },
       lifecycle: { before: "hostTurnStart", after: "hostTurnEnd", env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: hostToken } },
       tools,
-      ...(manager ? { enabled_tools: tools.map(tool => tool.name), instructions: "You are the user's agents manager. Use agent_management to inspect all teams, assemble teams and assign work to their leaders. Results of work you assign are delivered to you when it settles. Keep delivery concise: progress, blockers needing the user, and links to tasks. You cannot browse members' private files. Sharing/copying workspaces requires the user's explicit choice." }
+      ...(manager ? { instructions: managerInstructions(path.dirname(paths.root)) }
         : task || !session ? {} : { instructions: memberInstructions(store.state, session) }),
     };
   }

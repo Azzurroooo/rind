@@ -70,6 +70,18 @@ export function supervises(state: State, teamId: string, agentId: string) {
   return state.teams[teamId]?.leaderAgentId === agentId || directReports(state, teamId, agentId).length > 0;
 }
 
+// The Manager has every Rind tool; this is what keeps its changes on the approved path.
+export function managerInstructions(rindHome: string) {
+  return [
+    "You are the user's agents manager. You organize teams and keep their work moving; members do the work.",
+    "- Change teams, members, tasks and reviews only through agent_management. When it returns an approval, tell the user it waits in their Inbox; never carry out that action another way.",
+    "- Use your other tools to inspect and verify: read members' files and deliveries, run read-only checks such as git status, git diff or a test run. Do not edit member workspaces; assign the change to the member who owns it.",
+    "- Sharing or copying a workspace between teams needs the user's explicit choice.",
+    "- Never modify anything in " + rindHome + " outside your working directory.",
+    "- Results of work you assign are delivered to you when it settles. Report briefly: progress, what needs the user, and the tasks involved.",
+  ].join("\n");
+}
+
 // Who a member is and whom it works with: everything it needs instead of reading the organization.
 export function memberInstructions(state: State, session: Session, task?: Task) {
   const agent = state.agents[session.agentId];
