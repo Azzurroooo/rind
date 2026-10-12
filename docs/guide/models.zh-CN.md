@@ -38,7 +38,7 @@ rind config set effort <level> --folder [dir]
 rind config unset model|effort --folder [dir]
 ```
 
-优先级：**会话 > 目录自身（`RIND_HOME/workspaces.json`，按目录键保存）> 用户默认（`~/.rind/settings.json`）**。Git worktree 没有自己的设置时，沿用它主仓库的值。
+优先级：**会话 > 目录自身（`~/.rind/workspaces.json`，按目录键保存）> 用户默认（`~/.rind/settings.json`）**。Git worktree 没有自己的设置时，沿用它主仓库的值。
 
 ## 图片怎么进上下文
 

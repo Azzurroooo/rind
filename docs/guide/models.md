@@ -38,7 +38,7 @@ rind config set effort <level> --folder [dir]
 rind config unset model|effort --folder [dir]
 ```
 
-Priority: **session > the folder itself (`RIND_HOME/workspaces.json`, keyed by folder) > user defaults (`~/.rind/settings.json`)**. When a Git worktree has no settings of its own, it inherits the values of its main repo.
+Priority: **session > the folder itself (`~/.rind/workspaces.json`, keyed by folder) > user defaults (`~/.rind/settings.json`)**. When a Git worktree has no settings of its own, it inherits the values of its main repo.
 
 ## How images get into the context
 

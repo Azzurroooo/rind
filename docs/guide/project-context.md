@@ -22,9 +22,9 @@ A Skill is a folder with a `SKILL.md` whose frontmatter has a `description` (and
 | For | Location |
 | --- | --- |
 | This folder | `.rind/skills/<skill-name>/SKILL.md` under the working directory |
-| You, everywhere | `RIND_HOME/skills/<skill-name>/SKILL.md` |
+| You, everywhere | `~/.rind/skills/<skill-name>/SKILL.md` |
 
-Rind also reads your Claude skills (`~/.claude/skills`, `./.claude/skills`) and Codex skills (`~/.codex/skills`, `~/.agents/skills` and their `./` project versions). Ask Rind to make a skill and it follows the built-in `skill-creator` skill. Built-in skills live in `RIND_HOME/skills/.system`, which Rind replaces on update; to change one, put a skill with the same name in `RIND_HOME/skills`.
+Rind also reads your Claude skills (`~/.claude/skills`, `./.claude/skills`) and Codex skills (`~/.codex/skills`, `~/.agents/skills` and their `./` project versions). Ask Rind to make a skill and it follows the built-in `skill-creator` skill. Built-in skills live in `~/.rind/skills/.system`, which Rind replaces on update; to change one, put a skill with the same name in `~/.rind/skills`.
 
 Each request carries only the **catalog**: name, description and file location. When a task matches a skill, the model reads its `SKILL.md`. To use one now:
 
