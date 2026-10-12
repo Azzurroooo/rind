@@ -41,7 +41,7 @@ function harness({ sessionId = "s1", choices = { claude_user: false }, answer = 
     requireInitialization: value => value, state, getCommands: () => ({ normalizeCommands: () => [], localCommands: () => [] }), getTaskMonitor: () => null, getCompactContextState: () => ({ clear() {} }),
     askModelMenu: async () => null,
     askSkillImportMenu: async () => choices,
-    askChoice: async (title, options) => { questions.push({ title, options }); return answer; },
+    askChoice: async (question) => { questions.push(question); return answer; },
     askSessionMenu: async () => null, askForkPointMenu: async () => null, restoreLiveTurn() {}, clearPendingInputs() {},
     closeAssistant() {}, refreshInputState() {}, updateGoalState() {}, log: value => logs.push(typeof value === "function" ? value() : value),
     writeError() {}, redraw() {},
@@ -76,7 +76,8 @@ test("in a conversation the change is applied after the cache cost is accepted",
   const h = harness();
   await h.controller.runImportSelector();
   assert.equal(h.questions.length, 1);
-  assert.match(h.questions[0].title, /cannot reuse the prompt cache/);
+  assert.equal(h.questions[0].title, "Import skills");
+  assert.match(h.questions[0].message, /cannot reuse the prompt cache/);
   assert.match(h.questions[0].options[0], /^Cancel/, "cancel is the default");
   assert.deepEqual(h.commands.map(params => params.input), ["/import", "/import claude_user=off"]);
   assert.match(h.logs.join("\n"), /Skill imports updated/);

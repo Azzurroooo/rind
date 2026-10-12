@@ -206,7 +206,7 @@ export function createCliInputActions({
     authPromptId = request?.request_id || null;
     try {
       if (String(params.kind || "") === "select") {
-        return await askAuthChoice(params.message, params.options);
+        return await askChoice({ title: `Login · ${params.message || "Select"}`, options: params.options });
       }
       return await askAuthText(params.message, String(params.kind || "text"));
     } finally {
@@ -238,16 +238,17 @@ export function createCliInputActions({
     });
   }
 
-  function askAuthChoice(message, options) {
+  // The first option is preselected; a message explains the decision in full.
+  function askChoice({ title, message = "", options }) {
     const values = (Array.isArray(options) ? options : []).map((item) => String(item || "").trim()).filter(Boolean);
     if (!values.length) return Promise.resolve("");
     if (!output.terminalUi) {
       const ids = values.map((value) => value.split(" · ")[0]).join(", ");
-      return askLine(`${String(message || "Select")} [${ids}]: `);
+      return askLine(`${title} [${ids}]: `);
     }
     return new Promise((resolve) => {
       const choiceState = createChoiceMenuState(values, values[0]);
-      const session = { mode: "auth-choice", authTitle: String(message || "Select"), choiceState, resolve };
+      const session = { mode: "choice-dialog", title, message, choiceState, resolve };
       state.input.session = session;
       state.input.active = true;
       cancelActiveInput = () => completeTtyInput(session, "", false);
@@ -342,8 +343,8 @@ export function createCliInputActions({
       handleAuthInput(session, event);
       return;
     }
-    if (session.mode === "auth-choice") {
-      handleAuthChoiceInput(session, event);
+    if (session.mode === "choice-dialog") {
+      handleChoiceDialogInput(session, event);
       return;
     }
     if (session.mode === "theme") {
@@ -668,7 +669,7 @@ export function createCliInputActions({
     }
   }
 
-  function handleAuthChoiceInput(session, key) {
+  function handleChoiceDialogInput(session, key) {
     const modified = key.ctrl || key.alt || key.shift;
     if (!modified && (key.name === "enter" || key.name === "return")) {
       completeTtyInput(session, session.choiceState.selectedOption() || "", false);
@@ -777,7 +778,7 @@ export function createCliInputActions({
     ask,
     handleAuthPrompt,
     closeAuthPrompt,
-    askAuthChoice,
+    askChoice,
     answerQuestion,
     questionAnswered,
     restoreInputText,

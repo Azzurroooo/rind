@@ -6,7 +6,7 @@ import path from "node:path";
 import { AssistantRenderer } from "../lib/assistant-renderer.js";
 import { AssistantMessage } from "../lib/components/assistant-message.js";
 import { paintRaw, resetTheme, setTheme } from "../lib/theme.js";
-import { textWidth } from "../lib/text-width.js";
+import { stripAnsi, textWidth } from "../lib/text-width.js";
 import {
   answerPromptText,
   answerPlaceholderText,
@@ -23,7 +23,7 @@ import {
   inputHintText,
   interruptText,
   modelListErrorText,
-  authChoiceFrame,
+  choiceDialogFrame,
   authSecretFrame,
   modelMenuText,
   planUpdatedLine,
@@ -377,9 +377,9 @@ test("slashMenuText keeps the selected command visible", () => {
   );
 });
 
-test("authChoiceFrame renders a full provider box with selection", () => {
-  const text = authChoiceFrame({
-    title: "Provider",
+test("choiceDialogFrame renders a full provider box with selection", () => {
+  const text = choiceDialogFrame({
+    title: "Login · Provider",
     options: ["openai · OpenAI · not configured", "deepseek · DeepSeek · not configured"],
     selectedIndex: 1,
     width: 64,
@@ -392,21 +392,39 @@ test("authChoiceFrame renders a full provider box with selection", () => {
   assert.ok(lines[2].startsWith("│ › deepseek"));
   assert.match(lines[2], /deepseek · DeepSeek · not configured\s+│$/);
   assert.match(lines[4], /↑↓ select · enter choose · esc cancel/);
-  assert.equal(authChoiceFrame({ title: "Provider", options: [], selectedIndex: 0 }), "");
+  assert.equal(choiceDialogFrame({ title: "Login · Provider", options: [], selectedIndex: 0 }), "");
   assert.equal(new Set(lines.filter(Boolean).map((line) => textWidth(line))).size, 1, "all box rows share one width");
 });
 
-test("authChoiceFrame windows long provider lists to keep the selection visible", () => {
+test("choiceDialogFrame shows its title and wraps the whole message above the choices", () => {
+  const message = "This conversation's skill list changes at its next model request. That request cannot reuse the prompt cache, so it costs more and may take longer.";
+  const lines = choiceDialogFrame({
+    title: "Import skills",
+    message,
+    options: ["Cancel · keep the current skills", "Apply · change the skills now"],
+    selectedIndex: 0,
+    width: 64,
+  }).trimEnd().split("\n");
+
+  assert.ok(lines[0].startsWith("┌─ Import skills "));
+  assert.doesNotMatch(lines.join("\n"), /Login|\.\.\./);
+  const text = lines.map((line) => stripAnsi(line).replace(/^│ |\s*│$/g, "").trim()).join(" ");
+  assert.ok(text.includes(message.replace(/\s+/g, " ")), "every word of the message is shown");
+  assert.ok(lines.findIndex((line) => line.includes("› Cancel")) > lines.findIndex((line) => line.includes("longer.")));
+  assert.equal(new Set(lines.map((line) => textWidth(line))).size, 1, "all box rows share one width");
+});
+
+test("choiceDialogFrame windows long provider lists to keep the selection visible", () => {
   const options = Array.from({ length: 18 }, (_value, index) => `provider-${index} · Name ${index} · not configured`);
 
-  const top = authChoiceFrame({ title: "Provider", options, selectedIndex: 0, width: 76 }).split("\n");
+  const top = choiceDialogFrame({ title: "Login · Provider", options, selectedIndex: 0, width: 76 }).split("\n");
   assert.equal(top.filter(Boolean).length, 14); // title + 9 options + ellipsis + blank + hint + border
   assert.ok(top[1].includes("provider-0"));
   assert.ok(!top.some((line) => line.includes("provider-9")));
   assert.ok(top.at(-5).includes("…"));
   assert.ok(top.some((line) => line.includes("›")));
 
-  const bottom = authChoiceFrame({ title: "Provider", options, selectedIndex: 17, width: 76 }).split("\n");
+  const bottom = choiceDialogFrame({ title: "Login · Provider", options, selectedIndex: 17, width: 76 }).split("\n");
   assert.ok(bottom[1].includes("…"));
   assert.ok(bottom.some((line) => line.includes("provider-17")));
   assert.ok(!bottom.some((line) => line.includes("provider-7")));

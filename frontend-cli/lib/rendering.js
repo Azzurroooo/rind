@@ -1,4 +1,4 @@
-import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells } from "./text-width.js";
+import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells, wrapTextWithAnsi } from "./text-width.js";
 import { formatDuration } from "./tool-display.js";
 import { DEFAULT_THEME, paint, paintRaw, flavorSwatch, themeNames, breathingAccent } from "./theme.js";
 import { homedir } from "node:os";
@@ -817,7 +817,9 @@ export function authSecretFrame({
 
 const AUTH_CHOICE_WINDOW = 9;
 
-export function authChoiceFrame({ title = "", options = [], selectedIndex = 0, width = 76 } = {}) {
+// A boxed list of choices; the message above it wraps in full, so a decision
+// is never asked with its explanation cut off.
+export function choiceDialogFrame({ title = "", message = "", options = [], selectedIndex = 0, width = 76 } = {}) {
   const box = startupBannerWidth(width);
   const inner = box - 4;
   const values = (Array.isArray(options) ? options : []).map((item) => String(item || "").trim()).filter(Boolean);
@@ -828,7 +830,10 @@ export function authChoiceFrame({ title = "", options = [], selectedIndex = 0, w
     ? 0
     : Math.min(Math.max(0, selectedIndex - (AUTH_CHOICE_WINDOW - 2)), values.length - AUTH_CHOICE_WINDOW);
   const end = Math.min(values.length, start + AUTH_CHOICE_WINDOW);
-  const lines = [authFrameTitle(`Login · ${title}`.trim(), box)];
+  const explanation = String(message || "").trim()
+    ? wrapTextWithAnsi(String(message).trim(), inner).map((line) => startupBannerLine(dim(line), box))
+    : [];
+  const lines = [authFrameTitle(title, box), ...explanation, ...(explanation.length ? [startupBannerLine("", box)] : [])];
   if (start > 0) {
     lines.push(startupBannerLine(dim("…"), box));
   }

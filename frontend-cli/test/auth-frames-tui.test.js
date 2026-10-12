@@ -6,7 +6,7 @@ import { createTui } from "../lib/tui/tui.js";
 import { Container } from "../lib/tui/component.js";
 import { ComposerArea } from "../lib/components/composer-area.js";
 import { MonitorStack } from "../lib/components/monitor-stack.js";
-import { authChoiceFrame, authSecretFrame } from "../lib/rendering.js";
+import { authSecretFrame, choiceDialogFrame } from "../lib/rendering.js";
 import { createChoiceMenuState } from "../lib/choice-menu-state.js";
 import { createLineEditor } from "../lib/line-editor.js";
 
@@ -97,8 +97,8 @@ test("provider choice renders a full box with the selected provider highlighted"
     prompt: "",
     inputText: "",
     cursor: { line: 0, column: 0 },
-    menuText: authChoiceFrame({
-      title: "Provider",
+    menuText: choiceDialogFrame({
+      title: "Login · Provider",
       options: choiceState.options(),
       selectedIndex: choiceState.selectedIndex(),
       width,

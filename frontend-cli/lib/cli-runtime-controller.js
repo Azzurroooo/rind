@@ -508,10 +508,11 @@ export function createCliRuntimeController({
       log(() => commandResultText("Skill imports chosen.", "they apply when the conversation starts"));
       return;
     }
-    const answer = await askChoice?.(
-      "The skill list changes at the next model request, which cannot reuse the prompt cache.",
-      ["Cancel · keep the current skills", "Apply · change the skills now"],
-    );
+    const answer = await askChoice?.({
+      title: "Import skills",
+      message: "This conversation's skill list changes at its next model request. That request cannot reuse the prompt cache, so it costs more and may take longer.",
+      options: ["Cancel · keep the current skills", "Apply · change the skills now"],
+    });
     if (!String(answer || "").startsWith("Apply")) return;
     const changes = Object.entries(choices).map(([source, on]) => `${source}=${on ? "on" : "off"}`).join(" ");
     try {
@@ -528,7 +529,11 @@ export function createCliRuntimeController({
     try {
       const current = await request(methods.folderDefaultsGet, { workspace_root: folder });
       if (alreadySet(current?.folder || {})) return;
-      const answer = await askChoice("Also the default for new conversations in this folder?", ["No · only this conversation", "Yes · new conversations here start with " + label]);
+      const answer = await askChoice({
+        title: "Folder default",
+        message: "Also the default for new conversations in this folder?",
+        options: ["No · only this conversation", "Yes · new conversations here start with " + label],
+      });
       if (!String(answer || "").startsWith("Yes")) return;
       await request(methods.folderDefaultsSet, { workspace_root: folder, ...values });
       log(() => commandResultText("Folder default updated.", `new conversations here: ${label} · open ones keep theirs`));
