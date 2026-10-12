@@ -6,7 +6,7 @@ from typing import Any
 
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_HANDOFF_REASONING_CONTENT
 from agent.domain.message_boundary import validate_compact_handoff_boundary
-from agent.prompts import refresh_builtin_file_rules
+from agent.prompts import refresh_system_prompt
 
 INTERNAL_MESSAGE_KINDS = frozenset({"goal_checkpoint", "task_notification"})
 
@@ -85,7 +85,7 @@ def project_messages(
         if role in {"system", "user", "assistant"}:
             projected = {"role": role, "content": message.get("content", "")}
             if role == "system":
-                projected["content"] = refresh_builtin_file_rules(projected["content"])
+                projected["content"] = refresh_system_prompt(projected["content"])
             if "attachments" in message:
                 projected["attachments"] = message["attachments"]
             if include_ids and message.get("id"):

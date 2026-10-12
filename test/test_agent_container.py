@@ -6,7 +6,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -96,33 +95,6 @@ def test_container_reuses_worker_safe_resources() -> None:
     assert container.turn_runner._compaction_service is shared.compaction_service
 
 
-def test_container_filters_tools_before_building_registry_and_schema() -> None:
-    cache_dir = PROJECT_ROOT / ".pytest_cache"
-    cache_dir.mkdir(exist_ok=True)
-    settings = AppSettings(
-        settings_path=cache_dir / "settings.json",
-        settings_exists=True,
-        model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
-        reasoning_effort="high",
-        user_agent="test-agent",
-    )
-
-    with tempfile.TemporaryDirectory(dir=cache_dir) as session_dir:
-        container = build_agent_container(
-            settings=settings,
-            chat_client=FakeChatClient(),
-            session_dir=session_dir,
-            enabled_tools=("read_file",),
-        )
-
-        assert container.tool_registry.has("read_file") is True
-        assert container.tool_registry.has("bash") is False
-        assert [schema["function"]["name"] for schema in container.tool_registry.schemas] == ["read_file"]
-        assert container.turn_runner._tool_schemas == container.tool_registry.schemas
-
-
 def test_container_can_disable_user_question_tool_for_worker_agents() -> None:
     cache_dir = PROJECT_ROOT / ".pytest_cache"
     cache_dir.mkdir(exist_ok=True)
@@ -154,39 +126,13 @@ def test_container_can_disable_user_question_tool_for_worker_agents() -> None:
         assert "ask_user_question" not in {
             schema["function"]["name"] for schema in worker_container.tool_registry.schemas
         }
-
-
-def test_container_rejects_unknown_enabled_tools() -> None:
-    cache_dir = PROJECT_ROOT / ".pytest_cache"
-    cache_dir.mkdir(exist_ok=True)
-    settings = AppSettings(
-        settings_path=cache_dir / "settings.json",
-        settings_exists=True,
-        model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
-        reasoning_effort="high",
-        user_agent="test-agent",
-    )
-
-    with tempfile.TemporaryDirectory(dir=cache_dir) as session_dir:
-        with pytest.raises(ValueError, match=r"Unknown enabled tool\(s\): missing_tool"):
-            build_agent_container(
-                settings=settings,
-                chat_client=FakeChatClient(),
-                session_dir=session_dir,
-                enabled_tools=("missing_tool",),
-            )
-
-
-
-
-
-
-
-
-
-
+        guidance = lambda container: [
+            message["content"] for message in container.runtime._runtime_system_messages
+            if message["_context_kind"] == "tool_guidance"
+        ]
+        assert "ask_user_question" in guidance(default_container)[0]
+        assert guidance(worker_container) == [], "the prompt never describes a tool the session lacks"
+        assert "ask_user_question" not in default_container.session_store.system_prompt
 
 
 def test_container_rind_doc_provider_injects_workspace_doc(tmp_path, monkeypatch) -> None:

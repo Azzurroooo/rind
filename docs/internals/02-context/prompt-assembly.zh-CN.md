@@ -8,6 +8,7 @@ English | [简体中文](prompt-assembly.md)
 flowchart TB
     BASE["基础系统提示 + 环境"] --> CM["ContextManager"]
     DOC["用户 / 项目 RIND.md"] --> CM
+    TOOLS["会话自有工具的说明"] --> CM
     GOAL["Goal 策略"] --> CM
     TEAM["Agent 身份 / Team 目录"] --> CM
     SKILL["Skill 元数据目录"] --> CM
@@ -16,6 +17,8 @@ flowchart TB
 ~~~
 
 装配根用 build_system_prompt 创建基础提示；Team Agent 的 system.md 会加入身份；启用 Goal 时再注入 Goal 策略。ContextManager 读取用户级和项目级 RIND.md，分别最多注入 32 KiB，并记录截断或读取错误；Skill 目录只注入元数据索引，不把所有 Skill 正文塞进每轮请求。
+
+基础提示只描述每个会话都有的工具。只有部分会话才有的工具（目前是 ask_user_question），其说明是按会话实际注册的工具生成的运行时消息，因此提示里不会出现会话没有的工具；保存在历史里的旧版提示，会在读取历史时升级。
 
 运行时消息插在首条 system 消息之后；最近会话消息按原顺序保留。Goal 检查点属于一次续接的临时输入，用户给出的目标被标记为数据而非更高优先级指令。每类注入都能在 context stats/decisions 中看到，避免“模型为什么知道这个”只能靠猜。
 

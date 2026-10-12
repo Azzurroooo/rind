@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Collection
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -26,7 +25,7 @@ from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
 from agent.infrastructure.tools.shell.tool import ShellTools
 from agent.infrastructure.tools.web.session_pool import WebSessions
 from agent.application.images import prepare_image_messages
-from agent.prompts import build_goal_policy_prompt, build_system_prompt
+from agent.prompts import build_goal_policy_prompt, build_system_prompt, build_tool_guidance
 from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
 from agent.application.task_notifications import TaskNotifications
 
@@ -71,7 +70,6 @@ def build_agent_container(
     resume_latest: bool = False,
     enable_goal: bool = False,
     enable_user_question: bool = True,
-    enabled_tools: Collection[str] | None = None,
     system_prompt: str | None = None,
     workspace_root: str | None = None,
     project_id: str | None = None,
@@ -113,20 +111,6 @@ def build_agent_container(
         prompt_workspace,
         skill_files=external_tool.skill_files if external_tool else (),
     )
-    runtime_system_messages: list[dict] = []
-    if external_tool:
-        if external_tool.instructions:
-            runtime_system_messages.append({"role": "system", "content": external_tool.instructions, "_context_kind": "external_tools"})
-        if external_tool.enabled_tools is not None:
-            enabled_tools = external_tool.enabled_tools
-    if enable_goal:
-        runtime_system_messages.append(
-            {
-                "role": "system",
-                "content": build_goal_policy_prompt(),
-                "_context_kind": "goal_policy",
-            }
-        )
     session_output_root = None
     if session_id:
         session_output_root = str(
@@ -148,18 +132,18 @@ def build_agent_container(
         # Read at call time: a model change between turns changes the answer.
         image_input=lambda: turn_runner.image_input,
     )
-    if external_tool:
-        catalog = (*catalog, *external_tool.specs(session_store.session_id))
-    if enabled_tools is None:
-        tool_specs = catalog
-    else:
-        requested = set(enabled_tools)
-        known = {spec.name for spec in catalog}
-        unknown = sorted(requested - known)
-        if unknown:
-            raise ValueError(f"Unknown enabled tool(s): {', '.join(unknown)}")
-        tool_specs = tuple(spec for spec in catalog if spec.name in requested)
+    tool_specs = (*catalog, *external_tool.specs(session_store.session_id)) if external_tool else catalog
     tool_registry = DefaultToolRegistry(tool_specs)
+    # The system prompt describes only tools this session has.
+    runtime_system_messages = [
+        {"role": "system", "content": content, "_context_kind": kind}
+        for kind, content in (
+            ("tool_guidance", build_tool_guidance(spec.name for spec in tool_specs)),
+            ("external_tools", external_tool.instructions if external_tool else ""),
+            ("goal_policy", build_goal_policy_prompt() if enable_goal else ""),
+        )
+        if content
+    ]
     skills = SkillTurnCoordinator(skill_repository, catalog=any(spec.name == "read_file" for spec in tool_specs))
     tool_executor = ToolExecutor(registry=tool_registry)
     tool_result_normalizer = shared_resources.tool_result_normalizer if shared_resources else ToolResultNormalizer()

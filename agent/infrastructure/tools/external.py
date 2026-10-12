@@ -25,7 +25,6 @@ class ExternalTool:
     env: dict[str, str]
     tools: tuple[HostToolDeclaration, ...]
     instructions: str = ""
-    enabled_tools: tuple[str, ...] | None = None
     lifecycle: dict | None = None
     skill_files: tuple[str, ...] = ()
 
@@ -39,18 +38,15 @@ class ExternalTool:
             raise ValueError("External tool executable must be an absolute path.")
         args = value.get("args", [])
         env = value.get("env", {})
-        enabled = value.get("enabled_tools")
         skill_files = value.get("skill_files", [])
         if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
             raise ValueError("External tool arguments must be strings.")
         if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
             raise ValueError("External tool environment must contain strings.")
-        if enabled is not None and (not isinstance(enabled, list) or not all(isinstance(v, str) for v in enabled)):
-            raise ValueError("External tool allowlist must contain strings.")
         if not isinstance(skill_files, list) or not all(isinstance(v, str) and Path(v).is_absolute() for v in skill_files):
             raise ValueError("External skill references must be absolute file paths.")
         return cls(command, tuple(args), env, _declarations(value.get("tools", [])),
-                   str(value.get("instructions", "")), tuple(enabled) if enabled is not None else None, value.get("lifecycle"), tuple(skill_files))
+                   str(value.get("instructions", "")), value.get("lifecycle"), tuple(skill_files))
 
     async def call(self, session_id: str, method: str, parameters: dict, env: dict | None = None) -> dict:
         process = await asyncio.create_subprocess_exec(

@@ -24,7 +24,7 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   const host = await startSharedServer(options);
   const eventsA = [], eventsB = [];
-  const tool = { command: process.execPath, args: [], env: {}, tools: [{ name: "restricted", description: "Fixture", parameters: { type: "object", properties: {} } }], enabled_tools: ["restricted"] };
+  const tool = { command: process.execPath, args: [], env: {}, tools: [{ name: "host_fixture", description: "Fixture", parameters: { type: "object", properties: {} } }] };
   const first = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", a], externalTools: tool, onMessage: event => eventsA.push(event) });
   const second = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", b], onMessage: event => eventsB.push(event) });
   const admin = await connectSharedRuntime({ ...options, start: false });
@@ -51,9 +51,10 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   assert.equal(joined.session_id, infoA.session_id);
   await assert.rejects(admin.request("session/open", { workspace_root: a, session_id: infoA.session_id }), /running session/);
   assert.equal(requests.length, 2, "both model requests must be in flight at once");
-  const restricted = requests.find(r => r.messages.some(m => m.role === "user" && m.content === "A"));
-  assert.deepEqual(restricted.tools.map(t => t.function.name), ["restricted"]);
-  assert.ok(requests.find(r => r !== restricted).tools.some(t => t.function.name === "bash"));
+  const hosted = requests.find(r => r.messages.some(m => m.role === "user" && m.content === "A"));
+  const names = request => request.tools.map(t => t.function.name);
+  assert.ok(names(hosted).includes("host_fixture") && names(hosted).includes("bash"), "a host tool joins the built-in tools of its own session");
+  assert.ok(!names(requests.find(r => r !== hosted)).includes("host_fixture"), "and never reaches another session");
   await one.shutdown(); assert.equal((await turnA).code, "EXECUTION_UNCONFIRMED");
   for (const response of responses) {
     response.writeHead(200, { "Content-Type": "text/event-stream" });
