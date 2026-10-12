@@ -11,7 +11,7 @@ const TURN_EVENTS = {
   turn_failed: "idle",
   turn_cancelled: "idle",
 };
-// Idle sessions nobody shows are forgotten after this; history keeps them.
+// Idle sessions no window shows or holds are forgotten after this; history keeps them.
 const FORGET_AFTER_MS = 10 * 60 * 1000;
 
 export function createLiveSessions({ onChange = () => {}, now = () => Date.now(), schedule = fn => setImmediate(fn) } = {}) {
@@ -33,11 +33,13 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
   function list() {
     const watchers = new Map();
     for (const id of viewers.values()) watchers.set(id, (watchers.get(id) || 0) + 1);
+    // A covered window still holds its session: it shows it again when uncovered.
+    const held = new Set(covered.values());
     const cutoff = now() - FORGET_AFTER_MS;
     const out = [];
     for (const item of sessions.values()) {
       const count = watchers.get(item.id) || 0;
-      if (!count && item.turn === "idle" && !item.background && Date.parse(item.updatedAt) < cutoff) { sessions.delete(item.id); continue; }
+      if (!count && !held.has(item.id) && item.turn === "idle" && !item.background && Date.parse(item.updatedAt) < cutoff) { sessions.delete(item.id); continue; }
       out.push({ ...item, watchers: count });
     }
     return out;
@@ -82,7 +84,6 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       if (!covered.has(viewer)) return;
       const id = covered.get(viewer);
       covered.delete(viewer);
-      if (!sessions.has(id)) return;
       viewers.set(viewer, id);
       changed();
     },

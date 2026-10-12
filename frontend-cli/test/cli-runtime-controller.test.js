@@ -42,6 +42,7 @@ function createHarness({
   state.turn.id = "turn-a";
   const requests = [];
   const history = [];
+  let cleared = 0;
   const logs = [];
   const restored = [];
   const client = {
@@ -133,6 +134,7 @@ function createHarness({
     askForkPointMenu: async () => selectedFork,
     restoreLiveTurn() {},
     renderHistory: (messages) => history.push(messages),
+    clearTranscript: () => { cleared += 1; },
     onSessionRestored: () => restored.push(state.session.info.session_id),
     openManagedSession,
     clearPendingInputs() {},
@@ -143,7 +145,7 @@ function createHarness({
     writeError() {},
     redraw() {},
   });
-  return { state, client, requests, history, logs, restored, controller };
+  return { state, client, requests, history, logs, restored, controller, cleared: () => cleared };
 }
 
 test("managed history opens separately and leaves the current conversation intact", async () => {
@@ -493,4 +495,12 @@ test("model and effort results say when the change applies", async () => {
   assert.equal(appliesNote({ applies: "next_turn" }), "applies from the next turn; this turn keeps its model");
   assert.equal(appliesNote({ applies: "now" }), "applies to your next message");
   assert.equal(appliesNote({}), "applies to your next message", "older hosts do not say; nothing runs then");
+});
+
+test("switching sessions replaces the conversation on screen; the first restore keeps the startup banner", async () => {
+  const harness = createHarness();
+  await harness.controller.restoreSession();
+  assert.equal(harness.cleared(), 0);
+  await harness.controller.restoreSession("session-b", { switchSession: true });
+  assert.equal(harness.cleared(), 1);
 });

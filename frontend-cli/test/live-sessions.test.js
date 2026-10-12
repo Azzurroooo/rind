@@ -157,3 +157,15 @@ test("a conversation's model and effort are part of its live state", () => {
   assert.deepEqual([item.provider, item.model, item.reasoningEffort, item.selectionSource.model, item.connectionReady], ["deepseek", "deepseek-pro", "high", "folder", false]);
   assert.equal(pushes.length, 1, "the same settings again are no change");
 });
+
+test("a window covered for a long time still holds its session and shows it again", () => {
+  const { live, advance } = setup();
+  const w = {};
+  live.view(w, "s1");
+  live.hide(w);
+  advance(11 * 60 * 1000);
+  assert.deepEqual(live.list().map(s => [s.id, s.watchers]), [["s1", 0]], "a held session is not forgotten");
+  live.show(w);
+  assert.equal(live.list()[0].watchers, 1);
+  assert.equal(live.newestViewer("s1"), w, "it takes rind send input again");
+});
