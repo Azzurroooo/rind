@@ -580,3 +580,19 @@ def test_worker_goal_continuation_persists_distinct_checkpoints():
         "turn_started",
     ]
     assert goal["status"] == "complete"
+
+
+def test_deleting_a_session_drops_its_tool_configuration(tmp_path, monkeypatch):
+    async def run():
+        monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+        worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
+        await worker.initialize()
+        try:
+            session_id = (await worker.create_conversation({"enable_user_question": False}))["session_id"]
+            assert worker.execution.owns_session(session_id)
+            await worker.delete_session(session_id)
+            assert not worker.execution.owns_session(session_id)
+        finally:
+            await worker.close()
+
+    asyncio.run(run())

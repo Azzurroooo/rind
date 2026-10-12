@@ -190,6 +190,7 @@ class RuntimeWorker:
         clean = validate_session_id(session_id)
         self.execution.interrupt(clean, "Session deleted")
         await self.execution.release(clean, permanent=True)
+        self.execution.forget_options(clean)
         await self.shell_tools.close_session(clean)
         return await self.repository.delete(clean)
 
