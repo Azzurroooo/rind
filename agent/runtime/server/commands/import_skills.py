@@ -8,7 +8,7 @@ from agent.runtime.server.commands.skill import scan_skills
 
 
 USAGE = "/import [<source>=on|off ...]   sources: " + ", ".join(IMPORT_SOURCES)
-APPLIES = "The skill list changes at the next model request, which cannot reuse the prompt cache."
+APPLIES = "This breaks the prompt cache: the next model request will not hit it."
 
 
 async def handle_import(context: SlashCommandContext, args: list[str]) -> str | SlashCommandResult:

@@ -397,11 +397,11 @@ test("choiceDialogFrame renders a full provider box with selection", () => {
 });
 
 test("choiceDialogFrame shows its title and wraps the whole message above the choices", () => {
-  const message = "This conversation's skill list changes at its next model request. That request cannot reuse the prompt cache, so it costs more and may take longer.";
+  const message = "Applying breaks the prompt cache. The skill catalog in this conversation's context changes, so the next request will not hit the cache.";
   const lines = choiceDialogFrame({
     title: "Import skills",
     message,
-    options: ["Cancel · keep the current skills", "Apply · change the skills now"],
+    options: ["Cancel · keep the skills and the cache", "Apply · change the skills and break the cache"],
     selectedIndex: 0,
     width: 64,
   }).trimEnd().split("\n");
@@ -410,7 +410,7 @@ test("choiceDialogFrame shows its title and wraps the whole message above the ch
   assert.doesNotMatch(lines.join("\n"), /Login|\.\.\./);
   const text = lines.map((line) => stripAnsi(line).replace(/^│ |\s*│$/g, "").trim()).join(" ");
   assert.ok(text.includes(message.replace(/\s+/g, " ")), "every word of the message is shown");
-  assert.ok(lines.findIndex((line) => line.includes("› Cancel")) > lines.findIndex((line) => line.includes("longer.")));
+  assert.ok(lines.findIndex((line) => line.includes("› Cancel")) > lines.findIndex((line) => line.includes("hit the cache.")));
   assert.equal(new Set(lines.map((line) => textWidth(line))).size, 1, "all box rows share one width");
 });
 

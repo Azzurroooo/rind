@@ -17,7 +17,7 @@ const SOURCES = [
   { id: "codex_project", label: "Codex · project", paths: ["/work/.codex/skills", "/work/.agents/skills"], count: 0, enabled: true },
 ];
 
-function harness({ sessionId = "s1", choices = { claude_user: false }, answer = "Apply · change the skills now" } = {}) {
+function harness({ sessionId = "s1", choices = { claude_user: false }, answer = "Apply · change the skills and break the cache" } = {}) {
   const state = createCliState();
   state.session.info = { session_id: sessionId, workspace_root: "/work" };
   const commands = [];
@@ -77,14 +77,14 @@ test("in a conversation the change is applied after the cache cost is accepted",
   await h.controller.runImportSelector();
   assert.equal(h.questions.length, 1);
   assert.equal(h.questions[0].title, "Import skills");
-  assert.match(h.questions[0].message, /cannot reuse the prompt cache/);
+  assert.match(h.questions[0].message, /^Applying breaks the prompt cache\./);
   assert.match(h.questions[0].options[0], /^Cancel/, "cancel is the default");
   assert.deepEqual(h.commands.map(params => params.input), ["/import", "/import claude_user=off"]);
   assert.match(h.logs.join("\n"), /Skill imports updated/);
 });
 
 test("declining leaves the conversation's skills unchanged", async () => {
-  const h = harness({ answer: "Cancel · keep the current skills" });
+  const h = harness({ answer: "Cancel · keep the skills and the cache" });
   await h.controller.runImportSelector();
   assert.deepEqual(h.commands.map(params => params.input), ["/import"]);
 });

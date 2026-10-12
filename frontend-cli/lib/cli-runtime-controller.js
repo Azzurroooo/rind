@@ -487,7 +487,7 @@ export function createCliRuntimeController({
   // After /model or /effort: also make the choice what new conversations in
   // this folder start with? Not asked when the folder already has it.
   // /import: before the first message the window keeps the choice; afterwards
-  // the conversation changes once the cost to its prompt cache is accepted.
+  // the conversation changes only once breaking its prompt cache is accepted.
   async function runImportSelector() {
     let listed;
     try {
@@ -510,14 +510,14 @@ export function createCliRuntimeController({
     }
     const answer = await askChoice?.({
       title: "Import skills",
-      message: "This conversation's skill list changes at its next model request. That request cannot reuse the prompt cache, so it costs more and may take longer.",
-      options: ["Cancel · keep the current skills", "Apply · change the skills now"],
+      message: "Applying breaks the prompt cache. The skill catalog in this conversation's context changes, so the next request will not hit the cache.",
+      options: ["Cancel · keep the skills and the cache", "Apply · change the skills and break the cache"],
     });
     if (!String(answer || "").startsWith("Apply")) return;
     const changes = Object.entries(choices).map(([source, on]) => `${source}=${on ? "on" : "off"}`).join(" ");
     try {
       await request(methods.commandExecute, { input: `/import ${changes}` });
-      log(() => commandResultText("Skill imports updated.", "from the next model request"));
+      log(() => commandResultText("Skill imports updated.", "the next request will not hit the prompt cache"));
     } catch (error) {
       log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
     }

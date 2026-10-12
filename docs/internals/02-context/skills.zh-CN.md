@@ -52,7 +52,7 @@ frontmatter 是 YAML，用 `yaml.safe_load` 读取；值里出现未加引号的
 
 每轮开始时，SkillTurnCoordinator 重新扫描各层级，把生效且允许模型调用的 Skill 写入会话的 `skill_catalog`；compact 之后的那一轮同样会重新扫描。只有条目变化时才写入，因此目录这条 system 消息在提示词缓存中保持稳定。新对话从第一条消息起就有目录，某轮中新写入的 Skill 从下一轮出现。工具里没有 `read_file` 的会话不注入目录，Manager 就是这种情况。
 
-会话元数据里的 `skill_sources` 记录这个对话读取哪些 Claude 和 Codex 层级。在 `/import` 改动之前，对话读取项目级的 Claude 和 Codex 层级，不读取用户自己的：目录里的 Skill 服务于这个目录的工作，而 `~/.claude` 和 `~/.codex` 里是为其他 Agent 写的 Skill。fork 会继承它；窗口在第一条消息之前做出的选择，会随第一条消息一起保存。`/import` 修改正在运行的对话时会立即同步目录，因此下一次模型请求就会使用新目录，那次请求无法命中提示词缓存。
+会话元数据里的 `skill_sources` 记录这个对话读取哪些 Claude 和 Codex 层级。在 `/import` 改动之前，对话读取项目级的 Claude 和 Codex 层级，不读取用户自己的：目录里的 Skill 服务于这个目录的工作，而 `~/.claude` 和 `~/.codex` 里是为其他 Agent 写的 Skill。fork 会继承它；窗口在第一条消息之前做出的选择，会随第一条消息一起保存。`/import` 修改正在运行的对话时会立即同步目录，因此下一次模型请求就会使用新目录；这次修改会破坏提示词缓存，那次请求不会命中缓存。
 
 ## 显式调用
 

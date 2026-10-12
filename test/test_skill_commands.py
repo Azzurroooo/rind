@@ -100,7 +100,7 @@ async def test_import_switches_a_layer_and_refreshes_a_hosted_catalog(tmp_path: 
 
     assert session.sources["codex_user"] is True
     assert runtime.synced == 1
-    assert "cannot reuse the prompt cache" in result.text
+    assert "breaks the prompt cache" in result.text
     codex = next(source for source in result.display["sources"] if source["id"] == "codex_user")
     assert codex == {
         "id": "codex_user", "label": "Codex · user",
@@ -172,7 +172,7 @@ async def test_a_runtime_conversation_keeps_its_import_choice_from_the_window_to
         assert catalog_names(session_id) == ["claude-only", "skill-creator"], "the window's choice reaches the first message's catalog"
 
         updated = await request("rind/command/execute", session_id=session_id, input="/import claude_user=off")
-        assert "cannot reuse the prompt cache" in updated["text"]
+        assert "breaks the prompt cache" in updated["text"]
         await request("session/prompt", session_id=session_id, input="again")
         assert catalog_names(session_id) == ["skill-creator"]
         listing = await request("rind/command/execute", session_id=session_id, input="/skill")

@@ -37,7 +37,7 @@ $skill-name          @ it in a prompt
 
 An unknown `/skill:name` reports an error directly; an ordinary `$name` that is not an existing Skill is treated as ordinary text. The body of an invoked Skill enters the session as a snapshot, so deleting the file afterwards does not affect that session.
 
-When names collide, the more specific layer wins: project over user, and Rind over Codex over Claude at the same level. `/import` choices belong to the conversation; changing them mid-conversation costs the next request its prompt cache, so Rind asks first.
+When names collide, the more specific layer wins: project over user, and Rind over Codex over Claude at the same level. `/import` choices belong to the conversation; changing them mid-conversation breaks the prompt cache, so the next request will not hit it, and Rind asks first.
 
 ## Per-project default model / effort
 
