@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from xml.sax.saxutils import escape
 
 
@@ -117,13 +118,32 @@ _SUPERSEDED_LINES = frozenset({
 })
 
 
-def refresh_builtin_file_rules(content: str) -> str:
+_USER_CLARIFICATION = """   - `ask_user_question`: Ask the user one direct question only when a preference, scope choice, blocking decision, or information that cannot be discovered from the environment is required.
+   - Do not use this tool for questions that can be answered by inspecting files, running commands, searching available context, or making a conservative engineering assumption.
+   - `options` uses objects with `label` and `description`; the first option label must end with the exact suffix ` (Recommended)`, and no later option may use that suffix. The user interface adds a free-text answer entry automatically; do not add an `Other` option."""
+# Saved prompts once carried this section even in sessions without the tool.
+_SAVED_CLARIFICATION_SECTION = "0. **User Clarification**\n" + _USER_CLARIFICATION + "\n\n"
+
+# Guidance for tools a session may lack: build_tool_guidance includes it only
+# for tools the session has, so the prompt never describes a missing tool.
+_TOOL_GUIDANCE = {
+    "ask_user_question": f"<user_clarification>\n{_USER_CLARIFICATION}\n</user_clarification>",
+}
+
+
+def build_tool_guidance(tool_names: Iterable[str]) -> str:
+    names = set(tool_names)
+    return "\n\n".join(text for name, text in _TOOL_GUIDANCE.items() if name in names)
+
+
+def refresh_system_prompt(content: str) -> str:
+    """Bring a saved built-in system prompt up to date with the current template."""
     if not content.lstrip().startswith("You are Rind, an advanced AI software engineer and coding agent.\n"):
         return content
     end = content.find("</operational_guidelines>")
     if end < 0 or "<core_capabilities>" not in content[:end]:
         return content
-    base, suffix = content[:end], content[end:]
+    base, suffix = content[:end].replace(_SAVED_CLARIFICATION_SECTION, "", 1), content[end:]
     start = base.find("<rind_file_tool_rules>")
     if start >= 0:
         stop = base.find("</rind_file_tool_rules>", start)
@@ -142,7 +162,7 @@ def refresh_builtin_file_rules(content: str) -> str:
                     line = "   - **Step 6: Edit**: Read existing targets and use `edit_file` for precise changes; use `write_file` for new files or complete rewrites."
                 lines.append(line)
             return "\n".join(lines) + suffix
-    return content
+    return base + suffix
 
 
 _ENVIRONMENT_MARKER = "__RIND_ENVIRONMENT__"
@@ -156,11 +176,6 @@ You are autonomous, efficient, and capable of solving complex programming tasks 
 {_ENVIRONMENT_MARKER}
 
 <core_capabilities>
-0. **User Clarification**
-   - `ask_user_question`: Ask the user one direct question only when a preference, scope choice, blocking decision, or information that cannot be discovered from the environment is required.
-   - Do not use this tool for questions that can be answered by inspecting files, running commands, searching available context, or making a conservative engineering assumption.
-   - `options` uses objects with `label` and `description`; the first option label must end with the exact suffix ` (Recommended)`, and no later option may use that suffix. The user interface adds a free-text answer entry automatically; do not add an `Other` option.
-
 1. **File System Operations**
 {FILE_TOOL_RULES}
 

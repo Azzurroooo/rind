@@ -15,7 +15,7 @@ from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionSto
 from agent.infrastructure.persistence.message_projector import project_messages
 from agent.infrastructure.tools.files.specs import build_file_tool_specs
 from agent.infrastructure.tools.registry import DefaultToolRegistry
-from agent.prompts import FILE_TOOL_RULES, build_system_prompt, refresh_builtin_file_rules
+from agent.prompts import FILE_TOOL_RULES, _SAVED_CLARIFICATION_SECTION, build_system_prompt, build_tool_guidance, refresh_system_prompt
 from agent.runtime.core.stream_parser import MessageStreamParser
 from agent.runtime.core.turn_runner import TurnRunner
 
@@ -58,7 +58,7 @@ def test_legacy_projection_replaces_only_builtin_rules_and_is_stable():
     assert result[2]["content"] == history[2]["content"]
     assert history == before
     assert project_messages(history, [], [], "new runtime system") == result
-    assert refresh_builtin_file_rules(result[0]["content"]) == result[0]["content"]
+    assert refresh_system_prompt(result[0]["content"]) == result[0]["content"]
 
 
 @pytest.mark.parametrize("content", [
@@ -67,13 +67,13 @@ def test_legacy_projection_replaces_only_builtin_rules_and_is_stable():
     LEGACY_PROMPT.replace("Atomically create", "My custom write policy: create"),
 ])
 def test_unidentified_or_customized_prompt_is_not_replaced(content):
-    assert refresh_builtin_file_rules(content) == content
+    assert refresh_system_prompt(content) == content
 
 
 def test_new_managed_block_refreshes_without_replacing_surrounding_context():
     prompt = build_system_prompt("/project", environment="test environment")
     outdated = prompt.replace(FILE_TOOL_RULES, "<rind_file_tool_rules>obsolete built-in contract</rind_file_tool_rules>")
-    assert refresh_builtin_file_rules(outdated) == prompt
+    assert refresh_system_prompt(outdated) == prompt
 
 
 @pytest.mark.asyncio
@@ -133,3 +133,18 @@ async def test_resume_executes_pending_legacy_call_before_sampling(tmp_path, mon
     assert json.loads(requests[0][-1]["content"])["ok"] is True
     records = await reopened.get_tool_records()
     assert len(records) == 1 and records[0]["raw_args"] == raw_args
+
+
+def test_a_saved_prompt_loses_its_clarification_section_and_keeps_the_rest():
+    prompt = build_system_prompt("/project", environment="test environment")
+    saved = prompt.replace("1. **File System Operations**", _SAVED_CLARIFICATION_SECTION + "1. **File System Operations**", 1)
+    customized = saved.replace("Ask the user one direct question", "Ask my own kind of question")
+
+    assert refresh_system_prompt(saved) == prompt
+    assert "ask_user_question" not in prompt
+    assert refresh_system_prompt(customized) == customized, "a section that is not the built-in one is left alone"
+
+
+def test_tool_guidance_describes_only_tools_the_session_has():
+    assert "ask_user_question" in build_tool_guidance(["read_file", "ask_user_question"])
+    assert build_tool_guidance(["read_file", "bash"]) == ""

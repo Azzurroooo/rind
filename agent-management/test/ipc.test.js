@@ -123,3 +123,20 @@ test("stopping with stopAgents ends a busy service, and the next client starts a
   await exited;
   await assert.rejects(connectClient({ endpoint: server.paths.endpoint, token: "x" }), "the endpoint is closed after stopping");
 });
+
+test("the Manager keeps every Rind tool and is held to agent_management by its instructions", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-manager-"));
+  const server = await startServer({ home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) });
+  const user = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
+  t.after(async () => { user.close(); await server.close(); await rm(home, { recursive: true, force: true }); });
+  const session = await user.request("attachSession", { manager: true });
+
+  const config = await user.request("sessionTools", { sessionId: session.id });
+
+  assert.deepEqual(config.tools.map(tool => tool.name), ["agent_management"]);
+  assert.equal("enabled_tools" in config, false, "no allowlist narrows the built-in tools");
+  assert.deepEqual(config.skill_files, []);
+  assert.match(config.instructions, /only through agent_management/);
+  assert.match(config.instructions, /never carry out that action another way/);
+  assert.ok(config.instructions.includes(path.resolve(home)), "names the Rind home it must not modify");
+});

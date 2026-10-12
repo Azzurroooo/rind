@@ -68,7 +68,7 @@ test("direct session remains observable after detach and management restart, and
   assert.equal(snapshot.runs.length, 1); assert.equal(snapshot.runs[0].status, "succeeded"); assert.equal(calls, 1);
   assert.match(JSON.stringify(await viewer.request("session/replay", { session_id: info.session_id })), /Recovered delivery/);
 });
-test("direct CLI captures activity, rejects ambiguous teams, and manager exposes only management tools", { timeout: 40000 }, async t => {
+test("direct CLI captures activity, rejects ambiguous teams, and the manager has every tool plus management", { timeout: 40000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-direct-e2e-"));
   const workspace = path.join(home, "finance");
   await mkdir(workspace);
@@ -121,7 +121,12 @@ test("direct CLI captures activity, rejects ambiguous teams, and manager exposes
   assert.equal((await client.request("snapshot")).runs.at(-1).status, "succeeded");
   const manager = await cli(["--manager"], "Say hello\n");
   assert.equal(manager.code, 0, manager.stderr);
-  assert.deepEqual(requests.at(-1).tools.map(t => t.function.name), ["agent_management"], manager.stdout + "\n" + manager.stderr);
+  const managerTools = requests.at(-1).tools.map(t => t.function.name);
+  for (const name of ["agent_management", "read_file", "bash", "ask_user_question"]) assert.ok(managerTools.includes(name), name + ": " + manager.stderr);
+  assert.ok(!managerTools.includes("delegate") && !managerTools.includes("report"), "member tools stay with members");
+  const managerPrompt = requests.at(-1).messages.filter(message => message.role === "system").map(message => message.content).join("\n");
+  assert.match(managerPrompt, /only through agent_management/);
+  assert.match(managerPrompt, /<user_clarification>/, "the prompt describes ask_user_question because the Manager has it");
   view = await client.request("snapshot");
   assert.equal(view.runs.at(-1).status, "succeeded");
 });
@@ -141,6 +146,7 @@ test("real Rind reports through the declared tool and the task is delivered", { 
       const names = body.tools.map(t => t.function.name);
       assert.ok(names.includes("report") && names.includes("delegate"), "a leader's task run delivers and delegates");
       assert.ok(!names.includes("agent_management") && !names.includes("ask_user_question"), "a task run neither manages nor asks the user");
+      assert.ok(!JSON.stringify(body.messages).includes("ask_user_question"), "nor is it told about asking the user");
       response.writeHead(200, { "Content-Type": "text/event-stream", Connection: "close" });
       const delta = calls++ === 0 ? { tool_calls: [{ index: 0, id: "report-1", type: "function", function: { name: "report", arguments: JSON.stringify({ outcome: "completed", summary: "Fixture delivery", evidence: ["Local provider verified tool roundtrip"] }) } }] } : { content: "Delivery complete." };
       response.write("data: " + JSON.stringify({ id: "fixture", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: null }] }) + "\n\n");

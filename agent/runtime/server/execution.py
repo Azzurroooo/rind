@@ -672,15 +672,6 @@ class ExecutionCoordinator:
             execution.pending_answers.pop(event.tool_call_id, None)
 
     async def start(self, session_id: str) -> AgentContainer:
-        return await self.start_with_options(session_id)
-
-    async def start_with_options(
-        self,
-        session_id: str,
-        *,
-        enable_user_question: bool | None = None,
-        enabled_tools=None,
-    ) -> AgentContainer:
         clean = validate_session_id(session_id)
         async with self._lock:
             existing = self._active.get(clean)
@@ -690,7 +681,7 @@ class ExecutionCoordinator:
                 raise RuntimeError("Worker is shutting down.")
             task = self._starting.get(clean)
             if task is None:
-                task = asyncio.create_task(self._build_execution(clean, enable_user_question, enabled_tools))
+                task = asyncio.create_task(self._build_execution(clean))
                 self._starting[clean] = task
         try:
             return await asyncio.shield(task)
@@ -698,7 +689,7 @@ class ExecutionCoordinator:
             if task.done() and self._starting.get(clean) is task:
                 self._starting.pop(clean)
 
-    async def _build_execution(self, clean, enable_user_question, enabled_tools):
+    async def _build_execution(self, clean):
         external_tool, question_enabled = self._session_options.get(clean, (self._external_tool, self._enable_user_question))
         metadata = await self._repository.metadata(clean)
         root = validate_workspace_root(str(metadata.get("workspace_root") or metadata.get("cwd") or ""))
@@ -724,10 +715,7 @@ class ExecutionCoordinator:
                 session_id=clean,
                 session_store=self._repository.draft_store(clean),
                 enable_goal=self._enable_goal,
-                enable_user_question=(
-                    question_enabled if enable_user_question is None else enable_user_question
-                ),
-                enabled_tools=enabled_tools,
+                enable_user_question=question_enabled,
                 workspace_root=root,
                 project_id=metadata.get("project_id"),
                 owner_agent_id=metadata.get("owner_agent_id"),

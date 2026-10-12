@@ -7,7 +7,7 @@ export interface ToolDeclaration { name: string; description: string; parameters
 
 const MANAGEMENT: ToolDeclaration = {
   name: "agent_management",
-  description: "Manage registered teams and tasks. Call snapshot to discover IDs. Actions: getTeam(teamId) returns a concise team briefing; listModels(), getMemberModel(teamId,agentId), setMemberModel(teamId,agentId,provider?,model?,reasoningEffort?) and clearMemberModel(teamId,agentId,part:model|reasoningEffort) (a member's model is its workspace's default and applies from its next task); createTeam(name), addMember(teamId,workspace,position?,responsibility?), removeMember(teamId,agentId), deleteTeam(teamId), setLeader(teamId,agentId), setSupervisor(teamId,agentId,reportsToAgentId), updateMember(teamId,agentId,position?,responsibility?), createWorkspace(teamId,name), createWorktree(teamId,name,repository,branch,base?), assignTask(teamId,assigneeAgentId,brief), getTask(taskId), postTaskNote(taskId,text), readArtifact(artifactId), startTask(taskId), setTaskPriority(taskId,priority:high|normal|low), cancelTask(taskId), cancelRun(runId). Only registered members may run. Deleting a team with history or stopping a running task becomes a request the user approves in their Inbox; it leaves snapshot.approvals once the user decides. Share/copy choices require the user interface.",
+  description: "Manage registered teams and tasks. snapshot() gives the overview with IDs: teams and members, open tasks, the latest deliveries, active runs and approvals. Actions: getTeam(teamId) returns all of a team's tasks and a briefing; listModels(), getMemberModel(teamId,agentId), setMemberModel(teamId,agentId,provider?,model?,reasoningEffort?) and clearMemberModel(teamId,agentId,part:model|reasoningEffort) (a member's model is its workspace's default and applies from its next task); createTeam(name), addMember(teamId,workspace,position?,responsibility?), removeMember(teamId,agentId), deleteTeam(teamId), setLeader(teamId,agentId), setSupervisor(teamId,agentId,reportsToAgentId), updateMember(teamId,agentId,position?,responsibility?), createWorkspace(teamId,name), createWorktree(teamId,name,repository,branch,base?), assignTask(teamId,assigneeAgentId,brief), getTask(taskId) returns a task with its notes and artifacts, postTaskNote(taskId,text), readArtifact(artifactId), startTask(taskId), setTaskPriority(taskId,priority:high|normal|low), cancelTask(taskId), cancelRun(runId). Only registered members may run. Deleting a team with history or stopping a running task becomes a request the user approves in their Inbox; it leaves snapshot.approvals once the user decides. Share/copy choices require the user interface.",
   parameters: { type: "object", properties: { action: { type: "string", description: "Operation name." }, parameters: { type: "object", description: "Operation parameters." } }, required: ["action"] },
 };
 
@@ -68,6 +68,18 @@ export function directReports(state: State, teamId: string, agentId: string) {
 // The leader may grow the team; other members only once they lead someone.
 export function supervises(state: State, teamId: string, agentId: string) {
   return state.teams[teamId]?.leaderAgentId === agentId || directReports(state, teamId, agentId).length > 0;
+}
+
+// The Manager has every Rind tool; this is what keeps its changes on the approved path.
+export function managerInstructions(rindHome: string) {
+  return [
+    "You are the user's agents manager. You organize teams and keep their work moving; members do the work.",
+    "- Change teams, members, tasks and reviews only through agent_management. When it returns an approval, tell the user it waits in their Inbox; never carry out that action another way.",
+    "- Use your other tools to inspect and verify: read members' files and deliveries, run read-only checks such as git status, git diff or a test run. Do not edit member workspaces; assign the change to the member who owns it.",
+    "- Sharing or copying a workspace between teams needs the user's explicit choice.",
+    "- Never modify anything in " + rindHome + " outside your working directory.",
+    "- Results of work you assign are delivered to you when it settles. Report briefly: progress, what needs the user, and the tasks involved.",
+  ].join("\n");
 }
 
 // Who a member is and whom it works with: everything it needs instead of reading the organization.

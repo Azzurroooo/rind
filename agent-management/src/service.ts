@@ -5,7 +5,7 @@ import { activeRun, memberKey, requireValue, text, type State, type Agent, type 
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
-import { sessionStatus, memberStatus, queuedReason, priorityRank, teamBriefing, projectionIndex, type LiveSession } from "./projection.js";
+import { sessionStatus, memberStatus, queuedReason, priorityRank, teamBriefing, managerOverview, projectionIndex, type LiveSession } from "./projection.js";
 import { retain } from "./retention.js";
 
 import { supervisor, manages, setSupervisor } from "./organization.js";
@@ -423,7 +423,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   async function operate(state: State, actor: Principal, method: string, p: Params): Promise<any> {
     if (actor.kind !== "user") sessionOf(state, actor);
     switch (method) {
-      case "snapshot": return filtered(state, actor);
+      case "snapshot": return actor.kind === "manager" ? managerOverview(filtered(state, actor), state.agents) : filtered(state, actor);
       case "listTeams": return filtered(state, actor).teams;
       case "listAgents": return filtered(state, actor).agents;
       case "getTeam": {

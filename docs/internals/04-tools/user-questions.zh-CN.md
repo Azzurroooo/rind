@@ -27,7 +27,7 @@ sequenceDiagram
 
 一次问答用 session_id 与 tool_call_id 定位等待者：前端重连或切换会话后，仍必须答复原来的调用，不能只发一段没有来源的“同意”。ExecutionCoordinator 检查等待是否还存在，再解除工具等待；已取消的旧问题不能恢复为新的授权。
 
-问答工具的普通 handler 本身只返回 Unsupported，真正的交互由运行时处理器与 responder 接合。这使 Python 内核不需要知道用户在终端输入、点 Desktop 选项还是从消息渠道回复数字。无交互环境在装配时关闭能力，而不是执行到一半才尝试读取 stdin。
+问答工具的普通 handler 本身只返回 Unsupported，真正的交互由运行时处理器与 responder 接合。这使 Python 内核不需要知道用户在终端输入、点 Desktop 选项还是从消息渠道回复数字。无交互环境在装配时关闭能力，而不是执行到一半才尝试读取 stdin；此时系统提示里也不会再介绍这个工具。
 
 代码入口：[问答声明](../../../agent/infrastructure/tools/user_question.py)、[问答处理](../../../agent/application/tools/processor.py)、[等待者管理](../../../agent/runtime/server/execution.py)。验证：[处理器测试](../../../test/test_async_tool_call_processor.py)、[one-shot 测试](../../../frontend-cli/test/one-shot.test.js)。
 
