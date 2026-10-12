@@ -2,6 +2,8 @@
 
 English | [简体中文](README.md)
 
+想先用起来？读 **[在 Rind 里干活：按场景查的 CLI 指南](guide/README.zh-CN.md)**。下面各篇解释引擎本身如何工作。
+
 **[打开完整阅读地图：9 组、52 篇](internals/README.zh-CN.md)**
 
 从系统结构、执行时序、数据投影、能力扩展和可靠性五个角度，解释 Rind 当前代码如何工作。每篇都有 Mermaid 图、机制说明和源码/测试入口。
