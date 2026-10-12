@@ -20,6 +20,7 @@ export function createCliRuntimeController({
   askContextBoard = null,
   restoreLiveTurn,
   renderHistory = () => {},
+  clearTranscript = () => {},
   onSessionRestored = () => {},
   openManagedSession = null,
   clearPendingInputs,
@@ -205,7 +206,8 @@ export function createCliRuntimeController({
     const turnState = replay?.turn_state || update?.turn_state || null;
     const usage = update?.usage && typeof update.usage === "object" ? update.usage : {};
     const workspaceRoot = String(update?.workspace_root || options.workspaceRoot || "").trim();
-    closeAssistant();
+    if (switching) clearTranscript();
+    else closeAssistant();
     getTaskMonitor()?.clear();
     clearPendingInputs();
     state.session.info = {

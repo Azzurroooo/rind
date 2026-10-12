@@ -246,6 +246,7 @@ const {
   log: logOutput,
   writeError: writeErrorOutput,
   closeAssistant,
+  clearTranscript,
   renderHistory,
   setTurnContext,
 } = outputController;
@@ -331,6 +332,7 @@ const runtimeController = createCliRuntimeController({
   askContextBoard: (...args) => inputActions.askContextBoard(...args),
   restoreLiveTurn,
   renderHistory,
+  clearTranscript,
   onSessionRestored: rebindSendEndpoint,
   openManagedSession: management.chatContext ? (runtimeSessionId, prefill) => enterManagement({ ...management.chatContext, runtimeSessionId, prefill }) : null,
   clearPendingInputs: (...args) => inputActions.clearPendingInputs(...args),

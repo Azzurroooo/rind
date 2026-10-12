@@ -362,6 +362,20 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     runningTools.delete(block);
   }
 
+  // Another conversation replaces this one on screen; none of its blocks are kept.
+  function clearTranscript() {
+    closeAssistant();
+    legacyBegunTools.clear();
+    if (!terminalUi) {
+      return;
+    }
+    transcript.clear();
+    toolBlocks.clear();
+    runningTools.clear();
+    questionBlock = null;
+    blockCount = 0;
+  }
+
   function setToolsExpanded(expanded) {
     if (!terminalUi) {
       return;
@@ -460,6 +474,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     writeUserInput,
     writeError,
     closeAssistant,
+    clearTranscript,
     assistantAppend,
     beginTool,
     updateToolProgress,
