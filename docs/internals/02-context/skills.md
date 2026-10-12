@@ -52,7 +52,7 @@ Other fields (`metadata`, `allowed-tools`, …) are ignored and never replace th
 
 At the start of every turn, SkillTurnCoordinator rescans the layers and writes the effective, model-invocable skills to the session's `skill_catalog`. A turn after compaction is rescanned too. The write happens only when the entries changed, so the catalog's system message stays stable for the prompt cache. A new conversation gets its catalog from its first message, and a skill written during a turn appears from the next one. A session whose tools do not include `read_file` gets no catalog; the Manager is one.
 
-`skill_sources` in the session metadata records which Claude and Codex layers the conversation reads. It is absent, meaning all on, until `/import` changes it. A fork inherits it, and a window's choice before the first message is saved with that message. When `/import` changes it for a hosted conversation, the catalog is synced at once, so the next model request already uses it, and that request cannot reuse the prompt cache.
+`skill_sources` in the session metadata records which Claude and Codex layers the conversation reads. Until `/import` changes it, a conversation reads the project Claude and Codex layers and not the user's own: the folder's skills belong to its work, while `~/.claude` and `~/.codex` hold skills written for other agents. A fork inherits it, and a window's choice before the first message is saved with that message. When `/import` changes it for a hosted conversation, the catalog is synced at once, so the next model request already uses it, and that request cannot reuse the prompt cache.
 
 ## Explicit invocation
 

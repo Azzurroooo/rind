@@ -9,10 +9,10 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.domain.skills import parse_skill_metadata, render_available_skills
+from agent.domain.skills import IMPORT_SOURCES, parse_skill_metadata, render_available_skills
 from agent.infrastructure.skills import SkillRepository, install_system_skills
 
-ALL_ON: dict[str, bool] = {}
+ALL_ON = dict.fromkeys(IMPORT_SOURCES, True)
 
 
 def _write(root: Path, folder: str, frontmatter: str, body: str = "Body") -> Path:

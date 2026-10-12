@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 from pathlib import Path
@@ -67,7 +66,9 @@ async def test_skill_groups_layers_and_marks_overrides_hidden_skills_and_problem
     broken.parent.mkdir(parents=True)
     broken.write_text("---\nname: broken\n---\n", encoding="utf-8")
 
-    result = await _run("/skill", _context(tmp_path))
+    session = Session()
+    session.sources = normalize_skill_sources({"claude_user": True})
+    result = await _run("/skill", _context(tmp_path, session))
     sources = {source["label"]: source for source in result.display["sources"]}
 
     assert sources["Claude · user"]["skills"] == [
@@ -81,12 +82,10 @@ async def test_skill_groups_layers_and_marks_overrides_hidden_skills_and_problem
 
 
 @pytest.mark.asyncio
-async def test_skill_shows_a_switched_off_layer_as_one_line(tmp_path: Path) -> None:
+async def test_the_users_own_claude_skills_are_one_off_line_by_default(tmp_path: Path) -> None:
     _skill(tmp_path / "home" / ".claude" / "skills", "only")
-    session = Session()
-    session.sources = normalize_skill_sources({"claude_user": False})
 
-    result = await _run("/skill", _context(tmp_path, session))
+    result = await _run("/skill", _context(tmp_path))
 
     assert "Claude · user  off" in result.text and "1 skill(s)" in result.text
     assert "only skill" not in result.text
@@ -97,16 +96,16 @@ async def test_import_switches_a_layer_and_refreshes_a_hosted_catalog(tmp_path: 
     _skill(tmp_path / "home" / ".agents" / "skills", "codex")
     session, runtime = Session(), Runtime()
 
-    result = await _run("/import codex_user=off", _context(tmp_path, session, runtime))
+    result = await _run("/import codex_user=on", _context(tmp_path, session, runtime))
 
-    assert session.sources["codex_user"] is False
+    assert session.sources["codex_user"] is True
     assert runtime.synced == 1
     assert "cannot reuse the prompt cache" in result.text
     codex = next(source for source in result.display["sources"] if source["id"] == "codex_user")
     assert codex == {
         "id": "codex_user", "label": "Codex · user",
         "paths": [str(tmp_path / "home" / ".codex" / "skills"), str(tmp_path / "home" / ".agents" / "skills")],
-        "count": 1, "enabled": False,
+        "count": 1, "enabled": True,
     }
 
 
@@ -116,7 +115,7 @@ async def test_import_before_the_first_message_reads_the_window_choice_and_canno
     listed = await _run("/import", _context(tmp_path, draft_session, draft={"skill_sources": {"claude_project": False}}))
     changed = await _run("/import claude_user=off", _context(tmp_path, draft_session))
 
-    assert [source["enabled"] for source in listed.display["sources"]] == [True, True, False, True]
+    assert [source["enabled"] for source in listed.display["sources"]] == [False, False, False, True]
     assert "Send your first message" in changed.text
 
 
@@ -163,18 +162,22 @@ async def test_a_runtime_conversation_keeps_its_import_choice_from_the_window_to
 
     try:
         await request("initialize")
-        choice = {"claude_user": False}
+        default = await request("rind/command/execute", input="/import", workspace_root=str(tmp_path))
+        assert [source["enabled"] for source in default["display"]["sources"]] == [False, False, True, True]
+        choice = {"claude_user": True}
         listed = await request("rind/command/execute", input="/import", workspace_root=str(tmp_path), draft={"skill_sources": choice})
-        assert [source["enabled"] for source in listed["display"]["sources"]][0] is False
+        assert [source["enabled"] for source in listed["display"]["sources"]][0] is True
         session_id = (await request("session/create", workspace_root=str(tmp_path), skill_sources=choice))["session_id"]
         await request("session/prompt", session_id=session_id, input="hello")
-        assert catalog_names(session_id) == ["skill-creator"], "a new conversation has its catalog from the first message"
+        assert catalog_names(session_id) == ["claude-only", "skill-creator"], "the window's choice reaches the first message's catalog"
 
-        updated = await request("rind/command/execute", session_id=session_id, input="/import claude_user=on")
+        updated = await request("rind/command/execute", session_id=session_id, input="/import claude_user=off")
         assert "cannot reuse the prompt cache" in updated["text"]
         await request("session/prompt", session_id=session_id, input="again")
-        assert catalog_names(session_id) == ["claude-only", "skill-creator"]
-        assert "claude-only" in json.dumps(await request("rind/command/execute", session_id=session_id, input="/skill"))
+        assert catalog_names(session_id) == ["skill-creator"]
+        listing = await request("rind/command/execute", session_id=session_id, input="/skill")
+        claude = next(source for source in listing["display"]["sources"] if source["label"] == "Claude · user")
+        assert [skill["status"] for skill in claude["skills"]] == ["off"]
     finally:
         server.close()
         await worker.close()

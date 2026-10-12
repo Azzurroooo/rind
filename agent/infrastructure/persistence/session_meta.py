@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from agent.domain.skills import IMPORT_SOURCES, SKILL_NAME_PATTERN
+from agent.domain.skills import IMPORT_DEFAULTS, SKILL_NAME_PATTERN
 
 
 NAME_LIMIT = 80
@@ -105,9 +105,9 @@ def normalize_skill_catalog(value: Any) -> list[dict[str, str]]:
 
 
 def normalize_skill_sources(value: Any) -> dict[str, bool]:
-    """Which Claude and Codex Skill layers a session reads; absent means all of them."""
+    """Which Claude and Codex Skill layers a session reads; an unset layer keeps its default."""
     chosen = value if isinstance(value, dict) else {}
-    return {source: chosen.get(source) is not False for source in IMPORT_SOURCES}
+    return {source: chosen[source] if isinstance(chosen.get(source), bool) else default for source, default in IMPORT_DEFAULTS.items()}
 
 
 def new_session_meta(

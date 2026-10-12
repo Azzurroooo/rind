@@ -41,11 +41,11 @@ async def test_catalog_follows_the_session_import_choice_and_hides_manual_skills
 
     await skills.sync_catalog(session)
     names = [entry["name"] for entry in await session.get_skill_catalog()]
-    await session.set_skill_sources({"claude_user": False})
+    await session.set_skill_sources({"claude_user": True})
     await skills.sync_catalog(session)
 
-    assert names == ["claude", "demo", "skill-creator"]
-    assert [entry["name"] for entry in await session.get_skill_catalog()] == ["demo", "skill-creator"]
+    assert names == ["demo", "skill-creator"], "the user's own Claude skills are off by default"
+    assert [entry["name"] for entry in await session.get_skill_catalog()] == ["claude", "demo", "skill-creator"]
 
 
 @pytest.mark.asyncio
@@ -97,8 +97,9 @@ def test_catalog_normalization_keeps_only_valid_structured_entries() -> None:
     ) == [{"name": "demo", "description": "Demo", "location": "/s/demo/SKILL.md"}]
 
 
-def test_skill_sources_default_to_every_import_layer() -> None:
+def test_skill_sources_default_to_the_folder_layers_only() -> None:
     assert normalize_skill_sources(None) == {
-        "claude_user": True, "codex_user": True, "claude_project": True, "codex_project": True,
+        "claude_user": False, "codex_user": False, "claude_project": True, "codex_project": True,
     }
-    assert normalize_skill_sources({"claude_user": False, "unknown": False})["claude_user"] is False
+    chosen = normalize_skill_sources({"claude_user": True, "codex_project": "off", "unknown": True})
+    assert chosen == {"claude_user": True, "codex_user": False, "claude_project": True, "codex_project": True}

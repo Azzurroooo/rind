@@ -12,7 +12,9 @@ import yaml
 
 SKILL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 DESCRIPTION_MAX_CHARS = 1024
-IMPORT_SOURCES = ("claude_user", "codex_user", "claude_project", "codex_project")
+# Claude and Codex layers a new conversation reads: this folder's, not the user's own.
+IMPORT_DEFAULTS = {"claude_user": False, "codex_user": False, "claude_project": True, "codex_project": True}
+IMPORT_SOURCES = tuple(IMPORT_DEFAULTS)
 
 
 @dataclass(frozen=True, slots=True)

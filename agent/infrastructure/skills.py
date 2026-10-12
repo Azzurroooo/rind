@@ -11,7 +11,7 @@ import uuid
 
 from filelock import FileLock
 
-from agent.domain.skills import LoadedSkill, SkillMetadata, parse_skill_metadata, split_frontmatter
+from agent.domain.skills import IMPORT_DEFAULTS, LoadedSkill, SkillMetadata, parse_skill_metadata, split_frontmatter
 from agent.infrastructure.paths import resolve_rind_home
 
 
@@ -83,7 +83,7 @@ class SkillRepository:
 
     def scan(self, imports: Mapping[str, bool]) -> SkillScan:
         return SkillScan(tuple(
-            ScannedSource(source, imports.get(source.id, True), *_scan_source(source))
+            ScannedSource(source, imports.get(source.id, IMPORT_DEFAULTS.get(source.id, True)), *_scan_source(source))
             for source in self._sources
         ))
 
