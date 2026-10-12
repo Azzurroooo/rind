@@ -1,4 +1,4 @@
-import { activeRun, memberKey, type Run, type Session, type State, type Task } from "./model.js";
+import { activeRun, memberKey, type Approval, type Membership, type Run, type Session, type State, type Task, type Team } from "./model.js";
 
 // Lookups shared by one snapshot. Built once, so projecting every member,
 // session and queued task is linear in the state instead of quadratic.
@@ -94,4 +94,42 @@ export function sessionStatus(index: ProjectionIndex, sessionId: string) {
     : session && isOpen(index, session) ? "Open" : "Idle";
   const lastActivity = [last?.lastObservedAt, live?.updatedAt].filter(Boolean).sort().at(-1);
   return { status, ...(lastActivity ? { lastActivity } : {}), ...(last?.taskId ? { taskId: last.taskId } : {}), ...(live ? { watchers: live.watchers } : {}) };
+}
+
+// The organization as the user and the Manager read it (the service's snapshot).
+export interface OrganizationView {
+  teams: Team[]; memberships: (Membership & { status: string })[]; tasks: (Task & { queueReason?: string })[];
+  sessions: { id: string; agentId: string }[]; runs: Run[]; approvals: Approval[];
+}
+
+const RECENT_DELIVERIES = 5;
+const PREVIEW_LENGTH = 200;
+const preview = (text: string) => text.length > PREVIEW_LENGTH ? text.slice(0, PREVIEW_LENGTH) + "…" : text;
+
+// The Manager's snapshot: who is on each team, open work, the latest deliveries, active runs and approvals.
+// Everything else (all tasks, notes, artifacts) is read with getTeam, getTask and readArtifact.
+export function managerOverview(view: OrganizationView, agents: State["agents"]) {
+  const open = view.tasks.filter(t => t.status !== "done" && t.status !== "cancelled");
+  const delivered = view.tasks.filter(t => t.status === "done")
+    .sort((a, b) => (b.deliveredAt || "").localeCompare(a.deliveredAt || "")).slice(0, RECENT_DELIVERIES);
+  const agentOf = new Map(view.sessions.map(s => [s.id, s.agentId]));
+  return {
+    teams: view.teams.map(team => ({
+      id: team.id, name: team.name, ...(team.leaderAgentId ? { leaderAgentId: team.leaderAgentId } : {}),
+      members: view.memberships.filter(m => m.teamId === team.id).map(m => ({
+        agentId: m.agentId, name: agents[m.agentId]?.name || m.agentId, workspace: agents[m.agentId]?.canonicalWorkspace, status: m.status,
+        ...(m.position ? { position: m.position } : {}), ...(m.responsibility ? { responsibility: m.responsibility } : {}),
+        ...(m.reportsToAgentId ? { reportsToAgentId: m.reportsToAgentId } : {}),
+      })),
+    })),
+    tasks: [...open, ...delivered].map(task => ({
+      id: task.id, teamId: task.teamId, assigneeAgentId: task.assigneeAgentId, status: task.status, brief: preview(task.brief),
+      ...(task.priority ? { priority: task.priority } : {}), ...(task.queueReason ? { queueReason: task.queueReason } : {}),
+      ...(task.blockedOn ? { blockedOn: task.blockedOn } : {}), ...(task.error ? { error: preview(task.error) } : {}),
+      ...(task.report ? { outcome: task.report.outcome } : {}),
+    })),
+    omittedTasks: view.tasks.length - open.length - delivered.length,
+    runs: view.runs.filter(activeRun).map(r => ({ id: r.id, agentId: agentOf.get(r.sessionId), status: r.status, ...(r.taskId ? { taskId: r.taskId } : {}) })),
+    approvals: view.approvals,
+  };
 }

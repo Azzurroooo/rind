@@ -352,3 +352,16 @@ test("team names are unique among live teams, ignoring case and spaces", async t
   await f.call("deleteTeam", { teamId: archived.id, confirmName: "Old" });
   await f.call("createTeam", { name: "Old" });
 });
+test("the Manager's snapshot is an overview; the user's keeps every detail", async t => {
+  const f = await fixture(t);
+  const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Draft", start: false });
+  await f.call("postTaskNote", { taskId: task.id, text: "Context" });
+  const session = await f.call("attachSession", { manager: true });
+  const overview = await f.call("snapshot", {}, { kind: "manager", sessionId: session.id });
+  assert.deepEqual(Object.keys(overview).sort(), ["approvals", "omittedTasks", "runs", "tasks", "teams"]);
+  assert.equal(overview.tasks[0].id, task.id);
+  assert.equal(overview.teams[0].members[0].agentId, f.leader.id);
+  const full = await f.call("snapshot");
+  assert.ok(full.notes.some(n => n.text === "Context"));
+  assert.ok(full.sessions.length && full.memberships.length);
+});
