@@ -3,7 +3,7 @@
 // The rule throughout is "never show" raw arguments, JSON payloads, file
 // contents or empty sections unless the tool has no better representation.
 import { changeStats, filePath, formatEditFile, formatGlob, formatGrep, formatReadFile, formatWriteFile } from "./tools/fileTools.js";
-import { formatCreate, formatFetchWebPage, formatGeneric, formatSearchWeb, formatSkill, formatUpdateGoal } from "./tools/miscTools.js";
+import { formatCreate, formatFetchWebPage, formatGeneric, formatSearchWeb, formatUpdateGoal } from "./tools/miscTools.js";
 import { errorMessage, parseToolArguments, payloadParts, splitError, singleLine } from "./tools/parse.js";
 import { formatBash, formatBashOutput, formatDelegate, formatTaskControl } from "./tools/runTools.js";
 import { CAPS, meta } from "./tools/caps.js";
@@ -28,8 +28,6 @@ const FORMATTERS = {
   fetch_web_page: formatFetchWebPage,
   delegate: formatDelegate,
   agent_create: formatCreate("agent"),
-  skill_create: formatCreate("skill"),
-  skill: formatSkill,
   update_goal: formatUpdateGoal,
 };
 

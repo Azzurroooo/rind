@@ -1,31 +1,67 @@
-# Skill：目录先出现，正文按需进入
+# Skill：目录先出现，模型需要时自己读文件
 
 English | [简体中文](skills.md)
 
-Rind 不在每次模型请求里放入全部 SKILL.md。先让模型知道“有哪些能力”，用户显式调用或工具读取时才加载具体内容。
+Rind 不在每次模型请求里放入全部 SKILL.md。目录告诉模型有哪些 Skill、每个文件在哪里；任务匹配时，模型用 `read_file` 读取文件。用户显式调用时，正文直接进入会话。没有专门的 Skill 工具。
 
 ~~~mermaid
 flowchart LR
-    U["用户级 skills"] --> SCAN["只扫描 frontmatter"]
-    P["项目级 skills"] --> SCAN
-    A["Agent 级 skills"] --> SCAN
-    SCAN --> INDEX["会话 Skill 目录"]
-    INDEX --> CM["ContextManager 注入简短索引"]
-    CALL["$name / /skill:name"] --> LOAD["加载有效 SKILL.md"]
-    LOAD --> SNAP[("会话 skill_snapshot")]
+    LAYERS["八个层级，按优先级排列"] --> SCAN["用 PyYAML 解析 frontmatter"]
+    IMPORTS["会话 skill_sources"] --> SCAN
+    SCAN --> INDEX["会话目录：名称 · 描述 · 位置"]
+    INDEX --> CM["ContextManager 注入 available_skills"]
+    CM --> READ["模型：read_file 读取位置"]
+    CALL["$name / /skill:name"] --> SNAP[("会话 skill_snapshot")]
     SNAP --> CM
 ~~~
 
-SkillRepository 按用户、项目、Agent 作用域扫描；同名时后面的更具体作用域覆盖前者。扫描只读 frontmatter，正文在 load_skill 时检查路径仍位于作用域内，再解析全文。目录同步失败会保留上一份目录，不使当前回合因扫描错误而丢失既有 Skill 信息。
+## 层级
 
-显式调用由 SkillTurnCoordinator 在用户输入落盘时解析：/skill:name 未找到会报错，普通 $name 若不是已存在 Skill 不作为调用。成功调用的正文以 skill_snapshot 存入会话，后续恢复不依赖磁盘 Skill 文件恰好仍保持原样。模型也可经 skill 工具主动读取指定内容。
+SkillRepository 读取八个层级；同名（不分大小写）时，后面的层级覆盖前面的：
 
-## 文件发现与执行权限是两回事
+| 层级 | 目录 | 开关 |
+| --- | --- | --- |
+| Rind · 内置 | `RIND_HOME/skills/.system` | 始终开启 |
+| Claude · 用户 | `~/.claude/skills` | `/import` |
+| Codex · 用户 | `~/.codex/skills`，然后 `~/.agents/skills` | `/import` |
+| Rind · 用户 | `RIND_HOME/skills` | 始终开启 |
+| Claude · 项目 | `<cwd>/.claude/skills` | `/import` |
+| Codex · 项目 | `<cwd>/.codex/skills`，然后 `<cwd>/.agents/skills` | `/import` |
+| Rind · 项目 | `<cwd>/.rind/skills` | 始终开启 |
+| 团队 | 分配给该成员的 SKILL.md 文件 | 始终开启 |
 
-默认用户目录为 RIND_HOME/skills，项目目录为项目根/.rind/skills；Agent 作用域由装配时传入。仓库扫描各目录的直接子目录，读取其中的 SKILL.md，按名称忽略大小写合并。发现和加载均检查作用域边界，符号链接目录或 SKILL.md 不作为越界读取捷径。
+每个目录贡献其直接子目录中的 `<name>/SKILL.md`。以 `.` 开头的目录会被跳过，因此 Rind 用户层不会重复列出 `.system`，Codex 自带的 `~/.codex/skills/.system` 也不会读入。符号链接的 Skill 目录会被跟随，Skill 的位置记为真实路径。项目级层级以工作目录为根，和 `RIND.md` 一致，不会上溯到 Git 根。
 
-Skill 的正文是按需加载的说明，不是新的 Python 执行器，也不会自动给 Agent 增添未注册工具。把一个能力写进 SKILL.md 后，它仍只能通过当前容器已经拥有的工具实现。目录索引解决可发现性，会话快照解决此次激活的可追溯性，两者承担不同职责。
+## 内置 Skill
 
-代码入口：[SkillRepository](../../../agent/infrastructure/skills.py)、[激活协调](../../../agent/application/skill_selection.py)、[Skill 工具](../../../agent/infrastructure/tools/skill.py)。验证：[Skill 仓库](../../../test/test_skill_repository.py)、[激活事件](../../../test/test_skill_activation_event.py)。
+内置 Skill 随安装包以 `agent/skills` 发布，运行时从 `RIND_HOME/skills/.system` 读取。因此各种安装方式（安装包、npm、便携包、源码）共用同一段代码，不需要任何安装步骤。Worker 启动时，`install_system_skills` 把安装包里文件的 SHA-256 与 `.system` 中的 `.bundle` 标记比较：一致时只是读一个小文件；不一致时（升级后或首次启动），在文件锁内把安装包复制到 `.system` 旁边，再用重命名整体替换，读取方看到的要么是旧版本，要么是新版本，不会是混合状态。中断复制留下的残留目录会被清理。同步失败只记录日志，不会阻止 Worker 启动；`.system` 里没有任何 Skill 时，`/skill` 会报告内置 Skill 缺失。
+
+`.system` 归 Rind 所有，升级时会被替换。在 `RIND_HOME/skills` 放一个同名 Skill，即可覆盖内置 Skill。
+
+## 解析与问题
+
+frontmatter 是 YAML，用 `yaml.safe_load` 读取；值里出现未加引号的 `key: a: b` 冒号时，会加上引号重新解析。只读取三个顶层字段：
+
+- `name`：缺省时取目录名，只能包含字母、数字、连字符和下划线。与目录名不一致时只给警告。
+- `description`：必填。空白（包括 `|`、`>` 多行块里的换行）合并成一行。目录里最多显示 1024 个字符。
+- `disable-model-invocation: true`：不进入目录，但仍可以用 `/skill:name` 调用。
+
+其他字段（`metadata`、`allowed-tools` 等）一律忽略，也不会覆盖顶层字段。解析失败或缺少描述的文件会被跳过。每个问题和警告都连同位置一起保留，由 `/skill` 列出。
+
+## 目录与会话状态
+
+每轮开始时，SkillTurnCoordinator 重新扫描各层级，把生效且允许模型调用的 Skill 写入会话的 `skill_catalog`；compact 之后的那一轮同样会重新扫描。只有条目变化时才写入，因此目录这条 system 消息在提示词缓存中保持稳定。新对话从第一条消息起就有目录，某轮中新写入的 Skill 从下一轮出现。工具里没有 `read_file` 的会话不注入目录，Manager 就是这种情况。
+
+会话元数据里的 `skill_sources` 记录这个对话读取哪些 Claude 和 Codex 层级。在 `/import` 改动之前，对话读取项目级的 Claude 和 Codex 层级，不读取用户自己的：目录里的 Skill 服务于这个目录的工作，而 `~/.claude` 和 `~/.codex` 里是为其他 Agent 写的 Skill。fork 会继承它；窗口在第一条消息之前做出的选择，会随第一条消息一起保存。`/import` 修改正在运行的对话时会立即同步目录，因此下一次模型请求就会使用新目录；这次修改会破坏提示词缓存，那次请求不会命中缓存。
+
+## 显式调用
+
+用户输入落盘时，SkillTurnCoordinator 按会话当前读取的层级解析 `/skill:name` 和 `$name`。`/skill:name` 找不到会报错；`$name` 若不是已有 Skill，就按普通文本处理。成功调用的正文连同位置以 `skill_snapshot` 存入会话，之后恢复不依赖磁盘上的文件保持不变。
+
+## 发现不等于权限
+
+Skill 正文是说明，不是执行器，也不会授予任何工具。SKILL.md 描述的事情，仍然只能通过容器已有的工具完成，而 `read_file` 没有目录边界。克隆来的仓库里项目级的 `.claude`、`.agents` 目录会像 `RIND.md` 一样进入目录；`/skill` 会标明每个 Skill 的来源，`/import` 可以关掉这些层级。如何编写 Skill，见内置的 `skill-creator`。
+
+代码入口：[SkillRepository](../../../agent/infrastructure/skills.py)、[解析与目录](../../../agent/domain/skills.py)、[目录与调用](../../../agent/application/skill_selection.py)、[/skill](../../../agent/runtime/server/commands/skill.py)、[/import](../../../agent/runtime/server/commands/import_skills.py)。验证：[Skill 仓库](../../../test/test_skill_repository.py)、[目录与会话](../../../test/test_skill_catalog_session.py)、[命令](../../../test/test_skill_commands.py)。
 
 [返回系列地图](../README.zh-CN.md)

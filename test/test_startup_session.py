@@ -193,7 +193,7 @@ async def test_goal_saves_a_created_conversation_and_fork_needs_a_message(worker
 async def test_named_draft_preserves_metadata_and_serializes_first_writes(tmp_path):
     store = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), system_prompt="system")
     await store.create_session(session_id="reserved")
-    catalog = [{"name": "test-skill", "description": "A skill", "scope": "user"}]
+    catalog = [{"name": "test-skill", "description": "A skill", "location": "/skills/test-skill/SKILL.md"}]
     await store.set_skill_catalog(catalog)
     await store.initialize()
     assert not Path(store.session_base_path).exists()

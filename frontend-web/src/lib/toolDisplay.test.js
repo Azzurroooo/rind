@@ -163,13 +163,10 @@ describe("delegate, creation, goal, hidden and unknown tools", () => {
     expect(view.body).toMatchObject({ type: "markdown", text: "Looks good.", cap: 24 });
   });
 
-  it("agent_create and skill_create show the name and role or description", () => {
+  it("agent_create shows the name and role", () => {
     const agent = toolView(tool("agent_create", { name: "scout", role: "Finds files" }, ok({ agent_id: "a1", name: "scout" })));
     expect(agent).toMatchObject({ verb: "Created agent", target: "scout" });
     expect(agent.body.rows).toEqual([{ label: "name", value: "scout" }, { label: "role", value: "Finds files" }]);
-    const skill = toolView(tool("skill_create", { name: "deploy", description: "Ship it" }, ok({ name: "deploy" })));
-    expect(skill).toMatchObject({ verb: "Created skill", target: "deploy" });
-    expect(skill.body.rows[1]).toEqual({ label: "description", value: "Ship it" });
   });
 
   it("update_goal shows the status and the goal text", () => {

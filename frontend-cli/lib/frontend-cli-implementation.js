@@ -48,10 +48,11 @@ import { MonitorStack } from "./components/monitor-stack.js";
 import {
   inputHintText,
   interruptText,
-  authChoiceFrame,
+  choiceDialogFrame,
   authSecretFrame,
   modelMenuText,
   themeMenuText,
+  skillImportMenuText,
   questionMenuFrame,
   sessionMenuText,
   promptPlaceholderText,
@@ -322,8 +323,9 @@ const runtimeController = createCliRuntimeController({
   getTaskMonitor: () => taskMonitorController,
   getCompactContextState: () => compactContextState,
   askModelMenu: (...args) => inputActions.askModelMenu(...args),
+  askSkillImportMenu: (...args) => inputActions.askSkillImportMenu(...args),
   askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
-  askChoice: tui ? (...args) => inputActions.askAuthChoice(...args) : null,
+  askChoice: tui ? (...args) => inputActions.askChoice(...args) : null,
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
   askForkPointMenu: (...args) => inputActions.askForkPointMenu(...args),
   askContextBoard: (...args) => inputActions.askContextBoard(...args),
@@ -364,6 +366,7 @@ commandController = createCommandController({
     runGoalCommand: runtimeController.runGoalCommand,
     runRename: (argument) => runtimeController.runRename(argument),
     runModelSelector: runtimeController.runModelSelector,
+    runImportSelector: runtimeController.runImportSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
     runLogin: (providerId) => runLogin(providerId),
     runLogout: (providerId) => runLogout(providerId),
@@ -673,7 +676,7 @@ async function chooseLoginMethod(offered) {
   const methods = Object.keys(LOGIN_METHODS).filter((key) => offered.includes(key));
   if (methods.length < 2) return methods[0] || "api_key";
   const labels = methods.map((key) => LOGIN_METHODS[key]);
-  return methods[labels.indexOf(await inputActions.askAuthChoice("Sign in", labels))] || "";
+  return methods[labels.indexOf(await inputActions.askChoice({ title: "Login · Sign in", options: labels }))] || "";
 }
 
 async function runLogin(providerId = "") {
@@ -692,7 +695,7 @@ async function runLogin(providerId = "") {
       const options = providers
         .filter((item) => item.methods?.includes(method))
         .map((item) => `${item.id} · ${item.name} · ${item.configured ? item.source : "not configured"}`);
-      const choice = await inputActions.askAuthChoice("Provider", method === "api_key" ? [...options, ADD_CONNECTION] : options);
+      const choice = await inputActions.askChoice({ title: "Login · Provider", options: method === "api_key" ? [...options, ADD_CONNECTION] : options });
       selected = choice === ADD_CONNECTION ? ADD_CONNECTION : String(choice || "").split(" · ")[0].trim();
       if (!selected) {
         logOutput(LOGIN_CANCELED);
@@ -728,7 +731,7 @@ async function runLogout(providerId = "") {
       return;
     }
     if (!selected) {
-      const choice = await inputActions.askAuthChoice("Provider", stored.map((item) => `${item.id} · ${item.name}`));
+      const choice = await inputActions.askChoice({ title: "Logout · Provider", options: stored.map((item) => `${item.id} · ${item.name}`) });
       selected = String(choice || "").split(" · ")[0].trim();
     }
     const result = await request(runtimeMethods.authLogout, { provider_id: selected });
@@ -830,7 +833,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   if (!session) {
     return null;
   }
-  const choiceMenu = ["model", "theme", "sessions", "fork", "auth-choice"].includes(session.mode);
+  const choiceMenu = ["model", "theme", "sessions", "fork", "choice-dialog"].includes(session.mode);
   if (session.mode === "prompt" && session.menuState) {
     session.menuState.setInput(session.editor.input());
   }
@@ -848,9 +851,10 @@ function composeFrame(width = process.stdout.columns || 80) {
       menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
     };
   }
-  if (session.mode === "auth-choice") {
-    const menuText = authChoiceFrame({
-      title: session.authTitle || "Provider",
+  if (session.mode === "choice-dialog") {
+    const menuText = choiceDialogFrame({
+      title: session.title,
+      message: session.message,
       options: session.choiceState.options(),
       selectedIndex: session.choiceState.selectedIndex(),
       width,
@@ -888,6 +892,15 @@ function composeFrame(width = process.stdout.columns || 80) {
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: themeMenuText(session.themeState.items(), session.themeState.selectedIndex()).trimEnd(),
+    };
+  }
+  if (session.mode === "import") {
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
+      inputText: session.inputText,
+      cursor: { line: 0, column: session.inputText.length },
+      menuText: skillImportMenuText(session.importState.items(), session.importState.selectedIndex()).trimEnd(),
     };
   }
   if (session.mode === "question") {

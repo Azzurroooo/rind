@@ -85,7 +85,7 @@ class StdioWorkerClient:
 
 @pytest.fixture(scope="module")
 def context_worker(tmp_path_factory):
-    """One real worker subprocess; a scratch workspace plus scratch RIND_HOME."""
+    """One real worker subprocess; a scratch workspace, user home and RIND_HOME."""
     root = tmp_path_factory.mktemp("context-journey")
     workspace = root / "workspace"
     workspace.mkdir(parents=True)
@@ -96,7 +96,8 @@ def context_worker(tmp_path_factory):
         encoding="utf-8",
     )
     env = dict(os.environ)
-    env.update({"RIND_HOME": str(home), "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+    # The user's own Claude and Codex skills must not enter the measured context.
+    env.update({"RIND_HOME": str(home), "HOME": str(root), "USERPROFILE": str(root), "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     env.pop("RIND_WORKSPACE", None)
     process = subprocess.Popen(
         [

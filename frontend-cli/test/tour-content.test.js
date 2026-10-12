@@ -12,7 +12,7 @@ const STEP_KINDS = new Set([
 ]);
 const MENU_KINDS = new Set([
   "slash", "model", "theme", "sessions", "choice",
-  "monitor", "board", "auth-choice", "auth-secret", "auth-input",
+  "monitor", "board", "choice-dialog", "auth-secret", "auth-input",
 ]);
 const CLOSING_KINDS = new Set(["turn-done", "result", "exit", "note", "assistant"]);
 const SUBMIT_MODES = new Set(["send", "queue", "steer"]);

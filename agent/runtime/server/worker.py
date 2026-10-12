@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from functools import partial
 from typing import Any
@@ -14,9 +15,10 @@ from agent.application.tools import ToolResultNormalizer
 from agent.application.usage_summary import summarize_usage
 from agent.bootstrap import AgentContainer, SharedRuntimeResources
 from agent.infrastructure.llm import ProviderServiceImpl
-from agent.infrastructure.paths import validate_session_id, validate_workspace_root
+from agent.infrastructure.paths import resolve_rind_home, validate_session_id, validate_workspace_root
 from agent.infrastructure.persistence import ToolOutputStore
 from agent.infrastructure.persistence.plan import build_plan_snapshot
+from agent.infrastructure.skills import install_system_skills
 from agent.infrastructure.persistence.usage_ledger import (
     append_usage_record,
     default_usage_ledger_path,
@@ -28,6 +30,9 @@ from agent.infrastructure.tools.web.session_pool import WebSessions
 from agent.runtime.core import MessageStreamParser
 from agent.runtime.server.execution import ExecutionCoordinator
 from agent.runtime.server.session_service import SessionService
+
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeWorker:
@@ -84,6 +89,11 @@ class RuntimeWorker:
         async with self._initialize_lock:
             if not self._initialized:
                 await self._tool_output_store.cleanup()
+                try:
+                    await asyncio.to_thread(install_system_skills, resolve_rind_home())
+                except OSError:
+                    # Startup goes on with whatever .system holds; /skill reports missing built-ins.
+                    logger.exception("Built-in skills could not be installed into RIND_HOME/skills/.system.")
                 info = await self.repository.initial(self.workspace_root, self.session_id, self._resume_latest)
                 self.session_id = str(info["session_id"]) or None
                 self._initialized = True
@@ -145,9 +155,11 @@ class RuntimeWorker:
             raise ValueError("This conversation already exists.")
         info = await self.repository.create(str(root), selection=selection, selection_source=source, defer_persistence=True, session_id=proposed)
         session_id = info["session_id"]
+        # Chosen before the first message; that message saves them with the conversation.
         if params.get("name"):
-            # A name chosen before the first message; that message saves it with the conversation.
             await (await self.repository.open_store(session_id)).set_name(str(params["name"]))
+        if isinstance(params.get("skill_sources"), dict):
+            await (await self.repository.open_store(session_id)).set_skill_sources(params["skill_sources"])
         if "external_tools" in params or "enable_user_question" in params:
             tool = ExternalTool.from_json(json.dumps(params["external_tools"])) if params.get("external_tools") else None
             await self.execution.configure_session(session_id, tool, params.get("enable_user_question") is not False)

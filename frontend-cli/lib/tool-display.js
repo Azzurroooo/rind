@@ -115,10 +115,6 @@ export function argsFromResult(name, result) {
     case "delegate":
       put("agent_id", data.agent_id);
       break;
-    case "skill":
-    case "skill_create":
-      put("name", data.name);
-      break;
     case "agent_create":
       put("name", data.name);
       put("agent_id", data.agent_id);
@@ -629,22 +625,6 @@ const AGENT_CREATE_RENDERER = {
   },
 };
 
-function skillRenderer(verb) {
-  return {
-    runningMain(context, width) {
-      return `${verb} ${agentArg(context.args.name, width)}`;
-    },
-    finished(context, width, state) {
-      const { data } = resultData(context);
-      const path = singleLineText(data.path);
-      const pathPart = path ? dim(` · ${clipText(path, Math.max(8, width - 16), 0)}`) : "";
-      const overwritten = data.overwritten ? dim(" · overwritten") : "";
-      const name = agentArg(context.args.name || data.name, width);
-      return titleFor(state, `${verb} ${name}${pathPart}${overwritten}`);
-    },
-  };
-}
-
 const GENERIC_RENDERER = {
   runningMain(context, width) {
     const label = humanToolName(context.name);
@@ -705,6 +685,4 @@ export const TOOL_RENDERERS = {
   fetch_web_page: FETCH_WEB_PAGE_RENDERER,
   delegate: DELEGATE_RENDERER,
   agent_create: AGENT_CREATE_RENDERER,
-  skill: skillRenderer("skill"),
-  skill_create: skillRenderer("skill-create"),
 };

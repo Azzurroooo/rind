@@ -24,7 +24,7 @@ async def test_compact_pipeline_outcomes_and_reopened_context(tmp_path, monkeypa
     await session.initialize()
     await session.persist_message("user", "Keep the contract: answer 42.")
     await session.persist_message("assistant", "Understood.", reasoning_content="original reasoning")
-    await session.set_skill_catalog([{"name": "example", "description": "catalog marker", "scope": "project"}])
+    await session.set_skill_catalog([{"name": "example", "description": "catalog marker", "location": "/skills/example/SKILL.md"}])
     source = CancellationTokenSource()
     summary_requests = []
 

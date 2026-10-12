@@ -35,7 +35,7 @@ function harness({ answer = "No · only this conversation", folder = {}, askChoi
     requireInitialization: value => value, state, getCommands: () => ({ normalizeCommands: () => [], localCommands: () => [] }), getTaskMonitor: () => null, getCompactContextState: () => ({ clear() {} }),
     askModelMenu: async () => ({ providerId: "deepseek", modelId: "deepseek-v4-pro" }),
     askEffortMenu: async () => "high",
-    askChoice: askChoice ? async (title, options) => { questions.push({ title, options }); return answer; } : null,
+    askChoice: askChoice ? async (question) => { questions.push(question); return answer; } : null,
     askSessionMenu: async () => null, askForkPointMenu: async () => null, restoreLiveTurn() {}, clearPendingInputs() {},
     closeAssistant() {}, refreshInputState() {}, updateGoalState() {}, log: value => logs.push(typeof value === "function" ? value() : value),
     writeError() {}, redraw() {},
@@ -48,7 +48,7 @@ test("/model asks once whether new conversations in this folder start with the s
   const h = harness({ answer: "Yes · new conversations here start with deepseek / deepseek-v4-pro" });
   await h.controller.runModelSelector();
   assert.equal(h.questions.length, 1);
-  assert.equal(h.questions[0].title, "Also the default for new conversations in this folder?");
+  assert.equal(h.questions[0].message, "Also the default for new conversations in this folder?");
   assert.equal(h.questions[0].options.length, 2, "only this conversation, or this folder; never every folder");
   assert.deepEqual(h.sets(), [{ workspace_root: "/work/app", provider_id: "deepseek", model_id: "deepseek-v4-pro" }]);
   assert.match(h.logs.join("\n"), /open ones keep theirs/);

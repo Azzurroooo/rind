@@ -38,8 +38,8 @@ async def test_context_manager_injects_catalog_after_docs_and_transient_context(
     session = QueryOnlySession(
         [{"role": "system", "content": "base"}, {"role": "user", "content": "hello"}],
         [
-            {"name": "zeta", "description": "Zeta workflow", "scope": "project"},
-            {"name": "alpha", "description": "Alpha workflow", "scope": "user"},
+            {"name": "zeta", "description": "Zeta workflow", "location": "/skills/zeta/SKILL.md"},
+            {"name": "alpha", "description": "Alpha workflow", "location": "/skills/alpha/SKILL.md"},
         ],
     )
 
@@ -75,18 +75,18 @@ async def test_context_manager_does_not_add_catalog_to_persisted_history_or_empt
 @pytest.mark.asyncio
 async def test_catalog_rendering_is_stable_and_respects_the_character_budget() -> None:
     catalog = [
-        {"name": "alpha", "description": "a" * 1000, "scope": "project"},
-        {"name": "beta", "description": "b" * 1000, "scope": "user"},
+        {"name": "alpha", "description": "a" * 1000, "location": "/skills/alpha/SKILL.md"},
+        {"name": "beta", "description": "b" * 1000, "location": "/skills/beta/SKILL.md"},
     ]
     session = QueryOnlySession([{"role": "system", "content": "base"}], catalog)
-    manager = ContextManager(skill_catalog_char_limit=300)
+    manager = ContextManager(skill_catalog_char_limit=450)
 
     first = await manager.build_messages_async(session)
     second = await manager.build_messages_async(session)
     catalog_message = next(message for message in first.messages if message["content"].startswith("<available_skills>"))
 
     assert first.messages == second.messages
-    assert len(catalog_message["content"]) <= 300
+    assert len(catalog_message["content"]) <= 450
     assert "<available_skills>" not in session._messages[0]["content"]
 
 
@@ -94,7 +94,7 @@ async def test_catalog_rendering_is_stable_and_respects_the_character_budget() -
 async def test_compaction_context_can_exclude_the_catalog() -> None:
     session = QueryOnlySession(
         [{"role": "system", "content": "base"}, {"role": "user", "content": "hello"}],
-        [{"name": "demo", "description": "Demo", "scope": "project"}],
+        [{"name": "demo", "description": "Demo", "location": "/skills/demo/SKILL.md"}],
     )
 
     result = await ContextManager().build_messages_async(session, include_skill_catalog=False)

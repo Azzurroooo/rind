@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agent.runtime.server.commands.compact import COMMAND as COMPACT_COMMAND
 from agent.runtime.server.commands.help import build_help_command
+from agent.runtime.server.commands.import_skills import COMMAND as IMPORT_COMMAND
 from agent.runtime.server.commands.init_rind_doc import COMMAND as INIT_COMMAND
 from agent.runtime.server.commands.model import COMMAND as MODEL_COMMAND
 from agent.runtime.server.commands.rename import COMMAND as RENAME_COMMAND
@@ -21,6 +22,7 @@ def build_command_infos() -> tuple[SlashCommandInfo, ...]:
             STATUS_COMMAND,
             SESSIONS_COMMAND,
             SKILL_COMMAND,
+            IMPORT_COMMAND,
             INIT_COMMAND,
             COMPACT_COMMAND,
             MODEL_COMMAND,

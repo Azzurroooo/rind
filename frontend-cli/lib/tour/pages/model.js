@@ -30,7 +30,7 @@ export const modelPages = [
       closeMenu("Enter"),
       info({ model: "zai/glm-4.6" }),
       slashResult({ text: "Model switched to zai/glm-4.6" }),
-      menu({ kind: "auth-choice", title: "Also the default for new conversations in this folder?", options: ["No · only this conversation", "Yes · new conversations here start with zai / glm-4.6"], selected: 0 },
+      menu({ kind: "choice-dialog", title: "Folder default", message: "Also the default for new conversations in this folder?", options: ["No · only this conversation", "Yes · new conversations here start with zai / glm-4.6"], selected: 0 },
         "The model changes in this conversation first. You can also save it as this folder's default for new conversations and agent tasks."),
       closeMenu("Enter"),
       type("/effort high"),

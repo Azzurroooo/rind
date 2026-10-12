@@ -1,6 +1,6 @@
 import { prepareComposerFrame } from "../composer-terminal.js";
 import {
-  authChoiceFrame,
+  choiceDialogFrame,
   authSecretFrame,
   backgroundMonitorText,
   choiceMenuText,
@@ -346,8 +346,8 @@ function menuFrame(menu, inner) {
       const page = menu.pages[selected] || {};
       return { text: page.breakdown ? contextBoardText(page, inner) : usageBoardText(page, inner) };
     }
-    case "auth-choice":
-      return { text: authChoiceFrame({ title: menu.title, options: menu.options, selectedIndex: selected, width: inner }) };
+    case "choice-dialog":
+      return { text: choiceDialogFrame({ title: menu.title, message: menu.message, options: menu.options, selectedIndex: selected, width: inner }) };
     case "auth-secret":
     case "auth-input": {
       const frame = authSecretFrame({

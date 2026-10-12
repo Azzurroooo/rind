@@ -1,4 +1,4 @@
-"""Render the bilingual README hero artwork using the website's visual language."""
+"""Render the bilingual README hero artwork using Rind's visual identity."""
 
 from html import escape
 from math import cos, pi, sin

@@ -6,7 +6,7 @@ import path from "node:path";
 import { AssistantRenderer } from "../lib/assistant-renderer.js";
 import { AssistantMessage } from "../lib/components/assistant-message.js";
 import { paintRaw, resetTheme, setTheme } from "../lib/theme.js";
-import { textWidth } from "../lib/text-width.js";
+import { stripAnsi, textWidth } from "../lib/text-width.js";
 import {
   answerPromptText,
   answerPlaceholderText,
@@ -23,7 +23,7 @@ import {
   inputHintText,
   interruptText,
   modelListErrorText,
-  authChoiceFrame,
+  choiceDialogFrame,
   authSecretFrame,
   modelMenuText,
   planUpdatedLine,
@@ -377,9 +377,9 @@ test("slashMenuText keeps the selected command visible", () => {
   );
 });
 
-test("authChoiceFrame renders a full provider box with selection", () => {
-  const text = authChoiceFrame({
-    title: "Provider",
+test("choiceDialogFrame renders a full provider box with selection", () => {
+  const text = choiceDialogFrame({
+    title: "Login · Provider",
     options: ["openai · OpenAI · not configured", "deepseek · DeepSeek · not configured"],
     selectedIndex: 1,
     width: 64,
@@ -392,21 +392,39 @@ test("authChoiceFrame renders a full provider box with selection", () => {
   assert.ok(lines[2].startsWith("│ › deepseek"));
   assert.match(lines[2], /deepseek · DeepSeek · not configured\s+│$/);
   assert.match(lines[4], /↑↓ select · enter choose · esc cancel/);
-  assert.equal(authChoiceFrame({ title: "Provider", options: [], selectedIndex: 0 }), "");
+  assert.equal(choiceDialogFrame({ title: "Login · Provider", options: [], selectedIndex: 0 }), "");
   assert.equal(new Set(lines.filter(Boolean).map((line) => textWidth(line))).size, 1, "all box rows share one width");
 });
 
-test("authChoiceFrame windows long provider lists to keep the selection visible", () => {
+test("choiceDialogFrame shows its title and wraps the whole message above the choices", () => {
+  const message = "Applying breaks the prompt cache. The skill catalog in this conversation's context changes, so the next request will not hit the cache.";
+  const lines = choiceDialogFrame({
+    title: "Import skills",
+    message,
+    options: ["Cancel · keep the skills and the cache", "Apply · change the skills and break the cache"],
+    selectedIndex: 0,
+    width: 64,
+  }).trimEnd().split("\n");
+
+  assert.ok(lines[0].startsWith("┌─ Import skills "));
+  assert.doesNotMatch(lines.join("\n"), /Login|\.\.\./);
+  const text = lines.map((line) => stripAnsi(line).replace(/^│ |\s*│$/g, "").trim()).join(" ");
+  assert.ok(text.includes(message.replace(/\s+/g, " ")), "every word of the message is shown");
+  assert.ok(lines.findIndex((line) => line.includes("› Cancel")) > lines.findIndex((line) => line.includes("hit the cache.")));
+  assert.equal(new Set(lines.map((line) => textWidth(line))).size, 1, "all box rows share one width");
+});
+
+test("choiceDialogFrame windows long provider lists to keep the selection visible", () => {
   const options = Array.from({ length: 18 }, (_value, index) => `provider-${index} · Name ${index} · not configured`);
 
-  const top = authChoiceFrame({ title: "Provider", options, selectedIndex: 0, width: 76 }).split("\n");
+  const top = choiceDialogFrame({ title: "Login · Provider", options, selectedIndex: 0, width: 76 }).split("\n");
   assert.equal(top.filter(Boolean).length, 14); // title + 9 options + ellipsis + blank + hint + border
   assert.ok(top[1].includes("provider-0"));
   assert.ok(!top.some((line) => line.includes("provider-9")));
   assert.ok(top.at(-5).includes("…"));
   assert.ok(top.some((line) => line.includes("›")));
 
-  const bottom = authChoiceFrame({ title: "Provider", options, selectedIndex: 17, width: 76 }).split("\n");
+  const bottom = choiceDialogFrame({ title: "Login · Provider", options, selectedIndex: 17, width: 76 }).split("\n");
   assert.ok(bottom[1].includes("…"));
   assert.ok(bottom.some((line) => line.includes("provider-17")));
   assert.ok(!bottom.some((line) => line.includes("provider-7")));
@@ -606,48 +624,48 @@ test("slashDisplayText renders sessions and skills payloads", () => {
       "  resume: /sessions",
     ].join("\n"),
   );
-  assert.equal(
-    slashDisplayText({
-      type: "skills",
-      skills: [{
-        name: "demo",
-        scope: "project",
-        description: "Demo skill",
-        path: "E:\\project\\.rind\\skills\\demo\\SKILL.md",
-      }],
-    }),
-    [
-      `  ── Skills · 1 available ${"─".repeat(70)}`,
-      "  demo          [project]  Demo skill",
-      "      E:\\project\\.rind\\skills\\demo",
-    ].join("\n"),
-  );
 });
 
-test("slashDisplayText clips long slash command fields", () => {
+test("slashDisplayText groups skills by layer with overrides, imports and problems", () => {
   const text = slashDisplayText({
     type: "skills",
-    skills: [{
-      name: "debugging",
-      scope: "project",
-      description: "x".repeat(140),
-      path: `E:\\${"deep\\".repeat(20)}SKILL.md`,
-    }],
+    sources: [
+      { label: "Rind · built-in", paths: ["E:\\rind\\agent\\skills"], enabled: true, importable: false,
+        skills: [{ name: "skill-creator", description: "Create skills", status: "active" }] },
+      { label: "Claude · user", paths: ["E:\\home\\.claude\\skills"], enabled: false, importable: true,
+        skills: [{ name: "pdf", description: "Forms", status: "off" }] },
+      { label: "Codex · user", paths: ["E:\\home\\.codex\\skills", "E:\\home\\.agents\\skills"], enabled: true, importable: true, skills: [] },
+      { label: "Rind · project", paths: ["E:\\work\\.rind\\skills"], enabled: true, importable: false, skills: [
+        { name: "manual", description: "Release", status: "hidden" },
+        { name: "skill-creator", description: "Mine", status: "overridden", overridden_by: "E:\\work\\.rind\\skills\\x\\SKILL.md" },
+      ] },
+    ],
+    problems: [{ location: "E:\\work\\.rind\\skills\\bad\\SKILL.md", message: "missing description." }],
   });
 
-  assert.match(text, /x{68}\.\.\./);
-  assert.match(text, /E:\\deep\\deep\\deep.*\.\.\.$/);
+  assert.equal(text, [
+    `  ── Skills · 2 available ${"─".repeat(70)}`,
+    "  Rind · built-in  E:\\rind\\agent\\skills",
+    "    skill-creator  Create skills",
+    "  Claude · user  off · 1 skill · /import to enable",
+    "  Rind · project  E:\\work\\.rind\\skills",
+    "    manual         only via /skill:name · Release",
+    "    skill-creator  overridden by E:\\work\\.rind\\skills\\x",
+    "  Problems",
+    "    E:\\work\\.rind\\skills\\bad  missing description.",
+  ].join("\n"));
 });
 
-test("skill locations collapse the home directory and drop SKILL.md", () => {
-  const homeSkill = path.join(homedir(), ".rind", "skills", "calc", "SKILL.md");
+test("skill paths collapse the home directory and long descriptions are clipped", () => {
   const text = slashDisplayText({
     type: "skills",
-    skills: [{ name: "calc", scope: "user", description: "math", path: homeSkill }],
+    sources: [{ label: "Rind · user", paths: [path.join(homedir(), ".rind", "skills")], enabled: true, importable: false,
+      skills: [{ name: "calc", description: "x".repeat(140), status: "active" }] }],
+    problems: [],
   });
 
-  assert.match(text, /~[\\/]\.rind[\\/]skills[\\/]calc$/m);
-  assert.doesNotMatch(text, /SKILL\.md/);
+  assert.match(text, /Rind · user  ~[\\/]\.rind[\\/]skills$/m);
+  assert.match(text, /x+\.\.\.$/m);
 });
 
 test("slashResultText prefers structured display and falls back to raw text", () => {

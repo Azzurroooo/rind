@@ -80,7 +80,7 @@ flowchart LR
 | [上下文预算](02-context/context-budget.zh-CN.md) | 本地估算、服务端用量锚点、窗口余量和 context inspect 怎样避免盲目塞满？ | 预算分配图 |
 | [何时压缩](02-context/compaction-triggers.zh-CN.md) | 手动、自动、上下文超长恢复为何共享管线，却由不同调用者决定是否继续采样？ | 触发状态图 |
 | [压缩交接](02-context/compaction-handoff.zh-CN.md) | 历史摘要、原样保留的最近消息、工具配对、失败回退与边界校验怎样保证可续接？ | 压缩前后对照图 |
-| [Skill 的渐进披露](02-context/skills.zh-CN.md) | 元数据发现、作用域覆盖、显式激活、快照持久化如何避免每轮加载全文？ | 发现与激活时序图 |
+| [Skill 的渐进披露](02-context/skills.zh-CN.md) | 跨 Rind、Claude、Codex 目录的分层发现、模型用 read_file 读取的目录、显式调用快照，如何避免每轮加载全文？ | 发现与激活图 |
 | [图片进入上下文](02-context/image-input.zh-CN.md) | 用户上传与工具图片如何快照、存储、校验能力并适配模型请求？ | 图片数据流图 |
 
 ## 03 · 持久化与事实来源（5 篇）

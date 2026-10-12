@@ -77,16 +77,6 @@ export function formatCreate(noun) {
   };
 }
 
-export function formatSkill(tool, args, parts) {
-  return {
-    kind: "skill",
-    verb: "Loaded skill",
-    target: firstText(args.name, args.skill, parts.record.name),
-    meta: [],
-    body: null,
-  };
-}
-
 export function formatUpdateGoal(tool, args, parts) {
   const { record } = parts;
   const goal = String(args.goal || args.objective || args.text || record.goal || record.objective || "").trim();

@@ -1,6 +1,12 @@
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def isolated_rind_home(monkeypatch, tmp_path_factory):
+    """No test, nor a worker process it starts, writes into the developer's own RIND_HOME."""
+    monkeypatch.setenv("RIND_HOME", str(tmp_path_factory.mktemp("rind-home")))
+
+
 @pytest.fixture
 def shell_tools(tmp_path):
     from agent.infrastructure.persistence import ToolOutputStore

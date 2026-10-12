@@ -118,8 +118,6 @@ def test_builtin_catalog_preserves_default_tool_order(build_builtin_tool_specs) 
         "task_control",
             "bash_output",
             "update_plan",
-            "skill",
-            "skill_create",
         "search_web",
         "fetch_web_page",
     ]

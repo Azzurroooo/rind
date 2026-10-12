@@ -89,10 +89,24 @@ function renderSessionsDisplay(display: Record<string, unknown>) {
   }).join("")}</div>`
 }
 
+// Every skill layer with what it contributes; a switched-off import stays one
+// row so it can be found again, and problems close the list.
 function renderSkillsDisplay(display: Record<string, unknown>) {
-  const skills = recordList(display.skills)
-  if (!skills.length) return `<div class="command-display-empty">No skills found</div>`
-  return `<div class="command-display command-skill-list">${skills.map((skill) => `<div class="command-skill"><strong>${escapeHtml(displayText(skill.name))}</strong><small>${escapeHtml(displayText(skill.scope))}</small><span>${escapeHtml(displayText(skill.description))}</span>${skill.path ? `<code>${escapeHtml(displayText(skill.path))}</code>` : ""}</div>`).join("")}</div>`
+  const sources = recordList(display.sources).filter((source) => source.enabled ? recordList(source.skills).length : source.importable)
+  const problems = recordList(display.problems)
+  if (!sources.length && !problems.length) return `<div class="command-display-empty">No skills found</div>`
+  const notes: Record<string, string> = { hidden: "only via /skill:name", overridden: "overridden", off: "off" }
+  const row = (name: unknown, note: string, detail: unknown, code = "") =>
+    `<div class="command-skill"><strong>${escapeHtml(displayText(name))}</strong><small>${escapeHtml(note)}</small><span>${escapeHtml(displayText(detail))}</span>${code ? `<code>${escapeHtml(code)}</code>` : ""}</div>`
+  const layers = sources.map((source) => {
+    const skills = recordList(source.skills)
+    const paths = (Array.isArray(source.paths) ? source.paths : []).map(displayText).join(" · ")
+    if (!source.enabled) return row(source.label, "off", `${skills.length} ${skills.length === 1 ? "skill" : "skills"} · /import to enable`, paths)
+    return row(source.label, "", "", paths) + skills.map((skill) =>
+      row(skill.name, notes[displayText(skill.status)] || "", skill.status === "overridden" ? `by ${displayText(skill.overridden_by)}` : skill.description)).join("")
+  })
+  const issues = problems.map((problem) => row("Problem", "", problem.message, displayText(problem.location)))
+  return `<div class="command-display command-skill-list">${[...layers, ...issues].join("")}</div>`
 }
 
 function renderStatusDisplay(display: Record<string, unknown>) {

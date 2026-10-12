@@ -15,7 +15,6 @@ from agent.runtime.server.commands import SlashCommandContext, SlashCommandInfo,
 from agent.runtime.server.commands.catalog import build_command_infos
 from agent.infrastructure.settings import AppSettings
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
-from agent.infrastructure.skills import SkillRepository
 
 
 class FakeSession:
@@ -511,121 +510,6 @@ async def test_compact_returns_friendly_message_for_empty_session() -> None:
 
     assert runtime.compact_called is False
     assert result.text == "Not enough messages to compact. Send a message first."
-
-
-
-@pytest.mark.asyncio
-async def test_skill_lists_project_skill(tmp_path, monkeypatch) -> None:
-    skill_dir = tmp_path / ".rind" / "skills" / "demo"
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        "---\nname: demo\ndescription: Demo skill\ntriggers: []\n---\n\nBody\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-
-    result = await SlashCommandRouter(build_command_infos()).execute("/skill", _context())
-
-    assert "demo [project]" in result.text
-    assert "Demo skill" in result.text
-    assert result.display is not None
-    assert result.display["type"] == "skills"
-    assert any(skill["name"] == "demo" for skill in result.display["skills"])
-
-
-@pytest.mark.asyncio
-async def test_skill_lists_user_skill_from_rind_home(tmp_path, monkeypatch) -> None:
-    rind_home = tmp_path / "rind-home"
-    workspace = tmp_path / "workspace"
-    skill_dir = rind_home / "skills" / "demo"
-    workspace.mkdir()
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        "---\nname: demo\ndescription: User demo skill\ntriggers: []\n---\n\nBody\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(workspace)
-    monkeypatch.setenv("RIND_HOME", str(rind_home))
-
-    result = await SlashCommandRouter(build_command_infos()).execute("/skill", _context())
-
-    assert "demo [user]" in result.text
-    assert "User demo skill" in result.text
-    assert str(skill_dir / "SKILL.md") in result.text
-
-
-@pytest.mark.asyncio
-async def test_skill_lists_project_skill_from_cwd_not_parent_git_root(tmp_path, monkeypatch) -> None:
-    project = tmp_path / "project"
-    nested = project / "src"
-    nested_skill_dir = nested / ".rind" / "skills" / "nested"
-    parent_skill_dir = project / ".rind" / "skills" / "parent"
-    nested_skill_dir.mkdir(parents=True)
-    parent_skill_dir.mkdir(parents=True)
-    (project / ".git").mkdir()
-    (nested_skill_dir / "SKILL.md").write_text(
-        "---\nname: nested\ndescription: Nested skill\ntriggers: []\n---\n\nBody\n",
-        encoding="utf-8",
-    )
-    (parent_skill_dir / "SKILL.md").write_text(
-        "---\nname: parent\ndescription: Parent skill\ntriggers: []\n---\n\nBody\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(nested)
-
-    result = await SlashCommandRouter(build_command_infos()).execute("/skill", _context())
-
-    assert "nested [project]" in result.text
-    assert "Nested skill" in result.text
-    assert "parent [project]" not in result.text
-
-
-@pytest.mark.asyncio
-async def test_skill_list_rescans_without_updating_session_catalog(tmp_path, monkeypatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    skill_dir = tmp_path / ".rind" / "skills" / "first"
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        "---\nname: first\ndescription: First skill\n---\n\nBody\n",
-        encoding="utf-8",
-    )
-    repository = SkillRepository(project_root=str(tmp_path), user_skill_dir=str(tmp_path / "user-skills"))
-
-    class CatalogSession(FakeSession):
-        def __init__(self):
-            self.catalog = [{"name": "first", "description": "First skill", "scope": "project"}]
-            self.set_calls = 0
-
-        async def get_skill_catalog(self):
-            return list(self.catalog)
-
-        async def set_skill_catalog(self, entries):
-            self.set_calls += 1
-            self.catalog = list(entries)
-
-    session = CatalogSession()
-    runtime = FakeRuntime()
-    runtime.skill_repository = repository
-    context = SlashCommandContext(runtime=runtime, session=session, debug=True)
-    router = SlashCommandRouter(build_command_infos())
-
-    first = await router.execute("/skill list", context)
-    assert "first [project]" in first.text
-    assert session.set_calls == 0
-
-    new_skill_dir = tmp_path / ".rind" / "skills" / "second"
-    new_skill_dir.mkdir(parents=True)
-    (new_skill_dir / "SKILL.md").write_text(
-        "---\nname: second\ndescription: Second skill\n---\n\nBody\n",
-        encoding="utf-8",
-    )
-
-    second = await router.execute("/skill", context)
-
-    assert "first [project]" in second.text
-    assert "second [project]" in second.text
-    assert [entry["name"] for entry in session.catalog] == ["first"]
-    assert session.set_calls == 0
 
 
 @pytest.mark.asyncio

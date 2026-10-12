@@ -17,24 +17,27 @@ RIND.md is plain Markdown, and nothing written in it is executed — it is instr
 
 ## Skills: capability packages loaded on demand
 
-A Skill is a `SKILL.md` inside a directory, with frontmatter (`name`, `description`), placed in one of these locations:
+A Skill is a folder with a `SKILL.md` whose frontmatter has a `description` (and usually a `name`). Put your own here:
 
-| Scope | Location |
+| For | Location |
 | --- | --- |
-| User | `RIND_HOME/skills/<skill-name>/SKILL.md` |
-| Project | `<project root>/.rind/skills/<skill-name>/SKILL.md` |
+| This folder | `.rind/skills/<skill-name>/SKILL.md` under the working directory |
+| You, everywhere | `~/.rind/skills/<skill-name>/SKILL.md` |
 
-Each session injects only the **catalog** (name, description, scope), not the body. When you need one:
+Rind also reads the folder's Claude skills (`./.claude/skills`) and Codex skills (`./.codex/skills`, `./.agents/skills`). Your own Claude and Codex skills (`~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`) are off until you turn them on with `/import`. Ask Rind to make a skill and it follows the built-in `skill-creator` skill. Built-in skills live in `~/.rind/skills/.system`, which Rind replaces on update; to change one, put a skill with the same name in `~/.rind/skills`.
+
+Each request carries only the **catalog**: name, description and file location. When a task matches a skill, the model reads its `SKILL.md`. To use one now:
 
 ```text
 $skill-name          @ it in a prompt
 /skill:skill-name    the whole message is a single Skill invocation
-/skill list          list the Skills currently visible
+/skill               every skill, where it comes from, and any file that failed to load
+/import              choose which Claude and Codex skills this conversation reads
 ```
 
-An unknown `/skill:name` reports an error directly; an ordinary `$name` that is not an existing Skill is treated as ordinary text. The body of an invoked Skill enters the session as a snapshot, so deleting the file afterwards does not affect that session. The model can also read a specified Skill proactively with the `skill` tool.
+An unknown `/skill:name` reports an error directly; an ordinary `$name` that is not an existing Skill is treated as ordinary text. The body of an invoked Skill enters the session as a snapshot, so deleting the file afterwards does not affect that session.
 
-When names collide, the more specific scope overrides the user level (project > user).
+When names collide, the more specific layer wins: project over user, and Rind over Codex over Claude at the same level. `/import` choices belong to the conversation; changing them mid-conversation breaks the prompt cache, so the next request will not hit it, and Rind asks first.
 
 ## Per-project default model / effort
 
@@ -42,6 +45,6 @@ See [let Rind use the model you specify](models.md#let-the-project-remember-defa
 
 ## The rules behind it
 
-For Skill discovery and boundaries (symbolic links, path escapes), see [progressive disclosure of Skills](../internals/02-context/skills.md); for how RIND.md stacks with other sources, see [where instructions come from](../internals/02-context/prompt-assembly.md).
+For the skill layers, parsing rules and the catalog, see [progressive disclosure of Skills](../internals/02-context/skills.md); for how RIND.md stacks with other sources, see [where instructions come from](../internals/02-context/prompt-assembly.md).
 
 [Back to the scenario index](README.md)

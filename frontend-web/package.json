@@ -1,5 +1,5 @@
 {
-  "name": "rind-web-surface",
+  "name": "rind-browser-surface",
   "private": true,
   "version": "0.1.0",
   "type": "module",

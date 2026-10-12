@@ -17,8 +17,9 @@ const DESKTOP_HIDDEN_COMMANDS = new Set([
 export const fallbackSlashCommands: SlashCommand[] = [
   ["compact", "Compact current session context", "/compact"],
   ["help", "Show commands", "/help [command]"],
+  ["import", "Choose the Claude and Codex skills this conversation reads", "/import [<source>=on|off ...]"],
   ["init", "Draft RIND.md", "/init [project|user]"],
-  ["skill", "List skills", "/skill [list]"],
+  ["skill", "List skills and where they come from", "/skill"],
   ["status", "Show session status", "/status"],
   ["team", "Create a Team project", "/team create [project-id]"],
 ].map(([name, description, usage]) => ({ name, description, usage, aliases: [] }))
