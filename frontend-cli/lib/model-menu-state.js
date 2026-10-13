@@ -28,8 +28,11 @@ export function createModelMenuState(models, currentModel = "", providerNames = 
   };
 }
 
-// Models under a header per connection, the current one marked (and kept even
-// when its connection lists it no more). Shared by /model and the Agents page.
+// Models under a header per connection, the current one marked and kept first
+// under its connection while that connection is listed. A connection that was
+// logged out is not a choice, so its current model is not offered either —
+// the same rule the Runtime's catalog applies. Shared by /model and the Agents
+// page.
 export function groupModels(models, currentModel = "", providerNames = new Map()) {
   const current = typeof currentModel === "object"
     ? { providerId: String(currentModel.provider_id || "").trim(), modelId: String(currentModel.model_id || "").trim() }
@@ -56,19 +59,15 @@ export function groupModels(models, currentModel = "", providerNames = new Map()
       image_input: structured && typeof model.image_input === "boolean" ? model.image_input : null,
     });
   }
-  if (current.modelId && !currentFound) {
-    const entry = {
+  // The current model stays listed ahead of its connection's models while that
+  // connection is one of the listed ones; a connection without credentials is
+  // not a choice, and the Runtime's catalog drops it the same way.
+  if (current.modelId && !currentFound && providers.includes(current.providerId)) {
+    byProvider.get(current.providerId).unshift({
       modelId: current.modelId,
       providerId: current.providerId,
       current: true,
-    };
-    if (byProvider.has(current.providerId)) {
-      byProvider.get(current.providerId).unshift(entry);
-    } else {
-      appendModel(byProvider, providers, current.providerId, entry);
-      providers.splice(providers.indexOf(current.providerId), 1);
-      providers.unshift(current.providerId);
-    }
+    });
   }
   const items = [];
   if (providers.some((providerId) => providerId)) {

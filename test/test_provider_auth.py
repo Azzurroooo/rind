@@ -355,6 +355,17 @@ async def test_list_models_hides_unconfigured_providers_and_appends_current(tmp_
 
 
 @pytest.mark.asyncio
+async def test_list_models_keeps_unconfigured_current_connection_out(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    settings = _settings(tmp_path, provider="openai", model="gpt-5.5")
+    service = _service(tmp_path, settings, monkeypatch)
+
+    catalog = await service.list_models()
+
+    assert catalog.models == []
+
+
+@pytest.mark.asyncio
 async def test_create_chat_client_requires_configuration(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(tmp_path)
     service = _service(tmp_path, settings, monkeypatch)

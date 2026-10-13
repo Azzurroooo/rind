@@ -76,6 +76,22 @@ test("model menu includes current model when missing from server list", () => {
   assert.equal(state.selectedModel().current, true);
 });
 
+test("model menu drops a current model whose connection is not listed", () => {
+  const state = createModelMenuState(
+    [
+      { provider_id: "deepseek", id: "deepseek-chat" },
+    ],
+    { provider_id: "openai", model_id: "gpt-5.5" },
+  );
+
+  assert.deepEqual(
+    state.items().map((item) => item.header ? `header:${item.name}` : item.modelId),
+    ["header:deepseek", "deepseek-chat"],
+  );
+  assert.equal(state.selectedModel().modelId, "deepseek-chat");
+  assert.equal(state.selectedModel().current, false);
+});
+
 test("model menu selection skips provider headers", () => {
   const state = createModelMenuState(
     [

@@ -235,7 +235,10 @@ class ProviderServiceImpl:
             result.extend(models)
         current = ModelSelection(settings.provider, settings.model)
         definition = self.providers.get(current.provider_id)
-        if definition is not None and not any(
+        # The current selection is kept listed only while its connection can run;
+        # a model whose provider was logged out is not a choice (opencode hides
+        # providers without credentials the same way).
+        if definition is not None and self._credential_source(settings, definition) != "none" and not any(
             model.provider_id == current.provider_id and model.id == current.model_id for model in result
         ):
             result.append(self._resolve_model(settings, definition, current.model_id, cache.get(definition.id)))
