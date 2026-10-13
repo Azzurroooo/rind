@@ -1,0 +1,42 @@
+
+> rind-mobile@0.9.0 prebuild
+> node scripts/version.mjs
+
+Native version: 0.10.0
+
+> rind-mobile@0.9.0 build
+> vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 1727 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                              0.82 kB │ gzip:   0.47 kB
+dist/assets/dm-mono-latin-ext-500-normal-Dw3M13d8.woff       7.49 kB
+dist/assets/dm-mono-latin-ext-400-normal-1aZr6b2b.woff       7.50 kB
+dist/assets/manrope-vietnamese-wght-normal-usUDDRr7.woff2    8.52 kB
+dist/assets/manrope-greek-wght-normal-DL7QRZyv.woff2         9.44 kB
+dist/assets/dm-mono-latin-ext-400-normal-C2zvOubV.woff2      9.55 kB
+dist/assets/dm-mono-latin-ext-500-normal-BtRyHRi6.woff2      9.62 kB
+dist/assets/dm-mono-latin-400-normal--0xN8mdc.woff          11.21 kB
+dist/assets/dm-mono-latin-500-normal-CN8Miw6E.woff          11.25 kB
+dist/assets/manrope-cyrillic-wght-normal-Dvxsihut.woff2     14.50 kB
+dist/assets/dm-mono-latin-400-normal-4GdczIuU.woff2         14.82 kB
+dist/assets/dm-mono-latin-500-normal-DRMDZjhP.woff2         14.99 kB
+dist/assets/manrope-latin-ext-wght-normal-Ch3YOpNY.woff2    15.12 kB
+dist/assets/manrope-latin-wght-normal-DHIcAJRg.woff2        24.84 kB
+dist/assets/index-YAgZkUQN.css                              79.74 kB │ gzip:  16.99 kB
+dist/assets/web-Ct5PPd9x.js                                  0.36 kB │ gzip:   0.25 kB
+dist/assets/web-BvsBhwfi.js                                  0.38 kB │ gzip:   0.25 kB
+dist/assets/native-DPkgAxD8.js                               0.80 kB │ gzip:   0.36 kB
+dist/assets/web-BPma7L4k.js                                  0.83 kB │ gzip:   0.42 kB
+dist/assets/web-_v6EIUEd.js                                  0.84 kB │ gzip:   0.40 kB
+dist/assets/web-gxb9dZoL.js                                  1.15 kB │ gzip:   0.55 kB
+dist/assets/web-BvAcq33v.js                                  1.25 kB │ gzip:   0.58 kB
+dist/assets/base-CA8a5MJO.js                                 2.81 kB │ gzip:   1.00 kB
+dist/assets/web-97Gll1Ej.js                                  3.02 kB │ gzip:   1.21 kB
+dist/assets/web-DxY6ve0r.js                                  8.73 kB │ gzip:   2.97 kB
+dist/assets/index-DCx0MUmr.js                              336.96 kB │ gzip: 100.91 kB
+dist/assets/index-e_OxIPkf.js                              385.31 kB │ gzip: 118.91 kB
+✓ built in 5.26s

@@ -1,0 +1,59 @@
+{
+  "cjk": {
+    "raw_stdout_chars": 20000,
+    "raw_stdout_bytes": 60000,
+    "model_bytes": 60000,
+    "model_actual_lines": 1,
+    "model_has_task_id": false
+  },
+  "many_lines": {
+    "raw_stdout_chars": 10000,
+    "raw_stdout_bytes": 10000,
+    "model_bytes": 10192,
+    "model_actual_lines": 5003,
+    "model_has_task_id": true
+  },
+  "timeout": {
+    "raw_status": "timed_out",
+    "raw_reason": "Runtime deadline exceeded (100 ms)",
+    "event_status": "timed_out",
+    "event_error_type": "Timeout",
+    "model": "Command exited with code -15.",
+    "reused_event_status": "completed",
+    "reused_event_error_type": "",
+    "reused_event_result": "Command exited with code -15."
+  },
+  "lost": "(no tool output)",
+  "completed_page": "first page\n\nOutput truncated. Full output is available at /tmp/output.log.\nUse read_file or bash to inspect it.",
+  "reuse": {
+    "first_result": "{\"ok\":true,\"tool\":\"bash\",\"data\":{\"exit_code\":null,\"next_cursor\":\"next-token\",\"return_reason\":\"yield_timeout\",\"status\":\"running\",\"stderr\":\"\",\"stdout\":\"ready\",\"task_id\":\"task-reused\"},\"meta\":{}}",
+    "reused_result": "ready\n\nCommand is still running as task task-reused. Continue it with task_control (action read, task_id, cursor next-token), or rely on notify=on_exit to deliver completion.",
+    "structured_acknowledgements": [
+      true,
+      false
+    ]
+  },
+  "persistence": {
+    "stored_stdout_chars": 5006,
+    "model_has_tail": true,
+    "stored_has_tail": false,
+    "stored_has_next_cursor": false,
+    "stored_bytes": 5358
+  },
+  "index_retry": {
+    "write_attempts": 1,
+    "listed_ids": []
+  },
+  "completed_goal_policy_present": true,
+  "cache_keys": {
+    "a": "rind:db90b983bec2cd1286c79e2f",
+    "b": "rind:c14a9d9c27b84cde47e9fd57",
+    "same_template_prefix": true
+  },
+  "window_after_rescue_and_switch": {
+    "original_snapshot": null,
+    "rescue_limit": 104857,
+    "new_window": 1048576,
+    "new_hard_limit": 104857
+  }
+}

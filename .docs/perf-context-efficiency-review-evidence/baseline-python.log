@@ -1,0 +1,1664 @@
+........................................................................ [  4%]
+.........................................FFF.F..FF...................... [  9%]
+...F....F...F........FF......F.....F.......F............................ [ 14%]
+.................................FF..................................... [ 19%]
+........................................................................ [ 24%]
+........................................................................ [ 29%]
+........................................................................ [ 34%]
+................................................................F....... [ 39%]
+.............................................F...........F.............. [ 44%]
+...F.................................................................... [ 49%]
+........................................................................ [ 54%]
+........................................................................ [ 59%]
+.............................F.......................................... [ 64%]
+........................................................................ [ 69%]
+.......................................................................F [ 74%]
+........................................................................ [ 79%]
+.................s.................................................. [ 84%]
+........................................................................ [ 89%]
+........................................................................ [ 94%]
+..F..........F.......................................................... [ 99%]
+...........                                                              [100%]
+=================================== FAILURES ===================================
+_ test_added_providers_login_and_send_sdk_requests[tencent-coding-plan-https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb749a20>
+provider_id = 'tencent-coding-plan'
+endpoint = 'https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1afa5ded50>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'id': '91829c8fdc56e185bf779fabc3b9e4e4', 'error': {'message': 'not authorized', 'type': 'not_authorized_error', 'param': None, 'code': 'not_authorized'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_ test_added_providers_login_and_send_sdk_requests[tencent-token-plan-https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and2')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb74ad60>
+provider_id = 'tencent-token-plan'
+endpoint = 'https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1aeb752d50>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'id': 'a0874f0e5c92ba25167deeddaa8eff4a', 'error': {'message': 'not authorized', 'type': 'not_authorized_error', 'param': None, 'code': 'not_authorized'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_ test_added_providers_login_and_send_sdk_requests[xiaomi-https://api.xiaomimimo.com/v1/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb55b4d0>
+provider_id = 'xiaomi'
+endpoint = 'https://api.xiaomimimo.com/v1/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1aeb63e060>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'error': {'message': 'Invalid API Key', 'param': 'Please provide valid API Key', 'code': '401', 'type': 'invalid_key'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_ test_added_providers_login_and_send_sdk_requests[longcat-https://api.longcat.chat/openai/v1/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and4')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb55bee0>
+provider_id = 'longcat'
+endpoint = 'https://api.longcat.chat/openai/v1/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1aeb63eb10>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'error': {'code': 'invalid_api_key', 'message': 'incorrect api key', 'type': 'authentication_error'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_________ test_list_models_falls_back_to_builtin_catalog_without_cache _________
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_list_models_falls_back_to0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb7ebf50>
+
+    @pytest.mark.asyncio
+    async def test_list_models_falls_back_to_builtin_catalog_without_cache(tmp_path: Path, monkeypatch) -> None:
+        service = _service(tmp_path, _settings(tmp_path), monkeypatch)
+        service.credentials.set("deepseek", Credential(type="api_key", key="deepseek-key"))
+
+        catalog = await service.list_models()
+>       assert [model.id for model in catalog.models] == [
+            "deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp",
+            "deepseek-chat",  # Explicit current selection survives removal from the fallback.
+        ]
+E       AssertionError: assert ['gpt-6-astra...5.6-sol', ...] == ['deepseek-fl...eepseek-chat']
+E
+E         At index 0 diff: 'gpt-6-astra' != 'deepseek-flash'
+E         Left contains 17 more items, first extra item: 'gpt-5.6-sol'
+E         Use -v to get more diff
+
+test/test_provider_auth.py:339: AssertionError
+_ test_added_providers_login_and_send_sdk_requests[tencent-tokenhub-https://tokenhub.tencentmaas.com/v1/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and5')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb5a1b70>
+provider_id = 'tencent-tokenhub'
+endpoint = 'https://tokenhub.tencentmaas.com/v1/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1aeb783bf0>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'error': {'type': 'authentication_error', 'code': '401002', 'message': 'The API Key does not exist or signature verification failed. Please check whether the API Key is correct. See: https://console.cloud.tencent.com/tokenhub/apikey', 'message_zh': 'API Key 不存在或签名校验失败，请检查 API Key 是否正确，查看链接：https://console.cloud.tencent.com/tokenhub/apikey', 'source': 'gateway', 'request_id': '81c0c1c5-05df-4e95-8796-1060ccc2b134'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_ test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-sgp-https://token-plan-sgp.xiaomimimo.com/v1/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and6')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb55b070>
+provider_id = 'xiaomi-token-plan-sgp'
+endpoint = 'https://token-plan-sgp.xiaomimimo.com/v1/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1aeb687570>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'error': {'message': 'Invalid API Key', 'param': 'Please provide valid API Key', 'code': '401', 'type': 'invalid_key'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_ test_added_providers_login_and_send_sdk_requests[volcengine-https://ark.cn-beijing.volces.com/api/v3/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and7')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb5a26d0>
+provider_id = 'volcengine'
+endpoint = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1aeb6878a0>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'error': {'code': 'AuthenticationError', 'message': 'The API key format is incorrect. Request id: 021791890932607322de7e6e5ca2c4770340b38d79315cf7570f2', 'param': '', 'type': 'Unauthorized'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_ test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-cn-https://token-plan-cn.xiaomimimo.com/v1/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and8')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb74acf0>
+provider_id = 'xiaomi-token-plan-cn'
+endpoint = 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1aeb5f8b50>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'error': {'message': 'Invalid API Key', 'param': 'Please provide valid API Key', 'code': '401', 'type': 'invalid_key'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_______ test_list_models_uses_cache_fallback_and_reports_refresh_warning _______
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_list_models_uses_cache_fa0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb74bcb0>
+
+    @pytest.mark.asyncio
+    async def test_list_models_uses_cache_fallback_and_reports_refresh_warning(tmp_path: Path, monkeypatch) -> None:
+        from agent.infrastructure.llm.catalog import default_reasoning_efforts
+
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        service.credentials.set("deepseek", Credential(type="api_key", key="deepseek-key"))
+        service._write_cache({"deepseek": [{"id": "cached-chat", "name": "Cached Chat"}]})
+
+        catalog = await service.list_models()
+>       assert [model.id for model in catalog.models] == ["cached-chat", "deepseek-chat"]
+E       AssertionError: assert ['gpt-6-astra...5.6-sol', ...] == ['cached-chat...eepseek-chat']
+E
+E         At index 0 diff: 'gpt-6-astra' != 'cached-chat'
+E         Left contains 17 more items, first extra item: 'gpt-6-luna'
+E         Use -v to get more diff
+
+test/test_provider_auth.py:276: AssertionError
+_______ test_compatible_endpoint_cache_false_overrides_official_catalog ________
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_compatible_endpoint_cache0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb3812b0>
+
+    @pytest.mark.asyncio
+    async def test_compatible_endpoint_cache_false_overrides_official_catalog(tmp_path, monkeypatch):
+        endpoint = "https://api.deepseek.com"
+        settings = _settings(tmp_path, provider="openai-compatible", model="deepseek-flash", api_key="test", base_url=endpoint)
+        service = _service(tmp_path, settings, monkeypatch)
+        service._write_cache({"openai-compatible": {"base_url": endpoint, "refreshed_at": 1,
+            "models": [{"id": "deepseek-flash", "image_input": False}]}})
+        assert service.resolve_selection(ModelSelection("openai-compatible", "deepseek-flash")).image_input is False
+>       assert (await service.list_models()).models[0].image_input is False
+E       AssertionError: assert True is False
+E        +  where True = ModelDefinition(provider_id='openai', id='gpt-6-astra', api='openai-responses', reasoning_efforts=('low', 'medium', 'high', 'xhigh', 'max'), context_window=1050000, image_input=True).image_input
+
+test/test_provider_auth.py:117: AssertionError
+_ test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-ams-https://token-plan-ams.xiaomimimo.com/v1/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and9')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb383ee0>
+provider_id = 'xiaomi-token-plan-ams'
+endpoint = 'https://token-plan-ams.xiaomimimo.com/v1/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1aebf7a950>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'error': {'message': 'Invalid API Key', 'param': 'Please provide valid API Key', 'code': '401', 'type': 'invalid_key'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_ test_added_providers_login_and_send_sdk_requests[volcengine-coding-plan-https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and11')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb7e8830>
+provider_id = 'volcengine-coding-plan'
+endpoint = 'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1aeb336e40>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'error': {'code': 'AuthenticationError', 'message': 'The API key format is incorrect. Request id: 02179189093454301eed278f237d49413dcbc4d74636cb3e5df9b', 'param': '', 'type': 'Unauthorized'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_ test_added_providers_login_and_send_sdk_requests[hunyuan-https://api.hunyuan.cloud.tencent.com/v1/chat/completions] _
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_added_providers_login_and14')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1aeb3839a0>
+provider_id = 'hunyuan'
+endpoint = 'https://api.hunyuan.cloud.tencent.com/v1/chat/completions'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_id, endpoint", [
+        ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
+        ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+        ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+        ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+        ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+        ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+        ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+        ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+        ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+        ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+    ])
+    async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+        import json
+        import httpx
+        import anthropic
+        from agent.infrastructure.llm.catalog import PROVIDERS
+
+        definition = PROVIDERS[provider_id]
+        settings = _settings(tmp_path)
+        service = _service(tmp_path, settings, monkeypatch)
+        for item in PROVIDERS.values():
+            if item.environment_key:
+                monkeypatch.delenv(item.environment_key, raising=False)
+        transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+        captured = []
+
+        async def send(_self, request, **kwargs):
+            captured.append(request)
+            assert str(request.url) == endpoint
+            body = json.loads(request.content)
+            assert body["model"] == definition.fallback_models[0].id
+            assert "reasoning_effort" not in body
+            if definition.api == "anthropic-messages":
+                assert request.headers["x-api-key"] == "test-key"
+                result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                          "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                assert request.headers["authorization"] == "Bearer test-key"
+                result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                          "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+            return transport_http.Response(200, json=result, request=request)
+
+        monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+        await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+        assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+        model = (await service.list_models()).models[0]
+        assert model.provider_id == provider_id
+        client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+        try:
+>           response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_provider_auth.py:844:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_chat.OpenAIChatCompletionsClient object at 0x7a1aeb6aaeb0>
+messages = [{'role': 'user', 'content': 'hello'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'error': {'id': '4c4e9f96947b8b54259b892bdcd08fda', 'message': 'Incorrect API key provided: ********. You can find your API key at https://console.cloud.tencent.com/hunyuan/start.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_api_key'}}
+
+agent/infrastructure/llm/openai_chat.py:90: ProviderError
+_______________ test_provider_login_model_and_tool_turn_journey ________________
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_provider_login_model_and_0')
+
+    def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
+        fixture = FakeOpenAIServer()
+        fixture.set_models(["fake-model-a", "fake-model-b"])
+        fixture.script_tool_call("read_file", {"path": "note.txt"}, then_text=["note says: hello journey"])
+        fixture.script_text(["all good"])
+        fixture.start()
+
+        rind_home = tmp_path / "home"
+        rind_home.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "home").mkdir(exist_ok=True)
+        (workspace / "note.txt").write_text("hello journey", encoding="utf-8")
+        (tmp_path / "home" / "settings.json").write_text(
+            json.dumps({"provider": "openai-compatible", "baseUrl": fixture.base_url, "model": "fake-model-a"}),
+            encoding="utf-8",
+        )
+
+        server = _AppServerProcess(workspace, rind_home)
+        try:
+            server.send("init", "initialize")
+            initialize = server.response("init")
+            server.send("create", "session/create")
+            sid = server.response("create")["result"]["session_id"]
+            assert initialize["result"]["provider"] == "openai-compatible"
+            providers = {item["id"]: item for item in initialize["result"]["providers"]}
+>           assert providers["openai-compatible"]["configured"] is False
+E           assert True is False
+
+test/test_provider_e2e.py:127: AssertionError
+____________ test_google_login_static_catalog_and_tool_turn_journey ____________
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_google_login_static_catal0')
+
+    def test_google_login_static_catalog_and_tool_turn_journey(tmp_path: Path):
+        pytest.importorskip("google.genai")
+        fixture = FakeGeminiServer()
+        fixture.script_tool_call("read_file", {"path": "note.txt"}, then_text=["note says: gemini works"])
+        fixture.start()
+
+        rind_home = tmp_path / "home"
+        rind_home.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "home").mkdir(exist_ok=True)
+        (workspace / "note.txt").write_text("gemini works", encoding="utf-8")
+        (tmp_path / "home" / "settings.json").write_text(
+            json.dumps({"provider": "google", "baseUrl": fixture.base_url, "model": "gemini-3-flash"}),
+            encoding="utf-8",
+        )
+
+        server = _AppServerProcess(workspace, rind_home)
+        try:
+            server.send("init", "initialize")
+            initialize = server.response("init")
+            server.send("create", "session/create")
+            sid = server.response("create")["result"]["session_id"]
+            assert initialize["result"]["provider"] == "google"
+
+            server.send("login", "rind/auth/login", {
+                "session_id": sid,
+                "provider_id": "google",
+                "method": "api_key",
+            })
+            prompt = server.wait_for(
+                lambda message: message.get("kind") == "request" and message.get("method") == "rind/auth/prompt"
+            )
+            assert prompt["params"]["kind"] == "secret"
+            assert prompt["params"]["message"] == "Google API key"
+            server.send(prompt["request_id"], "rind/auth/prompt", {"value": "e2e-gemini-key"})
+            login = server.response("login")
+            assert login["result"]["ok"] is True
+            from agent.infrastructure.llm.catalog import PROVIDERS
+            expected_ids = {model.id for model in PROVIDERS["google"].fallback_models} | {"gemini-3-flash"}
+>           assert login["result"]["models_count"] == len(expected_ids)
+E           AssertionError: assert 28 == 11
+E            +  where 11 = len({'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash', 'gemini-3-flash-preview', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', ...})
+
+test/test_provider_e2e.py:237: AssertionError
+_______________ test_sdk_serializes_user_and_tool_images[google] _______________
+
+api = 'google'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("api", ["chat", "responses", "anthropic", "google"])
+    async def test_sdk_serializes_user_and_tool_images(api):
+        captured = []
+        transport_http = http_library(api)
+        def handle(request):
+            captured.append(json.loads(request.content))
+            if api == "chat":
+                data = {"id": "test", "object": "chat.completion", "created": 1, "model": "test", "choices": [{"index": 0, "message": {"role": "assistant", "content": "seen"}, "finish_reason": "stop"}]}
+            elif api == "responses":
+                data = {"id": "test", "object": "response", "created_at": 1, "status": "completed", "output": [{"type": "message", "id": "m", "role": "assistant", "content": [{"type": "output_text", "text": "seen", "annotations": []}]}]}
+            elif api == "anthropic":
+                data = {"id": "test", "type": "message", "role": "assistant", "model": "test", "content": [{"type": "text", "text": "seen"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}}
+            else:
+                data = {"candidates": [{"content": {"role": "model", "parts": [{"text": "seen"}]}, "finishReason": "STOP"}]}
+            return transport_http.Response(200, json=data)
+        client = sdk_client(api, handle)
+        original = messages()
+        before = copy.deepcopy(original)
+        try:
+            await client.create(original, max_output_tokens=64)
+        finally:
+            await client.close()
+        assert original == before
+        assert len(captured) == 1
+        body = captured[0]
+        def image_payloads(value):
+            if isinstance(value, str) and value.startswith("data:image/"):
+                return [value.split(",", 1)[1]]
+            if isinstance(value, dict):
+                if "data" in value and ("mimeType" in value or "media_type" in value):
+                    return [value["data"]]
+                return [data for item in value.values() for data in image_payloads(item)]
+            if isinstance(value, list):
+                return [data for item in value for data in image_payloads(item)]
+            return []
+        payloads = image_payloads(body)
+>       assert len(payloads) == 3
+E       assert 0 == 3
+E        +  where 0 = len([])
+
+test/test_image_requests.py:111: AssertionError
+___________ test_the_session_list_carries_each_conversation_settings ___________
+
+worker = <agent.runtime.server.worker.RuntimeWorker object at 0x7a1af91bb350>
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_the_session_list_carries_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1af938cfa0>
+
+    @pytest.mark.asyncio
+    async def test_the_session_list_carries_each_conversation_settings(worker, tmp_path, monkeypatch):
+        monkeypatch.setattr(worker.provider_service, "create_chat_client", Recorder().create)
+        _, request, _ = _server(worker)
+        try:
+            session_id = await _conversation(worker, tmp_path, request)
+            await _turn(worker, session_id, "first")
+            await request("model/set", session_id=session_id, provider_id="openai-compatible", model_id="model-b")
+            await request("model/effort", session_id=session_id, reasoning_effort="high")
+            listed = next(entry for entry in (await request("session/list", workspace_root=str(tmp_path)))["sessions"] if entry["id"] == session_id)
+            assert (listed["provider"], listed["model"], listed["reasoning_effort"]) == ("openai-compatible", "model-b", "high")
+            assert listed["selection_source"] == {"model": "session", "effort": "session"}
+>           assert listed["connection_ready"] is False, "openai-compatible has no key here; lists can warn"
+E           AssertionError: openai-compatible has no key here; lists can warn
+E           assert True is False
+
+test/test_session_settings.py:170: AssertionError
+___ test_a_signed_in_client_sends_a_fresh_token_and_persists_the_rotated_one ___
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_a_signed_in_client_sends_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1af91b7af0>
+token_endpoint = [{'grant_type': 'refresh_token', 'client_id': 'client', 'refresh_token': 'r0', 'resource': 'https://api.openai.com/v1'}]
+
+    @pytest.mark.asyncio
+    async def test_a_signed_in_client_sends_a_fresh_token_and_persists_the_rotated_one(tmp_path, monkeypatch, token_endpoint):
+        monkeypatch.setattr("agent.infrastructure.llm.provider_service.load_settings", lambda: _settings(tmp_path))
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        store = CredentialStore(tmp_path / "auth.json")
+        store.set("openai", Credential(type="oauth", access="old", refresh="r0", expires_at=int(time.time()) + 30, client_id="client"))
+        service = ProviderServiceImpl(store)
+        assert {status.id: status.methods for status in service.list_providers()}["openai"] == ("api_key", "oauth")
+
+        seen = []
+
+        async def send(self, request, **kwargs):
+            seen.append((request.headers["authorization"], json.loads(request.content)))
+            return httpx.Response(200, json={"id": "r", "object": "response", "status": "completed", "output": [], "usage": {"input_tokens": 1, "output_tokens": 1}}, request=request)
+
+        monkeypatch.setattr(httpx.AsyncClient, "send", send)
+        client = await service.create_chat_client(_settings(tmp_path), ModelSelection("openai", "gpt-5.5"), workspace_root=None)
+        try:
+>           await client.create([{"role": "user", "content": "hi"}], max_output_tokens=16)
+
+test/test_chatgpt_oauth.py:186:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.infrastructure.llm.openai_responses.OpenAIResponsesClient object at 0x7a1aeb687570>
+messages = [{'role': 'user', 'content': 'hi'}], tools = None
+cancellation_token = None, max_output_tokens = 16, reasoning_effort = None
+
+    async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None, *, max_output_tokens: int | None = None, reasoning_effort: str | None = None) -> ModelCompletion:
+        payload = self._payload(messages, tools, stream=False)
+        if max_output_tokens is not None and not self._subscription:
+            payload["max_output_tokens"] = max_output_tokens
+        effort = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+        if effort:
+            payload["reasoning"] = {"effort": effort}
+        try:
+            response = await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
+        except Exception as exc:
+>           raise provider_error(exc) from None
+E           agent.domain.errors.ProviderError: Error code: 401 - {'error': {'message': 'Incorrect API key provided: access-1. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_api_key'}}
+
+agent/infrastructure/llm/openai_responses.py:41: ProviderError
+_____________________ test_path_validation_rejects_escapes _____________________
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_path_validation_rejects_e0')
+
+    def test_path_validation_rejects_escapes(tmp_path):
+        for path in ("../outside.txt", "a/../../outside.txt", "C:/Windows/system32", "/etc/passwd"):
+>           with pytest.raises(FileMethodError) as excinfo:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE FileMethodError
+
+test/test_runtime_server_files.py:143: Failed
+___________________ test_detect_shell_prefers_rind_bash_path ___________________
+
+tmp_path = PosixPath('/tmp/pytest-of-azzurro/pytest-56/test_detect_shell_prefers_rind0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a1af90deba0>
+
+    def test_detect_shell_prefers_rind_bash_path(tmp_path, monkeypatch):
+        bash_path = tmp_path / "bash.exe"
+        bash_path.write_text("", encoding="utf-8")
+        monkeypatch.setenv("RIND_BASH_PATH", str(bash_path))
+
+        detection = detect_default_shell()
+
+>       assert detection.executable == str(bash_path)
+E       AssertionError: assert '/usr/bin/bash' == '/tmp/pytest-...ind0/bash.exe'
+E
+E         - /tmp/pytest-of-azzurro/pytest-56/test_detect_shell_prefers_rind0/bash.exe
+E         + /usr/bin/bash
+
+test/test_bash_shell_detection.py:22: AssertionError
+_________________________ test_j9_cli_one_shot_channel _________________________
+
+worker_journey = <test_journeys_user.SimpleNamespaceProcess object at 0x7a1aeb1f9fd0>
+model_server = <helpers.fake_openai_server.FakeOpenAIServer object at 0x7a1af9bc9bf0>
+
+    def test_j9_cli_one_shot_channel(worker_journey, model_server):
+        model_server.script_text(["One-shot task done, exit code should be 0."], delay_ms=5)
+        env = dict(os.environ)
+        env.update({"RIND_HOME": str(worker_journey.home), "PYTHONUTF8": "1"})
+        result = subprocess.run(
+            ["node", str(PROJECT_ROOT / "frontend-cli" / "bin" / "rind.js"),
+             "run", "--prompt", "run a one-shot task", "--dir", str(worker_journey.workspace)],
+            cwd=worker_journey.root, env=env, capture_output=True, text=True, timeout=120,
+            encoding="utf-8", errors="replace",
+        )
+>       assert result.returncode == 0, f"one-shot exit code {result.returncode}; stderr: {result.stderr[-500:]}"
+E       AssertionError: one-shot exit code 1; stderr: ✗ run failed: Runtime exited with 1
+E
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['node', '/tmp/rind-context-review-f4uJl6FZ/baseline/frontend-cli/bin/rind.js', 'run', '--prompt...est-of-azzurro/pytest-56/journey0/workspace'], returncode=1, stdout='', stderr='✗ run failed: Runtime exited with 1\n').returncode
+
+test/test_journeys_user.py:655: AssertionError
+_____________ test_numeric_sender_ids_survive_the_yaml_round_trip ______________
+
+    def test_numeric_sender_ids_survive_the_yaml_round_trip():
+        data = build_config_data(
+            ["telegram"], {"telegram": {"token": "t"}}, {"telegram": {"allow_from": ["123456789"], "group_allow": []}},
+            worker="ws://x", worker_token="", workspace="E:/ws",
+        )
+        text = render_yaml(data)
+        assert '"123456789"' in text or "'123456789'" in text, "numeric IDs must be quoted or they read back as int"
+>       config = build_config(parse_yaml(text, env={}))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_gateway_onboarding.py:94:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+data = {'worker': 'ws://x', 'workspace': 'E:/ws', 'channels': {'telegram': {'token': 't', 'allow_from': ('123456789',)}}, 'pairing': {'enabled': True}}
+
+    def build_config(data: Mapping[str, Any]) -> GatewayConfig:
+        _check_keys(data, _KNOWN_TOP_LEVEL, "")
+        worker = _require_str(data, "worker")
+        if worker != "stdio" and not worker.startswith(("ws://", "wss://")):
+            raise ConfigError('gateway config: worker must be "stdio" or a ws:// (wss://) URL')
+        workspace = _require_str(data, "workspace")
+        if not os.path.isabs(workspace):
+>           raise ConfigError("gateway config: workspace must be an absolute path")
+E           gateway.config.ConfigError: gateway config: workspace must be an absolute path
+
+gateway/config.py:305: ConfigError
+________________ test_auto_install_sdk_round_trips_through_yaml ________________
+
+    def test_auto_install_sdk_round_trips_through_yaml():
+        from gateway.config import parse_yaml, render_yaml
+
+        text = render_yaml({"worker": "ws://x", "workspace": "E:/ws", "auto_install_sdk": True})
+>       config = build_config(parse_yaml(text, env={}))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/test_gateway_onboarding.py:326:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+data = {'worker': 'ws://x', 'workspace': 'E:/ws', 'auto_install_sdk': True}
+
+    def build_config(data: Mapping[str, Any]) -> GatewayConfig:
+        _check_keys(data, _KNOWN_TOP_LEVEL, "")
+        worker = _require_str(data, "worker")
+        if worker != "stdio" and not worker.startswith(("ws://", "wss://")):
+            raise ConfigError('gateway config: worker must be "stdio" or a ws:// (wss://) URL')
+        workspace = _require_str(data, "workspace")
+        if not os.path.isabs(workspace):
+>           raise ConfigError("gateway config: workspace must be an absolute path")
+E           gateway.config.ConfigError: gateway config: workspace must be an absolute path
+
+gateway/config.py:305: ConfigError
+=============================== warnings summary ===============================
+../../../home/azzurro/code/agent/rind/.venv/lib/python3.14/site-packages/google/genai/types.py:42
+  /home/azzurro/code/agent/rind/.venv/lib/python3.14/site-packages/google/genai/types.py:42: DeprecationWarning: '_UnionGenericAlias' is deprecated and slated for removal in Python 3.17
+    VersionedUnionType = Union[builtin_types.UnionType, _UnionGenericAlias]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[tencent-coding-plan-https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions]
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[tencent-token-plan-https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions]
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[xiaomi-https://api.xiaomimimo.com/v1/chat/completions]
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[longcat-https://api.longcat.chat/openai/v1/chat/completions]
+FAILED test/test_provider_auth.py::test_list_models_falls_back_to_builtin_catalog_without_cache
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[tencent-tokenhub-https://tokenhub.tencentmaas.com/v1/chat/completions]
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-sgp-https://token-plan-sgp.xiaomimimo.com/v1/chat/completions]
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[volcengine-https://ark.cn-beijing.volces.com/api/v3/chat/completions]
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-cn-https://token-plan-cn.xiaomimimo.com/v1/chat/completions]
+FAILED test/test_provider_auth.py::test_list_models_uses_cache_fallback_and_reports_refresh_warning
+FAILED test/test_provider_auth.py::test_compatible_endpoint_cache_false_overrides_official_catalog
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-ams-https://token-plan-ams.xiaomimimo.com/v1/chat/completions]
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[volcengine-coding-plan-https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions]
+FAILED test/test_provider_auth.py::test_added_providers_login_and_send_sdk_requests[hunyuan-https://api.hunyuan.cloud.tencent.com/v1/chat/completions]
+FAILED test/test_provider_e2e.py::test_provider_login_model_and_tool_turn_journey
+FAILED test/test_provider_e2e.py::test_google_login_static_catalog_and_tool_turn_journey
+FAILED test/test_image_requests.py::test_sdk_serializes_user_and_tool_images[google]
+FAILED test/test_session_settings.py::test_the_session_list_carries_each_conversation_settings
+FAILED test/test_chatgpt_oauth.py::test_a_signed_in_client_sends_a_fresh_token_and_persists_the_rotated_one
+FAILED test/test_runtime_server_files.py::test_path_validation_rejects_escapes
+FAILED test/test_bash_shell_detection.py::test_detect_shell_prefers_rind_bash_path
+FAILED test/test_journeys_user.py::test_j9_cli_one_shot_channel - AssertionEr...
+FAILED test/test_gateway_onboarding.py::test_numeric_sender_ids_survive_the_yaml_round_trip
+FAILED test/test_gateway_onboarding.py::test_auto_install_sdk_round_trips_through_yaml
+24 failed, 1422 passed, 1 skipped, 1 warning, 4 subtests passed in 100.75s (0:01:40)

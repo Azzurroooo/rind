@@ -1,0 +1,54 @@
+{
+  "cjk": {
+    "raw_stdout_chars": 20000,
+    "raw_stdout_bytes": 60000,
+    "model_bytes": 16112,
+    "model_actual_lines": 1,
+    "model_has_task_id": true
+  },
+  "many_lines": {
+    "raw_stdout_chars": 10000,
+    "raw_stdout_bytes": 10000,
+    "model_bytes": 4866,
+    "model_actual_lines": 1,
+    "model_has_task_id": true
+  },
+  "timeout": {
+    "raw_status": "timed_out",
+    "raw_reason": "Runtime deadline exceeded (100 ms)",
+    "event_status": "timed_out",
+    "event_error_type": "Timeout",
+    "model": "{\"ok\":true,\"tool\":\"bash\",\"data\":{\"command\":\"/home/azzurro/code/agent/rind/.venv/bin/python -c 'import time; time.sleep(2)'\",\"cwd\":\"/tmp/rind-context-review-f4uJl6FZ/baseline\",\"elapsed_ms\":152,\"exit_code\":-15,\"finished_at\":1791892029.4944315,\"handoff\":false,\"next_cursor\":\"WyJ0YXNrX2MyMzZjMjEyNWQxMjRmMmI4YjIzMWNmMmU4NTgyZTlhIiwgMCwgMF0=\",\"notify\":\"on_exit\",\"origin_tool_call_id\":\"\",\"origin_turn_id\":\"\",\"owner_session_id\":\"review-shell\",\"reason\":\"Runtime deadline exceeded (100 ms)\",\"request_id\":null,\"return_reason\":\"finished\",\"shell_backend\":\"bash\",\"shell_executable\":\"/usr/bin/bash\",\"start_cursor\":\"WyJ0YXNrX2MyMzZjMjEyNWQxMjRmMmI4YjIzMWNmMmU4NTgyZTlhIiwgMCwgMF0=\",\"started_at\":1791892029.3416889,\"status\":\"timed_out\",\"stderr\":\"\",\"stdout\":\"\",\"task_id\":\"task_c236c2125d124f2b8b231cf2e8582e9a\"},\"meta\":{\"output_incomplete\":false,\"output_path\":\"/tmp/rind-review-repro-hh5ma28q/sessions/review-shell/tool-output/task_c236c2125d124f2b8b231cf2e8582e9a.txt\",\"total_bytes\":0,\"total_lines\":0,\"truncated\":false},\"ts\":\"2026-10-13T11:47:09.497429+00:00\"}",
+    "reused_event_status": "timed_out",
+    "reused_event_error_type": "Timeout",
+    "reused_event_result": "{\"ok\":true,\"tool\":\"bash\",\"data\":{\"command\":\"/home/azzurro/code/agent/rind/.venv/bin/python -c 'import time; time.sleep(2)'\",\"cwd\":\"/tmp/rind-context-review-f4uJl6FZ/baseline\",\"elapsed_ms\":152,\"exit_code\":-15,\"finished_at\":1791892029.4944315,\"handoff\":false,\"next_cursor\":\"WyJ0YXNrX2MyMzZjMjEyNWQxMjRmMmI4YjIzMWNmMmU4NTgyZTlhIiwgMCwgMF0=\",\"notify\":\"on_exit\",\"origin_tool_call_id\":\"\",\"origin_turn_id\":\"\",\"owner_session_id\":\"review-shell\",\"reason\":\"Runtime deadline exceeded (100 ms)\",\"request_id\":null,\"return_reason\":\"finished\",\"shell_backend\":\"bash\",\"shell_executable\":\"/usr/bin/bash\",\"start_cursor\":\"WyJ0YXNrX2MyMzZjMjEyNWQxMjRmMmI4YjIzMWNmMmU4NTgyZTlhIiwgMCwgMF0=\",\"started_at\":1791892029.3416889,\"status\":\"timed_out\",\"stderr\":\"\",\"stdout\":\"\",\"task_id\":\"task_c236c2125d124f2b8b231cf2e8582e9a\"},\"meta\":{\"output_incomplete\":false,\"output_path\":\"/tmp/rind-review-repro-hh5ma28q/sessions/review-shell/tool-output/task_c236c2125d124f2b8b231cf2e8582e9a.txt\",\"total_bytes\":0,\"total_lines\":0,\"truncated\":false},\"ts\":\"2026-10-13T11:47:09.497429+00:00\"}"
+  },
+  "lost": "{\"ok\":true,\"tool\":\"task_control\",\"data\":{\"exit_code\":null,\"reason\":\"Worker owner disappeared\",\"status\":\"lost\",\"stderr\":\"\",\"stdout\":\"\",\"task_id\":\"task-lost\"},\"meta\":{}}",
+  "completed_page": "{\"ok\":true,\"tool\":\"task_control\",\"data\":{\"exit_code\":0,\"next_cursor\":\"next-token\",\"return_reason\":\"finished\",\"start_cursor\":\"start-token\",\"status\":\"completed\",\"stderr\":\"\",\"stdout\":\"first page\",\"task_id\":\"task-page\"},\"meta\":{\"output_path\":\"/tmp/output.log\",\"truncated\":true}}",
+  "reuse": {
+    "first_result": "{\"ok\":true,\"tool\":\"bash\",\"data\":{\"exit_code\":null,\"next_cursor\":\"next-token\",\"return_reason\":\"yield_timeout\",\"status\":\"running\",\"stderr\":\"\",\"stdout\":\"ready\",\"task_id\":\"task-reused\"},\"meta\":{}}",
+    "reused_result": "{\"ok\":true,\"tool\":\"bash\",\"data\":{\"exit_code\":null,\"next_cursor\":\"next-token\",\"return_reason\":\"yield_timeout\",\"status\":\"running\",\"stderr\":\"\",\"stdout\":\"ready\",\"task_id\":\"task-reused\"},\"meta\":{}}",
+    "structured_acknowledgements": [
+      true,
+      true
+    ]
+  },
+  "persistence": {
+    "stored_stdout_chars": 10013,
+    "model_has_tail": true,
+    "stored_has_tail": true,
+    "stored_has_next_cursor": true,
+    "stored_bytes": 10215
+  },
+  "index_retry": {
+    "write_attempts": 2,
+    "listed_ids": [
+      "review-index"
+    ]
+  },
+  "cache_keys": {
+    "a": "rind:ffdf1035ece0d1a149f7861d",
+    "b": "rind:6e89cffa09e0cd7f27ee1dbd",
+    "same_template_prefix": true
+  }
+}

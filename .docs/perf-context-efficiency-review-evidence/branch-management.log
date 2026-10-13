@@ -1,0 +1,107 @@
+
+> @rind-ai/agent-management@0.1.0 test
+> npm run build && node scripts/run-tests.mjs
+
+
+> @rind-ai/agent-management@0.1.0 build
+> tsc
+
+✔ a conversation hears once, when all the work it delegated has settled (94.899877ms)
+✔ a result waits for a conversation that is not hosted, and arrives when it is again (49.249855ms)
+✔ work the delegator cancels is not reported back; work sent back is reported again (116.602888ms)
+✔ a blocker routed to the delegator comes back to its conversation (44.601815ms)
+✔ the Manager's conversation hears back from work it assigned (40.618943ms)
+✔ a delivery waits while another run owns the delegator's folder, then arrives (108.176595ms)
+✔ team history only contains conversations registered to that team (31.078046ms)
+✔ agent history keeps every conversation but labels its team scope (3.269559ms)
+✔ history scopes are validated before reading any workspace (2.085757ms)
+✔ independent history groups non-team conversations by workspace and skips team and Manager history (3.238399ms)
+✔ history carries what each conversation runs on, and whether its connection can run (1.4126ms)
+✔ direct host can reconcile after restart while its model cannot revive an expired session (82.089235ms)
+✔ local service has one writer, scoped credentials, subscription and disconnect reconciliation (45.521825ms)
+✔ the service reports its build and refuses to stop while an agent is working (12.305326ms)
+✔ stopping with stopAgents ends a busy service, and the next client starts a fresh one (12.971661ms)
+✔ the Manager keeps every Rind tool and is held to agent_management by its instructions (9.387047ms)
+✔ the user sets a member's model and effort as its workspace defaults, without a notice (37.844957ms)
+✔ what the Manager changes shows in the user's Inbox until dismissed (22.815064ms)
+✔ leaders and members cannot choose models, not even their own (18.006756ms)
+✔ a member model needs provider and model together, and a known part to clear (8.609871ms)
+✔ a refused change leaves no notice (14.469508ms)
+✔ a notice goes when its member leaves the team (22.121271ms)
+✔ the user reads every folder's defaults at once, and a reported change bumps the snapshot (20.648897ms)
+✔ a session whose turn ended while its jobs still run is Running job, not Working or Idle (3.786174ms)
+✔ a leader whose task waits for its members is Delegated (0.565658ms)
+✔ the Manager's overview keeps open work and the latest deliveries, and counts the rest (27.556388ms)
+✔ old receipts beyond the limit are pruned in request order, but recent ones survive any burst (5.936311ms)
+✔ finished direct turns keep the latest per session; task runs keep their recent history; active runs stay (28.704507ms)
+✔ indexed projections report the same statuses after pruning (1.953181ms)
+✔ shared conversations take their state from the Runtime: open only while a window shows them (0.843396ms)
+✔ direct session remains observable after detach and management restart, and reopens without a duplicate run (2561.477941ms)
+✖ direct CLI captures activity, rejects ambiguous teams, and the manager has every tool plus management (7573.796839ms)
+✔ real Rind reports through the declared tool and the task is delivered (2948.30747ms)
+✔ older services are matched by script and data folder from their command line (6.565761ms)
+✔ build ids depend on file names and contents, not on where the code is installed (31.559477ms)
+✔ disconnecting a client after stop cannot write to the closed service (35.523056ms)
+✔ a named member receives a blocker and its report resumes the blocked owner (79.52234ms)
+✔ an answer received before the blocked run exits still resumes its owner (38.213347ms)
+✔ changing team scope cannot reuse private conversation history (21.924566ms)
+✔ import previews and registers legacy files without changing them (42.220064ms)
+✔ three levels of delegation wait for grandchildren and deliver back through the original task chain (124.804146ms)
+✔ adding the first member establishes the root without a separate UI mutation (31.517205ms)
+✔ members delegate only to direct reports and reach nothing beyond delegate and report (60.322619ms)
+✔ feature worktrees stay under the team root, reject reused branches and preserve source files (94.97751ms)
+✔ copy is explicitly confirmed and excludes credentials and symbolic links (19.764176ms)
+✔ host admission covers automatic continuations and only replay reconciliation releases an unknown direct run (27.213716ms)
+✔ registration, explicit sharing and durable idempotency (23.666154ms)
+✔ same workspace queues while distinct worktrees run independently; reports gate completion (72.467584ms)
+✔ priority affects only queued work, cancellation is durable and status comes from the service (55.518001ms)
+✔ member responsibility edits respect team authority and apply to the next run (32.498188ms)
+✔ leader resumes after children return without a human polling every agent (63.67306ms)
+✔ members cannot reorder or cancel team work, and the Manager reads every briefing (28.584951ms)
+✔ crash recovery retains workspace ownership and never repeats uncertain work (60.554009ms)
+✔ delivered files are copied for the delegator and cannot escape through a symlink or traversal (49.631721ms)
+✔ store discards only an incomplete tail and rejects earlier corrupt records (7.348061ms)
+✔ snapshot rotation recovers before or after the previous journal is truncated (11.523776ms)
+✔ team names are unique among live teams, ignoring case and spaces (20.798429ms)
+✔ the Manager's snapshot is an overview; the user's keeps every detail (16.129988ms)
+✔ accepting a delivery records the review and rework goes back to the same owner with feedback (102.42754ms)
+✔ only the user reviews, and only finished deliveries (31.876884ms)
+✔ deleting a team keeps its deliveries read-only and releases its members and conversations (72.680769ms)
+✔ a team without history is removed completely, and removing a member releases it (23.856524ms)
+✔ Manager deletes empty teams directly but asks the user before deleting history or stopping work (85.152362ms)
+✔ an approval whose target is gone leaves the Inbox by itself (41.93831ms)
+✔ a conversation open in a window keeps working after its member leaves, and is released when the window closes (34.647943ms)
+✔ only released folders without instructions are unregistered (30.163602ms)
+✔ approvals disappear once they no longer apply, and the Manager asks before deleting a team with members (40.614821ms)
+✔ a deleted imported team can be imported again, and archived teams do not answer team reads (54.654342ms)
+✔ a window that leaves before its first message leaves no conversation behind (20.031398ms)
+✔ a run that fails before the service awaits it is recorded, not an unhandled rejection (26.131762ms)
+✔ a leader adds a worktree member on a new branch for a parallel feature and gives it the task (114.269386ms)
+✔ an empty workspace member starts with the model chosen for its creator, never a copy of settings.json (29.603885ms)
+✔ only the leader or a member that leads someone adds members, inside the team root (18.99216ms)
+✔ a member is retired once its work is finished and its worktree is clean; the branch stays (126.064467ms)
+ℹ tests 74
+ℹ suites 0
+ℹ pass 73
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13312.168438
+
+✖ failing tests:
+
+test at test/rind.test.js:71:1
+✖ direct CLI captures activity, rejects ambiguous teams, and the manager has every tool plus management (7573.796839ms)
+  AssertionError [ERR_ASSERTION]: the prompt describes ask_user_question because the Manager has it
+      at TestContext.<anonymous> (file:///home/azzurro/code/agent/rind/agent-management/test/rind.test.js:129:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '\nYou are Rind, an advanced AI software engineer and coding agent.\nYou are autonomous, efficient, and capable of solving complex programming tasks using tools.\nThe tools sent with each request define their own contracts; this prompt covers how to work.\n\n<operational_guidelines>\n1. **Path Resolution**\n   - The user\'s "root directory" is the **Current Working Directory** (`.`).\n   - ALWAYS refer to it as `.` (dot) in commands.\n   - Project-level `RIND.md` and project skills are rooted at the Current Working Directory, not a parent Git root.\n   - File tools still resolve paths from the project directory.\n   - **Windows warning**: in Git Bash, `/` may map to Git installation root, not project root.\n   - Avoid `ls /` and `cd /` unless system-level inspection is explicitly needed.\n\n2. **Planning**\n   - If a task has multiple steps, uncertain scope, or likely edits across files, first call `update_plan` with the complete list.\n   - Send the complete list again when the plan changes; an unchanged plan needs no call.\n   - When the scope changes, replace the full list in one `update_plan` call; do not patch or append implicitly.\n   - Plan records task control state only. Do not use plan as factual memory.\n   - When facts matter, re-read files, inspect command outputs, or rerun checks.\n   - Final factual claims may rely on truncated tool summaries only when the needed facts are visible; otherwise re-read the source or rerun the check.\n   - Oversized tool output is discarded after bounded previews are produced. Narrow the query, paginate reads, or redirect command output to an explicitly chosen file when the full result is required.\n\n3. **Tool Discipline**\n   - As a soft default, files <=20KB can usually be read in full; 20KB-50KB is a judgment zone; files >=50KB should usually be located first and read with `offset`/`limit`. These are guidelines, not hard limits.\n   - Prefer specialized tools over `bash`: use file and search tools for file work; reserve `bash` for real terminal commands.\n   - Never use `bash` output commands (such as `echo`) to communicate thoughts or instructions.\n   - When multiple tool calls are independent, issue them in parallel in the same response whenever possible to reduce round trips and improve efficiency; execute dependent calls sequentially.\n   - Never guess missing tool parameters.\n   - Never propose or make code changes before reading the relevant files.\n   - Edits and writes to the same file run in call order. Each edit sees earlier changes; a later write replaces the whole file.\n   - Create files only when necessary; prefer editing existing files, including Markdown.\n\n4. **Safety Protocols**\n   - Never delete files (`rm`) unless explicitly instructed or absolutely necessary for cleanup.\n   - Always verify the file path before writing or editing.\n   - Avoid over-engineering. Make only directly requested or clearly necessary changes.\n   - Do not introduce security vulnerabilities such as command injection, XSS, SQL injection, or other OWASP Top 10 risks. If you notice insecure code, fix it immediately.\n\n5. **Communication Style**\n   - Be concise and direct.\n   - Prioritize technical accuracy over agreement. Investigate uncertainty and respectfully correct mistaken assumptions.\n   - Avoid excessive praise, superlatives, and emotional validation.\n   - Use emojis ONLY if the user explicitly requests them. AVOID using emojis in all communication unless asked.\n   - Briefly explain why you are running commands.\n   - Do not end pre-tool-call text with a colon; use a period because tool calls may be hidden.\n   - If you encounter an error, analyze it, propose a fix, and try again. Do not give up easily.\n\n6. **Skill Usage**\n   - A Skill the user selects with `/skill:name` or `$skill-name` is already in context; follow it.\n   - Otherwise, read a catalog Skill\'s `SKILL.md` with `read_file` before following its workflow.\n   - To create or edit a Skill, follow the built-in `skill-creator` Skill.\n\n7. **RIND.md Context Docs**\n   - User-level and project-level `RIND.md` may be injected into context.\n   - Each file has a 32 KiB byte budget; if asked to edit one, keep it concise and under budget.\n   - Never create, update, delete, or rename any `RIND.md` unless the user explicitly asks or the current turn is `/init`.\n   - Treat `RIND.md` as static user-maintained guidance, not automatically updated memory.\n</operational_guidelines>\n\n<environment_context>\nOperating System: Linux\nCurrent Date: 2026-10-13\nCurrent Working Directory (Project Root): /tmp/rind-direct-e2e-YNi2cf/agents-management/manager\nShell Type: Bash\nShell Executable: /usr/bin/bash\n</environment_context>\n\nYou are the user\'s agents manager. You organize teams and keep their work moving; members do the work.\n- Change teams, members, tasks and reviews only through agent_management. When it returns an approval, tell the user it waits in their Inbox; never carry out that action another way.\n- Use your other tools to inspect and verify: read members\' files and deliveries, run read-only checks such as git status, git diff or a test run. Do not edit member workspaces; assign the change to the member who owns it.\n- Sharing or copying a workspace between teams needs the user\'s explicit choice.\n- Never modify anything in /tmp/rind-direct-e2e-YNi2cf outside your working directory.\n- Results of work you assign are delivered to you when it settles. Report briefly: progress, what needs the user, and the tasks involved.\n<available_skills>\nSkills are specialized instructions in SKILL.md files. When a task matches a skill\'s description, read its file with read_file before acting. Resolve relative paths in a skill against the directory that contains its SKILL.md.\n<skill name="skill-creator" location="/tmp/rind-direct-e2e-YNi2cf/skills/.system/skill-creator/SKILL.md">Create or improve a Skill (a SKILL.md with optional scripts, references and assets). Use when the user asks to make, save, edit or package a reusable workflow as a skill.</skill>\n</available_skills>',
+    expected: /<user_clarification>/,
+    operator: 'match',
+    diff: 'simple'
+  }
