@@ -1,10 +1,23 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
-import { createRuntimeClient, resolveRuntimeLaunch } from "../lib/runtime-client.js";
+import { createRuntimeClient, resolveRuntimeLaunch, resolveSourcePython } from "../lib/runtime-client.js";
+
+test("a source checkout runs its own virtual environment when no interpreter is chosen", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "rind-python-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const venv = path.join(root, ".venv", "bin");
+
+  assert.equal(resolveSourcePython("python", root), "python");
+  await mkdir(venv, { recursive: true });
+  await writeFile(path.join(venv, "python"), "");
+  assert.equal(resolveSourcePython("python", root), path.join(venv, "python"));
+  assert.equal(resolveSourcePython("/usr/bin/python3", root), "/usr/bin/python3");
+  assert.equal(resolveRuntimeLaunch({ python: "python", repoRoot: root }).command, path.join(venv, "python"));
+});
 
 async function shutdownFixture(t, handler) {
   const root = await mkdtemp(path.join(tmpdir(), "rind-shutdown-"));

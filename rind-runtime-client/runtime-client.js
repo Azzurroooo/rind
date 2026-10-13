@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { buildRuntimeEnv } from "./runtime-env.js";
@@ -11,10 +12,23 @@ import {
   runtimeRequestId,
 } from "./runtime-protocol.js";
 
+const DEFAULT_PYTHON = "python";
+
+/** The interpreter a source checkout runs: an explicit choice wins, then its own
+ *  virtual environment, then whatever `python` the caller's shell resolves. */
+export function resolveSourcePython(python, repoRoot) {
+  if (python && python !== DEFAULT_PYTHON) return python;
+  const candidates = [
+    path.join(repoRoot, ".venv", "bin", "python"),
+    path.join(repoRoot, ".venv", "Scripts", "python.exe"),
+  ];
+  return candidates.find(candidate => existsSync(candidate)) || python;
+}
+
 export function resolveRuntimeLaunch({ python, repoRoot, runtimePath = "", cliArgs = [] }) {
   const executable = runtimePath
     ? { command: runtimePath, args: [] }
-    : { command: python, args: [path.join(repoRoot, "main.py")] };
+    : { command: resolveSourcePython(python, repoRoot), args: [path.join(repoRoot, "main.py")] };
   const traceFlag = isTraceLlmEnvSet() ? ["--trace-llm"] : [];
   return {
     command: executable.command,
@@ -41,7 +55,7 @@ function isLongRunningRequest(method, params) {
 export function runHelpVersion({ python, repoRoot, runtimePath = "", cliArgs, cwd = process.cwd() }) {
   const executable = runtimePath
     ? { command: runtimePath, args: [] }
-    : { command: python, args: [path.join(repoRoot, "main.py")] };
+    : { command: resolveSourcePython(python, repoRoot), args: [path.join(repoRoot, "main.py")] };
   const result = spawnSync(executable.command, [...executable.args, ...cliArgs], {
     cwd,
     env: buildRuntimeEnv(repoRoot, process.env, { sourceRuntime: !runtimePath }),
