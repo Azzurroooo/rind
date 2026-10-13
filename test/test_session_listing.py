@@ -63,6 +63,48 @@ def test_grouped_listing_applies_exclusions_before_grouping(tmp_path):
     assert [Path(total["workspace_root"]).name for total in totals] == ["beta"]
 
 
+def test_listing_reuses_the_index_on_the_actual_read_path(tmp_path, monkeypatch):
+    sessions = tmp_path / "sessions"
+    _write_index(sessions, [_entry("20260101_a1", str(tmp_path), "2026-01-01")])
+    original = SessionFiles.load_json
+    reads = []
+
+    def counted(files, path):
+        reads.append(path)
+        return original(files, path)
+
+    monkeypatch.setattr(SessionFiles, "load_json", counted)
+    first = JsonlSessionStore.list_session_metadata(str(sessions))
+    first[0]["id"] = "caller mutation"
+    assert JsonlSessionStore.list_session_metadata(str(sessions))[0]["id"] == "20260101_a1"
+    assert len(reads) == 1
+    _write_index(sessions, [_entry("20260101_a2", str(tmp_path), "2026-01-02")])
+    assert JsonlSessionStore.list_session_metadata(str(sessions))[0]["id"] == "20260101_a2"
+    assert len(reads) == 2
+
+
+def test_index_cache_detects_atomic_same_size_same_mtime_replacement(tmp_path):
+    sessions = tmp_path / "sessions"
+    _write_index(sessions, [_entry("20260101_a1", str(tmp_path), "2026-01-01")])
+    index = sessions / "index.json"
+    repository = SessionIndexRepository(SessionFiles(), str(index))
+    assert repository.load_index()["sessions"][0]["id"] == "20260101_a1"
+    identity = index.stat()
+    replacement = sessions / "replacement.json"
+    replacement.write_text(index.read_text(encoding="utf-8").replace("a1", "a2"), encoding="utf-8")
+    os.utime(replacement, ns=(identity.st_atime_ns, identity.st_mtime_ns))
+    os.replace(replacement, index)
+    assert repository.load_index()["sessions"][0]["id"] == "20260101_a2"
+
+
+def test_grouped_totals_include_folders_beyond_the_preview_cap(tmp_path):
+    sessions = tmp_path / "sessions"
+    _write_index(sessions, [_entry(f"20260101_a{i}", str(tmp_path / str(i)), str(i)) for i in range(4)])
+    preview, totals = JsonlSessionStore.list_session_metadata_by_workspace(str(sessions), limit=2)
+    assert len(preview) == 2
+    assert len(totals) == 4
+
+
 def test_index_read_cache_sees_writes(tmp_path):
     sessions = tmp_path / "sessions"
     _write_index(sessions, [_entry("20260101_a1", str(tmp_path / "alpha"), "2026-01-01T00:00:01")])

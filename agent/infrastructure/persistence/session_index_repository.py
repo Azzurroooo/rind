@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # saved, so the parsed result is reused until the file's identity changes.
 # Readers treat it as read-only; writers read fresh under the file lock.
 # Bounded so many session folders cannot grow it without limit.
-_INDEX_CACHE: dict[str, tuple[int, int, dict[str, Any]]] = {}
+_INDEX_CACHE: dict[str, tuple[tuple[int, ...], dict[str, Any]]] = {}
 
 
 class SessionIndexRepository:
@@ -32,13 +32,21 @@ class SessionIndexRepository:
         except OSError:
             return {"sessions": []}
         key = os.path.abspath(self._index_path)
+        signature = (identity.st_dev, identity.st_ino, identity.st_ctime_ns, identity.st_mtime_ns, identity.st_size)
         cached = _INDEX_CACHE.get(key)
-        if cached and cached[0] == identity.st_mtime_ns and cached[1] == identity.st_size:
-            return cached[2]
+        if cached and cached[0] == signature:
+            return cached[1]
         data = self._read_index()
+        # Do not label a concurrent replacement with the identity of the old file.
+        try:
+            after = os.stat(self._index_path)
+        except OSError:
+            return data
+        if signature != (after.st_dev, after.st_ino, after.st_ctime_ns, after.st_mtime_ns, after.st_size):
+            return data
         if len(_INDEX_CACHE) >= 8:
             _INDEX_CACHE.clear()
-        _INDEX_CACHE[key] = (identity.st_mtime_ns, identity.st_size, data)
+        _INDEX_CACHE[key] = (signature, data)
         return data
 
     def _read_index(self) -> dict[str, Any]:

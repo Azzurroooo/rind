@@ -199,7 +199,7 @@ async def test_shell_model_projection_reports_a_non_zero_exit() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("output", ["汉" * 20000, "x\n" * 5000])
+@pytest.mark.parametrize("output", ["汉" * 20000, "x\n" * 5000], ids=["cjk-bytes", "many-lines"])
 async def test_real_shell_shape_respects_model_bounds_and_preserves_full_output(tmp_path, output):
     store = MemoryOutputStore(tmp_path)
     payload = {"ok": True, "tool": "bash", "data": {
@@ -211,7 +211,7 @@ async def test_real_shell_shape_respects_model_bounds_and_preserves_full_output(
     assert "Output truncated." in result.model_content
     full_path = tmp_path / "session" / "call.txt"
     assert str(full_path.resolve()) in result.model_content
-    assert json.loads(full_path.read_text())["data"]["stdout"] == output
+    assert json.loads(full_path.read_text(encoding="utf-8"))["data"]["stdout"] == output
 
 
 @pytest.mark.asyncio
@@ -249,4 +249,4 @@ async def test_shell_diagnostics_alone_cannot_bypass_model_bounds(tmp_path):
     assert len(result.model_content.splitlines()) <= 2000
     assert "Command status: lost" in result.model_content
     assert "START-REASON" in result.model_content and "END-REASON" in result.model_content
-    assert json.loads((tmp_path / "s/c.txt").read_text())["data"]["reason"] == reason
+    assert json.loads((tmp_path / "s/c.txt").read_text(encoding="utf-8"))["data"]["reason"] == reason

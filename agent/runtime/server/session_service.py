@@ -153,11 +153,10 @@ class SessionService:
         clean = validate_session_id(session_id)
         meta = await self.metadata(clean)
         draft = self.draft_store(clean)
+        self._created.pop(clean, None)
         if draft is not None:
             self._drafts.pop(draft.session_id, None)
             draft.mark_deleted()
-        else:
-            self._created.pop(clean, None)
 
         def _remove() -> None:
             root = JsonlSessionStore.resolve_session_root(self.session_dir)
@@ -275,14 +274,13 @@ class SessionService:
             persist_system_prompt=False,
         )
         messages = await store.get_messages_slice(
-            start=start,
-            end=end,
             include_ids=True,
             compacted=False,
         )
         total = len(messages)
+        messages = messages[start:end]
         if tail is not None:
-            messages = messages[max(0, total - tail):]
+            messages = messages[max(0, len(messages) - tail):]
         return {
             "messages": messages,
             "message_total": total,

@@ -436,9 +436,10 @@ class CompactionService:
                     "they stay saved on disk but were not re-examined. Do not claim knowledge of them."
                 )
             messages = build_compact_prompt(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
-            attachments = [item for message in corpus for item in message.get("attachments", [])]
+            included = corpus[history_start:]
+            attachments = [item for message in included for item in message.get("attachments", [])]
             if attachments:
-                if image_budget_exceeded(corpus):
+                if image_budget_exceeded(included):
                     messages[-1]["content"] += "\n[Images not re-examined: image request limit exceeded. Summarize prior observations and image references only.]"
                 else:
                     messages[-1]["attachments"] = attachments
@@ -464,16 +465,44 @@ class CompactionService:
         # intact. The conversation record is untouched and the corpus says what
         # was dropped, so compaction always makes progress instead of refusing.
         history_units = [unit for unit in self._conversation_units(corpus, 0) if unit[1] <= recent_start]
-        smallest = messages
-        while history_units:
-            history_units = history_units[max(1, len(history_units) // 4):]
-            start = history_units[0][0] if history_units else recent_start
-            # Something must remain to summarize; the newest messages alone can
-            # be too large, and then the same refusal as before applies.
-            if start >= len(corpus):
+        starts = [end for _, end in history_units if end < len(corpus)]
+        # Locate a likely cut using each unit once, then check the actual request.
+        # Retokenizing every growing suffix would be quadratic on long histories.
+        # These weights only guide the search; JSON overhead and images are always
+        # included by the exact checks below, including the image-limit transition.
+        weights = [estimated([{"role": "user", "content": json.dumps(corpus[start:end], ensure_ascii=False, sort_keys=True, default=str)}])
+                   for start, end in history_units if end < len(corpus)]
+        remaining = estimated(messages)
+        index = 0
+        for weight in weights:
+            remaining -= weight
+            if remaining <= input_budget:
                 break
-            smallest = build_request(start, start)
+            index += 1
+        index = min(index, len(starts) - 1)
+        smallest = messages
+        if image_budget_exceeded(corpus):
+            # Dropping an image can re-enable vision and increase token usage.
+            # Check in order across that discontinuity instead of skipping a
+            # valid text-only summary or claiming the budget is monotonic.
+            for start in starts:
+                smallest = build_request(start, start)
+                if estimated(smallest) <= input_budget:
+                    return smallest
+        elif starts:
+            smallest = build_request(starts[index], starts[index])
+            while estimated(smallest) > input_budget and index + 1 < len(starts):
+                index += 1
+                smallest = build_request(starts[index], starts[index])
             if estimated(smallest) <= input_budget:
+                # Recover constraints that the approximate cut skipped. Stop at
+                # the first oversized predecessor, preserving complete units.
+                while index > 0:
+                    previous = build_request(starts[index - 1], starts[index - 1])
+                    if estimated(previous) > input_budget:
+                        break
+                    smallest = previous
+                    index -= 1
                 return smallest
         raise BoundaryError(
             f"Compact input exceeds its budget even after dropping older history "

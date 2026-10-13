@@ -679,6 +679,9 @@ class RuntimeDispatcher:
             await self._respond_error(request, f"session/list limit must be an integer from 1 to {max_limit}.", "InvalidRequest")
             return
         workspace_root = params.get("workspace_root")
+        if workspace_root is not None and per_workspace_limit is not None:
+            await self._respond_error(request, "A grouped session/list cannot also select one workspace_root.", "InvalidRequest")
+            return
         if workspace_root is not None:
             if not isinstance(workspace_root, str) or not workspace_root.strip():
                 await self._respond_error(request, "workspace_root must be a non-empty string.", "InvalidRequest")

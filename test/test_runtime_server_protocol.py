@@ -520,6 +520,13 @@ def test_session_list_rejects_an_invalid_per_workspace_limit():
     assert _response(payloads, 29)["error"]["type"] == "InvalidRequest"
 
 
+def test_grouped_session_list_cannot_silently_ignore_a_workspace_filter():
+    server, payloads = make_server(FakeWorker())
+    asyncio.run(server._dispatch({"kind": "request", "request_id": 29, "method": "session/list",
+                                 "params": {"per_workspace_limit": 3, "workspace_root": "C:/notes"}}))
+    assert _response(payloads, 29)["error"]["type"] == "InvalidRequest"
+
+
 def test_session_new_returns_created_metadata():
     worker = FakeWorker()
     server, payloads = make_server(worker)

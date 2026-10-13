@@ -64,23 +64,6 @@ def _valid_session_id_value(value: object) -> bool:
     return True
 
 
-# Folder filtering runs over every index entry on every list; folders are few
-# and stable, so each is resolved once. Bounded so a pathological caller cannot
-# grow it without limit.
-_WORKSPACE_MEMO: dict[str, str] = {}
-
-
-def _normalized_workspace(value: str) -> str:
-    key = os.path.abspath(os.path.expanduser(str(value)))
-    resolved = _WORKSPACE_MEMO.get(key)
-    if resolved is None:
-        resolved = os.path.normcase(os.path.realpath(key))
-        if len(_WORKSPACE_MEMO) >= 1024:
-            _WORKSPACE_MEMO.clear()
-        _WORKSPACE_MEMO[key] = resolved
-    return resolved
-
-
 def _validate_session_meta(meta: Any, session_id: str) -> None:
     if not isinstance(meta, dict):
         raise ValueError(f"Session data corrupted or missing meta.json for id: {session_id}")
@@ -278,8 +261,7 @@ class JsonlSessionStore(SessionStore):
         """The newest conversations per folder, at most `per_workspace_limit` each
         and `limit` in total, plus each folder's full count. One pass, so busy
         folders cannot crowd others out and callers need no per-folder queries.
-        Each total names its folder by the workspace_root of its newest returned
-        conversation, which is always among the returned ones."""
+        Totals include every matching folder, including those outside the preview cap."""
         return cls._scan_session_metadata(
             session_dir, limit=limit, exclude_workspace_roots=exclude_workspace_roots,
             exclude_session_ids=exclude_session_ids, per_workspace_limit=per_workspace_limit,
@@ -298,13 +280,22 @@ class JsonlSessionStore(SessionStore):
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         index_path = cls.index_path_for(session_dir)
         files = SessionFiles()
-        index = files.load_json(index_path) or {}
+        index = SessionIndexRepository(files, index_path).load_index()
+        # Cache canonical paths only for this scan: symlink targets may change.
+        roots: dict[str, str] = {}
+
+        def normalized_workspace(value: str) -> str:
+            key = os.path.abspath(os.path.expanduser(str(value)))
+            if key not in roots:
+                roots[key] = os.path.normcase(os.path.realpath(key))
+            return roots[key]
+
         entries = index.get("sessions") if isinstance(index, dict) else []
         if not isinstance(entries, list):
             return [], []
-        expected_root = _normalized_workspace(workspace_root) if workspace_root else None
+        expected_root = normalized_workspace(workspace_root) if workspace_root else None
         # Excluded before the limit applies, so callers can page past busy folders.
-        excluded = {_normalized_workspace(value) for value in exclude_workspace_roots or [] if isinstance(value, str) and value}
+        excluded = {normalized_workspace(value) for value in exclude_workspace_roots or [] if isinstance(value, str) and value}
         skipped = {value for value in exclude_session_ids or [] if isinstance(value, str) and value}
         result: list[dict[str, Any]] = []
         totals: dict[str, list[Any]] = {}
@@ -316,16 +307,16 @@ class JsonlSessionStore(SessionStore):
             if entry.get("has_user_message") is False:
                 continue
             entry_root = entry.get("workspace_root")
-            if excluded and isinstance(entry_root, str) and _normalized_workspace(entry_root) in excluded:
+            if excluded and isinstance(entry_root, str) and normalized_workspace(entry_root) in excluded:
                 continue
             if expected_root is not None:
                 if not isinstance(entry_root, str):
                     continue
-                if _normalized_workspace(entry_root) != expected_root:
+                if normalized_workspace(entry_root) != expected_root:
                     continue
             result.append(copy.deepcopy(entry))
             if per_workspace_limit is not None and isinstance(entry_root, str) and entry_root:
-                bucket = totals.setdefault(_normalized_workspace(entry_root), [entry_root, 0])
+                bucket = totals.setdefault(normalized_workspace(entry_root), [entry_root, 0])
                 bucket[1] += 1
         result.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         if per_workspace_limit is None:
@@ -336,7 +327,7 @@ class JsonlSessionStore(SessionStore):
         representatives: dict[str, str] = {}
         counts: dict[str, int] = {}
         for entry in result:
-            key = _normalized_workspace(str(entry.get("workspace_root") or ""))
+            key = normalized_workspace(str(entry.get("workspace_root") or ""))
             if counts.get(key, 0) >= per_workspace_limit:
                 continue
             counts[key] = counts.get(key, 0) + 1
