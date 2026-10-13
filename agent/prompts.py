@@ -1,3 +1,5 @@
+import hashlib
+import re
 from xml.sax.saxutils import escape
 
 
@@ -126,12 +128,36 @@ _SAVED_CLARIFICATION_SECTION = (
 )
 
 
+_BUILTIN_PROMPT_DIGESTS = frozenset({
+    "8eac2a991a91b91740961ebf1c530a88337358e04d9d2a9d4f771ebb7f081d92",
+    "8ef608686a91e40d9991663f5b9615648df3bbcaace7dadd909318db8eb68b6d",
+    "6343a57a6c6b6d311aec70e574f55ed2a814ea31bc5a2928b9c149ace00e801b",
+    "22c6b0229aacaef91d2e2eb92d4ef81e4bb55a28b658366c2eadfe181aff2667",
+})
+
+
 def refresh_system_prompt(content: str) -> str:
     """Bring a saved built-in system prompt up to date with the current template."""
     if not content.lstrip().startswith("You are Rind, an advanced AI software engineer and coding agent.\n"):
         return content
     end = content.find("</operational_guidelines>")
-    if end < 0 or "<core_capabilities>" not in content[:end]:
+    if end < 0:
+        return content
+    boundary = end + len("</operational_guidelines>")
+    base = content[:boundary]
+    environment = re.search(r"<environment_context>.*?</environment_context>", base, re.S)
+    normalized = base[:environment.start()] + base[environment.end():] if environment else base
+    normalized = re.sub(
+        r"(?m)^   - The user's \"root directory\" is the \*\*Current Working Directory\*\* \(`[^`\n]*`\)\.$",
+        '   - The user\'s "root directory" is the **Current Working Directory** (`.`).',
+        normalized,
+    )
+    if hashlib.sha256(normalized.strip().encode("utf-8")).hexdigest() in _BUILTIN_PROMPT_DIGESTS:
+        suffix = content[boundary:]
+        if environment:
+            suffix += "\n" + environment.group() + "\n"
+        return _SYSTEM_PROMPT_TEMPLATE.rstrip("\n") + suffix
+    if "<core_capabilities>" not in content[:end]:
         return content
     base, suffix = content[:end].replace(_SAVED_CLARIFICATION_SECTION, "", 1), content[end:]
     start = base.find("<rind_file_tool_rules>")

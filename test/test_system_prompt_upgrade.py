@@ -2,6 +2,7 @@
 
 import copy
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -72,7 +73,7 @@ def test_unidentified_or_customized_prompt_is_not_replaced(content):
 
 
 def test_new_managed_block_refreshes_without_replacing_surrounding_context():
-    prompt = build_system_prompt(environment="test environment")
+    prompt = refresh_system_prompt(LEGACY_PROMPT)
     outdated = prompt.replace(FILE_TOOL_RULES, "<rind_file_tool_rules>obsolete built-in contract</rind_file_tool_rules>")
     assert refresh_system_prompt(outdated) == prompt
 
@@ -137,13 +138,28 @@ async def test_resume_executes_pending_legacy_call_before_sampling(tmp_path, mon
 
 
 def test_a_saved_prompt_loses_its_clarification_section_and_keeps_the_rest():
-    prompt = build_system_prompt(environment="test environment")
+    prompt = refresh_system_prompt(LEGACY_PROMPT)
     saved = prompt.replace("1. **File System Operations**", _SAVED_CLARIFICATION_SECTION + "1. **File System Operations**", 1)
     customized = saved.replace("Ask the user one direct question", "Ask my own kind of question")
 
     assert refresh_system_prompt(saved) == prompt
     assert "ask_user_question" not in prompt
     assert refresh_system_prompt(customized) == customized, "a section that is not the built-in one is left alone"
+
+
+@pytest.mark.parametrize("fixture", json.loads((Path(__file__).parent / "fixtures" / "builtin_system_prompts.json").read_text()))
+def test_known_builtin_templates_upgrade_without_losing_environment_or_suffix(fixture):
+    suffix = "\nUser instruction: preserve database migrations."
+    saved = fixture["content"].replace("/fixture", "/different-workspace").replace("2026-01-01", "2026-10-13") + suffix
+    upgraded = refresh_system_prompt(saved)
+    assert upgraded.startswith(build_system_prompt(environment=""))
+    assert upgraded.count("<environment_context>") == 1
+    assert "/different-workspace" in upgraded and "2026-10-13" in upgraded
+    assert suffix in upgraded
+    assert "<core_capabilities>" not in upgraded
+    assert refresh_system_prompt(upgraded) == upgraded
+    customized = saved.replace("Never guess missing tool parameters.", "Use my custom parameter policy.")
+    assert "Use my custom parameter policy." in refresh_system_prompt(customized)
 
 
 def test_ask_user_question_rules_live_in_its_own_schema():
