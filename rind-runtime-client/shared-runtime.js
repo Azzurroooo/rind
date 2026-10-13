@@ -3,7 +3,7 @@ import { privateDirectory } from "./local-files.js";
 import path from "node:path";
 import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, open } from "node:fs/promises";
+import { readFile, open, stat, rename, unlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { runtimeBuildId } from "./build-id.js";
@@ -77,14 +77,73 @@ export async function connectSharedRuntime(options = {}) {
   try { const current = await checked(await connect()); if (current) return current; }
   catch (error) { if (options.start === false) throw error; }
   await privateDirectory(paths.directory);
-  const log = await open(path.join(paths.directory, "runtime.log"), "a", 0o600);
-  const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ python: options.python, repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome || options.home })], { detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd] });
-  child.on("error", () => {}); child.unref(); await log.close();
-  for (let i = 0; i < 100; i++) {
-    try { return await connect(); } catch {}
+  // One starter at a time: without it two windows can each spawn a host while
+  // neither is connectable yet. The loser waits, then finds the winner.
+  const lock = await acquireHostLock(paths, 30000);
+  try {
+    try { const current = await checked(await connect()); if (current) return current; } catch {}
+    const log = await open(path.join(paths.directory, "runtime.log"), "a", 0o600);
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ python: options.python, repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome || options.home })], { detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd] });
+    child.on("error", () => {}); child.unref(); await log.close();
+    for (let i = 0; i < 100; i++) {
+      try { return await connect(); } catch {}
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error("Unable to connect to shared Runtime. See " + path.join(paths.directory, "runtime.log"));
+  } finally {
+    await lock?.release();
+  }
+}
+
+// Serializes starting the host. Advisory only — the endpoint bind decides who
+// serves — and reclaimed when its owner died, never removed without proof.
+// Follows orca's instance lock (src/main/orcad/orcad-instance-lock.ts).
+async function acquireHostLock(paths, timeoutMs) {
+  const file = path.join(paths.directory, "host.lock");
+  const nonce = randomUUID();
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      const handle = await open(file, "wx", 0o600);
+      try { await handle.writeFile(JSON.stringify({ pid: process.pid, at: Date.now(), nonce })); }
+      finally { await handle.close(); }
+      return { release: async () => {
+        const record = await readFile(file, "utf8").then(value => JSON.parse(value), () => null);
+        if (record?.nonce !== nonce) return;
+        await unlink(file).catch(() => {});
+      } };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+    if (!(await lockHeldByLiveProcess(file, 10000))) {
+      const claim = file + ".stale-" + process.pid + "-" + randomUUID().slice(0, 8);
+      try { await rename(file, claim); } catch (error) { if (error?.code !== "ENOENT") throw error; continue; }
+      await unlink(claim).catch(() => {});
+      continue;
+    }
+    if (Date.now() >= deadline) return null;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  throw new Error("Unable to connect to shared Runtime. See " + path.join(paths.directory, "runtime.log"));
+}
+
+// A lock is held while the process that published it is alive; a garbled
+// record counts only past its write grace, since it may still be arriving.
+async function lockHeldByLiveProcess(file, garbledGraceMs) {
+  const raw = await readFile(file, "utf8").catch(() => null);
+  if (raw === null) return false;
+  try {
+    const record = JSON.parse(raw);
+    return Number.isInteger(record?.pid) && record.pid > 0 && processAlive(record.pid);
+  } catch {
+    const value = await stat(file).catch(() => null);
+    return value !== null && Date.now() - value.mtimeMs < garbledGraceMs;
+  }
+}
+
+// Only ESRCH proves a process is gone; EPERM means it exists.
+function processAlive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error?.code === "EPERM"; }
 }
 
 export function createSharedRuntimeClient(options) {
@@ -95,7 +154,11 @@ export function createSharedRuntimeClient(options) {
   const sessionDir = arg("--session-dir");
   if (sessionDir && path.resolve(sessionDir) !== path.resolve(options.rindHome || options.home || process.env.RIND_HOME || path.join(os.homedir(), ".rind"), "sessions")) throw new Error("Shared Runtime uses RIND_HOME/sessions; omit --session-dir.");
   function start() {
-    starting ||= connectSharedRuntime({ ...options, onDisconnect() { options.onExit?.(null, null, { closing: closed, error: new Error("Shared Runtime disconnected. Reopen the session to reconnect.") }); } }).then(value => { connection = value; return value; });
+    if (!starting) {
+      // A failed attempt must not be remembered: the next ensure may reconnect.
+      starting = connectSharedRuntime({ ...options, onDisconnect() { options.onExit?.(null, null, { closing: closed, error: new Error("Shared Runtime disconnected. Reopen the session to reconnect.") }); } })
+        .then(value => { connection = value; return value; }, error => { starting = undefined; throw error; });
+    }
     return starting;
   }
   // Where this window works and what its conversation may use; a conversation

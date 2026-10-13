@@ -1,6 +1,6 @@
 import net from "node:net";
 import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
-import { readFile, writeFile, unlink, chmod, link } from "node:fs/promises";
+import { readFile, writeFile, unlink, link } from "node:fs/promises";
 import type { Principal } from "./model.js";
 import { ManagementError, requireValue } from "./model.js";
 import { managementPaths, privateDirectory } from "./paths.js";
@@ -13,6 +13,7 @@ import { activeRun } from "./model.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { listenOwned, EndpointOccupiedError } from "../../rind-runtime-client/endpoint.js";
 import { managerInstructions, memberInstructions, supervises, toolsFor } from "./tools.js";
 
 const RUNTIME_START_MS = 30000;
@@ -29,11 +30,6 @@ export async function startServer(options: { home?: string; python?: string; rep
   const build = managementBuildId();
   const paths = managementPaths(options.home);
   await privateDirectory(paths.state);
-  if (process.platform !== "win32") {
-    const inUse = await new Promise<boolean>(resolve => { const probe = net.connect(paths.endpoint); probe.once("connect", () => { probe.destroy(); resolve(true); }); probe.once("error", () => resolve(false)); });
-    requireValue(!inUse, "ALREADY_RUNNING", "Management service is already running.");
-    try { await unlink(paths.endpoint); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  }
   let readyResolve: () => void;
   let readyReject: (error: unknown) => void;
   const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
@@ -270,7 +266,12 @@ export async function startServer(options: { home?: string; python?: string; rep
     socket.on("error", () => {});
     socket.on("close", () => { sockets.delete(socket); if (unsubscribe) watchRuntime(false); unsubscribe?.(); if (service && !closing) void service.disconnect(attached).catch(() => {}); });
   });
-  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(paths.endpoint, () => { server.off("error", reject); resolve(); }); });
+  try {
+    await listenOwned(server, paths.endpoint);
+  } catch (error) {
+    if (error instanceof EndpointOccupiedError) throw new ManagementError("ALREADY_RUNNING", "Management service is already running.");
+    throw error;
+  }
   const reportError = (error: unknown) => process.stderr.write("agents management: " + String((error as Error)?.stack || error) + "\n");
   // Work that a restart would interrupt: running or starting runs. Unconfirmed
   // runs are already outside this service's control.
@@ -300,7 +301,6 @@ export async function startServer(options: { home?: string; python?: string; rep
   // Awaited by the requests that need it; a failure surfaces there, never as an unhandled rejection.
   realManager.catch(() => {});
   try {
-    if (process.platform !== "win32") await chmod(paths.endpoint, 0o600);
     try { userToken = (await readFile(paths.token, "utf8")).trim(); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (!userToken) {

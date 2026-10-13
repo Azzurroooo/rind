@@ -1,20 +1,16 @@
 import net from "node:net";
 import { privateDirectory } from "./local-files.js";
 import { randomBytes } from "node:crypto";
-import { readFile, writeFile, chmod, unlink } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createRuntimeClient } from "./runtime-client.js";
 import { sharedRuntimePaths } from "./shared-runtime.js";
+import { listenOwned } from "./endpoint.js";
 import { runtimeBuildId } from "./build-id.js";
 import { createLiveSessions } from "./live-sessions.js";
 
 export async function startSharedServer(options) {
   const paths = sharedRuntimePaths(options.rindHome);
   await privateDirectory(paths.directory);
-  if (process.platform !== "win32") {
-    const live = await new Promise(resolve => { const socket = net.connect(paths.endpoint); socket.once("connect", () => { socket.destroy(); resolve(true); }); socket.once("error", () => resolve(false)); });
-    if (live) throw new Error("Shared Runtime is already running.");
-    await unlink(paths.endpoint).catch(error => { if (error.code !== "ENOENT") throw error; });
-  }
   let token, initialized, authOwner, stopping = false, closing;
   const startedAt = new Date().toISOString();
   const build = runtimeBuildId(options);
@@ -116,11 +112,15 @@ export async function startSharedServer(options) {
       } catch (error) { peer.send({ id, error: { message: error.message, code: error.code } }); }
     }
   });
-  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(paths.endpoint, resolve); });
+  try {
+    await listenOwned(server, paths.endpoint);
+  } catch (error) {
+    if (error?.code === "ENDPOINT_OCCUPIED") throw new Error("Shared Runtime is already running.");
+    throw error;
+  }
   try {
     try { token = (await readFile(paths.token, "utf8")).trim(); } catch (error) { if (error.code !== "ENOENT") throw error; }
     if (!token) { token = randomBytes(32).toString("hex"); await writeFile(paths.token, token, { mode: 0o600, flag: "wx" }); }
-    if (process.platform !== "win32") await chmod(paths.endpoint, 0o600);
     readyResolve();
   } catch (error) {
     readyReject(error);
