@@ -9,14 +9,17 @@ import path from "node:path";
 import os from "node:os";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
-import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { connectSharedRuntime, sharedRuntimePaths } from "../../rind-runtime-client/shared-runtime.js";
 import { startSharedServer } from "../../rind-runtime-client/shared-server.js";
+import { probeEndpoint } from "../../rind-runtime-client/endpoint.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const rindBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));
 const runtimeModule = new URL("../../rind-runtime-client/shared-runtime.js", import.meta.url).href;
 const runtimeOptions = home => ({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot });
+const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function runCli(home, cwd, ...args) {
   return new Promise((resolve, reject) => {
@@ -188,4 +191,49 @@ test("the management service reports one Runtime pid across connections", { time
   const second = await connectManagement({ home, python: process.env.RIND_PYTHON || "python", repoRoot, start: false });
   t.after(() => second.close());
   assert.equal((await second.request("serviceInfo")).pid, info.pid, "one management service");
+});
+
+test("a Runtime whose worker died still exits, and the next window starts a fresh one", { timeout: 90000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-dead-worker-"));
+  t.after(() => removeRindHome(home));
+  const host = await connectSharedRuntime(runtimeOptions(home));
+  await host.request("initialize");
+  const info = await host.request("runtime/info");
+  const worker = await host.request("runtime/observe");
+  assert.ok(info.pid > 0 && worker.pid > 0);
+
+  // The worker dies under the host, and a shutdown request races the death.
+  process.kill(worker.pid);
+  await host.request("runtime/shutdown").catch(() => {});
+  host.close();
+  for (let i = 0; i < 200 && alive(info.pid); i++) await sleep(50);
+  assert.equal(alive(info.pid), false, "the host exits instead of lingering as a zombie");
+  for (let i = 0; i < 40 && await probeEndpoint(sharedRuntimePaths(home).endpoint); i++) await sleep(50);
+  assert.equal(await probeEndpoint(sharedRuntimePaths(home).endpoint), false, "the endpoint is free again");
+
+  const again = await connectSharedRuntime(runtimeOptions(home));
+  t.after(() => again.close());
+  const fresh = await again.request("runtime/info");
+  assert.notEqual(fresh.pid, info.pid, "a fresh host serves the next window");
+  await again.request("runtime/shutdown").catch(() => {});
+});
+
+test("a host that stopped answering is ended through its pid record", { timeout: 90000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-stuck-host-"));
+  t.after(() => removeRindHome(home));
+  const paths = sharedRuntimePaths(home);
+  await mkdir(paths.directory, { recursive: true });
+  await writeFile(paths.token, "test-token", { mode: 0o600 });
+  // A squatter owns the endpoint: it accepts connections and never answers.
+  const squatter = spawn(process.execPath, ["-e", "const net = require('node:net'); const server = net.createServer(() => {}); server.listen(process.argv[1]); setInterval(() => {}, 1000);", paths.endpoint], { stdio: "ignore", windowsHide: true });
+  t.after(() => { if (squatter.exitCode === null) squatter.kill("SIGKILL"); });
+  for (let i = 0; i < 100 && !(await probeEndpoint(paths.endpoint)); i++) await sleep(50);
+  assert.equal(await probeEndpoint(paths.endpoint), true, "the squatter holds the endpoint");
+  await writeFile(paths.record, JSON.stringify({ pid: squatter.pid, nonce: "stuck", startedAt: new Date().toISOString() }), { mode: 0o600 });
+
+  const host = await connectSharedRuntime(runtimeOptions(home));
+  t.after(() => host.close());
+  assert.ok((await host.request("runtime/info")).pid > 0, "a real host took over");
+  assert.equal(alive(squatter.pid), false, "the stuck process was ended");
+  await host.request("runtime/shutdown").catch(() => {});
 });

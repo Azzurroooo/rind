@@ -43,14 +43,14 @@ export async function listenOwned(server, endpoint) {
       } catch (error) {
         if (error?.code !== "EEXIST") throw error;
       }
-      if (await probe(endpoint)) throw new EndpointOccupiedError();
+      if (await probeEndpoint(endpoint)) throw new EndpointOccupiedError();
       const owner = await endpointIdentity(endpoint).catch(() => null);
       if (owner === null) continue;
       // Only replace the entry that was proven dead, and only while it is still
       // that entry and the second probe agrees: a concurrent publisher's entry
       // is never swapped out here.
       const before = await endpointIdentity(endpoint).catch(() => null);
-      if (!sameIdentity(before, owner) || await probe(endpoint)) continue;
+      if (!sameIdentity(before, owner) || await probeEndpoint(endpoint)) continue;
       await rename(bound, endpoint);
       return await confirm(endpoint, identity);
     }
@@ -81,7 +81,7 @@ async function listen(server, target) {
 // True while something accepts connections; anything else (refused, timed out)
 // counts as dead. Identities are file identities, so a missing entry never
 // matches a recorded one.
-async function probe(endpoint) {
+export async function probeEndpoint(endpoint) {
   return new Promise(resolve => {
     const socket = net.connect(endpoint);
     const done = alive => { socket.removeAllListeners(); socket.destroy(); resolve(alive); };

@@ -341,15 +341,20 @@ export async function startServer(options: { home?: string; python?: string; rep
     return closed ||= (async () => {
       closing = true;
       if (probe) clearInterval(probe);
-      await service.stop();
-      // The Manager folder may still be being secured; finish before reporting closed.
-      await realManager.catch(() => {});
-      // A Runtime still starting comes up after this; wait so that whoever
-      // cleans up next (tests, `rind agents stop`) can see and stop it.
-      await runtimeConnecting?.catch(() => {});
-      runtime?.close();
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>(resolve => server.close(() => resolve()));
+      // The process always lets go of its endpoint, even when stopping the
+      // service failed: a service nobody can stop is worse than a loud error.
+      try {
+        await service.stop();
+        // The Manager folder may still be being secured; finish before reporting closed.
+        await realManager.catch(() => {});
+        // A Runtime still starting comes up after this; wait so that whoever
+        // cleans up next (tests, `rind agents stop`) can see and stop it.
+        await runtimeConnecting?.catch(() => {});
+      } finally {
+        runtime?.close();
+        for (const socket of sockets) socket.destroy();
+        await new Promise<void>(resolve => server.close(() => resolve()));
+      }
     })();
   }
   return { paths, close };

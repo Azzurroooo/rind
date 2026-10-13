@@ -7,11 +7,12 @@ import { readFile, open, stat, rename, unlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { runtimeBuildId } from "./build-id.js";
+import { probeEndpoint } from "./endpoint.js";
 
 export function sharedRuntimePaths(home = process.env.RIND_HOME || path.join(os.homedir(), ".rind")) {
   const directory = path.resolve(home, "runtime");
   const endpoint = process.platform === "win32" ? "\\\\.\\pipe\\rind-runtime-" + createHash("sha256").update(directory.toLowerCase()).digest("hex").slice(0, 24) : path.join(directory, "runtime.sock");
-  return { directory, endpoint, token: path.join(directory, "token") };
+  return { directory, endpoint, token: path.join(directory, "token"), record: path.join(directory, "host.json") };
 }
 
 export async function connectSharedRuntime(options = {}) {
@@ -63,19 +64,53 @@ export async function connectSharedRuntime(options = {}) {
   // depends on it; otherwise keep using it and report the pending update.
   const checked = async connection => {
     if (options.start === false || !(options.repoRoot || options.runtimePath)) return connection;
-    const [info, expected] = await Promise.all([connection.request("runtime/info").catch(() => null), runtimeBuildId(options)]);
+    const [info, expected] = await Promise.all([
+      // A host that takes seconds to answer its own health check is not usable.
+      Promise.race([connection.request("runtime/info").catch(() => null), delay(3000).then(() => null)]),
+      runtimeBuildId(options),
+    ]);
     if (info?.buildId === expected) return connection;
     if (info && !info.busy && !info.attached) {
       await connection.request("runtime/shutdown").catch(() => {});
       connection.close();
-      for (let i = 0; i < 50; i++) { try { (await connect()).close(); } catch { return null; } await new Promise(resolve => setTimeout(resolve, 100)); }
+      for (let i = 0; i < 50; i++) { try { (await connect()).close(); } catch { return null; } await delay(100); }
       throw new Error("The outdated shared Runtime did not stop. See " + path.join(paths.directory, "runtime.log"));
+    }
+    if (!info) {
+      // The endpoint answers but no host serves it: a Runtime that is shutting
+      // down, or one that stopped answering. Wait for the endpoint to free,
+      // then end a host that is provably stuck so a fresh one can start.
+      connection.close();
+      if (await waitForFreeEndpoint(paths, 5000)) return null;
+      if (await endStuckHost(paths) && await waitForFreeEndpoint(paths, 5000)) return null;
+      throw new Error("A Runtime is holding " + paths.endpoint + " without answering, and it would not stop. End it from the task manager, then try again.");
     }
     connection.stale = { reason: info ? "busy" : "unknown", ...(info ? { pid: info.pid, busy: info.busy, attached: info.attached } : {}) };
     return connection;
   };
-  try { const current = await checked(await connect()); if (current) return current; }
-  catch (error) { if (options.start === false) throw error; }
+  // An endpoint that answers but serves nobody — no token yet, a host shutting
+  // down, or one that stopped answering — must not block the next host. Wait for
+  // a host that is still starting, then end a host that is provably stuck
+  // through the pid record it published (orca ends a stale daemon the same way).
+  // Returns a usable connection, or null once the endpoint is free.
+  async function takeOverStuckEndpoint() {
+    for (let i = 0; i < 30; i++) {
+      if (!(await probeEndpoint(paths.endpoint))) return null;
+      try { return await connect(); } catch {}
+      await delay(100);
+    }
+    await endStuckHost(paths);
+    if (!(await waitForFreeEndpoint(paths, 5000))) {
+      throw new Error("A Runtime is holding " + paths.endpoint + " without answering, and it would not stop. End it from the task manager, then try again.");
+    }
+    return null;
+  }
+
+  let current = null;
+  try { current = await checked(await connect()); } catch (error) { if (options.start === false) throw error; }
+  if (current) return current;
+  const taken = await takeOverStuckEndpoint();
+  if (taken) { current = await checked(taken); if (current) return current; }
   await privateDirectory(paths.directory);
   // One starter at a time: without it two windows can each spawn a host while
   // neither is connectable yet. The loser waits, then finds the winner.
@@ -146,6 +181,31 @@ async function lockHeldByLiveProcess(file, garbledGraceMs) {
 function processAlive(pid) {
   try { process.kill(pid, 0); return true; }
   catch (error) { return error?.code === "EPERM"; }
+}
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// True once nothing accepts connections on the endpoint; the deadline keeps a
+// host that never leaves from blocking the caller forever.
+async function waitForFreeEndpoint(paths, ms) {
+  const deadline = Date.now() + ms;
+  while (await probeEndpoint(paths.endpoint)) {
+    if (Date.now() >= deadline) return false;
+    await delay(100);
+  }
+  return true;
+}
+
+// A live endpoint that does not answer cannot be reached through its own
+// protocol; the pid record it publishes is the only way to end it. This runs
+// only after the endpoint has served nothing for seconds, so a host that is
+// merely starting is never touched. orca ends a stale daemon the same way.
+async function endStuckHost(paths) {
+  const record = await readFile(paths.record, "utf8").then(value => JSON.parse(value), () => null);
+  const pid = Number(record?.pid);
+  if (!Number.isInteger(pid) || pid <= 0 || !processAlive(pid)) return false;
+  try { process.kill(pid, "SIGKILL"); } catch { return false; }
+  return true;
 }
 
 export function createSharedRuntimeClient(options) {

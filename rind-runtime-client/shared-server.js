@@ -1,17 +1,20 @@
 import net from "node:net";
 import { privateDirectory } from "./local-files.js";
-import { randomBytes } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { randomBytes, randomUUID } from "node:crypto";
+import { readFile, writeFile, unlink } from "node:fs/promises";
 import { createRuntimeClient } from "./runtime-client.js";
 import { sharedRuntimePaths } from "./shared-runtime.js";
 import { listenOwned } from "./endpoint.js";
 import { runtimeBuildId } from "./build-id.js";
 import { createLiveSessions } from "./live-sessions.js";
 
+// Only the detached entry point exits on its own; a test imports this module.
+const hostEntry = Boolean(process.argv[1]?.endsWith("shared-server.js"));
+
 export async function startSharedServer(options) {
   const paths = sharedRuntimePaths(options.rindHome);
   await privateDirectory(paths.directory);
-  let token, initialized, authOwner, stopping = false, closing;
+  let token, recordNonce, initialized, authOwner, stopping = false, closing;
   const startedAt = new Date().toISOString();
   const build = runtimeBuildId(options);
   const peers = new Set(), auth = new Map(), prompts = new Set();
@@ -97,7 +100,16 @@ export async function startSharedServer(options) {
         const base = await initialize(); let result;
         if (method === "initialize") result = base;
         else if (method === "runtime/observe") { peer.observe = true; result = { pid: client.child.pid }; }
-        else if (method === "runtime/shutdown") { stopping = true; await client.shutdown(); peer.send({ id, result: { stopped: true } }); await close(); return; }
+        else if (method === "runtime/shutdown") {
+          stopping = true;
+          // A worker that already died mid-shutdown is no reason to stay up:
+          // the endpoint was released above and close() force-ends the worker.
+          try { await client.shutdown(); }
+          catch (error) { process.stderr.write("runtime shutdown: " + (error?.message || String(error)) + "\n"); }
+          peer.send({ id, result: { stopped: true } });
+          await close();
+          return;
+        }
         else if (method === "shutdown") { result = { detached: true }; peer.sessions.clear(); live.leave(peer); }
         else {
           if (method === "session/prompt" && prompts.has(params.session_id)) throw new Error("This session already has an active request. Use steering or follow-up input.");
@@ -123,6 +135,10 @@ export async function startSharedServer(options) {
   try {
     try { token = (await readFile(paths.token, "utf8")).trim(); } catch (error) { if (error.code !== "ENOENT") throw error; }
     if (!token) { token = randomBytes(32).toString("hex"); await writeFile(paths.token, token, { mode: 0o600, flag: "wx" }); }
+    // Published once this host owns the endpoint: it names the process that
+    // answers here, so a host that stops answering can still be ended.
+    recordNonce = randomUUID();
+    await writeFile(paths.record, JSON.stringify({ pid: process.pid, nonce: recordNonce, startedAt }), { mode: 0o600 });
     readyResolve();
   } catch (error) {
     readyReject(error);
@@ -130,10 +146,33 @@ export async function startSharedServer(options) {
     await new Promise(resolve => server.close(resolve));
     throw error;
   }
+  function releaseRecord() {
+    return readFile(paths.record, "utf8").then(value => {
+      if (JSON.parse(value).nonce !== recordNonce) return; // a later host owns it now
+      return unlink(paths.record).catch(() => {});
+    }, () => {}).catch(() => {});
+  }
+  // A host that is shutting down must never be in the way: the endpoint is
+  // released first, so the next host can bind while this worker stops; every
+  // peer is let go; the worker ends with force as the last resort. Nothing here
+  // can reject — a host that stops halfway is one nobody can stop at all.
   function close() {
-    return closing ||= (async () => { stopping = true; if (initialized) await client.shutdown(); for (const peer of peers) peer.socket.end(); await new Promise(resolve => server.close(resolve)); })();
+    return closing ||= (async () => {
+      stopping = true;
+      const closed = new Promise(resolve => server.close(resolve));
+      const forced = setTimeout(() => { for (const peer of peers) peer.socket.destroy(); }, 1000);
+      forced.unref?.();
+      for (const peer of peers) peer.socket.end();
+      try { if (initialized) await client.shutdown(); }
+      catch { /* the worker already exited or refused; the host still has to go */ }
+      client.forceShutdown();
+      await closed;
+      clearTimeout(forced);
+      await releaseRecord();
+      if (hostEntry) process.exit(0);
+    })();
   }
   return { paths, close };
 }
 
-if (process.argv[1]?.endsWith("shared-server.js")) startSharedServer(JSON.parse(process.argv[2] || "{}")).catch(error => { console.error(error); process.exitCode = 1; });
+if (hostEntry) startSharedServer(JSON.parse(process.argv[2] || "{}")).catch(error => { console.error(error); process.exitCode = 1; });

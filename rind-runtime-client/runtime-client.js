@@ -241,9 +241,10 @@ export function createRuntimeClient({
     }).then(async () => {
       closeInput();
       const { code, signal, error } = await exited;
-      if (shutdownError) throw shutdownError;
       if (error) throw error;
-      if (code !== 0) throw new Error(`Runtime exited during shutdown with ${signal || code}`);
+      // A clean exit is a finished shutdown even when the acknowledgement raced
+      // it; anything else keeps the request's error when there is one.
+      if (code !== 0) throw shutdownError || new Error(`Runtime exited during shutdown with ${signal || code}`);
     }).finally(clearKillTimer);
     return shutdownPromise;
   }
