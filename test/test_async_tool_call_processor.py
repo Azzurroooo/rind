@@ -365,8 +365,7 @@ async def test_large_tool_result_uses_bounded_event_model_and_persistence_conten
     model_content = persisted_kwargs["model_content"]
     assert len(result_event.result.encode("utf-8")) <= 8 * 1024
     assert len(model_content.encode("utf-8")) <= 25 * 1024
-    assert len(persisted_result.encode("utf-8")) <= 25 * 1024
-    assert len(result_event.result) <= len(model_content) == len(persisted_result)
+    assert persisted_result == result_event.result
     assert json.loads(result_event.result)["meta"]["truncated"] is True
     assert json.loads(model_content)["meta"]["truncated"] is True
     assert json.loads(persisted_result)["meta"]["truncated"] is True

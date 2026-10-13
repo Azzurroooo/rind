@@ -108,7 +108,10 @@ def _tool_result_payload(record: dict[str, Any], message: dict[str, Any]) -> str
         return json.dumps(payload, ensure_ascii=False)
     if isinstance(payload, str) and payload.strip():
         return payload
-    return message.get("content") if isinstance(message.get("content"), str) else ""
+    for fallback in (record.get("model_content"), message.get("content")):
+        if isinstance(fallback, str) and fallback:
+            return fallback
+    return ""
 
 
 def _tool_call_arguments(call: dict[str, Any]) -> dict[str, Any]:

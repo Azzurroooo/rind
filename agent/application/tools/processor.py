@@ -203,7 +203,7 @@ class ToolCallProcessor:
                     ts_start=ts_start,
                     ts_end=ts_end,
                     normalized_result=normalized_result,
-                    result_content=outcome.result if call.name in {"edit_file", "write_file"} else normalized_result.model_content,
+                    result_content=normalized_result.terminal_content,
                 )
             if self._task_notifications:
                 await self._task_notifications.result_committed(session.session_id, call.name, call.call_id, outcome.result)
