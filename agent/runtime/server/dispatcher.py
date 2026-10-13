@@ -665,9 +665,18 @@ class RuntimeDispatcher:
 
     async def _list_sessions(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        per_workspace_limit = params.get("per_workspace_limit")
+        if per_workspace_limit is not None and (
+            isinstance(per_workspace_limit, bool) or not isinstance(per_workspace_limit, int) or not 1 <= per_workspace_limit <= 20
+        ):
+            await self._respond_error(request, "session/list per_workspace_limit must be an integer from 1 to 20.", "InvalidRequest")
+            return
         limit = params.get("limit", 20)
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
-            await self._respond_error(request, "session/list limit must be an integer from 1 to 100.", "InvalidRequest")
+        # A grouped query returns up to `per_workspace_limit` per folder, so its
+        # overall cap is larger; an ordinary listing keeps the 100-entry cap.
+        max_limit = 1000 if per_workspace_limit is not None else 100
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= max_limit:
+            await self._respond_error(request, f"session/list limit must be an integer from 1 to {max_limit}.", "InvalidRequest")
             return
         workspace_root = params.get("workspace_root")
         if workspace_root is not None:
@@ -678,13 +687,27 @@ class RuntimeDispatcher:
         if excluded is not None and (not isinstance(excluded, list) or not all(isinstance(item, str) for item in excluded)):
             await self._respond_error(request, "exclude_workspace_roots must be a list of strings.", "InvalidRequest")
             return
-        sessions = await self._worker.repository.list(limit=limit, workspace_root=workspace_root, exclude_workspace_roots=excluded)
+        skipped = params.get("exclude_session_ids")
+        if skipped is not None and (not isinstance(skipped, list) or not all(isinstance(item, str) for item in skipped)):
+            await self._respond_error(request, "exclude_session_ids must be a list of strings.", "InvalidRequest")
+            return
+        totals = None
+        if per_workspace_limit is not None:
+            sessions, totals = await self._worker.repository.list_by_workspace(
+                limit=limit, per_workspace_limit=per_workspace_limit,
+                exclude_workspace_roots=excluded, exclude_session_ids=skipped,
+            )
+        else:
+            sessions = await self._worker.repository.list(
+                limit=limit, workspace_root=workspace_root, exclude_workspace_roots=excluded, exclude_session_ids=skipped
+            )
         ready = self._ready_connections()
         await self._respond(
             request,
             {
                 # Whether each conversation's connection can run, so lists can warn before its next turn fails.
                 "sessions": [session | {"connection_ready": session.get("provider") in ready} for session in sessions],
+                **({"totals": totals} if totals is not None else {}),
                 "current_session_id": self._worker.session_id or "",
             },
         )

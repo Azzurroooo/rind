@@ -64,6 +64,23 @@ def _valid_session_id_value(value: object) -> bool:
     return True
 
 
+# Folder filtering runs over every index entry on every list; folders are few
+# and stable, so each is resolved once. Bounded so a pathological caller cannot
+# grow it without limit.
+_WORKSPACE_MEMO: dict[str, str] = {}
+
+
+def _normalized_workspace(value: str) -> str:
+    key = os.path.abspath(os.path.expanduser(str(value)))
+    resolved = _WORKSPACE_MEMO.get(key)
+    if resolved is None:
+        resolved = os.path.normcase(os.path.realpath(key))
+        if len(_WORKSPACE_MEMO) >= 1024:
+            _WORKSPACE_MEMO.clear()
+        _WORKSPACE_MEMO[key] = resolved
+    return resolved
+
+
 def _validate_session_meta(meta: Any, session_id: str) -> None:
     if not isinstance(meta, dict):
         raise ValueError(f"Session data corrupted or missing meta.json for id: {session_id}")
@@ -240,37 +257,97 @@ class JsonlSessionStore(SessionStore):
         limit: int = 20,
         workspace_root: str | None = None,
         exclude_workspace_roots: list[str] | None = None,
+        exclude_session_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        sessions, _ = cls._scan_session_metadata(
+            session_dir, limit=limit, workspace_root=workspace_root,
+            exclude_workspace_roots=exclude_workspace_roots, exclude_session_ids=exclude_session_ids,
+        )
+        return sessions
+
+    @classmethod
+    def list_session_metadata_by_workspace(
+        cls,
+        session_dir: str | None = None,
+        *,
+        limit: int = 500,
+        per_workspace_limit: int = 3,
+        exclude_workspace_roots: list[str] | None = None,
+        exclude_session_ids: list[str] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """The newest conversations per folder, at most `per_workspace_limit` each
+        and `limit` in total, plus each folder's full count. One pass, so busy
+        folders cannot crowd others out and callers need no per-folder queries.
+        Each total names its folder by the workspace_root of its newest returned
+        conversation, which is always among the returned ones."""
+        return cls._scan_session_metadata(
+            session_dir, limit=limit, exclude_workspace_roots=exclude_workspace_roots,
+            exclude_session_ids=exclude_session_ids, per_workspace_limit=per_workspace_limit,
+        )
+
+    @classmethod
+    def _scan_session_metadata(
+        cls,
+        session_dir: str | None = None,
+        *,
+        limit: int = 20,
+        workspace_root: str | None = None,
+        exclude_workspace_roots: list[str] | None = None,
+        exclude_session_ids: list[str] | None = None,
+        per_workspace_limit: int | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         index_path = cls.index_path_for(session_dir)
         files = SessionFiles()
         index = files.load_json(index_path) or {}
         entries = index.get("sessions") if isinstance(index, dict) else []
         if not isinstance(entries, list):
-            return []
-        def normalize(value: str) -> str:
-            return os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(value))))
-
-        expected_root = normalize(workspace_root) if workspace_root else None
+            return [], []
+        expected_root = _normalized_workspace(workspace_root) if workspace_root else None
         # Excluded before the limit applies, so callers can page past busy folders.
-        excluded = {normalize(value) for value in exclude_workspace_roots or [] if isinstance(value, str) and value}
-        result = []
+        excluded = {_normalized_workspace(value) for value in exclude_workspace_roots or [] if isinstance(value, str) and value}
+        skipped = {value for value in exclude_session_ids or [] if isinstance(value, str) and value}
+        result: list[dict[str, Any]] = []
+        totals: dict[str, list[Any]] = {}
         for entry in entries:
             if not isinstance(entry, dict) or not _valid_session_id_value(entry.get("id")):
+                continue
+            if entry.get("id") in skipped:
                 continue
             if entry.get("has_user_message") is False:
                 continue
             entry_root = entry.get("workspace_root")
-            if excluded and isinstance(entry_root, str) and normalize(entry_root) in excluded:
+            if excluded and isinstance(entry_root, str) and _normalized_workspace(entry_root) in excluded:
                 continue
             if expected_root is not None:
                 if not isinstance(entry_root, str):
                     continue
-                normalized = os.path.normcase(os.path.realpath(os.path.abspath(entry_root)))
-                if normalized != expected_root:
+                if _normalized_workspace(entry_root) != expected_root:
                     continue
             result.append(copy.deepcopy(entry))
+            if per_workspace_limit is not None and isinstance(entry_root, str) and entry_root:
+                bucket = totals.setdefault(_normalized_workspace(entry_root), [entry_root, 0])
+                bucket[1] += 1
         result.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
-        return result[: max(0, int(limit))]
+        if per_workspace_limit is None:
+            return result[: max(0, int(limit))], []
+        # Keep the newest `per_workspace_limit` conversations of each folder; the
+        # total keeps naming the folder by a raw path callers already received.
+        kept: list[dict[str, Any]] = []
+        representatives: dict[str, str] = {}
+        counts: dict[str, int] = {}
+        for entry in result:
+            key = _normalized_workspace(str(entry.get("workspace_root") or ""))
+            if counts.get(key, 0) >= per_workspace_limit:
+                continue
+            counts[key] = counts.get(key, 0) + 1
+            representatives.setdefault(key, str(entry.get("workspace_root") or ""))
+            kept.append(entry)
+        workspace_totals = [
+            {"workspace_root": representatives[key], "count": totals[key][1]}
+            for key in counts
+            if key in totals and representatives.get(key)
+        ]
+        return kept[: max(0, int(limit))], workspace_totals
 
     def _resolve_workspace_root(self) -> str:
         if self._workspace_root:

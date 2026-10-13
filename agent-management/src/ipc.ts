@@ -7,7 +7,7 @@ import { managementPaths, privateDirectory } from "./paths.js";
 import { openStore } from "./store.js";
 import { createService } from "./service.js";
 import { createRindAdapter } from "./adapters/rind.js";
-import { sessionHistory, independentHistory } from "./history.js";
+import { sessionHistory, independentHistory, independentFolder } from "./history.js";
 import { managementBuildId } from "./build.js";
 import { activeRun } from "./model.js";
 import { fileURLToPath } from "node:url";
@@ -245,7 +245,11 @@ export async function startServer(options: { home?: string; python?: string; rep
           const manager = managerPath ? Object.values(store.state.agents).find(a => a.canonicalWorkspace === managerPath) : undefined;
           if (params.independent === true) {
             const host = await executionHost();
-            result = { workspaces: await independentHistory(store.state, await realManager, async query => (await host.request("session/list", { limit: 100, ...query })).sessions) };
+            const list = (query: Record<string, unknown>) => host.request("session/list", query);
+            const workspace = typeof params.workspace === "string" ? params.workspace.trim() : "";
+            result = workspace
+              ? { sessions: await independentFolder(store.state, await realManager, workspace, list) }
+              : { workspaces: await independentHistory(store.state, await realManager, list) };
           } else if (params.manager === true && !manager) result = { sessions: [] };
           else {
             const host = await executionHost();

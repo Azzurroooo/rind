@@ -124,7 +124,8 @@ class SessionService:
         return await asyncio.to_thread(JsonlSessionStore.load_session_metadata, clean, self.session_dir)
 
     async def list(
-        self, limit: int = 20, workspace_root: str | None = None, exclude_workspace_roots: list[str] | None = None
+        self, limit: int = 20, workspace_root: str | None = None, exclude_workspace_roots: list[str] | None = None,
+        exclude_session_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         return await asyncio.to_thread(
             JsonlSessionStore.list_session_metadata,
@@ -132,6 +133,20 @@ class SessionService:
             limit,
             workspace_root,
             exclude_workspace_roots,
+            exclude_session_ids,
+        )
+
+    async def list_by_workspace(
+        self, *, limit: int = 500, per_workspace_limit: int = 3,
+        exclude_workspace_roots: list[str] | None = None, exclude_session_ids: list[str] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        return await asyncio.to_thread(
+            JsonlSessionStore.list_session_metadata_by_workspace,
+            self.session_dir,
+            limit=limit,
+            per_workspace_limit=per_workspace_limit,
+            exclude_workspace_roots=exclude_workspace_roots,
+            exclude_session_ids=exclude_session_ids,
         )
 
     async def delete(self, session_id: str) -> dict[str, Any]:

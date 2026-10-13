@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyAgentsSnapshot, organizationRows, teamSessions, taskRows, inboxRows, sidebarRows, memberSessionRows, relativeTime, teamStatus, independentSessions, independentRows, folderRows, backgroundRows } from "../lib/agents-model.js";
+import { emptyAgentsSnapshot, organizationRows, teamSessions, taskRows, inboxRows, sidebarRows, memberSessionRows, relativeTime, teamStatus, independentSessions, independentRows, folderRows, backgroundRows, workspaceKey } from "../lib/agents-model.js";
 
 const NOW = Date.parse("2026-10-06T12:00:00Z");
 function fixture() {
@@ -145,6 +145,30 @@ test("independent folders take live state from the Runtime, include plain sessio
   assert.deepEqual(independentRows(merged, { query: "idea d" }).map(r => r.title), ["scratch", "Idea d"]);
   const folder = folderRows(merged.find(g => g.name === "scratch"), { now: NOW });
   assert.deepEqual(folder.map(r => r.kind === "section" ? "#" + r.title : r.title), ["New conversation in this folder", "#Active", "Idea e", "#Today", "Idea a", "#This week", "Idea b", "Idea c", "Idea d"]);
+});
+
+test("a bounded folder window shows the folder's full count while its page opens the fuller list", () => {
+  const { snapshot } = fixture();
+  // The overview fetched the newest conversation only; the folder has 52.
+  const groups = [{ workspace: "/home/me/scratch", name: "scratch", teams: [], total: 52, sessions: [{ runtimeSessionId: "r-a", title: "Newest", updatedAt: "2026-10-06T09:00:00Z" }] }];
+  const rows = independentRows(groups, { now: NOW });
+  assert.equal(rows.find(r => r.kind === "workspace").sessionCount, 52, "the row reports the folder's own count");
+  assert.deepEqual(rows.filter(r => r.kind !== "workspace").map(r => r.title), ["Newest", "+51 more conversations"]);
+
+  // Opening the folder's page replaces the window with its full list.
+  const extras = {
+    [workspaceKey("/home/me/scratch")]: { sessions: [
+      { runtimeSessionId: "r-a", title: "Newest", updatedAt: "2026-10-06T09:00:00Z" },
+      { runtimeSessionId: "r-old", title: "Older", updatedAt: "2026-10-01T09:00:00Z" },
+    ] },
+  };
+  snapshot.live = [{ id: "r-old", workspace: "/home/me/scratch", turn: "idle", watchers: 0, updatedAt: "2026-10-01T09:00:00Z" }];
+  const merged = independentSessions(snapshot, groups, "/rind/manager", extras);
+  const scratch = merged.find(g => g.name === "scratch");
+  assert.deepEqual(scratch.sessions.map(s => s.runtimeSessionId).sort(), ["r-a", "r-old"], "the full list replaces the bounded window");
+  assert.equal(scratch.total, 52, "the folder's count survives the fuller list");
+  assert.equal(scratch.sessions.find(s => s.runtimeSessionId === "r-old").status, "Idle");
+  assert.deepEqual(folderRows(scratch, { now: NOW }).map(r => r.kind === "section" ? "#" + r.title : r.title), ["New conversation in this folder", "#Today", "Newest", "#This week", "Older"]);
 });
 
 test("relative time is compact and never negative", () => {

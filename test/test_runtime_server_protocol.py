@@ -461,6 +461,34 @@ def test_session_list_returns_recent_sessions_and_current_id():
     result = _response(payloads, 27)["result"]
     assert result["current_session_id"] == "s1"
     assert result["sessions"] == [{"id": "s1", "title": "session s1", "connection_ready": False}]
+    assert "totals" not in result
+
+
+def test_session_list_groups_per_workspace_with_totals():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+    worker.workspace_root = "C:/work/notes"
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 28, "method": "session/list", "params": {"per_workspace_limit": 3, "limit": 500}})
+
+    asyncio.run(run())
+
+    result = _response(payloads, 28)["result"]
+    assert result["totals"] == [{"workspace_root": "C:/work/notes", "count": 1}]
+    assert result["sessions"][0]["workspace_root"] == "C:/work/notes"
+
+
+def test_session_list_rejects_an_invalid_per_workspace_limit():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 29, "method": "session/list", "params": {"per_workspace_limit": 0}})
+
+    asyncio.run(run())
+
+    assert _response(payloads, 29)["error"]["type"] == "InvalidRequest"
 
 
 def test_session_new_returns_created_metadata():

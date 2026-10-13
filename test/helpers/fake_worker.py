@@ -124,8 +124,14 @@ class FakeRepository:
             "workspace_root": self.worker.workspace_root,
         }
 
-    async def list(self, limit=20, workspace_root=None, exclude_workspace_roots=None) -> list[dict]:
+    async def list(self, limit=20, workspace_root=None, exclude_workspace_roots=None, exclude_session_ids=None) -> list[dict]:
         return [{"id": session_id, "title": f"session {session_id}"} for session_id in self.worker.sessions][:limit]
+
+    async def list_by_workspace(self, *, limit=500, per_workspace_limit=3, exclude_workspace_roots=None, exclude_session_ids=None) -> tuple[list[dict], list[dict]]:
+        sessions = [{"id": session_id, "title": f"session {session_id}", "workspace_root": self.worker.workspace_root}
+                    for session_id in self.worker.sessions][:limit]
+        totals = [{"workspace_root": self.worker.workspace_root, "count": len(self.worker.sessions)}]
+        return sessions, totals
 
     async def replay(self, session_id, start=None, end=None) -> dict:
         return {"messages": self.worker.messages, "turn_state": None, "session_id": session_id, "model": "m1"}
