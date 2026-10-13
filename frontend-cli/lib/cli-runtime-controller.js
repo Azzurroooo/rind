@@ -92,6 +92,7 @@ export function createCliRuntimeController({
 
   function sessionDeleted(sessionId) {
     if (state.session.info.session_id !== sessionId) return;
+    ++switchGeneration;
     state.session.reservedId = "";
     state.session.pendingName = "";
     state.session.pendingSkillSources = null;
@@ -203,11 +204,11 @@ export function createCliRuntimeController({
       throw new Error("Session ID is required.");
     }
     const switching = options.switchSession === true;
-    const switchToken = switching ? ++switchGeneration : 0;
+    const switchToken = switching ? ++switchGeneration : switchGeneration;
     const update = switching
       ? await request(methods.sessionSwitch, { session_id: targetId })
       : state.session.info;
-    if (switching && (switchToken !== switchGeneration || state.runtime.status === "closing")) {
+    if (switchToken !== switchGeneration || state.runtime.status === "closing") {
       return false;
     }
     const switchedId = String(update?.session_id || targetId);
@@ -218,8 +219,10 @@ export function createCliRuntimeController({
     // replay snapshot while live events continue arriving.
     const delegationSequence = state.display.lastEventSequence;
     let pendingDelegations = await getPendingDelegations(switchedId).catch(() => null);
+    if (switchToken !== switchGeneration || state.runtime.status === "closing") return false;
     const replay = await request(methods.sessionReplay, { session_id: switchedId, tail: HISTORY_WINDOW });
-    if (switching && (switchToken !== switchGeneration || state.runtime.status === "closing")) {
+    if (switchToken !== switchGeneration || state.runtime.status === "closing"
+        || (!switching && state.session.info.session_id !== switchedId)) {
       return false;
     }
     if (replay?.session_id && String(replay.session_id) !== switchedId) {

@@ -488,6 +488,33 @@ function deferred() {
   return { promise, resolve };
 }
 
+test("an initial restore cannot resurrect a deleted conversation", async () => {
+  const gate = deferred();
+  const harness = createHarness({ replay: () => gate.promise });
+  await harness.controller.ensureRuntime();
+  const loading = harness.controller.restoreSession();
+  await waitForRequests(harness.requests, methods.sessionReplay, 1);
+  harness.controller.sessionDeleted("session-a");
+  gate.resolve({ session_id: "session-a", messages: forkMenuMessages });
+  assert.equal(await loading, false);
+  assert.equal(harness.state.session.info.session_id, "");
+  assert.equal(harness.history.length, 0);
+});
+
+test("a newer switch invalidates an in-flight initial restore", async () => {
+  const gate = deferred();
+  const harness = createHarness({ replay: params => params.session_id === "session-a"
+    ? gate.promise : { session_id: params.session_id, messages: [] } });
+  await harness.controller.ensureRuntime();
+  const loading = harness.controller.restoreSession();
+  await waitForRequests(harness.requests, methods.sessionReplay, 1);
+  assert.equal(await harness.controller.restoreSession("session-b", { switchSession: true }), true);
+  gate.resolve({ session_id: "session-a", messages: forkMenuMessages });
+  assert.equal(await loading, false);
+  assert.equal(harness.state.session.info.session_id, "session-b");
+  assert.equal(harness.history.length, 1);
+});
+
 for (const changed of ["session", "turn", "history", "completed turn", "event sequence"]) {
   test(`/history cannot overwrite the transcript after ${changed} changes`, async () => {
     const gate = deferred();
