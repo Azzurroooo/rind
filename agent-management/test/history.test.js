@@ -106,6 +106,27 @@ test("a folder's page reads that folder's conversations with the same exclusions
   assert.deepEqual(await independentFolder(state, "/rind/manager", "/rind/manager", list), []);
 });
 
+test("overview keeps folders omitted by the preview cap", async () => {
+  const groups = await independentHistory(emptyState(), "/manager", async () => ({
+    sessions: [{ id: "r1", workspace_root: "/new" }],
+    totals: [{ workspace_root: "/new", count: 1 }, { workspace_root: "/old", count: 200 }],
+  }));
+  const old = groups.find(group => group.workspace === "/old");
+  assert.equal(old.total, 200);
+  assert.deepEqual(old.sessions, []);
+});
+
+test("folder paging excludes already loaded conversations before the limit", async () => {
+  const entries = Array.from({ length: 205 }, (_, i) => ({ id: `r${i}`, workspace_root: "/folder" }));
+  const list = async query => ({ sessions: entries.filter(entry => !query.exclude_session_ids.includes(entry.id)).slice(0, query.limit) });
+  const state = emptyState();
+  const first = await independentFolder(state, "/manager", "/folder", list);
+  const second = await independentFolder(state, "/manager", "/folder", list, first.map(s => s.runtimeSessionId));
+  const third = await independentFolder(state, "/manager", "/folder", list, [...first, ...second].map(s => s.runtimeSessionId));
+  assert.deepEqual([first.length, second.length, third.length], [100, 100, 5]);
+  assert.equal(new Set([...first, ...second, ...third].map(s => s.runtimeSessionId)).size, 205);
+});
+
 test("history carries what each conversation runs on, and whether its connection can run", async () => {
   const { state } = fixture();
   const list = async () => [{ id: "r-team", title: "Plan", provider: "deepseek", model: "deepseek-flash", reasoning_effort: "high", selection_source: { model: "folder", effort: "session" }, connection_ready: false }];

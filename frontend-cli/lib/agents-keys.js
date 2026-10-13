@@ -48,6 +48,7 @@ function enterLabel(view, row) {
     case "member": return "open member";
     case "session": return "join";
     case "more": return "show all";
+    case "folder-more": return "load earlier";
     case "workspace": return "open folder";
     case "new-session": return "start";
     case "add-member": return "add member";

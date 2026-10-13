@@ -142,6 +142,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   }
   function staleFolder(workspace) {
     const current = view.folderHistory[workspaceKey(workspace)];
+    // Paging is deliberate browsing. Keep its position until an explicit
+    // refresh instead of replacing older pages on the next clock tick.
+    if (current?.sessions?.length > 100) return false;
     return !current?.loading && Date.now() - (current?.at || 0) > INDEPENDENT_REFRESH_MS;
   }
   async function loadArchive(key) {
@@ -165,11 +168,17 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     project();
     void loadFolderDefaults();
   }
-  async function loadFolderSessions(workspace) {
+  async function loadFolderSessions(workspace, more = false) {
     const key = workspaceKey(workspace);
-    view.folderHistory[key] = { ...view.folderHistory[key], loading: true };
-    try { view.folderHistory[key] = { sessions: (await client.request("listSessions", { independent: true, workspace })).sessions, at: Date.now() }; }
-    catch (error) { view.folderHistory[key] = { sessions: view.folderHistory[key]?.sessions || [], at: Date.now() }; notify("Could not load this folder's conversations: " + error.message, "error"); }
+    const previous = view.folderHistory[key];
+    if (previous?.loading) return;
+    const retained = more ? previous?.sessions || [] : [];
+    view.folderHistory[key] = { ...previous, loading: true };
+    try {
+      const { sessions = [] } = await client.request("listSessions", { independent: true, workspace, excludeSessionIds: retained.map(s => s.runtimeSessionId) });
+      view.folderHistory[key] = { sessions: [...retained, ...sessions], hasMore: sessions.length === 100, at: Date.now() };
+    }
+    catch (error) { view.folderHistory[key] = { ...previous, loading: false, at: Date.now() }; notify("Could not load this folder's conversations: " + error.message, "error"); }
     project();
   }
   async function loadHistory(teamId, key = view.history[teamId]?.key) {
@@ -410,6 +419,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     switch (row.kind) {
       case "member": return openMember(row.teamId, row.agentId);
       case "more": return row.workspace ? openFolder(row.workspace) : openMember(row.teamId, row.agentId);
+      case "folder-more": return perform(() => loadFolderSessions(row.workspace, true), null, "Loading earlier conversations…");
       case "workspace": return openFolder(row.workspace);
       case "session": return ui.join(row);
       case "new-session": return ui.startNew({ ...row, teamId: row.teamId || view.page.teamId });
@@ -631,6 +641,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (view.page.teamId) delete view.history[view.page.teamId];
     if (view.page.kind === "manager") view.managerHistory = null;
     if (["independent", "folder"].includes(view.page.kind)) view.independent = null;
+    if (view.page.kind === "folder") delete view.folderHistory[workspaceKey(view.page.workspace)];
     if (view.page.kind === "background") view.serviceAt = 0;
     if (view.page.kind === "archive") view.archive = null;
     // A refresh that changes nothing still says it happened.

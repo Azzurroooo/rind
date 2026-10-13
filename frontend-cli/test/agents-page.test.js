@@ -209,3 +209,36 @@ test("refreshing says so even when nothing changed, and a duplicate team name is
   await visible("already exists");
   assert.equal((await h.client.request("snapshot")).teams.length, 1);
 });
+
+test("Independent paging is reachable by keyboard and retains earlier pages until refresh", { timeout: 30000 }, async t => {
+  const h = await harness({ columns: 120, rows: 30, prefix: "rind-agents-paging-" });
+  const workspace = path.join(h.home, "folder");
+  await mkdir(workspace);
+  await writeFile(path.join(h.home, "session_index.json"), JSON.stringify({ sessions: Array.from({ length: 205 }, (_, i) => ({
+    id: "conversation_" + String(i).padStart(3, "0"), title: "Conversation " + String(i).padStart(3, "0"),
+    workspace_root: workspace, has_user_message: true, updated_at: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
+  })) }));
+  const abort = new AbortController();
+  const running = runAgentsPage({ launch: h.launch, input: h.input, output: h.output.output, signal: abort.signal });
+  t.after(async () => { abort.abort(); await running; await h.cleanup(); });
+  await h.visible("Create your first team");
+  h.key("j"); await h.settle(); h.key("j");
+  await h.visible("conversations outside any team, by folder");
+  await h.visible("Conversation 204");
+  h.key("\r"); await h.visible("enter open folder"); await h.settle(); h.key("\r");
+  await h.visible("/102"); await h.settle();
+  h.key("G"); await h.visible("enter load earlier");
+  h.key("\r"); await h.settle(); h.key("G"); await h.visible("Conversation 005");
+  await h.visible("enter load earlier"); h.key("\r"); await h.settle(); h.key("G");
+  await h.visible("Conversation 000");
+  assert.doesNotMatch(h.screen(), /Load earlier conversations/);
+  // A management push reprojects the page; it must not discard loaded pages.
+  await h.client.request("createTeam", { name: "Refresh trigger" });
+  await h.visible("Conversation 000");
+  h.key("/"); h.paste("Conversation 000"); h.key("\r");
+  await h.visible("loaded conversations"); await h.visible("Conversation 000");
+  h.key("\x1b"); await h.settle(); h.key("r");
+  await h.visible("Up to date"); await h.visible("/102"); await h.settle(); h.key("G");
+  await h.visible("enter load earlier");
+  assert.doesNotMatch(h.screen(), /Conversation 000/, "explicit refresh starts from the first page");
+});

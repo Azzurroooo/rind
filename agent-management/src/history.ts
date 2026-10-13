@@ -97,6 +97,21 @@ export async function independentHistory(state: State, managerWorkspace: string,
     exclude_session_ids: teamSessionIds(state),
   });
   const totals = new Map((page.totals || []).map(item => [String(item.workspace_root || ""), Number(item.count) || 0]));
+  // The preview cap may contain no conversations from an older folder. Its
+  // total still makes that folder discoverable and opens its own bounded page.
+  const ensureGroup = (workspace: string) => {
+    const key = workspaceKey(workspace);
+    if (!workspace || key === manager) return undefined;
+    let group = groups.get(key);
+    if (!group) {
+      const agent = agents.get(key);
+      const teams = agent ? Object.values(state.memberships).filter(m => m.agentId === agent.id).map(m => state.teams[m.teamId]?.name).filter((name): name is string => Boolean(name)) : [];
+      group = { workspace: agent?.canonicalWorkspace || workspace, ...(agent ? { agentId: agent.id } : {}), name: agent?.name || workspace.split(/[\\/]/).filter(Boolean).at(-1) || workspace, teams, sessions: [], total: totals.get(workspace) };
+      groups.set(key, group);
+    }
+    return group;
+  };
+  for (const workspace of totals.keys()) ensureGroup(workspace);
   for (const raw of page.sessions || []) {
     const workspace = workspaceOf(raw);
     const key = workspaceKey(workspace);
@@ -105,14 +120,7 @@ export async function independentHistory(state: State, managerWorkspace: string,
     if (owner?.teamId) continue;
     const session = sessionOf(raw, owner);
     if (!session) continue;
-    let group = groups.get(key);
-    if (!group) {
-      const agent = agents.get(key);
-      const teams = agent ? Object.values(state.memberships).filter(m => m.agentId === agent.id).map(m => state.teams[m.teamId]?.name).filter((name): name is string => Boolean(name)) : [];
-      // Registered folders are reported by their canonical path so clients can match them to agents.
-      group = { workspace: agent?.canonicalWorkspace || workspace, ...(agent ? { agentId: agent.id } : {}), name: agent?.name || workspace.split(/[\\/]/).filter(Boolean).at(-1) || workspace, teams, sessions: [] };
-      groups.set(key, group);
-    }
+    const group = ensureGroup(workspace)!;
     if (group.sessions.some(s => s.runtimeSessionId === session.runtimeSessionId)) continue;
     group.sessions.push(session);
     const total = totals.get(workspace);
@@ -128,10 +136,10 @@ export async function independentHistory(state: State, managerWorkspace: string,
 
 // One folder's conversations, on demand for its page; the same exclusions as
 // the overview, so both always agree.
-export async function independentFolder(state: State, managerWorkspace: string, workspace: string, list: ListAll): Promise<WorkspaceSession[]> {
+export async function independentFolder(state: State, managerWorkspace: string, workspace: string, list: ListAll, excludeSessionIds: string[] = []): Promise<WorkspaceSession[]> {
   if (!workspace || workspaceKey(workspace) === workspaceKey(managerWorkspace)) return [];
   const registered = new Map(Object.values(state.sessions).filter(s => s.runtimeSessionId).map(s => [s.runtimeSessionId, s]));
-  const page = await list({ workspace_root: workspace, limit: 100, exclude_session_ids: teamSessionIds(state) });
+  const page = await list({ workspace_root: workspace, limit: 100, exclude_session_ids: [...teamSessionIds(state), ...excludeSessionIds] });
   const sessions: WorkspaceSession[] = [];
   const seen = new Set<string>();
   for (const raw of page.sessions || []) {

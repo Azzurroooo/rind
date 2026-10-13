@@ -328,8 +328,8 @@ export const workspaceKey = (value, platform = process.platform) => {
 // overview window before live state is merged in.
 export function independentSessions(snapshot, groups = [], managerWorkspace = "", folderSessions = {}) {
   const byWorkspace = new Map(groups.map(group => {
-    const extra = folderSessions[workspaceKey(group.workspace)]?.sessions;
-    return [workspaceKey(group.workspace), { ...group, sessions: (extra || group.sessions).map(s => ({ ...s, status: "Idle" })) }];
+    const page = folderSessions[workspaceKey(group.workspace)];
+    return [workspaceKey(group.workspace), { ...group, hasMore: page?.hasMore, sessions: (page?.sessions || group.sessions).map(s => ({ ...s, status: "Idle" })) }];
   }));
   const scoped = new Set(snapshot.sessions.filter(s => s.teamId && s.runtimeSessionId).map(s => s.runtimeSessionId));
   const manager = workspaceKey(managerWorkspace);
@@ -411,6 +411,7 @@ export function folderRows(group, { query = "", filter = "All", now = Date.now()
     if (title !== "Active") items.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
     rows.push(...items.map(session => independentSessionRow(session, group, 0, now)));
   }
+  if (group.hasMore) rows.push({ id: "folder-more:" + group.workspace, kind: "folder-more", title: "Load earlier conversations", workspace: group.workspace });
   return rows;
 }
 
