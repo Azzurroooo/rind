@@ -8,7 +8,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from agent.application.context import CompactionService, ContextEstimator, ContextManager
+from agent.application.context import CompactionService, ContextBudget, ContextEstimator, ContextManager
 from agent.application.ports.session_store import SessionStore
 from agent.application.skill_selection import SkillTurnCoordinator
 from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultNormalizer
@@ -81,6 +81,7 @@ def build_agent_container(
     web_sessions: WebSessions | None = None,
     task_notifications: TaskNotifications | None = None,
     external_tool=None,
+    context_window: int | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     prompt_workspace = str(Path(workspace_root or Path.cwd()).expanduser().resolve())
@@ -155,7 +156,7 @@ def build_agent_container(
     )
     stream_parser = shared_resources.stream_parser if shared_resources else MessageStreamParser()
     context_manager = ContextManager(
-        estimator=ContextEstimator(),
+        estimator=ContextEstimator(ContextBudget(context_window_tokens=context_window)),
         rind_doc_provider=lambda: build_rind_doc_context(workspace_root),
     )
     usage_recorder = partial(append_usage_record, default_usage_ledger_path())

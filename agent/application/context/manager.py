@@ -298,6 +298,14 @@ class ContextManager:
     def restore_hard_limit(self, hard_limit) -> None:
         self._estimator.budget.hard_limit_tokens = hard_limit
 
+    @property
+    def context_window(self) -> int:
+        return self._estimator.budget.resolved_context_window_tokens()
+
+    @context_window.setter
+    def context_window(self, tokens: int | None) -> None:
+        self._estimator.budget.context_window_tokens = tokens
+
     def rescue_context(self, internal_messages: list[dict], final_messages: list[dict]) -> tuple[list[dict], list[dict]]:
         """Surgical Context Rescue: Drops the oldest cold/tool messages instead of blindly shrinking budgets."""
         # Find oldest non-system message that isn't already dropped

@@ -64,7 +64,7 @@ async def test_a_named_connection_is_kept_in_the_auth_file_and_offered_like_a_pr
 async def test_a_client_for_a_named_connection_uses_its_own_endpoint_and_key(service, tmp_path):
     await service.login("", "connection", Answers("Client A", "https://client-a.example/v1", "m", "client-key"))
 
-    client = await service.create_chat_client(_settings(tmp_path), ModelSelection("client-a", "m"), workspace_root=None)
+    client = await service.create_chat_client(_settings(tmp_path), ModelSelection("client-a", "m"))
     try:
         assert str(client._client.base_url).rstrip("/") == "https://client-a.example/v1"
         assert client._client.api_key == "client-key"
@@ -106,7 +106,7 @@ async def test_a_connection_needs_its_own_name_a_web_url_and_a_key(service, tmp_
 @pytest.mark.asyncio
 async def test_a_missing_connection_is_reported_not_replaced(service, tmp_path):
     with pytest.raises(ProviderError) as raised:
-        await service.create_chat_client(_settings(tmp_path), ModelSelection("removed", "m"), workspace_root=None)
+        await service.create_chat_client(_settings(tmp_path), ModelSelection("removed", "m"))
 
     assert raised.value.code == "connection_missing"
     assert "/login" in str(raised.value)

@@ -24,7 +24,7 @@ class ContextBudget:
     system_budget_tokens: int = 2000
     conversation_budget_tokens: int = 6000
     tool_budget_tokens: int = 20000
-    context_window_tokens: int = DEFAULT_CONTEXT_WINDOW_TOKENS
+    context_window_tokens: int | None = DEFAULT_CONTEXT_WINDOW_TOKENS
     auto_compact_token_limit_percent: int = DEFAULT_AUTO_COMPACT_TOKEN_LIMIT_PERCENT
     auto_compact_enabled: bool = True
 

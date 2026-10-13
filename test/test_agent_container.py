@@ -63,6 +63,29 @@ def test_container_explicitly_shares_production_dependencies() -> None:
         assert not hasattr(container, "cli")
 
 
+def test_container_budgets_the_selected_model_context_window() -> None:
+    cache_dir = PROJECT_ROOT / ".pytest_cache"
+    cache_dir.mkdir(exist_ok=True)
+    settings = AppSettings(
+        settings_path=cache_dir / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    with tempfile.TemporaryDirectory(dir=cache_dir) as session_dir:
+        container = build_agent_container(
+            settings=settings, chat_client=FakeChatClient(), session_dir=session_dir, context_window=1_000_000,
+        )
+        assert container.context_manager.context_window == 1_000_000
+
+        container.context_manager.context_window = 8_192
+        assert container.context_manager.context_window == 8_192
+
+
 def test_container_reuses_worker_safe_resources() -> None:
     cache_dir = PROJECT_ROOT / ".pytest_cache"
     settings = AppSettings(

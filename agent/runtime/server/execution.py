@@ -17,7 +17,7 @@ from agent.domain.tasks import TERMINAL_STATES, public_task
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.errors import ProviderError
 from agent.domain.events import UserQuestionRequestedEvent
-from agent.domain.models import ModelSelection
+from agent.domain.models import ModelDefinition, ModelSelection
 from agent.infrastructure.llm import ProviderServiceImpl
 from agent.infrastructure.paths import validate_session_id, validate_workspace_root
 from agent.infrastructure.settings import load_settings
@@ -700,6 +700,7 @@ class ExecutionCoordinator:
             str(metadata.get("reasoning_effort") or settings.reasoning_effort),
         )
         chat_client = await self._chat_client_for(settings, selection)
+        definition = self._definition(selection, settings)
         container = None
         try:
             container = build_agent_container(
@@ -710,7 +711,8 @@ class ExecutionCoordinator:
                     reasoning_effort=selection.reasoning_effort,
                 ),
                 chat_client=chat_client,
-                image_input=self._image_input(selection, settings),
+                image_input=definition.image_input if definition else None,
+                context_window=definition.context_window if definition else None,
                 session_dir=self.session_dir,
                 session_id=clean,
                 session_store=self._repository.draft_store(clean),
@@ -746,9 +748,10 @@ class ExecutionCoordinator:
                 raise
             return self._provider_service.unavailable_client(selection, exc)
 
-    def _image_input(self, selection: ModelSelection, settings) -> bool | None:
+    def _definition(self, selection: ModelSelection, settings) -> ModelDefinition | None:
+        """The selected model's declared capabilities, or None while its connection is unusable."""
         try:
-            return self._provider_service.resolve_selection(selection, settings=settings).image_input
+            return self._provider_service.resolve_selection(selection, settings=settings)
         except ProviderError as exc:
             if exc.code not in UNUSABLE_CONNECTION_CODES:
                 raise
@@ -768,9 +771,13 @@ class ExecutionCoordinator:
         if not selection.model_id or selection == execution.selection:
             return
         settings = await asyncio.to_thread(load_settings)
+        definition = self._definition(selection, settings)
         replacement = await self._chat_client_for(settings, selection)
         previous = execution.chat_client
-        execution.container.turn_runner.replace_chat_client(replacement, image_input=self._image_input(selection, settings))
+        execution.container.turn_runner.replace_chat_client(
+            replacement, image_input=definition.image_input if definition else None,
+        )
+        execution.container.context_manager.context_window = definition.context_window if definition else None
         execution.chat_client, execution.selection = replacement, selection
         if previous is not None:
             await previous.close()
