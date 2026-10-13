@@ -540,12 +540,15 @@ test("deleting the current conversation clears its reserved identity before the 
   await harness.controller.ensureRuntime();
   harness.state.session.reservedId = "session-a";
   harness.state.session.pendingName = "old name";
+  harness.state.turn.active = true;
   harness.state.display.pendingDelegations.set("task-a", { sessionId: "session-a" });
   harness.controller.sessionDeleted("another-session");
   assert.equal(harness.state.session.info.session_id, "session-a");
   harness.controller.sessionDeleted("session-a");
   assert.equal(harness.state.session.reservedId, "");
   assert.equal(harness.state.session.pendingName, "");
+  assert.equal(harness.state.turn.active, false);
+  assert.equal(harness.state.turn.id, "");
   assert.equal(harness.state.display.pendingDelegations.size, 0);
   const original = harness.client.request.bind(harness.client);
   harness.client.request = (method, params) => method === methods.sessionCreate

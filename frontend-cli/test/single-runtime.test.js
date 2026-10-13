@@ -237,7 +237,7 @@ test("a pid record cannot authorize killing an unrelated endpoint owner", { time
   });
   for (let i = 0; i < 100 && !(await probeEndpoint(paths.endpoint)); i++) await sleep(50);
   assert.equal(await probeEndpoint(paths.endpoint), true, "the squatter holds the endpoint");
-  await writeFile(paths.record, JSON.stringify({ pid: squatter.pid, nonce: "stuck", startedAt: new Date().toISOString() }), { mode: 0o600 });
+  await writeFile(paths.record, JSON.stringify({ pid: squatter.pid, nonce: "4a33659c-f104-4f13-8c19-910c4e57c167", startedAt: new Date().toISOString() }), { mode: 0o600 });
 
   await assert.rejects(connectSharedRuntime(runtimeOptions(home)), /without answering/);
   assert.equal(alive(squatter.pid), true, "a stale pid record never kills unrelated user work");

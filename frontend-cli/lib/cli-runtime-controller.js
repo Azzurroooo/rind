@@ -100,7 +100,11 @@ export function createCliRuntimeController({
     state.display.history = null;
     state.display.backgroundWait = null;
     state.display.stats = {};
+    state.display.lastTurnId = "";
+    state.display.activeCompact = false;
+    state.display.activityLabel = "";
     state.turn.id = "";
+    state.turn.active = false;
     state.turn.interruptRequested = false;
     state.display.pendingDelegations?.clear();
     clearPendingInputs();
