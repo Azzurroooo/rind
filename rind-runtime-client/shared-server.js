@@ -32,7 +32,15 @@ export async function startSharedServer(options) {
     onRequest(prompt) { return new Promise(resolve => { if (!authOwner) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
     onStderr: text => process.stderr.write(text),
     // A crashed worker ends every turn it was running; nothing will report their end.
-    onExit() { live.reset(); if (!stopping) for (const peer of peers) peer.socket.destroy(); initialized = null; },
+    // The host stops with it: a later client starts a fresh host instead of
+    // reaching one that can no longer spawn a worker.
+    onExit() {
+      live.reset();
+      initialized = null;
+      if (stopping) return;
+      for (const peer of peers) peer.socket.destroy();
+      void close();
+    },
   });
   // `rind send`: the window that most recently showed the session takes the
   // input as if typed there. Without one, a turn that is still running takes it
