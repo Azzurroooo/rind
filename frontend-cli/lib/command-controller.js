@@ -87,6 +87,14 @@ export function createCommandController({
       await input.runSessionsSelector?.();
       return;
     }
+    if (isBareHistoryCommand(text)) {
+      if (input.isTerminal && input.runHistoryLoader) {
+        await input.runHistoryLoader();
+      } else {
+        output.log?.("/history requires an interactive terminal.");
+      }
+      return;
+    }
     if (isBareForkCommand(text)) {
       if (input.isTerminal && input.runForkSelector) {
         await input.runForkSelector();
@@ -213,6 +221,10 @@ function isLocalCommand(value, name) {
 
 function isBareSessionsCommand(value) {
   return String(value || "").trim().toLowerCase() === "/sessions";
+}
+
+function isBareHistoryCommand(value) {
+  return String(value || "").trim().toLowerCase() === "/history";
 }
 
 function isBareForkCommand(value) {

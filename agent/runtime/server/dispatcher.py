@@ -875,7 +875,15 @@ class RuntimeDispatcher:
             return
         start = params.get("start") if isinstance(params.get("start"), int) else None
         end = params.get("end") if isinstance(params.get("end"), int) else None
-        result = await self._worker.replay(session_id, start=start, end=end)
+        tail = params.get("tail")
+        if tail is not None:
+            if isinstance(tail, bool) or not isinstance(tail, int) or not 1 <= tail <= 5000:
+                await self._respond_error(request, "session/replay tail must be an integer from 1 to 5000.", "InvalidRequest")
+                return
+            if start is not None or end is not None:
+                await self._respond_error(request, "session/replay tail cannot be combined with start or end.", "InvalidRequest")
+                return
+        result = await self._worker.replay(session_id, start=start, end=end, tail=tail)
         await self._respond(request, result)
 
     async def _replay_event_pages(self, request: dict[str, Any], after_cursor: int) -> None:

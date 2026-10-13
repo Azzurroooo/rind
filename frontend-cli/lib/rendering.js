@@ -488,6 +488,12 @@ export function backgroundWaitingLine(count = 1) {
   return `${dim("─")} ${bold(label)}\n  ${dim("Will continue automatically when finished. You can keep typing.")}`;
 }
 
+// A long conversation opens on its newest part; the rest loads on demand.
+export function historyTruncatedText(hidden) {
+  const count = Math.max(0, Number(hidden) || 0);
+  return `${dim("…")} ${dim(`${count} earlier message${count === 1 ? "" : "s"} hidden`)} ${dim("·")} ${dim("/history loads more")}`;
+}
+
 export function promptHintLine(state = {}) {
   if (state.menuOpen) {
     return "";

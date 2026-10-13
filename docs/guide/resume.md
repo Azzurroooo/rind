@@ -19,6 +19,7 @@ Sessions live with their **directory**: `rind --session <id>` finds the director
 | Scenario | What to do |
 | --- | --- |
 | Continue where you left off | `rind --session <id>` resumes it directly; the startup banner replays a snippet of the last exchange first, so you never resume blind |
+| See earlier in a very long conversation | The transcript opens on the newest messages and says how many earlier ones are hidden; `/history` loads the previous page each time until the whole conversation is shown |
 | Browse past sessions | `/sessions` lists recent sessions; pick with ↑↓ and Enter opens it in **another CLI window**, leaving the current one alone |
 | Take a different path from some midpoint | `/fork`, select that message and fork a new session from it; the original history is untouched |
 | History too long, want to slim it down deliberately | `/compact`, see below |

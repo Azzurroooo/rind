@@ -36,12 +36,14 @@ function createHarness({
   switchGate = null,
   taskMonitor = null,
   openManagedSession = null,
+  replay = null,
 } = {}) {
   const state = createCliState();
   state.session.info = { session_id: "session-a", model: "model-a" };
   state.turn.id = "turn-a";
   const requests = [];
   const history = [];
+  const notices = [];
   let cleared = 0;
   const logs = [];
   const restored = [];
@@ -97,6 +99,9 @@ function createHarness({
         if (replayError) {
           return Promise.reject(replayError);
         }
+        if (replay) {
+          return Promise.resolve(replay(params));
+        }
         const messages = params.session_id === "session-a"
           ? forkMenuMessages
           : [
@@ -133,7 +138,7 @@ function createHarness({
     askSessionMenu: async () => selectedSession,
     askForkPointMenu: async () => selectedFork,
     restoreLiveTurn() {},
-    renderHistory: (messages) => history.push(messages),
+    renderHistory: (messages, options = {}) => { history.push(messages); notices.push(options.notice || ""); },
     clearTranscript: () => { cleared += 1; },
     onSessionRestored: () => restored.push(state.session.info.session_id),
     openManagedSession,
@@ -145,7 +150,7 @@ function createHarness({
     writeError() {},
     redraw() {},
   });
-  return { state, client, requests, history, logs, restored, controller, cleared: () => cleared };
+  return { state, client, requests, history, notices, logs, restored, controller, cleared: () => cleared };
 }
 
 test("managed history opens separately and leaves the current conversation intact", async () => {
@@ -291,6 +296,38 @@ test("session restore replays the current session without switching", async () =
   );
   assert.equal(harness.state.session.info.resume_preview, "");
   assert.equal(harness.history.length, 1);
+});
+
+test("a long conversation opens on its newest messages and /history loads the older page", async () => {
+  const all = Array.from({ length: 500 }, (_, index) => ({ id: "m" + index, role: index % 2 ? "assistant" : "user", content: "message " + index }));
+  const harness = createHarness({ replay: params => ({
+    session_id: params.session_id,
+    model: "m",
+    messages: typeof params.tail === "number" ? all.slice(-params.tail) : all.slice(params.start || 0),
+    message_total: all.length,
+    live_turn: null,
+  }) });
+
+  await harness.controller.restoreSession();
+  const initial = harness.requests.find(item => item.method === methods.sessionReplay);
+  assert.equal(initial.params.tail, 200, "only the newest messages are loaded");
+  assert.equal(harness.history.at(-1).length, 200);
+  assert.equal(harness.state.display.history.start, 300);
+  assert.match(harness.notices.at(-1), /300 earlier messages hidden/);
+  assert.match(harness.notices.at(-1), /\/history loads more/);
+
+  await harness.controller.runHistoryLoader();
+  assert.deepEqual(harness.requests.filter(item => item.method === methods.sessionReplay).at(-1).params, { session_id: "session-a", start: 100 });
+  assert.equal(harness.history.at(-1).length, 400);
+  assert.equal(harness.state.display.history.start, 100);
+  assert.match(harness.notices.at(-1), /100 earlier messages hidden/);
+  assert.equal(harness.cleared(), 1, "the transcript is rebuilt from the wider range");
+
+  await harness.controller.runHistoryLoader();
+  assert.deepEqual(harness.requests.filter(item => item.method === methods.sessionReplay).at(-1).params, { session_id: "session-a", start: 0 });
+  assert.equal(harness.history.at(-1).length, 500);
+  assert.equal(harness.state.display.history.start, 0);
+  assert.equal(harness.notices.at(-1), "", "no notice once the whole conversation is shown");
 });
 
 test("session restore waits for all monitor pages before returning", async () => {

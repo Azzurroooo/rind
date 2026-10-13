@@ -20,6 +20,8 @@ sequenceDiagram
 
 A regular replay reads persisted messages and turn_state, and attaches a bounded live_turn overlay; it does not start an Agent. Event pagination mode rebuilds durable events from messages, tool records, and terminal states. after_cursor counts only the conversation's durable sequence; task updates do not crowd that cursor. When the client applies a task snapshot, it should replace the old state, so a completion event missed during the disconnect is not lost.
 
+A window opening a conversation asks for its newest messages (`session/replay { tail }`) and receives `message_total` with them, so the interface can say how many earlier messages are hidden and load the previous page on demand (`/history`) instead of transferring the whole conversation. An unbounded replay still returns everything, and `tail` cannot be combined with `start`/`end`.
+
 live_turn exists only in a Worker that is still alive, letting the interface restore the text tail, tool states, or a pending question that has not been persisted yet; after a Worker restart, only the on-disk facts can be relied on. Switching sessions or replaying must not re-execute tools.
 
 ## Recovery restores a view, it does not retry network requests

@@ -26,6 +26,7 @@ export function createCliState() {
       activeCompact: false,
       activityLabel: "",
       backgroundWait: null,
+      history: null,
       stats: {},
       lastEventSequence: 0,
       lastTurnId: "",

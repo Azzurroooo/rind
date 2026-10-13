@@ -7,6 +7,7 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "fork", description: "Fork the current session", usage: "/fork" },
   { name: "goal", description: "View or control the active goal", usage: "/goal [pause | resume | clear | objective]" },
   { name: "help", description: "Show commands", usage: "/help [command]" },
+  { name: "history", description: "Load earlier messages of this conversation", usage: "/history" },
   { name: "import", description: "Choose the Claude and Codex skills this conversation reads", usage: "/import" },
   { name: "init", description: "Draft RIND.md", usage: "/init [project|user]" },
   { name: "login", description: "Configure a provider", usage: "/login [provider]" },

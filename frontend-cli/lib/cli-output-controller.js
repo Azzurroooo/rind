@@ -397,7 +397,10 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     return value ? `${turnContext}:${value}` : "";
   }
 
-  function renderHistory(messages) {
+  function renderHistory(messages, { notice = "" } = {}) {
+    if (notice) {
+      appendBlock(new TextBlock(outputBlockText(notice), { leading: blockCount > 0 }));
+    }
     const pendingTools = new Map();
     const flushPendingTools = () => {
       for (const [toolCallId, tool] of pendingTools.entries()) {

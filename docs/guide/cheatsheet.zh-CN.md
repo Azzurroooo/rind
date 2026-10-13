@@ -33,6 +33,7 @@ English | [简体中文](cheatsheet.zh-CN.md)
 | `/model`、`/model set <model>` | 选择菜单 / 直接指定模型 |
 | `/effort [low \| medium \| high \| xhigh \| max]` | 推理强度 |
 | `/sessions [limit]` | 列出最近会话 |
+| `/history` | 加载当前对话更早一页的消息 |
 | `/rename <name>`、`/rename --reset` | 命名会话 |
 | `/fork` | 从某条消息分叉会话 |
 | `/compact` | 压缩当前上下文 |

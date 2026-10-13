@@ -33,6 +33,7 @@ The CLI's keys and commands on a single screen. Come back to this page when you 
 | `/model`, `/model set <model>` | Picker menu / specify a model directly |
 | `/effort [low \| medium \| high \| xhigh \| max]` | Reasoning effort |
 | `/sessions [limit]` | List recent sessions |
+| `/history` | Load the previous page of this conversation's messages |
 | `/rename <name>`, `/rename --reset` | Name the session |
 | `/fork` | Fork the session from a message |
 | `/compact` | Compact the current context |

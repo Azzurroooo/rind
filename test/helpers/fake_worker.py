@@ -133,8 +133,12 @@ class FakeRepository:
         totals = [{"workspace_root": self.worker.workspace_root, "count": len(self.worker.sessions)}]
         return sessions, totals
 
-    async def replay(self, session_id, start=None, end=None) -> dict:
-        return {"messages": self.worker.messages, "turn_state": None, "session_id": session_id, "model": "m1"}
+    async def replay(self, session_id, start=None, end=None, tail=None) -> dict:
+        messages = list(self.worker.messages)
+        total = len(messages)
+        if tail is not None:
+            messages = messages[max(0, total - tail):]
+        return {"messages": messages, "turn_state": None, "session_id": session_id, "model": "m1", "message_total": total}
 
     async def replay_event_pages(self, session_id) -> dict:
         return {
@@ -214,8 +218,8 @@ class FakeWorker:
     async def create_session(self, workspace_root=None) -> dict:
         return {"session_id": "new-session", "model": "m2", "provider": "p1", "workspace_root": workspace_root or self.workspace_root}
 
-    async def replay(self, session_id, start=None, end=None) -> dict:
-        return await self.repository.replay(session_id, start, end)
+    async def replay(self, session_id, start=None, end=None, tail=None) -> dict:
+        return await self.repository.replay(session_id, start, end, tail)
 
     async def replay_event_pages(self, session_id) -> dict:
         return await self.repository.replay_event_pages(session_id)

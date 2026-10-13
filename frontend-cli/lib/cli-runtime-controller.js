@@ -1,4 +1,7 @@
-import { commandResultText, contextBoardText, goalCommandText, modelListErrorText, sessionSwitchedText, usageBoardText } from "./rendering.js";
+import { commandResultText, contextBoardText, goalCommandText, historyTruncatedText, modelListErrorText, sessionSwitchedText, usageBoardText } from "./rendering.js";
+
+// A conversation opens on its newest messages; /history loads the previous page.
+const HISTORY_WINDOW = 200;
 
 export function createCliRuntimeController({
   client,
@@ -194,13 +197,17 @@ export function createCliRuntimeController({
     if (switchedId !== targetId) {
       throw new Error("Runtime returned a different session.");
     }
-    const replay = await request(methods.sessionReplay, { session_id: switchedId });
+    const replay = await request(methods.sessionReplay, { session_id: switchedId, tail: HISTORY_WINDOW });
     if (switching && (switchToken !== switchGeneration || state.runtime.status === "closing")) {
       return false;
     }
     if (replay?.session_id && String(replay.session_id) !== switchedId) {
       throw new Error("Runtime replay returned a different session.");
     }
+    const messages = Array.isArray(replay?.messages) ? replay.messages : [];
+    const messageTotal = Number.isInteger(replay?.message_total) ? replay.message_total : messages.length;
+    const historyStart = Math.max(0, messageTotal - messages.length);
+    state.display.history = { sessionId: switchedId, start: historyStart, total: messageTotal };
 
     const liveTurn = replay?.live_turn || update?.live_turn || null;
     const turnState = replay?.turn_state || update?.turn_state || null;
@@ -230,7 +237,7 @@ export function createCliRuntimeController({
     state.turn.interruptRequested = false;
     state.display.backgroundWait = replay?.background_wait || null;
     options.announce?.(state.session.info);
-    renderHistory(replay?.messages);
+    renderHistory(messages, { notice: historyStart > 0 ? historyTruncatedText(historyStart) : "" });
     restoreLiveTurn(liveTurn);
     for (const task of replay?.tasks || []) {
       getTaskMonitor()?.recordTask?.({ type: "task_updated", session_id: switchedId, task });
@@ -279,6 +286,38 @@ export function createCliRuntimeController({
     } catch (error) {
       log(`Session switch failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // The transcript shows the newest part of a long conversation; this loads the
+  // previous page and rebuilds the transcript from the wider range.
+  async function runHistoryLoader() {
+    if (state.turn.active || state.display.activeCompact) {
+      log("Cannot load earlier messages while a turn is running.");
+      return;
+    }
+    const history = state.display.history;
+    if (!history?.start) {
+      if (history) log("The whole conversation is shown.");
+      else needsConversation("/history");
+      return;
+    }
+    const start = Math.max(0, history.start - HISTORY_WINDOW);
+    let replay;
+    try {
+      replay = await request(methods.sessionReplay, { session_id: state.session.info.session_id, start });
+    } catch (error) {
+      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    if (state.runtime.status === "closing") {
+      return;
+    }
+    const messages = Array.isArray(replay?.messages) ? replay.messages : [];
+    const messageTotal = Number.isInteger(replay?.message_total) ? replay.message_total : start + messages.length;
+    state.display.history = { sessionId: state.session.info.session_id, start, total: messageTotal };
+    clearTranscript();
+    renderHistory(messages, { notice: start > 0 ? historyTruncatedText(start) : "" });
+    redraw();
   }
 
   async function runForkSelector() {
@@ -617,6 +656,7 @@ export function createCliRuntimeController({
     refreshGoalState,
     runSessionsSelector,
     runForkSelector,
+    runHistoryLoader,
     runContextBoard,
     printContextReport,
     startCompactCommand,

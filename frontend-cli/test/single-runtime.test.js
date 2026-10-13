@@ -3,7 +3,7 @@
 // pids every client reports.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, realpath } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
@@ -133,6 +133,38 @@ test("rind send never starts a Runtime", { timeout: 60000 }, async t => {
   const sent = await runCli(home, home, "send", "--session", "missing", "hello");
   assert.notEqual(sent.code, 0, "an unopened session is refused");
   await assert.rejects(connectSharedRuntime({ ...runtimeOptions(home), start: false }), "no host was started");
+});
+
+test("session/replay tail windows a long conversation and reports the total", { timeout: 60000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-replay-window-"));
+  const workspace = path.join(home, "workspace");
+  const sessionDir = path.join(home, "sessions", "20260101_long");
+  await mkdir(sessionDir, { recursive: true });
+  await mkdir(workspace, { recursive: true });
+  // The store compares its normalized workspace root, as a saved session would hold.
+  const canonical = await realpath(workspace);
+  const workspaceRoot = process.platform === "win32" ? canonical.toLowerCase() : canonical;
+  const messages = Array.from({ length: 10 }, (_, index) => JSON.stringify({
+    id: "m" + index, role: index % 2 ? "assistant" : "user", content: "message " + index,
+    ts: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+  }));
+  await writeFile(path.join(sessionDir, "messages.jsonl"), messages.join("\n") + "\n");
+  await writeFile(path.join(sessionDir, "tool_calls.jsonl"), "");
+  await writeFile(path.join(sessionDir, "meta.json"), JSON.stringify({ schema_version: "2.0", session_id: "20260101_long", workspace_root: workspaceRoot, model: "fixture" }));
+  await writeFile(path.join(home, "session_index.json"), JSON.stringify({ sessions: [
+    { id: "20260101_long", workspace_root: workspaceRoot, updated_at: "2026-01-02T00:00:00Z", has_user_message: true },
+  ] }));
+  t.after(() => removeRindHome(home));
+
+  const host = await connectSharedRuntime(runtimeOptions(home));
+  t.after(() => host.close());
+  await host.request("initialize");
+  const replay = await host.request("session/replay", { session_id: "20260101_long", tail: 3 });
+
+  assert.equal(replay.message_total, 10);
+  assert.deepEqual(replay.messages.map(message => message.content), ["message 7", "message 8", "message 9"]);
+  const full = await host.request("session/replay", { session_id: "20260101_long" });
+  assert.equal(full.messages.length, 10, "an unbounded replay is unchanged");
 });
 
 test("the management service reports one Runtime pid across connections", { timeout: 120000 }, async t => {

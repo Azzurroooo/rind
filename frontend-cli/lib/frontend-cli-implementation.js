@@ -382,6 +382,7 @@ commandController = createCommandController({
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
     runForkSelector: runtimeController.runForkSelector,
+    runHistoryLoader: runtimeController.runHistoryLoader,
     runContextBoard: runtimeController.runContextBoard,
     printContextReport: runtimeController.printContextReport,
     runLocalCommand: async (text) => {

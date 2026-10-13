@@ -267,7 +267,7 @@ class SessionService:
             "updated_at": str(meta.get("updated_at") or ""),
         }
 
-    async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
+    async def replay(self, session_id: str, start: int | None = None, end: int | None = None, tail: int | None = None) -> dict[str, Any]:
         info = await self.info(session_id)
         store = await self._open_store_from_info(
             session_id,
@@ -280,8 +280,12 @@ class SessionService:
             include_ids=True,
             compacted=False,
         )
+        total = len(messages)
+        if tail is not None:
+            messages = messages[max(0, total - tail):]
         return {
             "messages": messages,
+            "message_total": total,
             "turn_state": await store.get_turn_state(),
             "session_id": session_id,
             "model": store.model,

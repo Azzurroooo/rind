@@ -413,6 +413,35 @@ def test_readonly_session_replay_is_handled_while_run_turn_is_blocked():
     assert replay["result"]["session_id"] == "s1"
 
 
+def test_session_replay_tail_returns_the_newest_messages_and_the_total():
+    worker = FakeWorker()
+    worker.messages = [{"role": "user", "content": f"m{index}"} for index in range(5)]
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 39, "method": "session/replay", "params": {"session_id": "s1", "tail": 2}})
+
+    asyncio.run(run())
+
+    result = _response(payloads, 39)["result"]
+    assert [message["content"] for message in result["messages"]] == ["m3", "m4"]
+    assert result["message_total"] == 5
+
+
+def test_session_replay_rejects_tail_together_with_a_range():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 40, "method": "session/replay", "params": {"session_id": "s1", "tail": 2, "start": 0}})
+        await server._dispatch({"kind": "request", "request_id": 41, "method": "session/replay", "params": {"session_id": "s1", "tail": 0}})
+
+    asyncio.run(run())
+
+    assert _response(payloads, 40)["error"]["type"] == "InvalidRequest"
+    assert _response(payloads, 41)["error"]["type"] == "InvalidRequest"
+
+
 # -- user questions ----------------------------------------------------------------
 
 
