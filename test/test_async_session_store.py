@@ -133,7 +133,11 @@ async def test_index_is_rewritten_only_when_the_listing_summary_changes(temp_ses
     await store.persist_message("user", "start")
 
     writes = []
-    monkeypatch.setattr(SessionIndexRepository, "update_index", lambda self, entry: writes.append(entry))
+    def record_write(self, entry):
+        writes.append(entry)
+        return True
+
+    monkeypatch.setattr(SessionIndexRepository, "update_index", record_write)
 
     await store.persist_sampling_usage({"sampling_kind": "assistant", "input_tokens": 10})
     await store.persist_turn_state("turn-1", "completed", "2026-01-01T00:00:00+00:00")
@@ -691,9 +695,33 @@ def test_session_index_write_failure_is_logged_and_ignored(monkeypatch, tmp_path
     monkeypatch.setattr(files, "write_json", fail_write)
 
     with caplog.at_level(logging.WARNING, logger="agent.infrastructure.persistence.session_index_repository"):
-        repository.update_index({"id": "session-1"})
+        assert repository.update_index({"id": "session-1"}) is False
 
     assert "Failed to update session index" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_failed_index_write_is_retried_without_a_summary_change(temp_session_dir, monkeypatch):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="retry-index", system_prompt="sys")
+    await store.initialize()
+    real_write = store._files.write_json
+    attempts = []
+
+    def fail_once(path, data):
+        if path == store._index_path:
+            attempts.append(data)
+            if len(attempts) == 1:
+                raise OSError("disk unavailable")
+        real_write(path, data)
+
+    monkeypatch.setattr(store._files, "write_json", fail_once)
+    await store.persist_message("user", "start")
+    assert store._index_repo.load_index()["sessions"] == []
+    await store.persist_sampling_usage({"sampling_kind": "assistant", "input_tokens": 10})
+    assert len(attempts) == 2
+    assert [entry["id"] for entry in store._index_repo.load_index()["sessions"]] == ["retry-index"]
+    await store.persist_sampling_usage({"sampling_kind": "assistant", "input_tokens": 20})
+    assert len(attempts) == 2
 
 
 def test_session_index_remove_failure_is_logged_and_ignored(monkeypatch, tmp_path, caplog):

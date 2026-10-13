@@ -547,8 +547,8 @@ class JsonlSessionStore(SessionStore):
         )
         if self._index_entry is not None and session_index_summary(self._index_entry) == session_index_summary(entry):
             return
-        self._index_entry = entry
-        self._index_repo.update_index(entry)
+        if self._index_repo.update_index(entry):
+            self._index_entry = entry
 
     def _persist_meta_sync(self, updated_at: str | None = None) -> None:
         if not self._session_meta:

@@ -27,9 +27,9 @@ class SessionIndexRepository:
             return {"sessions": []}
         return data
 
-    def update_index(self, entry: dict[str, Any]) -> None:
+    def update_index(self, entry: dict[str, Any]) -> bool:
         if not self._index_path:
-            return
+            return False
 
         try:
             lock = self._files.lock_for(self._index_path)
@@ -46,8 +46,10 @@ class SessionIndexRepository:
                     sessions.append(entry)
                 index_data["sessions"] = sessions
                 self._files.write_json(self._index_path, index_data)
+            return True
         except (OSError, RuntimeError, Timeout, ValueError) as exc:
             logger.warning("Failed to update session index %s: %s", self._index_path, exc)
+            return False
 
     def remove_session(self, session_id: str) -> None:
         if not self._index_path:
