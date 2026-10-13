@@ -103,6 +103,8 @@ def build_agent_container(
         parent_session_id=parent_session_id,
         reasoning_effort=settings.reasoning_effort,
         provider=settings.provider,
+        # A requested conversation must exist; only a fresh store creates one.
+        create_missing=not session_id,
     )
     skill_repository = SkillRepository(
         prompt_workspace,

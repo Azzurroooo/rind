@@ -375,7 +375,15 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     project();
     return renamed;
   }
-  const ui = { view, request, choose, form, showReport, rename, run: (action, label) => perform(action, null, label), restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter,
+  // A deleted conversation leaves every list, and Esc no longer goes back to it.
+  async function deleteConversation(runtimeSessionId) {
+    const result = await request("deleteSession", { runtimeSessionId });
+    if (view.returnTo?.runtimeSessionId === runtimeSessionId) view.returnTo = null;
+    view.history = {}; view.managerHistory = null; view.independent = null;
+    project();
+    return result;
+  }
+  const ui = { view, request, choose, form, showReport, rename, deleteConversation, run: (action, label) => perform(action, null, label), restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter,
     join: row => open({ ...where(row), runtimeSessionId: row.sessionId }), startNew: target => open(where(target)) };
   const actions = createActions(ui);
   const currentRow = () => (view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));

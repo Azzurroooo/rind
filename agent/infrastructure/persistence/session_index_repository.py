@@ -52,7 +52,9 @@ class SessionIndexRepository:
             return False
 
     def remove_session(self, session_id: str) -> None:
-        if not self._index_path:
+        if not self._index_path or not os.path.exists(self._index_path):
+            # Nothing was indexed yet; locking would create a folder for a
+            # conversation that never reached disk.
             return
 
         try:

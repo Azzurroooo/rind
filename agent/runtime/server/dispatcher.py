@@ -723,6 +723,8 @@ class RuntimeDispatcher:
             await self._respond_error(request, "Cannot delete a session with an active turn.", "TurnActive")
             return
         await self._worker.delete_session(session_id)
+        # Before the subscription is dropped, so a window holding the conversation hears it.
+        await self._send_event({"type": "session_deleted", "session_id": session_id, "turn_id": ""})
         self._subscribed.discard(session_id)
         await self._respond(request, {"ok": True, "deleted": session_id})
 

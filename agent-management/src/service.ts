@@ -710,6 +710,15 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         if (unused && !Object.values(state.runs).some(r => r.sessionId === session.id && activeRun(r))) { dropSession(state, session.id); pruneAgents(state, [session.agentId]); }
         return { detached: true };
       }
+      case "forgetSession": {
+        // The Runtime already removed the conversation; its registration and
+        // anything that waited to be delivered to it go with it.
+        userOnly(actor); const session = ownSession(state, actor, p.sessionId);
+        requireValue(!Object.values(state.runs).some(r => r.sessionId === session.id && activeRun(r)), "SESSION_BUSY", "This conversation is running. Stop it or wait for it to finish before deleting it.");
+        dropSession(state, session.id);
+        delete state.deliveries[session.id];
+        return { forgotten: session.id };
+      }
       case "resolveRun": {
         userOnly(actor); const run = state.runs[p.runId];
         requireValue(run?.status === "unknown", "INVALID_STATE", "Only unknown runs require reconciliation.");

@@ -207,6 +207,10 @@ export function createActions(ui) {
       }, { description: ["Now shown as: " + single(row.title)] });
   }
   const renameItem = row => ({ label: "Rename…", key: "r", description: "A name of your own; otherwise its first message", action: () => rename(row) });
+  // The one destructive action on a conversation: its saved history is removed.
+  const deleteItem = row => ({ label: "Delete conversation…", key: "d", danger: true, description: "Removes its messages permanently", action: () =>
+    ui.confirm("Delete this conversation?", [single(row.title), "", "Its saved messages are removed permanently. Files it wrote stay in the folder."], "Delete conversation",
+      async () => { await ui.deleteConversation(row.sessionId); ui.notify("Conversation deleted.", "success"); }) });
 
   function sessionActions(row) {
     const task = snap().tasks.find(t => t.id === row.taskId);
@@ -215,6 +219,7 @@ export function createActions(ui) {
         { label: "Continue conversation", key: "enter", description: "Outside any team", action: () => ui.join(row) },
         { label: "New conversation in this folder", key: "c", action: () => ui.startNew(row) },
         renameItem(row),
+        deleteItem(row),
       ], { description: [row.workspace] });
       return;
     }
@@ -226,6 +231,7 @@ export function createActions(ui) {
       ]),
       ...(task ? [{ label: "Task report", description: single(task.brief), action: () => delivery(task.id) }] : []),
       renameItem(row),
+      deleteItem(row),
     ]);
   }
 

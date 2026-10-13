@@ -64,6 +64,14 @@ export function createEventController({
         // this window is new again, and its next message creates it.
         if (state.sessionInfo && event.session_id === state.sessionInfo.session_id) { state.sessionInfo.session_id = ""; output.redraw?.(); }
         return;
+      case "session_deleted":
+        // Deleted here or in another window: nothing is left to continue, so
+        // the window is new again and its next message starts a conversation.
+        if (state.sessionInfo && event.session_id === state.sessionInfo.session_id) {
+          state.sessionInfo.session_id = "";
+          output.log?.("This conversation was deleted. Your next message starts a new one.");
+        }
+        return;
       case "task_updated":
       case "task_output":
         monitor.recordTask?.(event);

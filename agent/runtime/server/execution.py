@@ -166,10 +166,10 @@ class ExecutionCoordinator:
             self._schedule_continuation(session_id)
 
     async def background_wait(self, session_id: str) -> dict | None:
-        records = await self._task_notifications.store.relevant(session_id)
-        goal = await self._repository.get_goal(session_id) if self._enable_goal else None
         if self._closed or session_id in self._suppressed or session_id in self._closed_sessions:
             return None
+        records = await self._task_notifications.store.relevant(session_id)
+        goal = await self._repository.get_goal(session_id) if self._enable_goal else None
         if goal and goal.get("status") in {"paused", "blocked", "budget_exhausted"}:
             return None
         scope = self._scopes.get(session_id)

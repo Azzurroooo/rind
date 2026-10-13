@@ -24,6 +24,8 @@ export async function startSharedServer(options) {
       for (const peer of peers) if (peer.observe || peer.sessions.has(event.session_id)) peer.send({ event });
       // A first prompt failed before its message saved the conversation: it never existed.
       if (event?.event?.type === "session_discarded") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
+      // A conversation was deleted: every list and live table drops it now.
+      if (event?.event?.type === "session_deleted") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
     },
     onRequest(prompt) { return new Promise(resolve => { if (!authOwner) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
     onStderr: text => process.stderr.write(text),

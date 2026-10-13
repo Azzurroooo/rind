@@ -252,6 +252,20 @@ export async function startServer(options: { home?: string; python?: string; rep
             const list = async (workspace: string) => (await host.request("session/list", { workspace_root: workspace, limit: 100 })).sessions;
             result = { sessions: await sessionHistory(store.state, manager ? { agentId: manager.id } : { agentId: params.agentId, teamId: params.teamId }, list) };
           }
+        } else if (message.method === "deleteSession") {
+          requireValue(principal.kind === "user", "FORBIDDEN", "Private session history is available only to the user.");
+          const runtimeSessionId = typeof message.params.runtimeSessionId === "string" ? message.params.runtimeSessionId.trim() : "";
+          requireValue(runtimeSessionId, "INVALID_INPUT", "A conversation is required.");
+          const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === runtimeSessionId);
+          const busy = "This conversation is running. Stop it or wait for it to finish before deleting it.";
+          requireValue(!session || !Object.values(store.state.runs).some(r => r.sessionId === session.id && activeRun(r)), "SESSION_BUSY", busy);
+          const host = await executionHost();
+          const live = ((await host.request("runtime/sessions", {})).sessions || []).find((item: any) => item.id === runtimeSessionId);
+          requireValue(!live || live.turn === "idle", "SESSION_BUSY", busy);
+          requireValue(!(live?.watchers > 0), "SESSION_OPEN", "A Rind window is showing this conversation. Close it before deleting it.");
+          await host.request("session/delete", { session_id: runtimeSessionId });
+          if (session) await service.request({ kind: "user" }, "forgetSession", { requestId: "delete-" + randomBytes(12).toString("hex"), sessionId: session.id });
+          result = { deleted: true, runtimeSessionId };
         } else {
           result = await service.request(principal, message.method, message.params);
           if (message.method === "attachSession" || message.method === "reattachSession") attached.push(result.id);

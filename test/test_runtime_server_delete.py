@@ -154,6 +154,20 @@ def test_delete_prunes_subscription_set(tmp_path):
     assert "20260907_old" not in server._subscribed
 
 
+def test_delete_broadcasts_session_deleted(tmp_path):
+    worker = _FakeWorker(tmp_path, session_id="20260907_now")
+    _make_session(tmp_path, "20260907_old", tmp_path)
+    server = _make_server(worker)
+    server._subscribed.add("20260907_old")
+
+    asyncio.run(server.dispatch(_request("session/delete", {"session_id": "20260907_old"})))
+
+    payloads = server._writer._writer.payloads
+    event = next(payload for payload in payloads if payload.get("event", {}).get("type") == "session_deleted")
+    assert event["event"]["session_id"] == "20260907_old"
+    assert payloads[-1]["result"] == {"ok": True, "deleted": "20260907_old"}
+
+
 def test_ping_responds_ok_without_initialization(tmp_path):
     worker = _FakeWorker(tmp_path, session_id="20260907_now")
     server = RuntimeDispatcher(worker, writer=_CaptureWriter())

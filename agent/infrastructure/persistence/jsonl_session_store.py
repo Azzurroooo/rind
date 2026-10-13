@@ -111,10 +111,12 @@ class JsonlSessionStore(SessionStore):
         reasoning_effort: str = "",
         provider: str = "openai-compatible",
         selection_source: dict[str, str] | None = None,
+        create_missing: bool = True,
     ):
         self._session_dir = session_dir
         self._session_id = session_id
         self._resume_latest = resume_latest
+        self._create_missing = create_missing
         self._model = model
         self._provider = str(provider or "openai-compatible").strip()
         from agent.infrastructure.settings import normalize_reasoning_effort
@@ -150,6 +152,10 @@ class JsonlSessionStore(SessionStore):
     @property
     def is_persisted(self) -> bool:
         return self._msg_repo is not None
+
+    def mark_deleted(self) -> None:
+        """The session was deleted: a late write must never recreate it."""
+        self._create_missing = False
 
     async def get_metadata(self) -> dict[str, Any]:
         async with self._write_lock:
@@ -626,6 +632,8 @@ class JsonlSessionStore(SessionStore):
             session_paths = self._get_session_paths(session_id)
             if os.path.isdir(session_paths["base"]):
                 return self._load_session(session_id)
+            if not self._create_missing:
+                raise LookupError(f"Session not found: {session_id}")
             self._create_session(session_id)
             return []
 
@@ -651,6 +659,9 @@ class JsonlSessionStore(SessionStore):
     def _materialize_draft_sync(self) -> None:
         if self.is_persisted:
             return
+        # A deleted session must never be recreated by a write that raced the deletion.
+        if not self._create_missing:
+            raise LookupError(f"Session not found: {self._session_id or 'unknown'}")
         if self._session_id is None:
             self._bind_draft_sync(new_session_id())
         self._create_session_files_sync()

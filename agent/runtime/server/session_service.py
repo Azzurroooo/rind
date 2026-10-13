@@ -52,6 +52,7 @@ class SessionService:
             return False
         self._drafts.pop(store.session_id, None)
         self._created.pop(store.session_id, None)
+        store.mark_deleted()
         return True
 
     def abandoned(self) -> list[str]:
@@ -136,9 +137,12 @@ class SessionService:
     async def delete(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         meta = await self.metadata(clean)
-        if self.draft_store(clean) is not None:
-            self._drafts.pop(clean, None)
-            return {"session_id": clean, "workspace_root": str(meta.get("workspace_root") or "")}
+        draft = self.draft_store(clean)
+        if draft is not None:
+            self._drafts.pop(draft.session_id, None)
+            draft.mark_deleted()
+        else:
+            self._created.pop(clean, None)
 
         def _remove() -> None:
             root = JsonlSessionStore.resolve_session_root(self.session_dir)
@@ -322,6 +326,8 @@ class SessionService:
             system_prompt=build_system_prompt(environment=get_system_info(root)),
             workspace_root=root,
             reasoning_effort=info.get("reasoning_effort") or "",
+            # Opening an existing conversation must never recreate a deleted one.
+            create_missing=False,
         )
         await store.initialize(persist_system_prompt=persist_system_prompt)
         return store
