@@ -208,7 +208,9 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
 
   function writeError(text) {
     const value = String(text ?? "");
-    if (!terminalUi || state.runtime.status === "closing") {
+    // Before the terminal UI starts, appending would be painted only after a
+    // startup that may already be failing; a fatal start must reach the screen.
+    if (!terminalUi || !terminalUi.started || state.runtime.status === "closing") {
       process.stderr.write(value);
       return;
     }
