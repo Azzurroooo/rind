@@ -190,6 +190,9 @@ class ToolResultNormalizer:
         notes.append("Preview was shortened. Inspect the full output file for omitted content before advancing a task cursor.")
         low, high = 0, min(len(output), self.max_preview_bytes)
         best = render("")
+        if not fits(best):
+            text = render(output)
+            return self._project_for_model(text, *self._text_metrics(text), self._projection_identity(payload, "", "completed", ""), output_path)
         while low <= high:
             count = (low + high) // 2
             candidate = render(self._preview(output, count))

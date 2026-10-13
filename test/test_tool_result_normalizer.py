@@ -237,3 +237,16 @@ async def test_completed_output_page_keeps_sequential_cursor():
         "meta": {"truncated": True, "output_path": "/tmp/full.log"}}
     result = await ToolResultNormalizer().normalize(payload)
     assert "task_id task, cursor next-page" in result.model_content
+
+
+@pytest.mark.asyncio
+async def test_shell_diagnostics_alone_cannot_bypass_model_bounds(tmp_path):
+    reason = "START-REASON " + "界\n" * 30000 + " END-REASON"
+    payload = {"ok": True, "tool": "task_control", "data": {
+        "task_id": "task", "status": "lost", "reason": reason, "stdout": "", "stderr": ""}}
+    result = await ToolResultNormalizer().normalize(payload, output_store=MemoryOutputStore(tmp_path), session_id="s", call_id="c")
+    assert len(result.model_content.encode("utf-8")) <= 25 * 1024
+    assert len(result.model_content.splitlines()) <= 2000
+    assert "Command status: lost" in result.model_content
+    assert "START-REASON" in result.model_content and "END-REASON" in result.model_content
+    assert json.loads((tmp_path / "s/c.txt").read_text())["data"]["reason"] == reason

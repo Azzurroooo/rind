@@ -335,6 +335,8 @@ class ToolCallProcessor:
 
     def _outcome_from_record(self, record: dict[str, Any]) -> _ToolCallOutcome:
         result = record["result"]
+        if isinstance(result, dict) and record.get("attachments"):
+            result = {**result, "attachments": record["attachments"]}
         result_content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
         payload = _load_tool_payload(result_content)
         payload_status = _classify_tool_payload(payload) if payload else None
