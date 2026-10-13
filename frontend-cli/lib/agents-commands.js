@@ -58,7 +58,7 @@ export async function openAgentChat({ agent, teamId, manager = false, runtimeSes
     return await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [windowScript, ...args], {
         cwd: manager ? managerWorkspace(launch) : agent.canonicalWorkspace,
-        stdio: "inherit", windowsHide: true, env: { ...process.env, RIND_HOME: launch.home || process.env.RIND_HOME, RIND_PYTHON: launch.python || "python", RIND_RUNTIME_PATH: launch.runtimePath || "", [HANDOFF_ENV]: handoff.file, [TERMINAL_KEYBOARD_ENV]: terminalKeyboard() },
+        stdio: "inherit", windowsHide: true, env: { ...process.env, RIND_HOME: launch.home || process.env.RIND_HOME, RIND_PYTHON: launch.python || process.env.RIND_PYTHON, RIND_RUNTIME_PATH: launch.runtimePath || "", [HANDOFF_ENV]: handoff.file, [TERMINAL_KEYBOARD_ENV]: terminalKeyboard() },
       });
       child.once("error", reject);
       child.once("close", code => resolve(code));

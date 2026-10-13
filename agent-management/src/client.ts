@@ -104,7 +104,7 @@ export async function connectManagement(options: {
   await privateDirectory(paths.state);
   const log = await open(path.join(paths.state, "service.log"), "a", 0o600);
   const repoRoot = options.repoRoot || path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
-  const child = spawn(process.execPath, [fileURLToPath(new URL("./server.js", import.meta.url)), JSON.stringify({ home: options.home, python: options.python || process.env.RIND_PYTHON || "python", repoRoot, runtimePath: options.runtimePath || process.env.RIND_RUNTIME_PATH || "" })], { detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd] });
+  const child = spawn(process.execPath, [fileURLToPath(new URL("./server.js", import.meta.url)), JSON.stringify({ home: options.home, python: options.python || process.env.RIND_PYTHON || undefined, repoRoot, runtimePath: options.runtimePath || process.env.RIND_RUNTIME_PATH || "" })], { detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd] });
   child.on("error", () => {}); child.unref(); await log.close();
   let last: unknown;
   for (let i = 0; i < 40; i++) {

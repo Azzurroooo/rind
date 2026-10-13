@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { buildRuntimeEnv } from "./runtime-env.js";
+import { buildRuntimeEnv, resolveSourcePython } from "./runtime-env.js";
+export { resolveSourcePython } from "./runtime-env.js";
 import {
   createRuntimeRequest,
   isRuntimeEvent,
@@ -11,19 +11,6 @@ import {
   runtimeMethods,
   runtimeRequestId,
 } from "./runtime-protocol.js";
-
-const DEFAULT_PYTHON = "python";
-
-/** The interpreter a source checkout runs: an explicit choice wins, then its own
- *  virtual environment, then whatever `python` the caller's shell resolves. */
-export function resolveSourcePython(python, repoRoot) {
-  if (python && python !== DEFAULT_PYTHON) return python;
-  const candidates = [
-    path.join(repoRoot, ".venv", "bin", "python"),
-    path.join(repoRoot, ".venv", "Scripts", "python.exe"),
-  ];
-  return candidates.find(candidate => existsSync(candidate)) || python;
-}
 
 export function resolveRuntimeLaunch({ python, repoRoot, runtimePath = "", cliArgs = [] }) {
   const executable = runtimePath

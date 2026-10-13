@@ -20,7 +20,7 @@ export async function startSharedServer(options) {
   const build = runtimeBuildId(options);
   const peers = new Set(), auth = new Map(), prompts = new Set();
   const live = createLiveSessions({ onChange(sessions) { for (const peer of peers) if (peer.observe) peer.send({ event: { kind: "runtime", type: "sessions_changed", sessions } }); } });
-  const client = createRuntimeClient({ ...options, python: options.python || "python", cwd: paths.directory, cliArgs: [],
+  const client = createRuntimeClient({ ...options, cwd: paths.directory, cliArgs: [],
     onMessage(event) {
       // Sign-in progress (the URL to open) is for the window signing in.
       if (event?.method === "rind/auth/update") { authOwner?.send({ event }); return; }

@@ -9,14 +9,19 @@ import { createRuntimeClient, resolveRuntimeLaunch, resolveSourcePython } from "
 test("a source checkout runs its own virtual environment when no interpreter is chosen", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "rind-python-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const venv = path.join(root, ".venv", "bin");
+  const windows = process.platform === "win32";
+  const venv = path.join(root, ".venv", windows ? "Scripts" : "bin");
+  const executable = path.join(venv, windows ? "python.exe" : "python");
 
-  assert.equal(resolveSourcePython("python", root), "python");
+  assert.equal(resolveSourcePython(undefined, root), windows ? "python" : "python3");
   await mkdir(venv, { recursive: true });
-  await writeFile(path.join(venv, "python"), "");
-  assert.equal(resolveSourcePython("python", root), path.join(venv, "python"));
+  await writeFile(executable, "");
+  assert.equal(resolveSourcePython(undefined, root), executable);
+  assert.equal(resolveSourcePython(null, root), executable);
+  assert.equal(resolveSourcePython("python", root), "python");
+  assert.equal(resolveSourcePython("python3", root), "python3");
   assert.equal(resolveSourcePython("/usr/bin/python3", root), "/usr/bin/python3");
-  assert.equal(resolveRuntimeLaunch({ python: "python", repoRoot: root }).command, path.join(venv, "python"));
+  assert.equal(resolveRuntimeLaunch({ repoRoot: root }).command, executable);
 });
 
 async function shutdownFixture(t, handler) {

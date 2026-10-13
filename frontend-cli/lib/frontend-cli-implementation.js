@@ -76,7 +76,7 @@ const handoffFile = takeHandoffPath();
 const handoffWindow = Boolean(handoffFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const python = process.env.RIND_PYTHON || "python";
+const python = process.env.RIND_PYTHON || undefined;
 const runtimePath = process.env.RIND_RUNTIME_PATH || resolveInstalledRuntime();
 const managementLaunch = { python, repoRoot, runtimePath };
 if (cliArgs[0] === "agents") {
