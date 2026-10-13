@@ -100,6 +100,17 @@ def _tool_call_field(call: dict[str, Any], name: str) -> Any:
     return call.get(name) or function.get(name)
 
 
+
+def _tool_result_payload(record: dict[str, Any], message: dict[str, Any]) -> str:
+    """The structured record feeds replayed tool results; the model projection never does."""
+    payload = record.get("result")
+    if isinstance(payload, dict):
+        return json.dumps(payload, ensure_ascii=False)
+    if isinstance(payload, str) and payload.strip():
+        return payload
+    return message.get("content") if isinstance(message.get("content"), str) else ""
+
+
 def _tool_call_arguments(call: dict[str, Any]) -> dict[str, Any]:
     raw_args = call.get("raw_args")
     if raw_args is None:
@@ -117,15 +128,12 @@ def _tool_call_arguments(call: dict[str, Any]) -> dict[str, Any]:
 
 def _tool_result_event(message: dict[str, Any], record: dict[str, Any] | None, turn_id: str, session_id: str) -> dict[str, Any]:
     record = record if isinstance(record, dict) else {}
-    model_content = record.get("model_content")
-    if not isinstance(model_content, str) or not model_content:
-        model_content = message.get("content") if isinstance(message.get("content"), str) else ""
     event = {
         "type": "tool_result",
         "session_id": session_id,
         "turn_id": turn_id,
         "tool_call_id": str(message.get("tool_call_id") or ""),
-        "result": model_content,
+        "result": _tool_result_payload(record, message),
         "status": "error" if record.get("error_type") or record.get("ok") is False else "completed",
     }
     try:

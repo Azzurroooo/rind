@@ -164,4 +164,35 @@ async def test_task_status_and_empty_streams_remain_structured() -> None:
     payload = {"ok": True, "tool": "task_control", "data": {
         "task_id": "task_empty", "status": "running", "stdout": "", "stderr": "", "exit_code": None}}
     result = await ToolResultNormalizer().normalize(payload)
-    assert json.loads(result.model_content) == {**payload, "meta": {}}
+    assert result.model_content == "(no tool output)"
+
+
+@pytest.mark.asyncio
+async def test_shell_model_projection_keeps_the_output_and_the_continuation() -> None:
+    payload = {"ok": True, "tool": "bash", "data": {
+        "task_id": "task_shell", "status": "running", "return_reason": "yield_timeout",
+        "stdout": "hello\n", "stderr": "warn\n", "exit_code": None,
+        "next_cursor": "cursor-token", "start_cursor": "cursor-token",
+        "owner_session_id": "session", "origin_tool_call_id": "call", "origin_turn_id": "turn",
+        "request_id": "request", "shell_executable": "/usr/bin/bash", "cwd": "/work",
+        "command": "ls", "elapsed_ms": 12, "finished_at": 1.5},
+        "meta": {"truncated": True, "total_bytes": 900, "total_lines": 30, "output_path": "/tmp/task.log"}}
+    result = await ToolResultNormalizer().normalize(payload)
+
+    assert result.model_content.startswith("hello\nwarn")
+    assert "still running as task task_shell" in result.model_content
+    assert "cursor-token" in result.model_content
+    assert "Output truncated. Full output is available at /tmp/task.log." in result.model_content
+    for bookkeeping in ("owner_session_id", "origin_tool_call_id", "request_id", "shell_executable",
+                        "elapsed_ms", "finished_at", '"command"', "start_cursor"):
+        assert bookkeeping not in result.model_content
+
+
+@pytest.mark.asyncio
+async def test_shell_model_projection_reports_a_non_zero_exit() -> None:
+    payload = {"ok": True, "tool": "bash", "data": {
+        "task_id": "task_fail", "status": "exited", "return_reason": "finished",
+        "stdout": "", "stderr": "boom\n", "exit_code": 2}}
+    result = await ToolResultNormalizer().normalize(payload)
+
+    assert result.model_content == "boom\n\nCommand exited with code 2."

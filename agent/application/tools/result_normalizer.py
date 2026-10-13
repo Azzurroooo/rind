@@ -22,6 +22,13 @@ _MAX_PREVIEW_LINES = 2_000
 _TRUNCATION_MARKER = "\n\nOutput truncated. Full output is available at {output_path}.\nUse read_file or bash to inspect it.\n"
 _READ_PAGE_MARKER = "\n\nRead output is limited to the requested page. Use the original path and next_offset in meta to continue reading.\n"
 _READ_PREVIEW_MARKER = "\n\nRead preview is incomplete. Read the original path in smaller ranges.\n"
+_EMPTY_SHELL_OUTPUT = "(no tool output)"
+_SHELL_CONTINUE_REASONS = frozenset({"yield_timeout", "released"})
+_SHELL_WARNINGS = (
+    ("output_incomplete", "Output log is incomplete"),
+    ("output_error", "Output log error"),
+    ("persistence_error", "Task journal write failed"),
+)
 
 
 class ToolOutputWriter(Protocol):
@@ -92,7 +99,7 @@ class ToolResultNormalizer:
         )
         is_task = isinstance(payload, dict) and isinstance(payload.get("data"), dict) and payload["data"].get("task_id")
         if is_task:
-            model_content = self._project_task(payload, self.max_preview_bytes, output_path)
+            model_content = self._project_shell_for_model(payload)
             terminal_content = self._project_task(payload, self.terminal_max_bytes, output_path)
         elif read_payload is not None:
             model_content = self._project_read_for_model(read_payload)
@@ -142,6 +149,29 @@ class ToolResultNormalizer:
             meta["truncated"] = True
             text = render()
         return text
+
+    @staticmethod
+    def _project_shell_for_model(payload: dict) -> str:
+        """A shell result is the command output plus how to continue. The harness record
+        (task id, cursors, internal ids, timestamps, shell paths) stays out of the prompt."""
+        data = payload["data"]
+        meta = dict(payload.get("meta") or {})
+        streams = [part.rstrip("\n") for part in (data.get("stdout"), data.get("stderr")) if part]
+        output = "\n".join(streams)
+        notes = []
+        exit_code = data.get("exit_code")
+        if isinstance(exit_code, int) and exit_code != 0:
+            notes.append(f"Command exited with code {exit_code}.")
+        if str(data.get("return_reason") or "") in _SHELL_CONTINUE_REASONS:
+            notes.append(
+                f"Command is still running as task {data.get('task_id')}. Continue it with "
+                f"task_control (action read, task_id, cursor {data.get('next_cursor')}), or rely on "
+                "notify=on_exit to deliver completion."
+            )
+        if meta.get("truncated"):
+            notes.append(_TRUNCATION_MARKER.format(output_path=meta.get("output_path") or "the output file").strip())
+        notes.extend(f"{label}: {meta[key]}" for key, label in _SHELL_WARNINGS if meta.get(key))
+        return "\n\n".join(part for part in (output, *notes) if part) or _EMPTY_SHELL_OUTPUT
 
     def _project_by_bytes(
         self,
