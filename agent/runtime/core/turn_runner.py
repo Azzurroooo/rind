@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from collections.abc import Callable
@@ -100,6 +101,11 @@ class TurnRunner:
         self._chat_client = chat_client
         self._image_input = image_input
 
+    def _bind_session(self, session: SessionStore) -> None:
+        setter = getattr(self._chat_client, "set_session_id_provider", None)
+        if callable(setter) and not inspect.iscoroutinefunction(setter):
+            setter(lambda: session.session_id)
+
     async def _prepare_for_model(self, messages: list[dict], **options) -> list[dict]:
         """Images go in or are replaced by a note, by what the current model accepts."""
         return await self._prepare_messages(messages, image_input=self._image_input, **options)
@@ -120,6 +126,7 @@ class TurnRunner:
         """Run the main conversation loop for a user turn asynchronously, yielding events."""
 
         turn_started_at = time.perf_counter()
+        self._bind_session(session)
         original_hard_limit = self._snapshot_context_hard_limit()
         try:
             sampling_index = 0
@@ -441,6 +448,7 @@ class TurnRunner:
         cancellation_token: CancellationToken | None = None,
         turn_id: str = "",
     ) -> dict:
+        self._bind_session(session)
         _, record = await self._run_compact(
             session=session,
             reason=reason,

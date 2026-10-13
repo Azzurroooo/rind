@@ -82,6 +82,7 @@ async def test_compatible_chat_keeps_cap_during_parameter_fallbacks():
 
     sdk.chat.completions.create = send
     client = OpenAIChatCompletionsClient(sdk, "model", "high", reasoning_efforts=("low", "high"))
+    client.set_session_id_provider(lambda: "session")
     assert (await client.create([], max_output_tokens=8192, reasoning_effort="low")).content == "summary"
     assert len(calls) == 3
     assert all(p.get("max_tokens", p.get("max_completion_tokens")) == 8192 for p in calls)

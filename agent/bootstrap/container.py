@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -105,9 +104,6 @@ def build_agent_container(
         reasoning_effort=settings.reasoning_effort,
         provider=settings.provider,
     )
-    trace_setter = getattr(chat_client, "set_trace_session_id_provider", None)
-    if callable(trace_setter) and not inspect.iscoroutinefunction(trace_setter):
-        trace_setter(lambda: session_store.session_id)
     skill_repository = SkillRepository(
         prompt_workspace,
         skill_files=external_tool.skill_files if external_tool else (),

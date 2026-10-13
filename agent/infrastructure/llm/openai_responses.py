@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from contextlib import aclosing
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Callable
+
+import openai
 
 from agent.application.ports.chat_client import ChatClient
 from agent.domain.cancellation import CancellationToken
@@ -16,6 +18,7 @@ from .errors import provider_error
 from agent.infrastructure.llm.cancellation import await_with_cancellation, close_resource, iterate_with_cancellation
 from agent.infrastructure.llm.catalog import resolve_reasoning_effort
 from agent.infrastructure.llm.images import image_data_url
+from .prompt_cache import prompt_cache_key, rejects_prompt_cache_key
 
 
 class OpenAIResponsesClient(ChatClient):
@@ -27,6 +30,21 @@ class OpenAIResponsesClient(ChatClient):
         self._reasoning_effort = reasoning_effort or ""
         self._reasoning_efforts = reasoning_efforts
         self._subscription = subscription
+        self._session_id_provider: Callable[[], str] | None = None
+        self._prompt_cache_key_disabled = False
+
+    def set_session_id_provider(self, provider: Callable[[], str] | None) -> None:
+        self._session_id_provider = provider
+
+    async def _request(self, payload, cancellation_token):
+        try:
+            return await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
+        except openai.APIStatusError as exc:
+            if "prompt_cache_key" not in payload or not rejects_prompt_cache_key(exc):
+                raise
+            payload.pop("prompt_cache_key")
+            self._prompt_cache_key_disabled = True
+            return await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
 
     async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None, *, max_output_tokens: int | None = None, reasoning_effort: str | None = None) -> ModelCompletion:
         payload = self._payload(messages, tools, stream=False)
@@ -36,7 +54,7 @@ class OpenAIResponsesClient(ChatClient):
         if effort:
             payload["reasoning"] = {"effort": effort}
         try:
-            response = await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
+            response = await self._request(payload, cancellation_token)
         except Exception as exc:
             raise provider_error(exc) from None
         return _completion(response)
@@ -46,7 +64,7 @@ class OpenAIResponsesClient(ChatClient):
         call_ids: dict[str, str] = {}
         response = None
         try:
-            response = await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
+            response = await self._request(payload, cancellation_token)
             async with aclosing(iterate_with_cancellation(response, cancellation_token)) as chunks:
                 async for raw in chunks:
                     for event in _events(raw, call_ids):
@@ -65,6 +83,9 @@ class OpenAIResponsesClient(ChatClient):
 
     def _payload(self, messages, tools, *, stream: bool) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": self._model, "input": _input_items(messages), "stream": stream}
+        session_id = self._session_id_provider() if self._session_id_provider else ""
+        if session_id and not self._prompt_cache_key_disabled:
+            payload["prompt_cache_key"] = prompt_cache_key(session_id)
         if self._subscription:
             payload["store"] = False
         if tools:
