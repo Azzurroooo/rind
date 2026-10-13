@@ -127,6 +127,26 @@ async def test_goal_checkpoint_is_hidden_from_replay_but_kept_for_context(temp_s
 
 
 @pytest.mark.asyncio
+async def test_index_is_rewritten_only_when_the_listing_summary_changes(temp_session_dir, monkeypatch):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="frugal-index", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "start")
+
+    writes = []
+    monkeypatch.setattr(SessionIndexRepository, "update_index", lambda self, entry: writes.append(entry))
+
+    await store.persist_sampling_usage({"sampling_kind": "assistant", "input_tokens": 10})
+    await store.persist_turn_state("turn-1", "completed", "2026-01-01T00:00:00+00:00")
+
+    assert writes == []
+
+    await store.persist_message("assistant", "done")
+
+    assert [entry["size"] for entry in writes] == [{"messages": 3, "tool_calls": 0}]
+    assert writes[0]["updated_at"]
+
+
+@pytest.mark.asyncio
 async def test_empty_session_is_removed_with_index_entry(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir)
     await store.initialize()

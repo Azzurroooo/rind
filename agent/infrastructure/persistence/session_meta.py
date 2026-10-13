@@ -73,6 +73,12 @@ def session_index_entry(
     }
 
 
+def session_index_summary(entry: dict[str, Any]) -> dict[str, Any]:
+    """The index entry without its activity timestamp. The index is a derived listing
+    cache: it is rewritten when this summary changes, not on every bookkeeping write."""
+    return {key: value for key, value in entry.items() if key != "updated_at"}
+
+
 def default_auto_compact_window() -> dict[str, Any]:
     return {"ordinal": 1}
 

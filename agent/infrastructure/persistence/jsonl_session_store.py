@@ -41,6 +41,7 @@ from agent.infrastructure.persistence.session_meta import (
     normalize_skill_catalog,
     normalize_skill_sources,
     session_index_entry,
+    session_index_summary,
     sync_session_counts,
 )
 from agent.infrastructure.paths import (
@@ -132,6 +133,7 @@ class JsonlSessionStore(SessionStore):
         self._session_paths = {}
         self._session_meta = None
         self._has_user_message = False
+        self._index_entry: dict[str, Any] | None = None
         self._last_preview = ""
         self._projected_caches: dict[tuple[bool, bool, bool], tuple[tuple[Any, ...], list[dict[str, Any]]]] = {}
         self._files = SessionFiles()
@@ -534,6 +536,7 @@ class JsonlSessionStore(SessionStore):
         if not self._has_user_message:
             if self._session_id:
                 self._index_repo.remove_session(self._session_id)
+            self._index_entry = None
             return
 
         entry = session_index_entry(
@@ -543,6 +546,9 @@ class JsonlSessionStore(SessionStore):
             tool_call_count=self._session_meta["tool_call_count"],
             preview=self._last_preview,
         )
+        if self._index_entry is not None and session_index_summary(self._index_entry) == session_index_summary(entry):
+            return
+        self._index_entry = entry
         self._index_repo.update_index(entry)
 
     def _persist_meta_sync(self, updated_at: str | None = None) -> None:
