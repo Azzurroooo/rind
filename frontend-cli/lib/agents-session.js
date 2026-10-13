@@ -71,7 +71,11 @@ export async function prepareManagement(args, launch, { interactive = !!process.
   const options = managementArgs(args);
   const root = path.resolve(launch.home || process.env.RIND_HOME || path.join(os.homedir(), ".rind"), "agents-management");
   const rindHome = path.dirname(root);
-  if (!options.manager && !options.team && !existsSync(path.join(root, "state", "user-token"))) return plainSession(options.args, interactive, rindHome);
+  const managerFolder = path.join(root, "manager");
+  // The Manager's folder is the Manager's identity: entering it — from the
+  // Agents page, or by running Rind there — is the same conversation.
+  const asManager = options.manager || await sameDirectory(argument(options.args, "--cwd") || argument(options.args, "--dir") || process.cwd(), managerFolder);
+  if (!asManager && !options.team && !existsSync(path.join(root, "state", "user-token"))) return plainSession(options.args, interactive, rindHome);
   let client, session, runtimeSessionId = "", reconnecting, detached = false, disconnected = false;
   const connectionOptions = { ...launch, onDisconnect: () => {
     if (detached) return;
@@ -106,15 +110,15 @@ export async function prepareManagement(args, launch, { interactive = !!process.
   }
   try {
     const snapshot = await client.request("snapshot");
-    let workspace = options.manager ? path.join(root, "manager") : path.resolve(argument(options.args, "--cwd") || argument(options.args, "--dir") || process.cwd());
+    let workspace = asManager ? managerFolder : path.resolve(argument(options.args, "--cwd") || argument(options.args, "--dir") || process.cwd());
     let resumeId = argument(options.args, "--session");
     let registeredSession = resumeId && snapshot.sessions.find(s => s.runtimeSessionId === resumeId);
-    if (registeredSession && !options.manager && !argument(options.args, "--cwd") && !argument(options.args, "--dir")) workspace = snapshot.agents.find(a => a.id === registeredSession.agentId).canonicalWorkspace;
+    if (registeredSession && !asManager && !argument(options.args, "--cwd") && !argument(options.args, "--dir")) workspace = snapshot.agents.find(a => a.id === registeredSession.agentId).canonicalWorkspace;
     if (resumeId && !registeredSession) {
       // A conversation without saved history (a new one) is checked by the Runtime when it opens.
       const known = await sessionWorkspace(rindHome, resumeId, argument(options.args, "--session-dir"));
       if (known) {
-        const explicitWorkspace = options.manager || argument(options.args, "--cwd") || argument(options.args, "--dir");
+        const explicitWorkspace = asManager || argument(options.args, "--cwd") || argument(options.args, "--dir");
         const normalize = value => process.platform === "win32" ? value.toLowerCase() : value;
         const canonical = value => realpath(value).then(normalize, () => { throw new Error("The folder of that conversation no longer exists: " + value); });
         if (explicitWorkspace && await canonical(workspace) !== await canonical(known)) throw new Error("That conversation belongs to another workspace. Open its member from Agents management.");
@@ -124,15 +128,17 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     workspace = await realpath(workspace);
     if (process.platform === "win32") workspace = workspace.toLowerCase();
     const agent = snapshot.agents.find(a => a.canonicalWorkspace === workspace && a.adapter === "rind");
-    if (!agent && !options.manager) {
+    if (!agent && !asManager) {
       if (options.team) throw new Error("This directory is not registered. Add it from Agents management first.");
       client.close(); return plainSession(options.args, interactive, rindHome);
     }
     if (options.args.includes("--trace-llm")) throw new Error("Shared Runtime tracing is host-wide. Set RIND_TRACE_LLM=1 before starting the shared host instead of --trace-llm.");
     const sessionDir = argument(options.args, "--session-dir");
     if (sessionDir && path.resolve(sessionDir) !== path.resolve(path.dirname(root), "sessions")) throw new Error("Shared conversations use RIND_HOME/sessions. Set RIND_HOME to select another shared history directory; omit --session-dir.");
-    if (!resumeId && agent && (options.args.includes("--resume-latest") || options.args.includes("-c"))) {
-      const history = await client.request("listSessions", { agentId: agent.id });
+    if (!resumeId && (asManager || agent) && (options.args.includes("--resume-latest") || options.args.includes("-c"))) {
+      const history = asManager
+        ? await client.request("listSessions", { manager: true })
+        : await client.request("listSessions", { agentId: agent.id });
       resumeId = history.sessions[0]?.runtimeSessionId;
       if (resumeId) {
         registeredSession = snapshot.sessions.find(s => s.runtimeSessionId === resumeId);
@@ -144,7 +150,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     if (options.team) team = selectRecord(teams, options.team, "Workspace team");
     else if (!options.standalone && registeredSession) team = teams.find(t => t.id === registeredSession.teamId);
     else if (!options.standalone && teams.length === 1) team = teams[0];
-    else if (!options.standalone && teams.length > 1 && !options.manager) {
+    else if (!options.standalone && teams.length > 1 && !asManager) {
       if (!interactive) throw new Error("This workspace belongs to multiple teams. Use --team <id> or --standalone.");
       const choose = chooseTeam || (async choices => {
         const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -154,13 +160,13 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       const answer = String(await choose(teams));
       if (answer !== "0") { team = teams[Number(answer) - 1]; if (!team) throw new Error("Select a listed team, or 0 for an independent session."); }
     }
-    session = await client.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: options.manager, runtimeSessionId: resumeId, shared: true });
+    session = await client.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: asManager, runtimeSessionId: resumeId, shared: true });
     const externalTools = await client.request("sessionTools", { sessionId: session.id });
     const runtimeArgs = !argument(options.args, "--cwd") && !argument(options.args, "--dir") ? ["--cwd", workspace, ...options.args] : options.args;
     return {
-      chatContext: { agent, teamId: team?.id, manager: options.manager },
+      chatContext: { agent, teamId: team?.id, manager: asManager },
       prefill: options.prefill,
-      shared: true, args: runtimeArgs, externalTools, label: options.manager ? "Manager" : team ? "Team: " + team.name : "Independent member session",
+      shared: true, args: runtimeArgs, externalTools, label: asManager ? "Manager" : team ? "Team: " + team.name : "Independent member session",
       async bind(info) {
         if (runtimeSessionId && info.session_id !== runtimeSessionId) throw new Error("Open another registered session in a separate rind process.");
         runtimeSessionId = info.session_id;
@@ -185,6 +191,16 @@ export async function prepareManagement(args, launch, { interactive = !!process.
   } catch (error) { client.close(); throw error; }
 }
 function argument(args, flag) { const index = args.indexOf(flag); return index >= 0 ? args[index + 1] : undefined; }
+
+// Two spellings of one folder; one that does not exist yet matches by the path
+// it would be created at, so the Manager's folder is recognized before its first use.
+async function sameDirectory(left, right) {
+  const fold = async value => {
+    const resolved = await realpath(value).catch(() => path.resolve(value));
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  };
+  return await fold(left) === await fold(right);
+}
 
 export function observeRuntime(client, management) {
   if (!management.before) return client;
