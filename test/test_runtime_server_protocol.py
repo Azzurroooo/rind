@@ -918,7 +918,7 @@ def test_project_durable_events_maps_raw_meta_shapes_and_failures():
         "content_chars": len("calling"),
         "text": "calling",
     }
-    assert events[3]["status"] == "error"
+    assert events[3]["status"] == "failed"
     assert events[3]["result"] == "boom"
     assert "duration_ms" not in events[3]
     assert events[4] == {
@@ -927,6 +927,56 @@ def test_project_durable_events_maps_raw_meta_shapes_and_failures():
         "turn_id": "turn-9",
         "reason": "model exploded",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task_status,event_status,error_type", [
+    ("completed", "completed", ""),
+    ("timed_out", "timed_out", "Timeout"),
+    ("cancelled", "cancelled", "Cancelled"),
+    ("lost", "failed", "TaskLost"),
+    ("failed", "failed", "ToolExecutionError"),
+])
+async def test_tool_replay_bounds_raw_output_and_preserves_live_status(tmp_path, task_status, event_status, error_type):
+    import copy
+    from agent.application.tools.processor import ToolCallProcessor
+    from agent.domain import ParsedToolCall, tool_ok
+    from agent.domain.tool_result import ToolExecutionResult
+    from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
+
+    source = "界" * 40000
+    output_path = str(tmp_path / "output.txt")
+    Path(output_path).write_text(source, encoding="utf-8")
+    payload = tool_ok("bash", {
+        "task_id": "task-1", "status": task_status, "reason": "test reason",
+        "stdout": source, "stderr": "", "start_cursor": "0",
+    }, meta={"output_path": output_path, "truncated": True})
+
+    class Executor:
+        def is_async_tool(self, name):
+            return True
+
+        async def execute_async(self, name, args):
+            return ToolExecutionResult(status="ok", result_str=payload)
+
+    store = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "Run command")
+    call = ParsedToolCall("call-1", "bash", "{}")
+    processor = ToolCallProcessor(Executor())
+    live = [event async for event in processor.execute(session=store, tool_calls=[call])][-1]
+    records = await store.get_tool_records()
+    before = copy.deepcopy(records)
+    replay = list(iter_durable_events(await store.load_messages(), records, None, store.session_id))[-1]
+    assert replay["result"] == live.result
+    assert replay["status"] == live.status == event_status
+    assert replay["error_type"] == live.error_type == error_type
+    assert replay["tool_name"] == live.tool_name == "bash"
+    assert len(replay["result"].encode("utf-8")) <= 8192
+    assert records == before and records[0]["result"]["data"]["stdout"] == source
+    assert len(records[0]["model_content"].encode("utf-8")) <= 25 * 1024
+    reused = [event async for event in processor.execute(session=store, tool_calls=[call])][-1]
+    assert (reused.result, reused.status, reused.error_type) == (live.result, live.status, live.error_type)
 
 
 # -- process and stdio plumbing ----------------------------------------------------

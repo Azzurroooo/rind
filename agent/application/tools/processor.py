@@ -19,6 +19,7 @@ from agent.domain import (
     tool_error,
     tool_ok,
 )
+from agent.domain.tool_result import classify_tool_error, classify_tool_payload, parse_tool_result_payload
 from agent.domain.events import (
     RuntimeEvent,
     ToolCallStartedEvent,
@@ -190,6 +191,10 @@ class ToolCallProcessor:
             session_id=session.session_id or "",
             call_id=call.call_id,
         )
+        projected = parse_tool_result_payload(normalized_result.model_content)
+        projected_status = classify_tool_payload(projected) if projected else None
+        if outcome.status == "completed" and projected_status:
+            outcome.status, outcome.error_type = projected_status
         try:
             if not reused:
                 await self._persist_tool_result(
@@ -286,10 +291,10 @@ class ToolCallProcessor:
 
             if result.status == "ok":
                 tool_result_str = result.result_str
-                payload = _load_tool_payload(tool_result_str)
+                payload = parse_tool_result_payload(tool_result_str)
                 if payload is None:
                     tool_result_str = tool_ok(call.name, tool_result_str)
-                payload_status = _classify_tool_payload(payload) if payload else None
+                payload_status = classify_tool_payload(payload) if payload else None
                 if payload_status:
                     return _ToolCallOutcome(
                         status=payload_status[0],
@@ -306,7 +311,7 @@ class ToolCallProcessor:
                     result=result.result_str or tool_cancelled(call.name, result.error_msg),
                 )
             return _ToolCallOutcome(
-                status=result.failure_status or _classify_tool_error(error_type),
+                status=result.failure_status or classify_tool_error(error_type),
                 error_type=error_type,
                 result=tool_error(call.name, result.error_msg, error_type),
             )
@@ -338,10 +343,10 @@ class ToolCallProcessor:
         if isinstance(result, dict) and record.get("attachments"):
             result = {**result, "attachments": record["attachments"]}
         result_content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
-        payload = _load_tool_payload(result_content)
-        payload_status = _classify_tool_payload(payload) if payload else None
+        payload = parse_tool_result_payload(result_content)
+        payload_status = classify_tool_payload(payload) if payload else None
         error_type = str(record.get("error_type") or "")
-        status = "completed" if record.get("ok") is True else _classify_tool_error(
+        status = "completed" if record.get("ok") is True else classify_tool_error(
             error_type or "ToolExecutionError"
         )
         return _ToolCallOutcome(
@@ -482,45 +487,3 @@ class ToolCallProcessor:
             **({"attachments": normalized_result.attachments} if normalized_result.attachments else {}),
         )
         await session.persist_message("tool", "", tool_call_id=call.call_id, tool_name=call.name)
-
-
-def _load_tool_payload(value: str) -> dict | None:
-    if not value or not value.lstrip().startswith("{"):
-        return None
-    try:
-        payload = json.loads(value)
-    except (TypeError, ValueError):
-        return None
-    if isinstance(payload, dict) and "ok" in payload and "tool" in payload:
-        return payload
-    return None
-
-
-def _classify_tool_payload(payload: dict) -> tuple[ToolEventStatus, str] | None:
-    if payload.get("ok") is False:
-        error_type = payload.get("error_type")
-        if not isinstance(error_type, str) or not error_type:
-            error_type = "ToolExecutionError"
-        return _classify_tool_error(error_type), error_type
-    data = payload.get("data")
-    status = data.get("status") if isinstance(data, dict) else None
-    if status == "cancelled":
-        return "cancelled", "Cancelled"
-    if status == "timed_out":
-        return "timed_out", "Timeout"
-    if status in {"lost", "failed"}:
-        return "failed", "TaskLost" if status == "lost" else "ToolExecutionError"
-    return None
-
-
-def _classify_tool_error(error_type: str) -> ToolEventStatus:
-    normalized = error_type.lower()
-    if normalized == "cancelled":
-        return "cancelled"
-    if normalized in {"toolnotfound", "notfound", "userquestionunsupported"}:
-        return "unavailable"
-    if "timeout" in normalized or normalized in {"deadlineexceeded"}:
-        return "timed_out"
-    if normalized in {"toolargsjsonerror", "invalidarguments", "invaliduserquestion", "typeerror", "valueerror"}:
-        return "rejected"
-    return "failed"

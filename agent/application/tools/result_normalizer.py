@@ -68,11 +68,7 @@ class ToolResultNormalizer:
         session_id: str = "",
         call_id: str = "",
     ) -> NormalizedToolResult:
-        payload = self._canonicalize(self._parse_json(result_payload))
-        attachments = payload.pop("attachments", []) if isinstance(payload, dict) else []
-        rendered = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, separators=(",", ": "))
-        if isinstance(payload, str):
-            payload = self._parse_json(payload)
+        payload, rendered, attachments = self._prepare_payload(result_payload)
         total_bytes, total_lines = self._text_metrics(rendered)
         identity = self._projection_identity(payload, tool_name, status, error_type)
         existing_path, existing_truncated = self._existing_output_reference(payload)
@@ -89,25 +85,11 @@ class ToolResultNormalizer:
         if needs_preview and not is_read and not is_mutation and not output_path and output_store is not None and session_id and call_id:
             output_path = await output_store.write(session_id, call_id, rendered)
         read_payload = self._read_payload(payload) if is_read else None
-        source_metadata = dict(read_payload["meta"]) if read_payload is not None else None
-
-        terminal_content = self._project_by_bytes(
-            rendered,
-            self.terminal_max_bytes,
-            total_bytes,
-            total_lines,
-            identity,
-            output_path=None,
-            include_notice=False,
-            metadata=source_metadata,
-        )
+        read_content = self._project_read_for_model(read_payload) if read_payload is not None else None
         if is_task:
             model_content = self._project_shell_for_model(payload, shell_output, output_path)
-            terminal_content = self._project_task(payload, self.terminal_max_bytes, output_path)
-        elif read_payload is not None:
-            model_content = self._project_read_for_model(read_payload)
-            if json.loads(model_content).get("ok") is False:
-                terminal_content = model_content
+        elif read_content is not None:
+            model_content = read_content
         elif is_mutation and isinstance(payload, dict):
             model_content = self._project_mutation_for_model(payload)
         elif needs_preview:
@@ -119,10 +101,43 @@ class ToolResultNormalizer:
             model_content = rendered
 
         return NormalizedToolResult(
-            terminal_content=terminal_content,
+            terminal_content=self._project_terminal(payload, rendered, identity, output_path, read_content),
             model_content=model_content,
             model_content_policy={"truncated": model_content != rendered},
             attachments=attachments,
+        )
+
+    def project_for_terminal(
+        self, result_payload: Any, *, tool_name: str = "", status: str = "completed", error_type: str = "",
+    ) -> str:
+        payload, rendered, _ = self._prepare_payload(result_payload)
+        identity = self._projection_identity(payload, tool_name, status, error_type)
+        output_path, _ = self._existing_output_reference(payload)
+        read_payload = self._read_payload(payload)
+        read_content = self._project_read_for_model(read_payload) if read_payload is not None else None
+        return self._project_terminal(payload, rendered, identity, output_path, read_content)
+
+    def _prepare_payload(self, result_payload: Any) -> tuple[Any, str, list[dict]]:
+        payload = self._canonicalize(self._parse_json(result_payload))
+        attachments = payload.pop("attachments", []) if isinstance(payload, dict) else []
+        rendered = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, separators=(",", ": "))
+        if isinstance(payload, str):
+            payload = self._parse_json(payload)
+        return payload, rendered, attachments
+
+    def _project_terminal(
+        self, payload: Any, rendered: str, identity: tuple[bool, str, str],
+        output_path: str | None, read_content: str | None,
+    ) -> str:
+        if isinstance(payload, dict) and isinstance(payload.get("data"), dict) and payload["data"].get("task_id"):
+            return self._project_task(payload, self.terminal_max_bytes, output_path)
+        if read_content is not None and json.loads(read_content).get("ok") is False:
+            return read_content
+        read_payload = self._read_payload(payload)
+        return self._project_by_bytes(
+            rendered, self.terminal_max_bytes, *self._text_metrics(rendered), identity,
+            output_path=None, include_notice=False,
+            metadata=dict(read_payload["meta"]) if read_payload is not None else None,
         )
 
     def _project_task(self, payload: dict, limit: int, output_path: str | None) -> str:
