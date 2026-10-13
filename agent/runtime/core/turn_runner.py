@@ -106,6 +106,14 @@ class TurnRunner:
         if callable(setter) and not inspect.iscoroutinefunction(setter):
             setter(lambda: session.session_id)
 
+    async def _tools_for_session(self, session: SessionStore) -> list[dict]:
+        if not any(tool.get("function", {}).get("name") == "update_goal" for tool in self._tool_schemas):
+            return self._tool_schemas
+        goal = await session.get_goal()
+        if goal and goal.get("status") == "active":
+            return self._tool_schemas
+        return [tool for tool in self._tool_schemas if tool.get("function", {}).get("name") != "update_goal"]
+
     async def _prepare_for_model(self, messages: list[dict], **options) -> list[dict]:
         """Images go in or are replaced by a note, by what the current model accepts."""
         return await self._prepare_messages(messages, image_input=self._image_input, **options)
@@ -214,7 +222,7 @@ class TurnRunner:
                     while True:
                         stream_response = self._chat_client.stream(
                             messages=request_messages,
-                            tools=self._tool_schemas,
+                            tools=await self._tools_for_session(session),
                             cancellation_token=cancellation_token,
                         )
                         stream_result = ModelStreamResult()
@@ -538,7 +546,7 @@ class TurnRunner:
                 messages,
                 context.stats,
                 turn_id,
-                tool_schemas=self._tool_schemas,
+                tool_schemas=await self._tools_for_session(session),
             )
         except asyncio.CancelledError:
             raise

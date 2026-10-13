@@ -126,7 +126,10 @@ test("direct CLI captures activity, rejects ambiguous teams, and the manager has
   assert.ok(!managerTools.includes("delegate") && !managerTools.includes("report"), "member tools stay with members");
   const managerPrompt = requests.at(-1).messages.filter(message => message.role === "system").map(message => message.content).join("\n");
   assert.match(managerPrompt, /only through agent_management/);
-  assert.match(managerPrompt, /<user_clarification>/, "the prompt describes ask_user_question because the Manager has it");
+  const question = requests.at(-1).tools.find(tool => tool.function.name === "ask_user_question").function;
+  assert.match(question.description, /conservative engineering assumption/);
+  assert.match(question.parameters.properties.options.description, /Recommended/);
+  assert.match(question.parameters.properties.options.description, /never add an "Other" item/);
   view = await client.request("snapshot");
   assert.equal(view.runs.at(-1).status, "succeeded");
 });

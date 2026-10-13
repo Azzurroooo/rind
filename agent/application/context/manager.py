@@ -331,7 +331,10 @@ class ContextManager:
 
     async def _goal_policy_message(self, session) -> list[dict]:
         """The goal policy applies while a goal is active; the tool schema carries its mechanics."""
-        if self._goal_policy_provider is None or await session.get_goal() is None:
+        if self._goal_policy_provider is None:
+            return []
+        goal = await session.get_goal()
+        if not goal or goal.get("status") != "active":
             return []
         return [{"role": "system", "content": self._goal_policy_provider(), "_context_kind": "goal_policy"}]
 
