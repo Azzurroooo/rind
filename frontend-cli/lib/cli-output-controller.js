@@ -1,6 +1,8 @@
 import { AssistantRenderer } from "./assistant-renderer.js";
 import {
   assistantHeaderText,
+  deliveryBlockText,
+  delegatedWaitingLine,
   outputBlockText,
   promptText,
   startupText,
@@ -11,6 +13,7 @@ import {
   questionAnswerText,
   questionText,
 } from "./rendering.js";
+import { delegatedTask } from "./tool-display.js";
 import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
@@ -203,6 +206,24 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         lines.pop();
       }
       return lines;
+    }));
+  }
+
+  // A message delivered from the team, not typed here: it reads as a report.
+  function writeDelivery(text) {
+    const value = String(text ?? "");
+    if (!value.trim()) {
+      return;
+    }
+    if (!terminalUi) {
+      process.stdout.write(outputBlockText(deliveryBlockText(value, 1000).join("\n"), state.display.outputStarted));
+      state.display.outputStarted = true;
+      return;
+    }
+    const leading = blockCount > 0;
+    appendBlock(new DynamicBlock((width) => {
+      const lines = deliveryBlockText(value, width);
+      return leading ? ["", ...lines] : lines;
     }));
   }
 
@@ -402,6 +423,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       appendBlock(new TextBlock(outputBlockText(notice), { leading: blockCount > 0 }));
     }
     const pendingTools = new Map();
+    const delegated = new Map();
     const flushPendingTools = () => {
       for (const [toolCallId, tool] of pendingTools.entries()) {
         beginTool({
@@ -423,7 +445,15 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       if (role === "user") {
         flushPendingTools();
         closeAssistant();
-        writeUserInput(messageText(message?.content));
+        const content = messageText(message?.content);
+        if (message?._rind_meta?.kind === "team_delivery") {
+          for (const taskId of settledDelegations(content, delegated.keys())) {
+            delegated.delete(taskId);
+          }
+          writeDelivery(content);
+        } else {
+          writeUserInput(content);
+        }
         continue;
       }
       if (role === "assistant") {
@@ -449,6 +479,13 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         const toolCallId = String(message?.tool_call_id || "");
         const tool = pendingTools.get(toolCallId) || { name: "tool", arguments: "" };
         pendingTools.delete(toolCallId);
+        const content = messageText(message?.content);
+        if (tool.name === "delegate") {
+          const task = delegatedTask(content);
+          if (task) {
+            delegated.set(task.taskId, task.assignee);
+          }
+        }
         beginTool({
           tool_call_id: toolCallId,
           tool_name: tool.name,
@@ -458,12 +495,17 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
           tool_call_id: toolCallId,
           tool_name: tool.name,
           status: "completed",
-          result: messageText(message?.content),
+          result: content,
         });
       }
     }
     flushPendingTools();
     closeAssistant();
+    // Restoring a leader that still waits for delegated work says so, the same
+    // way a finished turn does.
+    if (delegated.size) {
+      log(() => delegatedWaitingLine([...delegated.values()]));
+    }
     redraw(true);
   }
 
@@ -477,6 +519,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     mainPromptText,
     log,
     writeUserInput,
+    writeDelivery,
     writeError,
     closeAssistant,
     clearTranscript,
@@ -494,6 +537,12 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   };
 }
 
+
+// The delivery text names the tasks that settled; only those stop waiting.
+function settledDelegations(text, taskIds) {
+  const body = String(text || "");
+  return [...taskIds].filter(taskId => body.includes(taskId));
+}
 
 function messageText(content) {
   if (typeof content === "string") {

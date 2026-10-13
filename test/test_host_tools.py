@@ -39,9 +39,27 @@ async def test_a_call_reaches_the_host_by_tool_name_without_runtime_arguments(mo
     registry = DefaultToolRegistry(tool.specs("session-1"))
     result = await registry.call_async("delegate", {"to": "a1", "brief": "Build it", "_cancellation_token": object()})
     assert calls == [("session-1", "delegate", {"to": "a1", "brief": "Build it"})]
-    assert json.loads(result) == {"ok": True, "result": {"task": "t1"}}
+    payload = json.loads(result)
+    assert payload["ok"] is True and payload["tool"] == "delegate"
+    assert payload["data"] == {"task": "t1"}
     missing = await registry.call_async("delegate", {"to": "a1"})
     assert "Missing arguments: brief" in missing and len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_host_refusal_becomes_a_structured_tool_error(monkeypatch):
+    tool = _tool()
+
+    async def call(self, session_id, method, parameters, env=None):
+        return {"ok": False, "error": {"code": "WORKSPACE_SHARED", "message": "Share it explicitly."}}
+
+    monkeypatch.setattr(ExternalTool, "call", call)
+    registry = DefaultToolRegistry(tool.specs("session-1"))
+    payload = json.loads(await registry.call_async("delegate", {"to": "a1", "brief": "Build it"}))
+
+    assert payload["ok"] is False and payload["tool"] == "delegate"
+    assert payload["error"] == "Share it explicitly."
+    assert payload["error_type"] == "WORKSPACE_SHARED"
 
 
 @pytest.mark.parametrize("tools, message", [

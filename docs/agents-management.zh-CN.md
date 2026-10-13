@@ -128,7 +128,7 @@ Enter opens the task's **report**:
            endpoint now redirects.
  Evidence  • unit tests pass
            • screenshot of the new page
- Files     login.png  ~/.rind/agents/artifacts/…/login.png
+ Files     login.png  12.4 KiB  ~/.rind/agents/artifacts/…/login.png
  Next      Announce it in the release notes
 
  ▸ Notes 3 · Runs 1   z to show
@@ -239,6 +239,10 @@ A member never reads or changes the organization. It is told who it is, its supe
 A task run cannot ask the user a question; it reports a blocker instead. Everything else, models included, belongs to the user and the Manager (`agent_management`); the service refuses it from members, and members cannot subscribe to snapshots. An empty-workspace member starts with the model chosen for its creator's folder; a worktree member follows its repository's.
 
 Nobody polls. Whoever delegated hears back once all of its delegated work has settled (delivered, blocked, failed): a parent task runs again and is told the results instead of its brief, and a conversation — a member's or the Manager's — gets them as its next turn through the Runtime's `rind/session/deliver`. A result for a conversation the Runtime does not host waits in the service and arrives when it is hosted again. Delivered files are copied to `state/artifacts/<team>/<recipient>/<task>/<id>/<name>` and named by path in the results; the recipient reads them with `read_file`. The path is guidance, not a sandbox: Rind's file tools have no directory boundary.
+
+A conversation that handed work out says so while nothing in it runs: after the delegate call the window shows `─ Waiting for <member>` until the delivery arrives, and the delivery turn is marked (`turn_started` with `delivery` and `delivery_text`), rendered as a `Delivery` report, and stored as a user message with `meta.kind = "team_delivery"` so a later replay shows the same report instead of a message the user typed. The report names the member, the task, `delivered:` outcome, summary, evidence, file paths and the next action.
+
+A conversation that handed work out says so while nothing in it runs: after the delegate call the window shows `─ Waiting for <member>` until the delivery arrives, and the delivery turn is marked (`turn_started` with `delivery` and `delivery_text`), rendered as a `Delivery` report, and stored as a user message with `meta.kind = "team_delivery"` so a later replay shows the same report instead of a message the user typed. The report names the member, the task, `delivered:` outcome, summary, evidence, file paths and the next action.
 
 ## Boundaries
 

@@ -92,7 +92,7 @@ test("three levels of delegation wait for grandchildren and deliver back through
   await eventually(() => f.starts.length === 4);
   assert.equal(f.starts[3].input.task.id, mid.taskId);
   assert.equal(f.starts[3].input.session.id, f.starts[1].input.session.id, "continuations preserve session identity");
-  assert.match(f.starts[3].input.input, new RegExp("a1 · task " + leaf.taskId + " · delivered: done\\n  Leaf delivery"));
+  assert.match(f.starts[3].input.input, new RegExp("a1 · task " + leaf.taskId + " · delivered: done\\n  Summary: Leaf delivery"));
   await f.call("report", { outcome: "done", summary: "Integrated child", evidence: [] }, f.runner(f.starts[3]));
   f.starts[3].finish({ content: "Done" });
   await eventually(() => f.starts.length === 5);

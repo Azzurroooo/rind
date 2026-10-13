@@ -494,6 +494,22 @@ export function historyTruncatedText(hidden) {
   return `${dim("…")} ${dim(`${count} earlier message${count === 1 ? "" : "s"} hidden`)} ${dim("·")} ${dim("/history loads more")}`;
 }
 
+// After the leader ends its turn with delegated work pending, that is the state
+// to show: nothing in this window runs, and results arrive here by themselves.
+export function delegatedWaitingLine(names = []) {
+  const unique = [...new Set((Array.isArray(names) ? names : [names]).map(singleLine).filter(Boolean))];
+  const label = unique.length ? `Waiting for ${unique.join(", ")}` : "Waiting for delegated work";
+  return `${dim("─")} ${bold(label)}\n  ${dim("The results are delivered to this conversation when they settle. You can keep typing.")}`;
+}
+
+// A turn that runs on a delivered result: show what arrived, one page, wrapped.
+export function deliveryBlockText(text, width = 80) {
+  const room = Math.max(8, width - 2);
+  const content = String(text || "").replace(/\r\n?/g, "\n").trimEnd();
+  const lines = content ? wrapTextWithAnsi(content, room).map(line => "  " + line) : [];
+  return [`${dim("─")} ${bold("Delivery")}`, ...lines];
+}
+
 export function promptHintLine(state = {}) {
   if (state.menuOpen) {
     return "";

@@ -474,6 +474,7 @@ const eventController = createEventController({
     },
     setActivityLabel: outputController.setActivityLabel,
     setBackgroundWait: outputController.setBackgroundWait,
+    writeDelivery: outputController.writeDelivery,
     redraw: redrawInput,
     clearCompactContext: () => compactContextState.clear(),
     deliverQueuedInput: (...args) => inputActions.deliverQueuedInput(...args),

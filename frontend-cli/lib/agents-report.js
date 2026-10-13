@@ -46,14 +46,28 @@ function standing(report, width, now) {
   return [];
 }
 
+// Delivery file sizes read best in the unit a person would say.
+function fileSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KiB`;
+  }
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
 function delivery({ task, artifacts }, width) {
   const r = task.report;
   if (!r) return [paint.dim("No delivery report yet.")];
+  const files = artifacts.map(file => [single(file.name), file.size ? paint.dim(fileSize(file.size)) : "", paint.dim(clean(file.path || ""))].filter(Boolean).join("  "));
+  const published = !files.length && r.artifacts?.length ? [paint.dim(`${r.artifacts.length} published file${r.artifacts.length === 1 ? "" : "s"}`)] : [];
   return gap([
     block("Outcome", [r.outcome], width, paint.bold),
     block("Summary", [r.summary], width),
-    block("Evidence", r.evidence.map(item => "• " + single(item)), width),
-    block("Files", artifacts.map(file => single(file.name) + "  " + paint.dim(clean(file.path || ""))), width),
+    block("Evidence", r.evidence.length ? r.evidence.map(item => "• " + single(item)) : [paint.dim("none given")], width),
+    block("Files", files.length ? files : published, width),
     block("Next", [r.nextAction], width),
   ]);
 }

@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent.domain.tool_result import tool_error, tool_ok
 from agent.infrastructure.tools.spec import ToolSpec
 
 
@@ -79,7 +80,17 @@ class ExternalTool:
         async def invoke(**arguments) -> str:
             # Runtime-injected arguments (the cancellation token) stay in the runtime.
             visible = {key: value for key, value in arguments.items() if not key.startswith("_")}
-            return json.dumps(await self.call(session_id, declaration.name, visible), ensure_ascii=False)
+            reply = await self.call(session_id, declaration.name, visible)
+            # The bridge envelope becomes the runtime's structured tool result, so
+            # the outcome, the result and failures all keep their meaning.
+            if reply.get("ok"):
+                return tool_ok(declaration.name, reply.get("result"))
+            failure = reply.get("error") if isinstance(reply.get("error"), dict) else {}
+            return tool_error(
+                declaration.name,
+                str(failure.get("message") or "The execution host refused this call."),
+                str(failure.get("code") or ""),
+            )
 
         return ToolSpec(name=declaration.name, handler=invoke, description=declaration.description, parameters=declaration.parameters)
 

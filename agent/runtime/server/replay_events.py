@@ -54,12 +54,19 @@ def _project_message(message: dict[str, Any], meta: dict[str, Any], record: dict
     role = message.get("role")
     turn_id = str(meta.get("turn_id") or "")
     if role == "user":
-        return [{
+        event = {
             "type": "turn_started",
             "session_id": session_id,
             "turn_id": turn_id,
             "user_message_chars": len(str(message.get("content") or "")),
-        }]
+        }
+        # A delivered result keeps its meaning when it is replayed; the projector
+        # carries the kind under `_rind_meta`.
+        marker = message.get("_rind_meta") if isinstance(message.get("_rind_meta"), dict) else meta
+        if marker.get("kind") == "team_delivery":
+            event["delivery"] = True
+            event["delivery_text"] = str(message.get("content") or "")
+        return [event]
     if role == "assistant":
         events = [
             {

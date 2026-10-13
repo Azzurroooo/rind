@@ -520,8 +520,15 @@ class ExecutionCoordinator:
                         run_kwargs["resume"] = True
                     if compact:
                         run_kwargs["compact"] = "manual"
+                    if delivery:
+                        run_kwargs["delivery"] = True
                     async for event in execution.container.runtime.run_turn(**run_kwargs):
                         event_data = event.to_dict()
+                        # Why this turn runs and what it carries, so windows can
+                        # show a delivery instead of an unexplained Working.
+                        if delivery and event_data.get("type") == "turn_started":
+                            event_data["delivery"] = True
+                            event_data["delivery_text"] = str(query or "")
                         if event_data.get("type") == "queued_input_delivered":
                             business_started = True
                         if event_data.get("type") in {"turn_completed", "turn_failed", "turn_cancelled"}:

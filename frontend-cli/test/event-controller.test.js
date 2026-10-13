@@ -30,6 +30,31 @@ test("background waits replace only the pending turn's completion line", async (
   assert.match(lines.at(-1), /Worked for/);
 });
 
+test("delegated work shows a waiting line and a delivered result clears it", async () => {
+  const lines = [];
+  const deliveries = [];
+  const controller = createEventController({
+    state: { sessionInfo: { session_id: "s1" } },
+    output: {
+      log: (line) => lines.push(typeof line === "function" ? line() : line),
+      writeDelivery: (text) => deliveries.push(text),
+      closeAssistant() {},
+    },
+  });
+  const result = JSON.stringify({ ok: true, tool: "delegate", data: { taskId: "8f21ab77c3", assignee: "reviewer", next: "End your turn now." } });
+  await controller.handle({ event: { type: "tool_result", session_id: "s1", tool_name: "delegate", tool_call_id: "c1", status: "completed", result } });
+  await controller.handle({ event: { type: "turn_completed", session_id: "s1", duration_ms: 1200, background_wait: null } });
+  assert.match(lines.at(-1), /Waiting for reviewer/);
+  assert.match(lines.at(-1), /delivered to this conversation when they settle/);
+  assert.doesNotMatch(lines.at(-1), /Worked for/);
+
+  const text = "Delegated work settled:\n- reviewer · task 8f21ab77c3 · delivered: done\n  Summary: Reviewed.";
+  await controller.handle({ event: { type: "turn_started", session_id: "s1", delivery: true, delivery_text: text } });
+  assert.deepEqual(deliveries, [text], "the turn that runs on the delivery shows it");
+  await controller.handle({ event: { type: "turn_completed", session_id: "s1", duration_ms: 500, background_wait: null } });
+  assert.match(lines.at(-1), /Worked for/, "once settled, the ordinary completion line returns");
+});
+
 test("image notices use normal output without changing the input buffer", async () => {
   const state = { inputBuffer: "未发送内容", cursorIndex: 3 };
   const before = { ...state };

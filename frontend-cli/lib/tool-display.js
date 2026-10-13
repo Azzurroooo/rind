@@ -30,6 +30,7 @@ const COLLAPSED_BODY_CAPS = {
   grep: 0,
   glob: 0,
   delegate: 1,
+  report: 3,
 };
 
 const EXPANDED_HARD_CAPS = {
@@ -43,6 +44,7 @@ const EXPANDED_HARD_CAPS = {
   read_file: 40,
   fetch_web_page: 24,
   delegate: 24,
+  report: 40,
   search_web: 16,
 };
 
@@ -112,9 +114,11 @@ export function argsFromResult(name, result) {
     case "bash_output":
       put("bg_id", data.bg_id);
       break;
-    case "delegate":
-      put("agent_id", data.agent_id);
+    case "delegate": {
+      const task = delegatedTask(result);
+      put("to", task?.assignee);
       break;
+    }
     case "agent_create":
       put("name", data.name);
       put("agent_id", data.agent_id);
@@ -132,6 +136,24 @@ function resultDataFromRaw(result) {
     data: payload.data && typeof payload.data === "object" ? payload.data : {},
     meta: payload.meta && typeof payload.meta === "object" ? payload.meta : {},
   };
+}
+
+// The delegate/report result the host service returns: {taskId, assignee, next}.
+// Older recordings nest the host reply one level deeper as a string.
+export function delegatedTask(result) {
+  const payload = parseToolResult(result);
+  let data = payload.data;
+  if (typeof data === "string") {
+    data = parseToolResult(data);
+  }
+  if (data && typeof data === "object" && !Array.isArray(data) && data.result && typeof data.result === "object") {
+    data = data.result;
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return null;
+  }
+  const taskId = singleLineText(data.taskId);
+  return taskId ? { taskId, assignee: singleLineText(data.assignee) } : null;
 }
 
 export function renderToolRunning(context, width) {
@@ -591,26 +613,83 @@ const FETCH_WEB_PAGE_RENDERER = {
 
 const DELEGATE_RENDERER = {
   runningMain(context, width) {
-    return `delegate → ${agentArg(context.args.agent_id, width)}`;
+    return `delegate → ${delegateTarget(context.args, width) || dim("…")}`;
+  },
+  finished(context, width, state) {
+    const task = delegatedTask(context.event?.result);
+    const target = delegateTarget(context.args, width) || (task?.assignee ? agentArg(task.assignee, width) : dim("…"));
+    const id = task ? dim(` · task ${clipText(task.taskId, Math.max(8, width), 6)}`) : "";
+    return titleFor(state, `delegate → ${target}${id}`) + durationPart("delegate", context.event);
+  },
+  body(context, width, limit) {
+    const brief = singleLineText(context.args.brief || context.args.message);
+    const lines = brief ? [dim(`    ${clipText(brief, width, 6)}`)] : [];
+    return { lines: lines.slice(0, limit), total: lines.length };
+  },
+};
+
+function delegateTarget(args, width) {
+  if (singleLineText(args?.to)) {
+    return agentArg(args.to, width);
+  }
+  if (args?.new) {
+    return `${agentArg(args.new.name, width)}${dim(" (new)")}`;
+  }
+  if (singleLineText(args?.task)) {
+    return `task ${clipText(args.task, Math.max(8, width), 6)}`;
+  }
+  if (singleLineText(args?.retire)) {
+    return `retire ${clipText(args.retire, Math.max(8, width), 6)}`;
+  }
+  return "";
+}
+
+const REPORT_RENDERER = {
+  runningMain() {
+    return "report";
   },
   finished(context, width, state) {
     const { data } = resultData(context);
-    const status = singleLineText(data.status) || (state.kind === "ok" ? "completed" : "");
-    const agentId = context.args.agent_id || data.agent_id;
-    const main = `delegate → ${agentArg(agentId, width)}${status ? dim(` · ${status}`) : ""}`;
-    return titleFor(state, main) + durationPart("delegate", context.event);
+    const blocked = context.args?.blocked;
+    const main = blocked ? "report → blocked" : data.delivered ? "report → delivered" : "report";
+    const outcome = blocked ? "" : singleLineText(context.args?.outcome);
+    return titleFor(state, `${main}${outcome ? dim(" · ") + clipText(outcome, width, 24) : ""}`);
   },
   body(context, width, limit) {
-    const { data } = resultData(context);
-    const summaryLines = String(data.summary || "").split(/\r\n|\r|\n/).filter((line) => line.trim());
-    const lines = summaryLines.slice(0, limit).map((line) => dim(`    ${clipText(line, width, 6)}`));
-    const published = Array.isArray(data.published_paths) ? data.published_paths.length : 0;
-    if (published && lines.length < limit) {
-      lines.push(dim(`    published ${published} path${published === 1 ? "" : "s"}`));
+    const args = context.args || {};
+    if (args.blocked) {
+      return { lines: [dim(`    ${clipText(`needs ${singleLineText(args.blocked.responder)}: ${singleLineText(args.blocked.action)}`, width, 6)}`)], total: 1 };
     }
-    return { lines, total: summaryLines.length + (published ? 1 : 0) };
+    const lines = [];
+    const summary = singleLineText(args.summary);
+    if (summary) {
+      lines.push(`${dim("    summary: ")}${clipText(summary, width, 6)}`);
+    }
+    const evidence = Array.isArray(args.evidence) ? args.evidence.filter(item => singleLineText(item)) : [];
+    if (evidence.length) {
+      lines.push(dim(`    evidence: ${evidence.length} item${evidence.length === 1 ? "" : "s"}`));
+    }
+    const files = Array.isArray(args.artifacts) ? args.artifacts.filter(item => singleLineText(item)) : [];
+    if (files.length) {
+      lines.push(dim(`    files: ${clipText(files.map(item => String(item).split(/[\\/]/).pop()).join(", "), width, 6)}`));
+    }
+    return { lines: lines.slice(0, limit), total: lines.length };
   },
 };
+
+const AGENT_MANAGEMENT_RENDERER = {
+  runningMain(context, width) {
+    return `agent management${managementAction(context, width)}`;
+  },
+  finished(context, width, state) {
+    return titleFor(state, `agent management${managementAction(context, width)}`);
+  },
+};
+
+function managementAction(context, width) {
+  const action = singleLineText(context.args?.action);
+  return action ? dim(" · ") + accent(clipText(action, width, 16)) : "";
+}
 
 const AGENT_CREATE_RENDERER = {
   runningMain(context, width) {
@@ -684,5 +763,7 @@ export const TOOL_RENDERERS = {
   search_web: SEARCH_WEB_RENDERER,
   fetch_web_page: FETCH_WEB_PAGE_RENDERER,
   delegate: DELEGATE_RENDERER,
+  report: REPORT_RENDERER,
+  agent_management: AGENT_MANAGEMENT_RENDERER,
   agent_create: AGENT_CREATE_RENDERER,
 };

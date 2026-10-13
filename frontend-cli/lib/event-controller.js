@@ -2,12 +2,14 @@ import { runtimeEventType } from "./runtime-protocol.js";
 import {
   cancelledText,
   contextBuiltLine,
+  delegatedWaitingLine,
   errorLine,
   planUpdatedLine,
   systemNoticeLine,
   turnCompletedLine,
   backgroundWaitingLine,
 } from "./rendering.js";
+import { delegatedTask } from "./tool-display.js";
 
 const WORKING_EVENTS = new Set([
   "assistant_delta",
@@ -27,6 +29,9 @@ export function createEventController({
   const pendingFileChanges = new Map();
   const pendingPlanInputs = new Map();
   const imageNotices = new Map();
+  // Delegated tasks this conversation handed out and still waits for; they end
+  // when a delivery names them, not when this window's next turn ends.
+  const pendingDelegations = new Map();
   let toolStats = { completed: 0, failed: 0 };
 
   async function handle(message) {
@@ -82,6 +87,17 @@ export function createEventController({
         return;
       case "turn_started":
         output.setBackgroundWait?.(null);
+        // A turn that runs on a delivered result: show the delivery and stop
+        // waiting for exactly the tasks it names.
+        if (event.delivery) {
+          const delivering = String(event.delivery_text || "");
+          for (const taskId of settledDelegations(delivering, pendingDelegations.keys())) {
+            pendingDelegations.delete(taskId);
+          }
+          if (delivering.trim()) {
+            output.writeDelivery?.(delivering);
+          }
+        }
         return;
       case "context_compacted":
       case "assistant_message_completed":
@@ -145,6 +161,7 @@ export function createEventController({
         const planInput = takePlanInput(event);
         monitor.recordResult?.(event);
         recordToolResult(event);
+        rememberDelegation(event);
         const plan = event.tool_name === "update_plan" && event.status === "completed"
           ? parsePlanInput(planInput)
           : null;
@@ -209,6 +226,9 @@ export function createEventController({
         output.setBackgroundWait?.(event.background_wait);
         if (event.background_wait) {
           output.log?.(() => backgroundWaitingLine(event.background_wait.count));
+        } else if (waitingOnDelegations(event.session_id).length) {
+          // Nothing runs here and nothing needs the user: work was handed out.
+          output.log?.(() => delegatedWaitingLine(waitingOnDelegations(event.session_id).map(item => item.assignee)));
         } else if (state.activeGoal?.status !== "active") {
           output.log?.(turnCompletedLine(event, toolStats));
         }
@@ -246,6 +266,23 @@ export function createEventController({
       return;
     }
     toolStats.completed += 1;
+  }
+
+  // A successful delegate hands out work this conversation now waits for.
+  function rememberDelegation(event) {
+    if (event.tool_name !== "delegate" || event.status !== "completed") {
+      return;
+    }
+    const task = delegatedTask(event.result);
+    if (task) {
+      pendingDelegations.set(task.taskId, { assignee: task.assignee, sessionId: String(event.session_id || "") });
+    }
+  }
+
+  // Only this conversation's delegations; another window may share the session.
+  function waitingOnDelegations(sessionId) {
+    const id = String(sessionId || "");
+    return [...pendingDelegations.values()].filter(item => item.sessionId === id);
   }
 
   function rememberPlanInputStart(event) {
@@ -296,6 +333,12 @@ function parsePlanInput(value) {
 function parseToolData(value) {
   const parsed = parseObject(value);
   return parsed.data && typeof parsed.data === "object" ? parsed.data : {};
+}
+
+// The delivery text names the tasks that settled; only those stop waiting.
+function settledDelegations(text, taskIds) {
+  const body = String(text || "");
+  return [...taskIds].filter(taskId => body.includes(taskId));
 }
 
 function parseObject(value) {

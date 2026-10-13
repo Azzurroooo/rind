@@ -188,3 +188,80 @@ test("real Rind reports through the declared tool and the task is delivered", { 
   assert.equal(current.report.summary, "Fixture delivery");
   assert.equal(calls, 2);
 });
+
+test("a leader conversation delegates work and the delivery returns as its own turn", { timeout: 90000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-delegation-e2e-"));
+  const leaderWorkspace = path.join(home, "leader"), memberWorkspace = path.join(home, "member");
+  await mkdir(leaderWorkspace); await mkdir(memberWorkspace);
+  let memberAgentId = "", delegateResult = "";
+  const trouble = [];
+  const provider = http.createServer((request, response) => {
+    if (request.method === "GET") { response.end(JSON.stringify({ data: [{ id: "fixture" }] })); return; }
+    let raw = ""; request.on("data", chunk => raw += chunk); request.on("end", () => {
+      const body = JSON.parse(raw);
+      const names = (body.tools || []).map(tool => tool.function.name);
+      const toolMessage = body.messages.find(message => message.role === "tool" && typeof message.content === "string");
+      const delivered = body.messages.some(message => message.role === "user" && typeof message.content === "string" && message.content.startsWith("Delegated work settled:"));
+      let delta;
+      if (names.includes("report")) {
+        delta = toolMessage && toolMessage.content.includes('"report"')
+          ? { content: "Reported." }
+          : { tool_calls: [{ index: 0, id: "report-1", type: "function", function: { name: "report", arguments: JSON.stringify({ outcome: "done", summary: "Fixture delivery", evidence: ["Local provider verified"] }) } }] };
+      } else {
+        if (!names.includes("delegate")) trouble.push("the leader conversation cannot delegate: " + names.join(","));
+        if (delivered) delta = { content: "Delivery received." };
+        else if (toolMessage) { delegateResult = toolMessage.content; delta = { content: "Delegating." }; }
+        else delta = { tool_calls: [{ index: 0, id: "delegate-1", type: "function", function: { name: "delegate", arguments: JSON.stringify({ to: memberAgentId, brief: "Build the fixture" }) } }] };
+      }
+      const toolCall = Boolean(delta.tool_calls);
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write("data: " + JSON.stringify({ choices: [{ index: 0, delta, finish_reason: null }] }) + "\n\n");
+      response.write("data: " + JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: toolCall ? "tool_calls" : "stop" }] }) + "\n\n");
+      response.end("data: [DONE]\n\n");
+    });
+  });
+  await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture-key", model: "fixture" }));
+  const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
+  const server = await startServer(options);
+  const token = (await readFile(server.paths.token, "utf8")).trim();
+  const user = await connectClient({ endpoint: server.paths.endpoint, token });
+  t.after(async () => { user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  const team = await user.request("createTeam", { name: "E2E" });
+  const leader = await user.request("registerAgent", { workspace: leaderWorkspace, name: "Lead" });
+  const member = await user.request("registerAgent", { workspace: memberWorkspace, name: "Builder" });
+  await user.request("addMember", { teamId: team.id, agentId: leader.id });
+  await user.request("addMember", { teamId: team.id, agentId: member.id, reportsToAgentId: leader.id });
+  await user.request("setLeader", { teamId: team.id, agentId: leader.id });
+  memberAgentId = member.id;
+
+  const session = await user.request("attachSession", { agentId: leader.id, teamId: team.id, shared: true });
+  const events = [];
+  const window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }), onMessage: message => events.push(message?.event || message) });
+  t.after(() => window.shutdown().catch(() => {}));
+  const info = await window.request("session/create", {});
+  await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
+  await window.request("session/prompt", { session_id: info.session_id, input: "Delegate the fixture work." });
+
+  // The host tool's result keeps its meaning for whoever reads it.
+  const delegated = JSON.parse(delegateResult);
+  assert.equal(delegated.tool, "delegate");
+  assert.equal(delegated.data.assignee, "Builder");
+  assert.ok(delegated.data.taskId, "the delegate result names its task");
+  assert.deepEqual(trouble, []);
+
+  // The member's delivery comes back as a turn of this same conversation.
+  let started;
+  for (let i = 0; i < 400 && !started; i++) {
+    started = events.find(event => event.type === "turn_started" && event.delivery);
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.ok(started, "the delivery started a turn: " + JSON.stringify(events.map(event => event.type)));
+  assert.match(started.delivery_text, /Builder · task .* · delivered: done/);
+  assert.match(started.delivery_text, /Summary: Fixture delivery/);
+  const [task] = (await user.request("snapshot")).tasks;
+  assert.equal(task.status, "done");
+  const replay = await window.request("session/replay", { session_id: info.session_id });
+  const deliveredMessage = replay.messages.find(message => message._rind_meta?.kind === "team_delivery");
+  assert.match(deliveredMessage.content, /Fixture delivery/);
+});

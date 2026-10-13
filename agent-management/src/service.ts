@@ -214,9 +214,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       const head = "- " + nameOf(state, task.assigneeAgentId) + " · task " + task.id + " · ";
       if (task.status === "done" && task.report) {
         const files = task.report.artifacts.map(id => state.artifacts[id]).filter(Boolean).map(a => path.join(paths.artifacts, a.file));
-        return [head + "delivered: " + task.report.outcome, "  " + task.report.summary,
+        return [head + "delivered: " + task.report.outcome,
+          "  Summary: " + task.report.summary,
           task.report.evidence.length ? "  Evidence: " + task.report.evidence.join("; ") : "",
-          files.length ? "  Files (read them with read_file): " + files.join(", ") : ""].filter(Boolean).join("\n");
+          files.length ? "  Files (read them with read_file): " + files.join(", ") : "",
+          task.report.nextAction ? "  Next: " + task.report.nextAction : ""].filter(Boolean).join("\n");
       }
       if (task.status === "blocked" && task.blockedOn) return head + "blocked, needs " + nameOf(state, task.blockedOn.responder) + ": " + task.blockedOn.action;
       return head + task.status.replace("_", " ") + (task.error ? ": " + task.error : "");
