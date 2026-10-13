@@ -190,6 +190,7 @@ test("runtime exit rejects an in-flight request and reports a recoverable failur
   assert.notEqual(result.code, 0);
   assert.equal(result.details.closing, false);
   assert.match(result.details.error.message, /Runtime exited/);
+  await client.shutdown(); // A worker already released by close needs no further shutdown.
 });
 
 test("runtime client stays stopped until explicit start", async () => {

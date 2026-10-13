@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import http from "node:http";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { connectSharedRuntime, sharedRuntimePaths } from "../../rind-runtime-client/shared-runtime.js";
 import { startSharedServer } from "../../rind-runtime-client/shared-server.js";
 import { probeEndpoint } from "../../rind-runtime-client/endpoint.js";
@@ -168,6 +168,9 @@ test("session/replay tail windows a long conversation and reports the total", { 
   assert.deepEqual(replay.messages.map(message => message.content), ["message 7", "message 8", "message 9"]);
   const full = await host.request("session/replay", { session_id: "20260101_long" });
   assert.equal(full.messages.length, 10, "an unbounded replay is unchanged");
+  const range = await host.request("session/replay", { session_id: "20260101_long", start: 4, end: 7 });
+  assert.equal(range.message_total, 10, "range replay reports the full conversation length");
+  assert.deepEqual(range.messages.map(message => message.content), ["message 4", "message 5", "message 6"]);
 });
 
 test("the management service reports one Runtime pid across connections", { timeout: 120000 }, async t => {
@@ -218,22 +221,58 @@ test("a Runtime whose worker died still exits, and the next window starts a fres
   await again.request("runtime/shutdown").catch(() => {});
 });
 
-test("a host that stopped answering is ended through its pid record", { timeout: 90000 }, async t => {
+test("a pid record cannot authorize killing an unrelated endpoint owner", { timeout: 30000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-stuck-host-"));
-  t.after(() => removeRindHome(home));
   const paths = sharedRuntimePaths(home);
   await mkdir(paths.directory, { recursive: true });
   await writeFile(paths.token, "test-token", { mode: 0o600 });
   // A squatter owns the endpoint: it accepts connections and never answers.
   const squatter = spawn(process.execPath, ["-e", "const net = require('node:net'); const server = net.createServer(() => {}); server.listen(process.argv[1]); setInterval(() => {}, 1000);", paths.endpoint], { stdio: "ignore", windowsHide: true });
-  t.after(() => { if (squatter.exitCode === null) squatter.kill("SIGKILL"); });
+  t.after(async () => {
+    if (squatter.exitCode === null) {
+      const stopped = new Promise(resolve => squatter.once("exit", resolve));
+      squatter.kill("SIGKILL"); await stopped;
+    }
+    await removeRindHome(home);
+  });
   for (let i = 0; i < 100 && !(await probeEndpoint(paths.endpoint)); i++) await sleep(50);
   assert.equal(await probeEndpoint(paths.endpoint), true, "the squatter holds the endpoint");
   await writeFile(paths.record, JSON.stringify({ pid: squatter.pid, nonce: "stuck", startedAt: new Date().toISOString() }), { mode: 0o600 });
 
+  await assert.rejects(connectSharedRuntime(runtimeOptions(home)), /without answering/);
+  assert.equal(alive(squatter.pid), true, "a stale pid record never kills unrelated user work");
+  await writeFile(paths.record, "{broken");
+  await assert.rejects(connectSharedRuntime(runtimeOptions(home)), /without answering/, "corrupt records do not authorize recovery");
+  assert.equal(alive(squatter.pid), true);
+});
+
+test("a verified shared host that stopped answering can be replaced", { timeout: 45000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-verified-stuck-"));
+  const paths = sharedRuntimePaths(home);
+  await mkdir(paths.directory, { recursive: true });
+  const preload = path.join(home, "stuck.mjs");
+  await writeFile(preload, "import net from 'node:net'; const write = net.Socket.prototype.write; net.Socket.prototype.write = function (...args) { return this === process.stdout || this === process.stderr ? write.apply(this, args) : true; };\n");
+  const nonce = "4a33659c-f104-4f13-8c19-910c4e57c167";
+  const entry = fileURLToPath(new URL("../../rind-runtime-client/shared-server.js", import.meta.url));
+  const stuck = spawn(process.execPath, ["--import", pathToFileURL(preload).href, entry, JSON.stringify(runtimeOptions(home)), "--rind-host-nonce=" + nonce], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+  let stderr = "";
+  stuck.stderr.on("data", chunk => { stderr += chunk; });
+  t.after(async () => { if (stuck.exitCode === null) stuck.kill("SIGKILL"); await removeRindHome(home); });
+  for (let i = 0; i < 100 && !(await probeEndpoint(paths.endpoint)); i++) await sleep(50);
+  assert.equal(await probeEndpoint(paths.endpoint), true, stderr);
   const host = await connectSharedRuntime(runtimeOptions(home));
   t.after(() => host.close());
-  assert.ok((await host.request("runtime/info")).pid > 0, "a real host took over");
-  assert.equal(alive(squatter.pid), false, "the stuck process was ended");
+  assert.equal(alive(stuck.pid), false);
+  assert.notEqual((await host.request("runtime/info")).pid, stuck.pid);
+  await host.request("runtime/shutdown").catch(() => {});
+});
+
+test("a detached host resolves relative launch paths in the caller's folder", { timeout: 30000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-relative-host-"));
+  t.after(() => removeRindHome(home));
+  const host = await connectSharedRuntime({ ...runtimeOptions(home), rindHome: path.relative(process.cwd(), home), repoRoot: path.relative(process.cwd(), repoRoot) || "." });
+  t.after(() => host.close());
+  await host.request("initialize");
+  assert.ok((await host.request("runtime/info")).pid > 0);
   await host.request("runtime/shutdown").catch(() => {});
 });

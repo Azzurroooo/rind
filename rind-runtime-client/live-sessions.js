@@ -80,9 +80,10 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       viewers.delete(viewer);
       changed();
     },
-    show(viewer) {
+    show(viewer, canShow = () => true) {
       if (!covered.has(viewer)) return;
       const id = covered.get(viewer);
+      if (!canShow(id)) return;
       covered.delete(viewer);
       viewers.set(viewer, id);
       changed();

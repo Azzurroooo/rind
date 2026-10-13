@@ -226,6 +226,9 @@ export function createRuntimeClient({
     closing = true;
     if (!child) return Promise.resolve();
     const runtime = child;
+    if (runtime.exitCode !== null || runtime.signalCode !== null) {
+      return runtime.exitCode === 0 ? Promise.resolve() : Promise.reject(new Error(`Runtime already exited with ${runtime.signalCode || runtime.exitCode}`));
+    }
     const exited = new Promise((resolve) => {
       runtime.once("close", (code, signal) => resolve({ code, signal }));
       runtime.once("error", (error) => resolve({ error }));

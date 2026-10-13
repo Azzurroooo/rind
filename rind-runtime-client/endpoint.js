@@ -1,15 +1,14 @@
-// Exactly one live server owns a local endpoint. A Unix server binds a private
-// name first and publishes it over the canonical name with link/rename, so no
-// actor ever removes a name it did not create: linking fails while any entry
-// exists, a probe decides whether that entry still serves, and only an entry
-// proven dead — and re-checked, since a replace may race — is replaced
-// atomically. A server that loses ownership while starting stops serving.
+// Unix publishers serialize stale-entry replacement under a process lock.
+// Link/rename publishes a private listener; identity checks detect interference
+// from software outside this protocol. A failed publisher stops its listener.
 // Windows named pipes are exclusive by name, so binding the canonical name is
 // the whole protocol there.
 // This follows orca's daemon endpoint ownership (src/main/daemon/daemon-endpoint-ownership.ts).
 import net from "node:net";
-import { chmod, link, rename, stat, unlink } from "node:fs/promises";
+import { chmod, link, lstat, unlink } from "node:fs/promises";
+import { lstatSync, renameSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { acquireProcessLock } from "./process-lock.js";
 
 export class EndpointOccupiedError extends Error {
   constructor(message = "The endpoint is already served.") {
@@ -33,7 +32,9 @@ export async function listenOwned(server, endpoint) {
   }
   const bound = endpoint + ".bind-" + process.pid + "-" + randomUUID().slice(0, 8);
   await listen(server, bound);
+  let lock;
   try {
+    lock = await acquireProcessLock(endpoint + ".publish-lock");
     await chmod(bound, 0o600).catch(() => {});
     const identity = await endpointIdentity(bound);
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -43,20 +44,26 @@ export async function listenOwned(server, endpoint) {
       } catch (error) {
         if (error?.code !== "EEXIST") throw error;
       }
-      if (await probeEndpoint(endpoint)) throw new EndpointOccupiedError();
       const owner = await endpointIdentity(endpoint).catch(() => null);
       if (owner === null) continue;
-      // Only replace the entry that was proven dead, and only while it is still
-      // that entry and the second probe agrees: a concurrent publisher's entry
-      // is never swapped out here.
-      const before = await endpointIdentity(endpoint).catch(() => null);
-      if (!sameIdentity(before, owner) || await probeEndpoint(endpoint)) continue;
-      await rename(bound, endpoint);
+      if (await probeEndpoint(endpoint)) throw new EndpointOccupiedError();
+      // Other Rind publishers hold this same lock. Recheck before replacing
+      // to detect changes made by software that does not use the protocol.
+      let before;
+      try { const value = lstatSync(endpoint); before = `${value.dev}:${value.ino}`; }
+      catch (error) { if (error.code === "ENOENT") continue; throw error; }
+      if (!sameIdentity(before, owner)) continue;
+      renameSync(bound, endpoint);
       return await confirm(endpoint, identity);
     }
     throw new Error("Could not take ownership of the endpoint " + endpoint + ".");
+  } catch (error) {
+    // Publishing can fail after the private listener has already been bound.
+    server.close();
+    throw error;
   } finally {
     await unlink(bound).catch(() => {});
+    await lock?.release();
   }
 }
 
@@ -78,21 +85,20 @@ async function listen(server, target) {
   });
 }
 
-// True while something accepts connections; anything else (refused, timed out)
-// counts as dead. Identities are file identities, so a missing entry never
-// matches a recorded one.
+// Only missing/refused proves the endpoint is free. Timeouts and permission
+// errors are unknown ownership, conservatively treated as occupied.
 export async function probeEndpoint(endpoint) {
   return new Promise(resolve => {
     const socket = net.connect(endpoint);
     const done = alive => { socket.removeAllListeners(); socket.destroy(); resolve(alive); };
-    socket.setTimeout(500, () => done(false));
+    socket.setTimeout(500, () => done(true));
     socket.once("connect", () => done(true));
-    socket.once("error", () => done(false));
+    socket.once("error", error => done(!["ENOENT", "ECONNREFUSED"].includes(error.code)));
   });
 }
 
 async function endpointIdentity(endpoint) {
-  const value = await stat(endpoint);
+  const value = await lstat(endpoint);
   return `${value.dev}:${value.ino}`;
 }
 

@@ -247,8 +247,10 @@ export async function startServer(options: { home?: string; python?: string; rep
             const host = await executionHost();
             const list = (query: Record<string, unknown>) => host.request("session/list", query);
             const workspace = typeof params.workspace === "string" ? params.workspace.trim() : "";
+            const excluded = params.excludeSessionIds ?? [];
+            requireValue(Array.isArray(excluded) && excluded.every(id => typeof id === "string"), "INVALID_INPUT", "excludeSessionIds must be a list of conversation IDs.");
             result = workspace
-              ? { sessions: await independentFolder(store.state, await realManager, workspace, list) }
+              ? { sessions: await independentFolder(store.state, await realManager, workspace, list, excluded) }
               : { workspaces: await independentHistory(store.state, await realManager, list) };
           } else if (params.manager === true && !manager) result = { sessions: [] };
           else {
@@ -345,12 +347,10 @@ export async function startServer(options: { home?: string; python?: string; rep
       // service failed: a service nobody can stop is worse than a loud error.
       try {
         await service.stop();
-        // The Manager folder may still be being secured; finish before reporting closed.
-        await realManager.catch(() => {});
-        // A Runtime still starting comes up after this; wait so that whoever
-        // cleans up next (tests, `rind agents stop`) can see and stop it.
-        await runtimeConnecting?.catch(() => {});
       } finally {
+        // Even failed service cleanup must join an in-flight host connection.
+        await realManager.catch(() => {});
+        await runtimeConnecting?.catch(() => {});
         runtime?.close();
         for (const socket of sockets) socket.destroy();
         await new Promise<void>(resolve => server.close(() => resolve()));
