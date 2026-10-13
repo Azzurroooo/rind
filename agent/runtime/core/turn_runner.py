@@ -611,8 +611,6 @@ class TurnRunner:
         return self._context_manager.snapshot_hard_limit()
 
     def _restore_context_hard_limit(self, hard_limit) -> None:
-        if hard_limit is None:
-            return
         self._context_manager.restore_hard_limit(hard_limit)
 
     def _cancelled_event(

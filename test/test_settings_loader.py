@@ -132,6 +132,23 @@ def test_load_settings_uses_defaults_when_file_missing(tmp_path, monkeypatch):
     assert settings.reasoning_effort == ""
 
 
+def test_load_settings_reads_model_scoped_context_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    windows = {"openai-compatible": {"custom-1m": 1048576}, "office": {"small": 8192}}
+    write_settings(tmp_path, {"modelContextWindows": windows})
+    assert load_settings().model_context_windows == windows
+
+
+@pytest.mark.parametrize("windows", [None, [], {"office": []}, {"": {}}, {"office": {"": 1}},
+    {"office": {"m": True}}, {"office": {"m": 0}}, {"office": {"m": -1}},
+    {"office": {"m": "1024"}}, {"office": {"m": 1024.5}}])
+def test_invalid_model_context_windows_are_reported(tmp_path, monkeypatch, windows):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    write_settings(tmp_path, {"modelContextWindows": windows})
+    with pytest.raises(ValueError, match="modelContextWindows"):
+        load_settings()
+
+
 def test_ensure_user_settings_creates_empty_default_configuration(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 

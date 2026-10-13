@@ -1371,7 +1371,8 @@ def test_model_boundary_accepts_completed_tool_call():
 
 
 @pytest.mark.asyncio
-async def test_context_length_recovery_hard_limit_is_turn_local():
+@pytest.mark.parametrize("hard_limit", [None, 1000])
+async def test_context_length_recovery_hard_limit_is_turn_local(hard_limit):
     class LocalEmptyStream:
         def __aiter__(self):
             return self
@@ -1444,7 +1445,7 @@ async def test_context_length_recovery_hard_limit_is_turn_local():
 
     manager = ContextManager(
         estimator=ContextEstimator(
-            ContextBudget(hard_limit_tokens=1000, context_window_tokens=2000)
+            ContextBudget(hard_limit_tokens=hard_limit, context_window_tokens=2000)
         )
     )
     parser = MagicMock()
@@ -1460,7 +1461,9 @@ async def test_context_length_recovery_hard_limit_is_turn_local():
     events = [event async for event in runner.run_turn(FakeSession())]
 
     assert any(isinstance(event, TurnCompletedEvent) for event in events)
-    assert manager._estimator.budget.hard_limit_tokens == 1000
+    assert manager.snapshot_hard_limit() == hard_limit
+    manager.context_window = 1048576
+    assert manager._estimator.budget.resolved_hard_limit_tokens() == (hard_limit or 1048576)
 
 
 @pytest.mark.asyncio
@@ -1526,7 +1529,8 @@ def main() -> int:
     test_model_boundary_rejects_naked_tool()
     test_model_boundary_rejects_incomplete_tool_call_tail()
     test_model_boundary_accepts_completed_tool_call()
-    asyncio.run(test_context_length_recovery_hard_limit_is_turn_local())
+    asyncio.run(test_context_length_recovery_hard_limit_is_turn_local(None))
+    asyncio.run(test_context_length_recovery_hard_limit_is_turn_local(1000))
     print("Async runtime tests passed.")
     return 0
 

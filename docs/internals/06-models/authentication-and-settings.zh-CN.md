@@ -57,6 +57,17 @@ CLI 中用 /login 保存供应商 API key，用 /model 选择模型，/effort �
 }
 ~~~
 
+自定义模型的 token 窗口缺失或不准确时，可在同一用户设置中加入 `modelContextWindows`。键为精确的连接 id（含命名连接）和模型 id，值必须是正整数 token 数。显式配置优先于端点 metadata 和内置目录，在创建、恢复和切换会话时随所选模型生效。未配置的模型仍使用正常的 metadata／目录回退；未知窗口使用运行时默认值。
+
+~~~json
+{
+  "modelContextWindows": {
+    "openai-compatible": { "custom-1m": 1048576 },
+    "office": { "small-model": 8192 }
+  }
+}
+~~~
+
 ## 保存方式的真实边界
 
 auth.json 是本地 JSON 文件，使用文件锁、临时文件替换和尽力设置的文件权限；它没有操作系统密钥链或加密存储承诺。单次读写有锁，也不等于整个读—改—写事务一直持锁。移动端的安全存储保存的是远程连接凭证，与 Python 供应商凭证不是同一个系统。

@@ -266,6 +266,7 @@ class ProviderServiceImpl:
                         if context_window is None:
                             context_window = known.context_window
                     break
+        context_window = settings.model_context_windows.get(definition.id, {}).get(model_id, context_window)
         return replace(base, image_input=capability, context_window=context_window)
 
     async def _fetch_models(self, settings: AppSettings, definition) -> bool:
