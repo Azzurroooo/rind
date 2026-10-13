@@ -190,10 +190,6 @@ class ToolCallProcessor:
             session_id=session.session_id or "",
             call_id=call.call_id,
         )
-        projected = _load_tool_payload(normalized_result.model_content)
-        projected_status = _classify_tool_payload(projected) if projected else None
-        if outcome.status == "completed" and projected_status:
-            outcome = _ToolCallOutcome(status=projected_status[0], error_type=projected_status[1], result=outcome.result)
         try:
             if not reused:
                 await self._persist_tool_result(
@@ -203,7 +199,7 @@ class ToolCallProcessor:
                     ts_start=ts_start,
                     ts_end=ts_end,
                     normalized_result=normalized_result,
-                    result_content=normalized_result.terminal_content,
+                    result_content=outcome.result,
                 )
             if self._task_notifications:
                 await self._task_notifications.result_committed(session.session_id, call.name, call.call_id, outcome.result)
@@ -338,14 +334,18 @@ class ToolCallProcessor:
         return None
 
     def _outcome_from_record(self, record: dict[str, Any]) -> _ToolCallOutcome:
+        result = record["result"]
+        result_content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+        payload = _load_tool_payload(result_content)
+        payload_status = _classify_tool_payload(payload) if payload else None
         error_type = str(record.get("error_type") or "")
         status = "completed" if record.get("ok") is True else _classify_tool_error(
             error_type or "ToolExecutionError"
         )
         return _ToolCallOutcome(
-            status=status,
-            error_type=error_type,
-            result=str(record.get("model_content") or ""),
+            status=payload_status[0] if payload_status else status,
+            error_type=payload_status[1] if payload_status else error_type,
+            result=result_content,
         )
 
     def _build_user_question_event(
@@ -506,6 +506,8 @@ def _classify_tool_payload(payload: dict) -> tuple[ToolEventStatus, str] | None:
         return "cancelled", "Cancelled"
     if status == "timed_out":
         return "timed_out", "Timeout"
+    if status in {"lost", "failed"}:
+        return "failed", "TaskLost" if status == "lost" else "ToolExecutionError"
     return None
 
 

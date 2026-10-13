@@ -300,6 +300,7 @@ async def test_completed_tool_record_is_reused_without_execution() -> None:
                     "raw_args": '{"value":"x"}',
                     "ok": True,
                     "error_type": None,
+                    "result": {"ok": True, "tool": "demo_tool", "data": "already done"},
                     "model_content": '{"ok":true,"tool":"demo_tool","data":"already done"}',
                     "args": {"value": "x"},
                 }
@@ -352,7 +353,7 @@ async def test_shell_terminal_state_sets_tool_result_status(
 
 
 @pytest.mark.asyncio
-async def test_large_tool_result_uses_bounded_event_model_and_persistence_content() -> None:
+async def test_large_tool_result_preserves_business_result_and_bounds_display() -> None:
     processor = ToolCallProcessor(tool_executor=FakeLargeToolExecutor())
     session = FakeSession()
     call = ParsedToolCall(call_id="call_large", name="demo_tool", raw_args="{}")
@@ -365,10 +366,54 @@ async def test_large_tool_result_uses_bounded_event_model_and_persistence_conten
     model_content = persisted_kwargs["model_content"]
     assert len(result_event.result.encode("utf-8")) <= 8 * 1024
     assert len(model_content.encode("utf-8")) <= 25 * 1024
-    assert persisted_result == result_event.result
+    assert json.loads(persisted_result)["data"] == "x" * 100_000
     assert json.loads(result_event.result)["meta"]["truncated"] is True
     assert json.loads(model_content)["meta"]["truncated"] is True
-    assert json.loads(persisted_result)["meta"]["truncated"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,event_status,error_type", [
+    ("running", "completed", ""), ("timed_out", "timed_out", "Timeout"),
+    ("cancelled", "cancelled", "Cancelled"), ("lost", "failed", "TaskLost"),
+])
+async def test_shell_reuse_preserves_business_result_and_notifications(status, event_status, error_type):
+    payload = {"ok": True, "tool": "bash", "data": {
+        "task_id": "task", "status": status, "stdout": "a" * 10000 + "TAIL-EVIDENCE",
+        "stderr": "warn", "reason": "state reason", "next_cursor": "next", "start_cursor": "start"}}
+
+    class Executor(FakeToolExecutor):
+        async def execute_async(self, name, args, raw_args=None):
+            self.received_args = args
+            return ToolExecutionResult(status="ok", result_str=json.dumps(payload))
+
+    class Session(FakeSession):
+        async def get_tool_records(self, **kwargs):
+            if not self.persisted_tool_calls:
+                return []
+            args, fields = self.persisted_tool_calls[0]
+            return [{"id": args[0], "name": args[1], "raw_args": args[3],
+                     "ok": True, "result": json.loads(args[-1]), **fields}]
+
+    class Notifications:
+        def __init__(self):
+            self.results = []
+            self.request_id = None
+
+        async def result_committed(self, session_id, name, call_id, result):
+            self.results.append(json.loads(result))
+
+    session, executor, notifications = Session(), Executor(), Notifications()
+    processor = ToolCallProcessor(executor, task_notifications=notifications)
+    call = ParsedToolCall(call_id="shell", name="bash", raw_args="{}")
+    first = [event async for event in processor.execute(session, [call])][-1]
+    executor.received_args = None
+    reused = [event async for event in processor.execute(session, [call])][-1]
+    assert executor.received_args is None
+    assert len(session.persisted_tool_calls) == 1
+    assert first.status == reused.status == event_status
+    assert first.error_type == reused.error_type == error_type
+    assert notifications.results == [payload, payload]
+    assert json.loads(session.persisted_tool_calls[0][0][-1]) == payload
 
 
 @pytest.mark.asyncio

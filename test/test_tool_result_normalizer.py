@@ -160,11 +160,11 @@ async def test_stable_serialization_for_same_input() -> None:
 
 
 @pytest.mark.asyncio
-async def test_task_status_and_empty_streams_remain_structured() -> None:
+async def test_empty_running_task_still_offers_continuation() -> None:
     payload = {"ok": True, "tool": "task_control", "data": {
         "task_id": "task_empty", "status": "running", "stdout": "", "stderr": "", "exit_code": None}}
     result = await ToolResultNormalizer().normalize(payload)
-    assert result.model_content == "(no tool output)"
+    assert "still running as task task_empty" in result.model_content
 
 
 @pytest.mark.asyncio
@@ -196,3 +196,44 @@ async def test_shell_model_projection_reports_a_non_zero_exit() -> None:
     result = await ToolResultNormalizer().normalize(payload)
 
     assert result.model_content == "boom\n\nCommand exited with code 2."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output", ["汉" * 20000, "x\n" * 5000])
+async def test_real_shell_shape_respects_model_bounds_and_preserves_full_output(tmp_path, output):
+    store = MemoryOutputStore(tmp_path)
+    payload = {"ok": True, "tool": "bash", "data": {
+        "task_id": "task_big", "status": "exited", "stdout": output, "stderr": "",
+        "exit_code": 0, "start_cursor": "start", "next_cursor": "end"}, "meta": {"truncated": False}}
+    result = await ToolResultNormalizer().normalize(payload, output_store=store, session_id="session", call_id="call")
+    assert len(result.model_content.encode("utf-8")) <= 25 * 1024
+    assert len(result.model_content.splitlines()) <= 2000
+    assert "Output truncated." in result.model_content
+    full_path = tmp_path / "session" / "call.txt"
+    assert str(full_path.resolve()) in result.model_content
+    assert json.loads(full_path.read_text())["data"]["stdout"] == output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,reason", [
+    ("timed_out", "Runtime deadline exceeded (100 ms)"),
+    ("cancelled", "Explicit task cancellation"),
+    ("lost", "Worker owner disappeared"),
+    ("failed", "Process could not start"),
+])
+async def test_shell_projection_preserves_terminal_state_and_reason(status, reason):
+    payload = {"ok": True, "tool": "task_control", "data": {
+        "task_id": "task", "status": status, "reason": reason, "stdout": "", "stderr": "", "exit_code": None}}
+    result = await ToolResultNormalizer().normalize(payload)
+    assert status in result.model_content
+    assert reason in result.model_content
+
+
+@pytest.mark.asyncio
+async def test_completed_output_page_keeps_sequential_cursor():
+    payload = {"ok": True, "tool": "task_control", "data": {
+        "task_id": "task", "status": "exited", "stdout": "page", "stderr": "", "exit_code": 0,
+        "records": [], "start_cursor": "beginning", "next_cursor": "next-page"},
+        "meta": {"truncated": True, "output_path": "/tmp/full.log"}}
+    result = await ToolResultNormalizer().normalize(payload)
+    assert "task_id task, cursor next-page" in result.model_content

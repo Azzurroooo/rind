@@ -23,7 +23,6 @@ _TRUNCATION_MARKER = "\n\nOutput truncated. Full output is available at {output_
 _READ_PAGE_MARKER = "\n\nRead output is limited to the requested page. Use the original path and next_offset in meta to continue reading.\n"
 _READ_PREVIEW_MARKER = "\n\nRead preview is incomplete. Read the original path in smaller ranges.\n"
 _EMPTY_SHELL_OUTPUT = "(no tool output)"
-_SHELL_CONTINUE_REASONS = frozenset({"yield_timeout", "released"})
 _SHELL_WARNINGS = (
     ("output_incomplete", "Output log is incomplete"),
     ("output_error", "Output log error"),
@@ -80,6 +79,11 @@ class ToolResultNormalizer:
         is_read = identity[1] == "read_file"
         is_mutation = identity[0] and identity[1] in {"edit_file", "write_file"}
         preview_required = total_bytes > self.max_preview_bytes or total_lines > self.max_preview_lines
+        is_task = isinstance(payload, dict) and isinstance(payload.get("data"), dict) and payload["data"].get("task_id")
+        if is_task:
+            shell_output = "\n".join(part.rstrip("\n") for part in (payload["data"].get("stdout"), payload["data"].get("stderr")) if part)
+            shell_bytes, shell_lines = self._text_metrics(shell_output)
+            preview_required |= shell_bytes > self.max_preview_bytes or shell_lines > self.max_preview_lines
         needs_preview = preview_required or existing_truncated
         output_path = existing_path
         if needs_preview and not is_read and not is_mutation and not output_path and output_store is not None and session_id and call_id:
@@ -97,9 +101,8 @@ class ToolResultNormalizer:
             include_notice=False,
             metadata=source_metadata,
         )
-        is_task = isinstance(payload, dict) and isinstance(payload.get("data"), dict) and payload["data"].get("task_id")
         if is_task:
-            model_content = self._project_shell_for_model(payload)
+            model_content = self._project_shell_for_model(payload, shell_output, output_path)
             terminal_content = self._project_task(payload, self.terminal_max_bytes, output_path)
         elif read_payload is not None:
             model_content = self._project_read_for_model(read_payload)
@@ -150,28 +153,51 @@ class ToolResultNormalizer:
             text = render()
         return text
 
-    @staticmethod
-    def _project_shell_for_model(payload: dict) -> str:
-        """A shell result is the command output plus how to continue. The harness record
-        (task id, cursors, internal ids, timestamps, shell paths) stays out of the prompt."""
+    def _project_shell_for_model(self, payload: dict, output: str, output_path: str | None) -> str:
         data = payload["data"]
         meta = dict(payload.get("meta") or {})
-        streams = [part.rstrip("\n") for part in (data.get("stdout"), data.get("stderr")) if part]
-        output = "\n".join(streams)
         notes = []
+        status = data.get("status")
+        if status in {"timed_out", "cancelled", "lost", "failed"}:
+            notes.append(f"Command status: {status}." + (f" {data['reason']}" if data.get("reason") else ""))
         exit_code = data.get("exit_code")
         if isinstance(exit_code, int) and exit_code != 0:
             notes.append(f"Command exited with code {exit_code}.")
-        if str(data.get("return_reason") or "") in _SHELL_CONTINUE_REASONS:
+        if status == "running":
             notes.append(
                 f"Command is still running as task {data.get('task_id')}. Continue it with "
-                f"task_control (action read, task_id, cursor {data.get('next_cursor')}), or rely on "
+                f"task_control (action read, task_id {data['task_id']}, cursor {data.get('next_cursor')}), or rely on "
                 "notify=on_exit to deliver completion."
             )
         if meta.get("truncated"):
-            notes.append(_TRUNCATION_MARKER.format(output_path=meta.get("output_path") or "the output file").strip())
+            notes.append(_TRUNCATION_MARKER.format(output_path=output_path or "the output file").strip())
+            cursor = data.get("next_cursor") if "records" in data else data.get("start_cursor")
+            if cursor:
+                notes.append(f"Read more output with task_control (action read, task_id {data['task_id']}, cursor {cursor}).")
         notes.extend(f"{label}: {meta[key]}" for key, label in _SHELL_WARNINGS if meta.get(key))
-        return "\n\n".join(part for part in (output, *notes) if part) or _EMPTY_SHELL_OUTPUT
+
+        def render(preview: str) -> str:
+            return "\n\n".join(part for part in (preview, *notes) if part) or _EMPTY_SHELL_OUTPUT
+
+        def fits(text: str) -> bool:
+            return len(text.encode("utf-8")) <= self.max_preview_bytes and self._line_count(text) <= self.max_preview_lines
+
+        text = render(output)
+        if fits(text):
+            return text
+        if not meta.get("truncated"):
+            notes.append(_TRUNCATION_MARKER.format(output_path=output_path or "the output file").strip())
+        notes.append("Preview was shortened. Inspect the full output file for omitted content before advancing a task cursor.")
+        low, high = 0, min(len(output), self.max_preview_bytes)
+        best = render("")
+        while low <= high:
+            count = (low + high) // 2
+            candidate = render(self._preview(output, count))
+            if fits(candidate):
+                best, low = candidate, count + 1
+            else:
+                high = count - 1
+        return best
 
     def _project_by_bytes(
         self,
