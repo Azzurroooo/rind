@@ -475,7 +475,10 @@ class AgentRuntime:
                     f"Failed to persist user input: {exc}",
                     code=type(exc).__name__,
                 ) from exc
-        await self._session_store.persist_user_input(content, meta=meta)
+        if meta is None:
+            await self._session_store.persist_user_input(content)
+        else:
+            await self._session_store.persist_user_input(content, meta=meta)
 
     async def _persist_message(self, role: str, content: str, meta: dict | None = None) -> None:
         try:

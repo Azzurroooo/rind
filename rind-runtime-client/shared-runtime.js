@@ -83,7 +83,9 @@ export async function connectSharedRuntime(options = {}) {
   try {
     try { const current = await checked(await connect()); if (current) return current; } catch {}
     const log = await open(path.join(paths.directory, "runtime.log"), "a", 0o600);
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ python: options.python, repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome || options.home })], { detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd] });
+    // The host must not hold the caller's working directory open: on Windows a
+    // process whose current directory is inside a folder blocks removing it.
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ python: options.python, repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome || options.home })], { cwd: paths.directory, detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd] });
     child.on("error", () => {}); child.unref(); await log.close();
     for (let i = 0; i < 100; i++) {
       try { return await connect(); } catch {}
