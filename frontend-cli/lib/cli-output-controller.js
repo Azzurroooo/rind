@@ -13,7 +13,7 @@ import {
   questionAnswerText,
   questionText,
 } from "./rendering.js";
-import { delegatedTask } from "./tool-display.js";
+import { rememberDelegation, settledDelegations } from "./delegation-state.js";
 import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
@@ -418,12 +418,13 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     return value ? `${turnContext}:${value}` : "";
   }
 
-  function renderHistory(messages, { notice = "" } = {}) {
+  function renderHistory(messages, { notice = "", pendingDelegations = null } = {}) {
     if (notice) {
       appendBlock(new TextBlock(outputBlockText(notice), { leading: blockCount > 0 }));
     }
     const pendingTools = new Map();
-    const delegated = new Map();
+    const delegated = state.display.pendingDelegations ||= new Map();
+    delegated.clear();
     const flushPendingTools = () => {
       for (const [toolCallId, tool] of pendingTools.entries()) {
         beginTool({
@@ -447,7 +448,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         closeAssistant();
         const content = messageText(message?.content);
         if (message?._rind_meta?.kind === "team_delivery") {
-          for (const taskId of settledDelegations(content, delegated.keys())) {
+          for (const taskId of settledDelegations(content)) {
             delegated.delete(taskId);
           }
           writeDelivery(content);
@@ -481,10 +482,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         pendingTools.delete(toolCallId);
         const content = messageText(message?.content);
         if (tool.name === "delegate") {
-          const task = delegatedTask(content);
-          if (task) {
-            delegated.set(task.taskId, task.assignee);
-          }
+          rememberDelegation(delegated, content, state.session.info.session_id);
         }
         beginTool({
           tool_call_id: toolCallId,
@@ -501,10 +499,17 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     }
     flushPendingTools();
     closeAssistant();
+    // A tail page may omit the delegate call. Management owns the full task
+    // state and overrides reconstruction when that snapshot is available.
+    if (Array.isArray(pendingDelegations)) {
+      delegated.clear();
+      for (const task of pendingDelegations) delegated.set(task.taskId, task);
+    }
     // Restoring a leader that still waits for delegated work says so, the same
     // way a finished turn does.
     if (delegated.size) {
-      log(() => delegatedWaitingLine([...delegated.values()]));
+      const assignees = [...delegated.values()].map(task => task.assignee);
+      log(() => delegatedWaitingLine(assignees));
     }
     redraw(true);
   }
@@ -537,12 +542,6 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   };
 }
 
-
-// The delivery text names the tasks that settled; only those stop waiting.
-function settledDelegations(text, taskIds) {
-  const body = String(text || "");
-  return [...taskIds].filter(taskId => body.includes(taskId));
-}
 
 function messageText(content) {
   if (typeof content === "string") {

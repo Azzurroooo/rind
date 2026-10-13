@@ -221,13 +221,13 @@ function terminalBody(tool: ToolEntry, data: Record<string, unknown>): ToolBody 
 
 function delegate(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
   const data = rec(tool.result?.data)
-  const agent = str(tool.arguments.agent_id) || str(data.agent_id)
-  const task = clipLine(str(tool.arguments.task), 80)
+  const agent = str(data.assignee) || str(tool.arguments.to) || str(rec(tool.arguments.new).name) || str(tool.arguments.agent_id) || str(data.agent_id)
+  const task = clipLine(str(tool.arguments.brief) || str(tool.arguments.message) || str(tool.arguments.task), 80)
   const status = str(data.status)
   const summary = str(data.summary).trim()
   return {
     verb: "Delegated to", target: [agent, task].filter(Boolean).join(": "), path: false,
-    meta: [...(status ? [{ text: status }] : []), ...durationMeta(tool)],
+    meta: [...(str(data.taskId) ? [{ text: "task " + str(data.taskId) }] : []), ...(status ? [{ text: status }] : []), ...durationMeta(tool)],
     body: summary ? { type: "markdown", text: summary, preview: bodyCaps.markdownPreview } : undefined,
   }
 }

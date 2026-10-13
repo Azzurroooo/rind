@@ -13,6 +13,8 @@ const methods = {
   goalClear: "rind/goal/clear",
   commandExecute: "rind/command/execute",
   sessionCompact: "rind/session/compact",
+  sessionCreate: "session/create",
+  sessionPrompt: "session/prompt",
   sessionSwitch: "session/switch",
   sessionFork: "session/fork",
   sessionReplay: "session/replay",
@@ -126,7 +128,7 @@ function createHarness({
   const controller = createCliRuntimeController({
     client,
     methods,
-    sessionScopedMethods: new Set(["rind/session/steer", methods.sessionFork, methods.sessionReplay]),
+    sessionScopedMethods: new Set(["rind/session/steer", methods.sessionPrompt, methods.sessionFork, methods.sessionReplay]),
     turnScopedMethods: new Set(["rind/session/steer"]),
     requireInitialization: (value) => value,
     state,
@@ -485,6 +487,47 @@ function deferred() {
   const promise = new Promise((value) => { resolve = value; });
   return { promise, resolve };
 }
+
+for (const changed of ["session", "turn", "history", "completed turn", "event sequence"]) {
+  test(`/history cannot overwrite the transcript after ${changed} changes`, async () => {
+    const gate = deferred();
+    const harness = createHarness({ replay: () => gate.promise });
+    await harness.controller.ensureRuntime();
+    harness.state.display.history = { sessionId: "session-a", start: 400, total: 600 };
+    const before = harness.cleared();
+    const loading = harness.controller.runHistoryLoader();
+    await waitForRequests(harness.requests, methods.sessionReplay, 1);
+    if (changed === "session") harness.state.session.info.session_id = "session-b";
+    if (changed === "turn") harness.state.turn.active = true;
+    if (changed === "history") harness.state.display.history = { sessionId: "session-a", start: 200, total: 600 };
+    if (changed === "completed turn") harness.state.display.lastTurnId = "new-finished-turn";
+    if (changed === "event sequence") harness.state.display.lastEventSequence += 1;
+    gate.resolve({ messages: [{ role: "user", content: "old history" }], message_total: 600 });
+    await loading;
+    assert.equal(harness.cleared(), before);
+  });
+}
+
+test("deleting the current conversation clears its reserved identity before the next prompt", async () => {
+  const harness = createHarness();
+  await harness.controller.ensureRuntime();
+  harness.state.session.reservedId = "session-a";
+  harness.state.session.pendingName = "old name";
+  harness.state.display.pendingDelegations.set("task-a", { sessionId: "session-a" });
+  harness.controller.sessionDeleted("another-session");
+  assert.equal(harness.state.session.info.session_id, "session-a");
+  harness.controller.sessionDeleted("session-a");
+  assert.equal(harness.state.session.reservedId, "");
+  assert.equal(harness.state.session.pendingName, "");
+  assert.equal(harness.state.display.pendingDelegations.size, 0);
+  const original = harness.client.request.bind(harness.client);
+  harness.client.request = (method, params) => method === methods.sessionCreate
+    ? (harness.requests.push({ method, params }), Promise.resolve({ session_id: "fresh-id" }))
+    : original(method, params);
+  await harness.controller.request(methods.sessionPrompt, { input: "new question" });
+  assert.equal(harness.requests.find(item => item.method === methods.sessionCreate).params.session_id, undefined);
+  assert.equal(harness.requests.at(-1).params.session_id, "fresh-id");
+});
 
 async function waitForRequests(requests, method, count) {
   while (requests.filter((item) => item.method === method).length < count) {

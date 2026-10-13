@@ -156,6 +156,11 @@ describe("web tools", () => {
 });
 
 describe("delegate, creation, goal, hidden and unknown tools", () => {
+  it("uses the management delegate contract and exposes the returned task ID", () => {
+    const view = toolView(tool("delegate", { to: "agent-id", brief: "Review the diff" }, ok({ taskId: "task-id", assignee: "Reviewer", status: "queued" })));
+    expect(view.target).toBe("Reviewer: Review the diff");
+    expect(view.meta.map(part => part.text)).toContain("task task-id");
+  });
   it("delegate shows agent and task with the final answer as markdown", () => {
     const view = toolView(tool("delegate", { agent: "reviewer", task: "Review the diff" }, ok({ status: "completed", summary: "Looks good." }), { duration_ms: 65000 }));
     expect(view).toMatchObject({ verb: "Delegated to", target: "reviewer: Review the diff", agent: "reviewer" });

@@ -334,6 +334,7 @@ const runtimeController = createCliRuntimeController({
   renderHistory,
   clearTranscript,
   onSessionRestored: rebindSendEndpoint,
+  getPendingDelegations: async id => management.pendingDelegations ? management.pendingDelegations(id) : null,
   openManagedSession: management.chatContext ? (runtimeSessionId, prefill) => enterManagement({ ...management.chatContext, runtimeSessionId, prefill }) : null,
   clearPendingInputs: (...args) => inputActions.clearPendingInputs(...args),
   closeAssistant,
@@ -442,6 +443,7 @@ taskMonitorController = createTaskMonitorController({
 });
 const eventController = createEventController({
   state: {
+    get pendingDelegations() { return displayState.pendingDelegations; },
     get sessionInfo() {
       return sessionState.info;
     },
@@ -479,6 +481,7 @@ const eventController = createEventController({
     clearCompactContext: () => compactContextState.clear(),
     deliverQueuedInput: (...args) => inputActions.deliverQueuedInput(...args),
     clearQueuedInputs: (...args) => inputActions.clearPendingInputs(...args),
+    sessionDeleted: id => { runtimeController.sessionDeleted(id); management.sessionDeleted?.(id); },
   },
 });
 inputActions = createCliInputActions({

@@ -349,7 +349,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       // Cancelled by its delegator: nothing to report back.
       task.returned = true;
       const run = Object.values(state.runs).find(r => r.taskId === task.id && activeRun(r));
-      if (run && live.has(run.id)) return stopRun(state, by, run, task);
+      if (run && live.has(run.id)) return { ...stopRun(state, by, run, task), taskId: task.id, status: "cancelled" };
       requireValue(!["done", "cancelled"].includes(task.status), "TASK_FINISHED", "This task has already finished.");
       task.status = "cancelled"; delete task.dispatch; delete task.blockedOn;
       note(state, task.id, by, "Cancelled task."); wakeDelegator(state, task);
@@ -360,7 +360,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     note(state, task.id, by, message);
     delete task.report; delete task.deliveredAt; task.returned = false;
     resume(task, "From " + nameOf(state, by) + ": " + message);
-    return { taskId: task.id, status: "queued", next: END_TURN };
+    return { taskId: task.id, assignee: nameOf(state, task.assigneeAgentId), status: "queued", next: END_TURN };
   }
   function markDelivered(task: Task) { task.status = "done"; task.deliveredAt = new Date().toISOString(); delete task.blockedOn; }
   function deleteTeam(state: State, teamId: string) {

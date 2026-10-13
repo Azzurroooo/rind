@@ -11,7 +11,8 @@ import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { startServer } from "../../agent-management/dist/ipc.js";
 import { connectClient } from "../../agent-management/dist/client.js";
-import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
+import { createSharedRuntimeClient, connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { prepareManagement } from "../lib/agents-session.js";
 import { createActions } from "../lib/agents-actions.js";
 import { emptyAgentsSnapshot } from "../lib/agents-model.js";
 
@@ -73,6 +74,17 @@ test("deleting a saved conversation removes it and refuses while it runs or is s
   await window.request("session/cancel", { session_id: sessionId });
   await turn;
   await assert.rejects(client.request("deleteSession", { runtimeSessionId: sessionId }), { code: "SESSION_OPEN" }, "a shown conversation is not deleted");
+  const host = await connectSharedRuntime({ rindHome: home, start: false });
+  try {
+    await assert.rejects(host.request("session/delete", { session_id: sessionId }), { code: "SESSION_OPEN" }, "the host also protects shown sessions from direct callers");
+    const [created, removed] = await Promise.allSettled([
+      host.request("session/create", { session_id: "opening-race", workspace_root: workspace }),
+      host.request("session/delete", { session_id: "opening-race" }),
+    ]);
+    assert.equal(created.status, "fulfilled");
+    assert.equal(removed.status, "rejected");
+    assert.equal(removed.reason.code, "SESSION_BUSY");
+  } finally { host.close(); }
 
   await window.shutdown();
   for (let i = 0; i < 50; i++) {
@@ -83,4 +95,49 @@ test("deleting a saved conversation removes it and refuses while it runs or is s
   const independent = await client.request("listSessions", { independent: true });
   assert.ok(!independent.workspaces.some(group => group.sessions.some(session => session.runtimeSessionId === sessionId)), "every list drops it");
   await assert.rejects(client.request("deleteSession", { runtimeSessionId: sessionId }), { code: "SessionNotFound" }, "it cannot be deleted twice");
+});
+
+test("a hidden managed window renews its binding and tools after its conversation is deleted", { timeout: 90000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-delete-managed-"));
+  const launch = { home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  const server = await startServer(launch);
+  const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
+  let management, window;
+  t.after(async () => {
+    await window?.shutdown(); await management?.close(); client.close(); await server.close();
+    await (await import("./helpers/rind-home.js")).removeRindHome(home);
+  });
+  management = await prepareManagement(["--manager"], launch, { interactive: true });
+  window = createSharedRuntimeClient({ rindHome: home, python: launch.python, repoRoot: launch.repoRoot,
+    cliArgs: management.args, externalTools: management.externalTools, onMessage(message) {
+      if (message.event?.type === "session_deleted") management.sessionDeleted(message.session_id);
+    } });
+  await window.request("initialize");
+  const original = await window.request("session/create");
+  await management.bind(original);
+  const oldToken = management.externalTools.env.RIND_MANAGEMENT_TOKEN;
+  await window.setVisible(false);
+  await client.request("deleteSession", { runtimeSessionId: original.session_id });
+  await assert.rejects(client.request("deleteSession", { runtimeSessionId: original.session_id }), { code: "SessionNotFound" });
+  await Promise.all([management.before("session/create", {}), management.before("session/create", {})]);
+  const replacement = await window.request("session/create");
+  await management.bind(replacement);
+  assert.notEqual(replacement.session_id, original.session_id);
+  const token = management.externalTools.env.RIND_MANAGEMENT_TOKEN;
+  assert.notEqual(token, oldToken);
+  const scoped = await connectClient({ endpoint: server.paths.endpoint, token, runtimeSessionId: replacement.session_id });
+  try {
+    await scoped.request("snapshot");
+    const team = await client.request("createTeam", { name: "Delegation recovery" });
+    const agent = await client.request("createWorkspace", { teamId: team.id, name: "Worker" });
+    const task = await scoped.request("assignTask", { teamId: team.id, assigneeAgentId: agent.id, brief: "Queued local fixture", start: false });
+    assert.deepEqual(await management.pendingDelegations(replacement.session_id), [{ taskId: task.id, assignee: agent.name, sessionId: replacement.session_id }]);
+    assert.deepEqual(await management.pendingDelegations(original.session_id), []);
+    await scoped.request("cancelTask", { taskId: task.id });
+    assert.deepEqual(await management.pendingDelegations(replacement.session_id), []);
+  } finally { scoped.close(); }
+  const snapshot = await client.request("snapshot");
+  assert.ok(snapshot.sessions.some(s => s.runtimeSessionId === replacement.session_id));
+  assert.ok(!snapshot.sessions.some(s => s.runtimeSessionId === original.session_id));
+  assert.equal(snapshot.sessions.length, 1, "concurrent requests share one replacement registration");
 });

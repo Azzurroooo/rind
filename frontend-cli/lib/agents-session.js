@@ -163,11 +163,23 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     }
     session = await client.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: asManager, runtimeSessionId: resumeId, shared: true });
     const externalTools = await client.request("sessionTools", { sessionId: session.id });
+    let needsAttachment = false, attaching;
     const runtimeArgs = !argument(options.args, "--cwd") && !argument(options.args, "--dir") ? ["--cwd", workspace, ...options.args] : options.args;
     return {
       chatContext: { agent, teamId: team?.id, manager: asManager },
       prefill: options.prefill,
       shared: true, args: runtimeArgs, externalTools, label: asManager ? "Manager" : team ? "Team: " + team.name : "Independent member session",
+      sessionDeleted(id) {
+        if (id !== runtimeSessionId) return;
+        runtimeSessionId = "";
+        needsAttachment = true;
+      },
+      async pendingDelegations(id) {
+        if (id !== runtimeSessionId || needsAttachment) return [];
+        const snapshot = await client.request("snapshot");
+        return snapshot.tasks.filter(task => task.originSessionId === session.id && !task.returned && task.status !== "cancelled")
+          .map(task => ({ taskId: task.id, assignee: snapshot.agents.find(agent => agent.id === task.assigneeAgentId)?.name || task.assigneeAgentId, sessionId: id }));
+      },
       async bind(info) {
         if (runtimeSessionId && info.session_id !== runtimeSessionId) throw new Error("Open another registered session in a separate rind process.");
         runtimeSessionId = info.session_id;
@@ -175,6 +187,23 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       },
       async before(method, params) {
         if (reconnecting || disconnected) await reconnect();
+        if (method === "session/create" && needsAttachment) {
+          attaching ||= (async () => {
+            const replacement = await client.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: asManager, shared: true });
+            try {
+              const tools = await client.request("sessionTools", { sessionId: replacement.id });
+              // The runtime client holds this object; renew its credentials in place.
+              for (const key of Object.keys(externalTools)) delete externalTools[key];
+              Object.assign(externalTools, tools);
+              session = replacement;
+              needsAttachment = false;
+            } catch (error) {
+              await client.request("detachSession", { sessionId: replacement.id }).catch(() => {});
+              throw error;
+            }
+          })().finally(() => { attaching = null; });
+          await attaching;
+        }
         if (["session/new", "session/switch"].includes(method)) throw new Error("Use Agents management to open another member, or start a separate rind session.");
         if (params?.session_id && runtimeSessionId && params.session_id !== runtimeSessionId) throw new Error("This process is attached to another registered runtime session.");
       },
@@ -185,11 +214,14 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       },
       async close() {
         if (detached) return; detached = true;
-        try { await client.request("detachSession", { sessionId: session.id }); }
+        try { await attaching; if (!needsAttachment) await client.request("detachSession", { sessionId: session.id }); }
         finally { client.close(); }
       },
     };
-  } catch (error) { client.close(); throw error; }
+  } catch (error) {
+    if (session) await client.request("detachSession", { sessionId: session.id }).catch(() => {});
+    client.close(); throw error;
+  }
 }
 function argument(args, flag) { const index = args.indexOf(flag); return index >= 0 ? args[index + 1] : undefined; }
 

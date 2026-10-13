@@ -142,6 +142,7 @@ function resultDataFromRaw(result) {
 // Older recordings nest the host reply one level deeper as a string.
 export function delegatedTask(result) {
   const payload = parseToolResult(result);
+  if (payload.ok === false) return null;
   let data = payload.data;
   if (typeof data === "string") {
     data = parseToolResult(data);
@@ -153,7 +154,7 @@ export function delegatedTask(result) {
     return null;
   }
   const taskId = singleLineText(data.taskId);
-  return taskId ? { taskId, assignee: singleLineText(data.assignee) } : null;
+  return taskId ? { taskId, assignee: singleLineText(data.assignee), status: singleLineText(data.status) } : null;
 }
 
 export function renderToolRunning(context, width) {
