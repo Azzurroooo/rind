@@ -30,7 +30,6 @@ class OpenAIChatCompletionsClient(ChatClient):
         async_client: Any,
         model: str,
         reasoning_effort: str | None = None,
-        workspace_root: str | None = None,
         *,
         reasoning_efforts: tuple[str, ...] = (),
     ):
@@ -41,7 +40,6 @@ class OpenAIChatCompletionsClient(ChatClient):
         self._reasoning_effort_disabled = False
         self._prompt_cache_key_disabled = False
         self._trace_session_id_provider: Callable[[], str] | None = None
-        self._workspace_root = workspace_root
 
     def set_trace_session_id_provider(self, provider: Callable[[], str] | None) -> None:
         """Bind request traces to the active session."""
@@ -218,7 +216,6 @@ class OpenAIChatCompletionsClient(ChatClient):
         ]
         payload = {
             "model": self._model,
-            "cwd": os.path.normcase(os.path.realpath(self._workspace_root or os.getcwd())),
             "system": system_parts,
             "tools": tools,
         }

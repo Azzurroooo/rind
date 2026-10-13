@@ -95,7 +95,7 @@ def build_agent_container(
         session_id=session_id,
         resume_latest=resume_latest,
         model=model,
-        system_prompt=system_prompt or build_system_prompt(prompt_workspace, environment=get_system_info(prompt_workspace)),
+        system_prompt=system_prompt or build_system_prompt(environment=get_system_info(prompt_workspace)),
         workspace_root=workspace_root,
         project_id=project_id,
         owner_agent_id=owner_agent_id,

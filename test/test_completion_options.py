@@ -117,5 +117,5 @@ async def test_factory_passes_only_known_reasoning_capabilities(tmp_path, monkey
     monkeypatch.setattr("agent.infrastructure.llm.provider_service.build_async_client", lambda *_args, **_kwargs: SimpleNamespace())
     factory = MagicMock()
     monkeypatch.setattr("agent.infrastructure.llm.openai_responses.OpenAIResponsesClient", factory)
-    await service.create_chat_client(_settings(tmp_path, provider="openai"), ModelSelection("openai", model, "high"), workspace_root=str(tmp_path))
+    await service.create_chat_client(_settings(tmp_path, provider="openai"), ModelSelection("openai", model, "high"))
     assert factory.call_args.kwargs["reasoning_efforts"] == efforts

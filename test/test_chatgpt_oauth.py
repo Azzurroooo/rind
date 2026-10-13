@@ -181,7 +181,7 @@ async def test_a_signed_in_client_sends_a_fresh_token_and_persists_the_rotated_o
         return httpx.Response(200, json={"id": "r", "object": "response", "status": "completed", "output": [], "usage": {"input_tokens": 1, "output_tokens": 1}}, request=request)
 
     monkeypatch.setattr(httpx.AsyncClient, "send", send)
-    client = await service.create_chat_client(_settings(tmp_path), ModelSelection("openai", "gpt-5.5"), workspace_root=None)
+    client = await service.create_chat_client(_settings(tmp_path), ModelSelection("openai", "gpt-5.5"))
     try:
         await client.create([{"role": "user", "content": "hi"}], max_output_tokens=16)
         await client.create([{"role": "user", "content": "again"}])
@@ -199,7 +199,7 @@ async def test_signing_out_while_a_client_is_open_says_so(tmp_path, monkeypatch)
     store = CredentialStore(tmp_path / "auth.json")
     store.set("openai", Credential(type="oauth", access="old", refresh="r0", expires_at=int(time.time()) + 30, client_id="client"))
     service = ProviderServiceImpl(store)
-    client = await service.create_chat_client(_settings(tmp_path), ModelSelection("openai", "gpt-5.5"), workspace_root=None)
+    client = await service.create_chat_client(_settings(tmp_path), ModelSelection("openai", "gpt-5.5"))
     service.logout("openai")
     try:
         with pytest.raises(ProviderError, match="Signed out of OpenAI"):

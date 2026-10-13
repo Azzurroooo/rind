@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.prompts import build_system_prompt
 
-SYSTEM_PROMPT = build_system_prompt("/test", environment="test environment")
+SYSTEM_PROMPT = build_system_prompt(environment="test environment")
 
 
 def test_system_prompt_describes_single_update_plan_protocol() -> None:

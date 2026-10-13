@@ -179,7 +179,7 @@ class ProviderServiceImpl:
     def logout(self, provider_id: str) -> bool:
         return self.credentials.delete(provider_id)
 
-    async def create_chat_client(self, settings: AppSettings, selection: ModelSelection, *, workspace_root: str | None):
+    async def create_chat_client(self, settings: AppSettings, selection: ModelSelection):
         definition = self._provider(selection.provider_id)
         credential = self._resolve_credential(settings, definition)
         if credential is None:
@@ -198,14 +198,14 @@ class ProviderServiceImpl:
 
             return OpenAIChatCompletionsClient(
                 build_async_client(key, endpoint, max_retries=14), selection.model_id, reasoning_effort,
-                workspace_root=workspace_root, reasoning_efforts=efforts,
+                reasoning_efforts=efforts,
             )
         if definition.api == "openai-responses":
             from agent.infrastructure.llm.openai_responses import OpenAIResponsesClient
 
             return OpenAIResponsesClient(
                 build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort,
-                workspace_root=workspace_root, reasoning_efforts=efforts, subscription=credential.type == "oauth",
+                reasoning_efforts=efforts, subscription=credential.type == "oauth",
             )
         if definition.api == "anthropic-messages":
             from agent.infrastructure.llm.anthropic_messages import AnthropicMessagesClient

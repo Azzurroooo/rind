@@ -165,15 +165,9 @@ def refresh_system_prompt(content: str) -> str:
     return base + suffix
 
 
-_ENVIRONMENT_MARKER = "__RIND_ENVIRONMENT__"
-_WORKSPACE_ROOT_MARKER = "__RIND_WORKSPACE_ROOT__"
-
-
 _SYSTEM_PROMPT_TEMPLATE = f"""
 You are Rind, an advanced AI software engineer and coding agent.
 You are autonomous, efficient, and capable of solving complex programming tasks using tools.
-
-{_ENVIRONMENT_MARKER}
 
 <core_capabilities>
 1. **File System Operations**
@@ -203,7 +197,7 @@ You are autonomous, efficient, and capable of solving complex programming tasks 
 
 <operational_guidelines>
 1. **Path Resolution**
-   - The user's "root directory" is the **Current Working Directory** (`{_WORKSPACE_ROOT_MARKER}`).
+   - The user's "root directory" is the **Current Working Directory** (`.`).
    - ALWAYS refer to it as `.` (dot) in commands.
    - Project-level `RIND.md` and project skills are rooted at the Current Working Directory, not a parent Git root.
    - **Windows warning**: in Git Bash, `/` may map to Git installation root, not project root.
@@ -274,7 +268,7 @@ You are autonomous, efficient, and capable of solving complex programming tasks 
 </operational_guidelines>
 """
 
-def build_system_prompt(workspace_root: str, *, environment: str) -> str:
-    return _SYSTEM_PROMPT_TEMPLATE.replace(_WORKSPACE_ROOT_MARKER, workspace_root, 1).replace(
-        _ENVIRONMENT_MARKER, environment, 1,
-    )
+def build_system_prompt(*, environment: str) -> str:
+    """Append the environment section last so everything before it stays byte-stable
+    across workspaces and days, and providers can reuse their prompt cache for it."""
+    return _SYSTEM_PROMPT_TEMPLATE + environment

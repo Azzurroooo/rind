@@ -179,7 +179,7 @@ class SessionService:
         if selection is None:
             selection, selection_source = await asyncio.to_thread(self.choose_selection, root)
         model, reasoning_effort, provider = selection.model_id, selection.reasoning_effort, selection.provider_id
-        system_prompt = build_system_prompt(str(root), environment=get_system_info(root))
+        system_prompt = build_system_prompt(environment=get_system_info(root))
         store = JsonlSessionStore(
             session_dir=self.session_dir,
             session_id=session_id or new_session_id(),
@@ -319,7 +319,7 @@ class SessionService:
             session_id=clean,
             model=info["model"],
             provider=info.get("provider") or "openai-compatible",
-            system_prompt=build_system_prompt(str(root), environment=get_system_info(root)),
+            system_prompt=build_system_prompt(environment=get_system_info(root)),
             workspace_root=root,
             reasoning_effort=info.get("reasoning_effort") or "",
         )

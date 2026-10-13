@@ -699,7 +699,7 @@ class ExecutionCoordinator:
             str(metadata.get("model") or settings.model),
             str(metadata.get("reasoning_effort") or settings.reasoning_effort),
         )
-        chat_client = await self._chat_client_for(settings, selection, root)
+        chat_client = await self._chat_client_for(settings, selection)
         container = None
         try:
             container = build_agent_container(
@@ -737,10 +737,10 @@ class ExecutionCoordinator:
         self._active[clean] = _ActiveExecution(container=container, chat_client=chat_client, selection=selection)
         return container
 
-    async def _chat_client_for(self, settings, selection: ModelSelection, root):
+    async def _chat_client_for(self, settings, selection: ModelSelection):
         """A client, or one whose every request reports why the connection cannot be used."""
         try:
-            return await self._provider_service.create_chat_client(settings, selection, workspace_root=root)
+            return await self._provider_service.create_chat_client(settings, selection)
         except ProviderError as exc:
             if exc.code not in UNUSABLE_CONNECTION_CODES:
                 raise
@@ -767,9 +767,8 @@ class ExecutionCoordinator:
         selection = ModelSelection(str(store.provider or ""), str(store.model or ""), str(store.reasoning_effort or ""))
         if not selection.model_id or selection == execution.selection:
             return
-        root = str(getattr(store, "workspace_root", "") or "")
         settings = await asyncio.to_thread(load_settings)
-        replacement = await self._chat_client_for(settings, selection, root or None)
+        replacement = await self._chat_client_for(settings, selection)
         previous = execution.chat_client
         execution.container.turn_runner.replace_chat_client(replacement, image_input=self._image_input(selection, settings))
         execution.chat_client, execution.selection = replacement, selection

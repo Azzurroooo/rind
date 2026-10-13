@@ -162,7 +162,7 @@ async def test_longcat_login_discovery_and_streamed_tool_round_trip(service, mon
     tools = [{'type': 'function', 'function': {'name': 'read_file', 'description': 'Read file',
               'parameters': {'type': 'object', 'properties': {'path': {'type': 'string'}}}}}]
     messages = [{'role': 'user', 'content': 'Read note.txt'}]
-    client = await instance.create_chat_client(settings, ModelSelection('longcat', settings.model, 'high'), workspace_root=None)
+    client = await instance.create_chat_client(settings, ModelSelection('longcat', settings.model, 'high'))
     try:
         events = [event async for event in client.stream(messages, tools)]
         assert any(e.kind == 'reasoning_delta' and e.reasoning == 'Inspect the file.' for e in events)

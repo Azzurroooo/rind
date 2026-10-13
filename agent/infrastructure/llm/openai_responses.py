@@ -21,7 +21,7 @@ from agent.infrastructure.llm.images import image_data_url
 class OpenAIResponsesClient(ChatClient):
     """`subscription`: a ChatGPT sign-in token, which stores nothing and takes no output cap."""
 
-    def __init__(self, async_client: Any, model: str, reasoning_effort: str = "", workspace_root: str | None = None, *, reasoning_efforts: tuple[str, ...] = (), subscription: bool = False) -> None:
+    def __init__(self, async_client: Any, model: str, reasoning_effort: str = "", *, reasoning_efforts: tuple[str, ...] = (), subscription: bool = False) -> None:
         self._client = async_client
         self._model = model
         self._reasoning_effort = reasoning_effort or ""
