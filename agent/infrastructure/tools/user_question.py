@@ -22,11 +22,11 @@ TOOL_SPECS = (
     ToolSpec(
         name="ask_user_question",
         handler=ask_user_question,
-        description="Ask the user a question that must be confirmed by them. Use only when a preference, scope decision, blocking choice, or information genuinely absent from the environment needs a human answer; do not ask about things tools can discover.",
+        description="Ask the user a question that must be confirmed by them. Use only when a preference, scope decision, blocking choice, or information genuinely absent from the environment needs a human answer; do not ask about things tools can discover, and prefer a conservative engineering assumption over asking.",
         param_descriptions={
             "question": "The single, clearly stated question to ask the user",
             "options": {
-                "description": "Optional structured answer list; the first item's label must end with \" (Recommended)\" and no other item may use that suffix. The user can also type free text.",
+                "description": "Optional structured answer list; the first item's label must end with \" (Recommended)\" and no other item may use that suffix. The user can also type free text, so never add an \"Other\" item.",
                 "items": {
                     "type": "object",
                     "properties": {

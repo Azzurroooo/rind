@@ -25,7 +25,7 @@ from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
 from agent.infrastructure.tools.shell.tool import ShellTools
 from agent.infrastructure.tools.web.session_pool import WebSessions
 from agent.application.images import prepare_image_messages
-from agent.prompts import build_goal_policy_prompt, build_system_prompt, build_tool_guidance
+from agent.prompts import build_goal_policy_prompt, build_system_prompt
 from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
 from agent.application.task_notifications import TaskNotifications
 
@@ -135,13 +135,10 @@ def build_agent_container(
     )
     tool_specs = (*catalog, *external_tool.specs(session_store.session_id)) if external_tool else catalog
     tool_registry = DefaultToolRegistry(tool_specs)
-    # The system prompt describes only tools this session has.
     runtime_system_messages = [
         {"role": "system", "content": content, "_context_kind": kind}
         for kind, content in (
-            ("tool_guidance", build_tool_guidance(spec.name for spec in tool_specs)),
             ("external_tools", external_tool.instructions if external_tool else ""),
-            ("goal_policy", build_goal_policy_prompt() if enable_goal else ""),
         )
         if content
     ]
@@ -158,6 +155,7 @@ def build_agent_container(
     context_manager = ContextManager(
         estimator=ContextEstimator(ContextBudget(context_window_tokens=context_window)),
         rind_doc_provider=lambda: build_rind_doc_context(workspace_root),
+        goal_policy_provider=build_goal_policy_prompt if enable_goal else None,
     )
     usage_recorder = partial(append_usage_record, default_usage_ledger_path())
     compaction_service = shared_resources.compaction_service if shared_resources else CompactionService(

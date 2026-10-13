@@ -443,3 +443,25 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+@pytest.mark.asyncio
+async def test_goal_policy_is_composed_only_while_a_goal_is_active():
+    from agent.prompts import build_goal_policy_prompt
+
+    goal = {"objective": "ship it", "status": "active"}
+
+    class GoalSession:
+        def __init__(self, active):
+            self._active = active
+        async def get_messages_slice(self, **kwargs):
+            return [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}]
+        async def get_goal(self):
+            return dict(goal) if self._active else None
+
+    manager = ContextManager(goal_policy_provider=build_goal_policy_prompt)
+    without = await manager.build_messages_async(GoalSession(False))
+    with_goal = await manager.build_messages_async(GoalSession(True))
+
+    assert not [m for m in without.messages if "goal execution policy" in str(m.get("content", "")).lower()]
+    assert [m for m in with_goal.messages if "goal execution policy" in str(m.get("content", "")).lower()]

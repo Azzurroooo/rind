@@ -46,11 +46,13 @@ class ContextManager:
         hot_message_limit: int = 6,
         skill_catalog_char_limit: int = 8000,
         rind_doc_provider=None,
+        goal_policy_provider=None,
     ):
         self._estimator = estimator or ContextEstimator()
         self._hot_message_limit = max(1, int(hot_message_limit))
         self._skill_catalog_char_limit = max(0, int(skill_catalog_char_limit))
         self._rind_doc_provider = rind_doc_provider
+        self._goal_policy_provider = goal_policy_provider
 
     async def build_messages_async(
         self,
@@ -85,6 +87,7 @@ class ContextManager:
             }
         extra_system_messages = (
             rind_messages
+            + await self._goal_policy_message(session)
             + self._valid_system_messages(transient_system_messages)
             + skill_messages
         )
@@ -325,6 +328,12 @@ class ContextManager:
 
     def _strip_internal_fields(self, message: dict) -> dict:
         return {key: value for key, value in dict(message).items() if not key.startswith("_")}
+
+    async def _goal_policy_message(self, session) -> list[dict]:
+        """The goal policy applies while a goal is active; the tool schema carries its mechanics."""
+        if self._goal_policy_provider is None or await session.get_goal() is None:
+            return []
+        return [{"role": "system", "content": self._goal_policy_provider(), "_context_kind": "goal_policy"}]
 
     def _build_rind_doc_messages(self) -> tuple[list[dict], dict, dict]:
         stats = {

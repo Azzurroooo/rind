@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import Any
 
 from agent.application.ports.task_store import TaskStore
 from agent.application.ports.session_store import SessionStore

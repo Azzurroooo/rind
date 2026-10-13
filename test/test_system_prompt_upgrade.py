@@ -14,8 +14,9 @@ from agent.domain.models import ModelStreamEvent
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.persistence.message_projector import project_messages
 from agent.infrastructure.tools.files.specs import build_file_tool_specs
+from agent.infrastructure.tools.user_question import TOOL_SPECS as USER_QUESTION_TOOL_SPECS
 from agent.infrastructure.tools.registry import DefaultToolRegistry
-from agent.prompts import FILE_TOOL_RULES, _SAVED_CLARIFICATION_SECTION, build_system_prompt, build_tool_guidance, refresh_system_prompt
+from agent.prompts import FILE_TOOL_RULES, _SAVED_CLARIFICATION_SECTION, build_system_prompt, refresh_system_prompt
 from agent.runtime.core.stream_parser import MessageStreamParser
 from agent.runtime.core.turn_runner import TurnRunner
 
@@ -145,6 +146,11 @@ def test_a_saved_prompt_loses_its_clarification_section_and_keeps_the_rest():
     assert refresh_system_prompt(customized) == customized, "a section that is not the built-in one is left alone"
 
 
-def test_tool_guidance_describes_only_tools_the_session_has():
-    assert "ask_user_question" in build_tool_guidance(["read_file", "ask_user_question"])
-    assert build_tool_guidance(["read_file", "bash"]) == ""
+def test_ask_user_question_rules_live_in_its_own_schema():
+    function = USER_QUESTION_TOOL_SPECS[0].schema["function"]
+    options = function["parameters"]["properties"]["options"]["description"]
+
+    assert "conservative engineering assumption" in function["description"]
+    assert "Recommended" in options
+    assert 'never add an "Other" item' in options
+    assert "ask_user_question" not in build_system_prompt(environment="test environment")

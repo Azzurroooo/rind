@@ -149,13 +149,8 @@ def test_container_can_disable_user_question_tool_for_worker_agents() -> None:
         assert "ask_user_question" not in {
             schema["function"]["name"] for schema in worker_container.tool_registry.schemas
         }
-        guidance = lambda container: [
-            message["content"] for message in container.runtime._runtime_system_messages
-            if message["_context_kind"] == "tool_guidance"
-        ]
-        assert "ask_user_question" in guidance(default_container)[0]
-        assert guidance(worker_container) == [], "the prompt never describes a tool the session lacks"
         assert "ask_user_question" not in default_container.session_store.system_prompt
+        assert "ask_user_question" not in worker_container.session_store.system_prompt
 
 
 def test_container_rind_doc_provider_injects_workspace_doc(tmp_path, monkeypatch) -> None:
