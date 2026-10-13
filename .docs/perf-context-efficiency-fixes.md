@@ -66,7 +66,7 @@
 
 ## 3. 验证结果
 
-环境：Linux、Python 3.14.6、Node 24.21.0、npm 11.19.0。Python 使用仓库 `.venv`；Node 测试统一将该 venv 放在 PATH 首部，并设置 `RIND_PYTHON`。所有模型请求为 mock / 本地 fake provider。
+环境：Linux、Python 3.14.6、Node 24.21.0、npm 11.19.0。Python 使用仓库 `.venv`；Node 测试统一将该 venv 放在 PATH 首部，并设置 `RIND_PYTHON`。测试设计使用 mock / 本地 fake provider，但事后诊断确认 12 项 OpenAI SDK 请求测试的 mock 未拦截新版 SDK 的 httpx2 默认传输，假凭据请求到达真实 API 并返回 401；不能将本次全量测试描述为完全离线。
 
 | 命令 | 最终结果 |
 | --- | --- |
@@ -121,3 +121,9 @@ npm --prefix mobile run build
 本次完成当前 Linux 环境下已有自动测试入口和相关构建，没有执行真实计费模型基准、跨平台矩阵、原生 iOS / Android 编译或 frozen runtime 安装验收。因此能确认已发现的实现缺口闭合且未新增自动回归失败，不能据此认证最终成本降幅或所有真实模型任务的能力绝对不退化。
 
 Git 保留备份分支 `review/context-efficiency-before-fixes` → `cdf5ff8`，修复按九个独立提交保存，报告和证据单独提交。构建产生的 iOS 工程版本改动已还原；原有未跟踪 `logs/` 保留。
+
+### Python 基线失败诊断补充
+
+23 项失败分类：12 项旧 mock 未覆盖 OpenAI 3.29.0 默认 httpx2 传输；6 项继承外部 OPENAI_API_KEY，导致模型列表或连接状态与无凭据断言不符；4 项 Windows 路径／shell 假设在 Linux 上不成立；1 项 Google 图片断言未识别 SDK 输出的 mime_type 字段。
+
+2026-10-13 定向诊断：仅在临时测试进程中清除 provider 环境凭据，并为 OpenAI 客户端显式注入原测试能够拦截的 httpx 客户端，相关 22 项用例（18 项原失败及 4 项 Anthropic 对照）全部通过，8.94s。此验证未修改生产代码或测试文件，也不等于真实服务验收。Google MockTransport 捕获到 3 张图片，逐张解码均与原始图片字节相同；Linux 上 C:/Windows/system32 被解析为工作区内部相对路径，../ 与 /etc/passwd 均被拒绝。

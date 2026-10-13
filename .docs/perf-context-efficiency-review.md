@@ -180,7 +180,7 @@ worker crash 使用生产 shared server 和隔离 settings，未调用真实模�
 
 ## 全量自动化测试结果
 
-环境：Linux；Python 3.14.6；Node 24.21.0；npm 11.19.0。全部自动回归使用 mock / 本地 fake provider。针对失败集，另外在同环境运行 main 的 Python、CLI、agent-management 全套对照。
+环境：Linux；Python 3.14.6；Node 24.21.0；npm 11.19.0。自动回归设计使用 mock / 本地 fake provider，但事后确认 12 项 OpenAI SDK 请求测试的旧 mock 漏拦默认 httpx2 传输，假凭据请求到达真实 API 并返回 401；详见修复报告的 Python 基线失败诊断补充。针对失败集，另外在同环境运行 main 的 Python、CLI、agent-management 全套对照。
 
 | 套件 | 分支结果 | main 对照 / 判断 |
 | --- | --- | --- |
