@@ -427,8 +427,14 @@ class CompactionService:
         input_budget = window - max_output_tokens - max(1, window // 20)
         estimator = ContextEstimator()
 
-        def build_request():
-            payload = {"history": corpus[:recent_start], "retained_recent_messages": corpus[recent_start:]}
+        def build_request(history_start: int = 0, dropped_messages: int = 0):
+            payload = {"history": corpus[history_start:recent_start], "retained_recent_messages": corpus[recent_start:]}
+            if dropped_messages:
+                # Say it plainly, so the handoff never claims knowledge it lost.
+                payload["note"] = (
+                    f"{dropped_messages} oldest history messages did not fit the summary budget and were dropped; "
+                    "they stay saved on disk but were not re-examined. Do not claim knowledge of them."
+                )
             messages = build_compact_prompt(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
             attachments = [item for message in corpus for item in message.get("attachments", [])]
             if attachments:
@@ -438,8 +444,11 @@ class CompactionService:
                     messages[-1]["attachments"] = attachments
             return messages
 
+        def estimated(messages):
+            return estimator.estimate_messages(messages).estimated_input_tokens
+
         messages = build_request()
-        if estimator.estimate_messages(messages).estimated_input_tokens <= input_budget:
+        if estimated(messages) <= input_budget:
             return messages
         # Only shorten tool bodies; never cut user constraints or tool arguments.
         for message in corpus:
@@ -448,14 +457,30 @@ class CompactionService:
                 omitted = len(content) - 4000
                 message["content"] = content[:2000] + f"\n[tool result: {omitted} characters omitted]\n" + content[-2000:]
         messages = build_request()
-        estimated = estimator.estimate_messages(messages).estimated_input_tokens
-        if estimated > input_budget:
-            raise BoundaryError(
-                f"Compact input exceeds its budget ({estimated} estimated tokens, {input_budget} available). "
-                "History was preserved; use a model with a larger context window or start a new session.",
-                status="rejected", code="compact_input_too_large",
-            )
-        return messages
+        if estimated(messages) <= input_budget:
+            return messages
+        # Still too large: drop the oldest history units until the summary fits,
+        # the way codex trims from the beginning while keeping recent messages
+        # intact. The conversation record is untouched and the corpus says what
+        # was dropped, so compaction always makes progress instead of refusing.
+        history_units = [unit for unit in self._conversation_units(corpus, 0) if unit[1] <= recent_start]
+        smallest = messages
+        while history_units:
+            history_units = history_units[max(1, len(history_units) // 4):]
+            start = history_units[0][0] if history_units else recent_start
+            # Something must remain to summarize; the newest messages alone can
+            # be too large, and then the same refusal as before applies.
+            if start >= len(corpus):
+                break
+            smallest = build_request(start, start)
+            if estimated(smallest) <= input_budget:
+                return smallest
+        raise BoundaryError(
+            f"Compact input exceeds its budget even after dropping older history "
+            f"({estimated(smallest)} estimated tokens, {input_budget} available). "
+            "History was preserved; use a model with a larger context window or start a new session.",
+            status="rejected", code="compact_input_too_large",
+        )
 
     def _get(self, value: Any, key: str) -> Any:
         if isinstance(value, dict):

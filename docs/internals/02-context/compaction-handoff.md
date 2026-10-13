@@ -16,13 +16,13 @@ flowchart LR
     RAW --> DISK[("Original JSONL retained")]
 ~~~
 
-The split unit must not break apart an assistant tool_calls and its corresponding tool results. The summary request keeps history and retained_recent_messages separate, retaining the latter for reference without duplicating it in the handoff. The budget precheck only shortens over-long tool bodies; it never deletes user text or tool arguments. If the input still does not fit, the commit is rejected. Cancellation is also rechecked after the model returns but before the commit.
+The split unit must not break apart an assistant tool_calls and its corresponding tool results. The summary request keeps history and retained_recent_messages separate, retaining the latter for reference without duplicating it in the handoff. The budget precheck first shortens over-long tool bodies; it never deletes user text or tool arguments. If the input still does not fit, the oldest history units are dropped from the summary input — the way codex trims from the beginning — while retained_recent_messages stay verbatim, so compaction makes progress instead of being refused; the corpus carries a note naming how many messages were dropped, and the full record stays on disk. Only when the newest messages alone exceed the budget is the commit rejected. Cancellation is also rechecked after the model returns but before the commit.
 
 Both successful handoffs and the deterministic fallback record their strategy. An empty summary or a non-success finish reason cannot be treated as a complete handoff, and Provider usage is recorded even when the summary is discarded. On disk, compactions.jsonl and compact_boundary are written, and the next projection replaces the old context with "user continuation message + assistant handoff + recent messages" and validates the message boundary; the original history remains usable for replay.
 
 ## The summary itself must fit in the window
 
-The summary request reserves an output budget of min(8,192, window/10) and then leaves 5% of the window as headroom. Over-long tool bodies can be compressed to their first 2,000 characters and last 2,000 characters, with the omitted amount marked in between; user constraints and tool arguments are exempt from this shortening. If the precheck still does not fit, it fails: you cannot cut out user requirements first and then declare the compaction a success.
+The summary request reserves an output budget of min(8,192, window/10) and then leaves 5% of the window as headroom. Over-long tool bodies can be compressed to their first 2,000 characters and last 2,000 characters, with the omitted amount marked in between; user constraints and tool arguments are exempt from this shortening. If the precheck still does not fit, it drops the oldest history units until the input fits, keeping the newest messages verbatim; the dropped count is stated in the corpus so the handoff cannot claim what it did not see. Only a summary input whose newest messages alone exceed the budget is refused: you cannot cut out user requirements first and then declare the compaction a success.
 
 | Compaction artifact | Purpose |
 | --- | --- |
