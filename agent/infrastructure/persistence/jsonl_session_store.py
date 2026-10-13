@@ -235,7 +235,6 @@ class JsonlSessionStore(SessionStore):
         workspace_root: str | None = None,
         exclude_workspace_roots: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        root = cls.resolve_session_root(session_dir)
         index_path = cls.index_path_for(session_dir)
         files = SessionFiles()
         index = files.load_json(index_path) or {}

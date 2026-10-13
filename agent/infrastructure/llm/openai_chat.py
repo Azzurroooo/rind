@@ -6,7 +6,6 @@ import asyncio
 from contextlib import aclosing
 import hashlib
 import json
-import os
 from typing import Any, AsyncIterator, Callable
 
 import openai
