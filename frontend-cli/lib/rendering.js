@@ -475,6 +475,14 @@ export function promptActivityLine(state = {}) {
     const width = composerWidth(state.frameWidth);
     return clipCells(prefix + dim(middleClipCells(detail, Math.max(0, width - textWidth(prefix + suffix)))) + suffix, width);
   }
+  if (!state.running && state.delegatedWait?.length) {
+    const names = [...new Set(state.delegatedWait.map(singleLine).filter(Boolean))];
+    const detail = names.length ? names.join(", ") : "delegated work";
+    const prefix = `  ${breathingAccent("Waiting", (state.frame || 0) * 300)} ${dim("·")} `;
+    const suffix = ` ${dim("·")} ${dim("wakes on delivery")}`;
+    const width = composerWidth(state.frameWidth);
+    return clipCells(prefix + dim(middleClipCells(detail, Math.max(0, width - textWidth(prefix + suffix)))) + suffix, width);
+  }
   if (!state.running) {
     return "";
   }

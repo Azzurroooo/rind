@@ -43,10 +43,12 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   function inputState() {
     const running = state.turn.active || state.display.activeCompact;
     const backgroundWait = waitingForBackground();
+    const delegatedWait = waitingForDelegations();
     const inputSession = state.input.session;
     return {
       running,
       backgroundWait,
+      delegatedWait,
       label: state.display.activityLabel || (state.display.activeCompact
         ? "Compacting"
         : "Working"),
@@ -66,6 +68,15 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       || state.turn.interruptRequested
       || ["paused", "blocked", "budget_exhausted"].includes(state.session.info.goal?.status)) return null;
     return state.display.backgroundWait;
+  }
+
+  function waitingForDelegations() {
+    if (state.runtime.status !== "ready" || state.turn.active || state.display.activeCompact
+      || state.turn.interruptRequested || waitingForBackground()) return [];
+    const sessionId = String(state.session?.info?.session_id || "");
+    const pending = state.display.pendingDelegations;
+    if (!sessionId || !(pending instanceof Map) || !pending.size) return [];
+    return [...pending.values()].filter(item => item.sessionId === sessionId).map(item => item.assignee);
   }
 
   function setBackgroundWait(waiting) {
@@ -98,7 +109,8 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   function updateActivityTimer() {
     const running = state.turn.active || state.display.activeCompact;
     const waiting = waitingForBackground();
-    if (terminalUi && (running || waiting)) {
+    const delegated = waitingForDelegations();
+    if (terminalUi && (running || waiting || (delegated.length && animateTools && hasColor()))) {
       if (!state.display.activityStartedAt) {
         state.display.activityStartedAt = now();
       }
@@ -106,7 +118,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         return;
       }
       const interval = running ? 300 : hasColor() ? 150 : 1000;
-      const origin = running ? state.display.activityStartedAt : waiting.started_at * 1000;
+      const origin = running || !waiting ? state.display.activityStartedAt : waiting.started_at * 1000;
       const delay = interval - Math.max(0, now() - origin) % interval;
       state.display.activityTimer = schedule(() => {
         state.display.activityTimer = null;
@@ -389,6 +401,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   function clearTranscript() {
     closeAssistant();
     legacyBegunTools.clear();
+    state.display.pendingDelegations?.clear();
     if (!terminalUi) {
       return;
     }
@@ -447,7 +460,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         flushPendingTools();
         closeAssistant();
         const content = messageText(message?.content);
-        if (message?._rind_meta?.kind === "team_delivery") {
+        if (message?._rind_meta?.kind === "team_delivery" || content.startsWith("Delegated work settled:\n")) {
           for (const taskId of settledDelegations(content)) {
             delegated.delete(taskId);
           }
@@ -511,6 +524,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       const assignees = [...delegated.values()].map(task => task.assignee);
       log(() => delegatedWaitingLine(assignees));
     }
+    refreshInputState();
     redraw(true);
   }
 

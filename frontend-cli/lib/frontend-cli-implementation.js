@@ -661,9 +661,17 @@ async function enterManagement(chat) {
     }
   } finally {
     agentsPageAbort = null;
-    if (next.action !== "leave") void runtimeClient.setVisible?.(true);
+    if (next.action !== "leave") {
+      void runtimeClient.setVisible?.(true);
+      const pending = await management.pendingDelegations?.(sessionState.info.session_id).catch(() => null);
+      if (Array.isArray(pending)) {
+        displayState.pendingDelegations.clear();
+        for (const task of pending) displayState.pendingDelegations.set(task.taskId, task);
+      }
+    }
     process.on("SIGINT", handleSigint);
     tui.start({ acquireInput: false });
+    refreshInputState();
     tui.replayAll();
     if (!inputStateData.session) { inputStateData.prefill = draft || ""; inputController.resume(); }
   }

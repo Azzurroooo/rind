@@ -177,7 +177,9 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       async pendingDelegations(id) {
         if (id !== runtimeSessionId || needsAttachment) return [];
         const snapshot = await client.request("snapshot");
-        return snapshot.tasks.filter(task => task.originSessionId === session.id && !task.returned && task.status !== "cancelled")
+        const sessionIds = new Set([session.id, ...snapshot.sessions.filter(s => s.runtimeSessionId === id).map(s => s.id)]);
+        const parentTaskIds = new Set(snapshot.runs.filter(run => sessionIds.has(run.sessionId) && run.taskId).map(run => run.taskId));
+        return snapshot.tasks.filter(task => ((task.originSessionId && sessionIds.has(task.originSessionId)) || (task.parentTaskId && parentTaskIds.has(task.parentTaskId))) && !task.returned && task.status !== "cancelled")
           .map(task => ({ taskId: task.id, assignee: snapshot.agents.find(agent => agent.id === task.assigneeAgentId)?.name || task.assigneeAgentId, sessionId: id }));
       },
       async bind(info) {

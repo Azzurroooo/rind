@@ -17,21 +17,25 @@ export interface ProjectionIndex {
   runsBySession: Map<string, Run[]>;
   sessionsByMember: Map<string, Session[]>;
   tasksByMember: Map<string, Task[]>;
+  delegatedBySession: Map<string, Task[]>;
   reservedWorkspaces: Map<string, Run>;
 }
 
 const push = <T>(map: Map<string, T[]>, key: string, value: T) => { const list = map.get(key); if (list) list.push(value); else map.set(key, [value]); };
 
 export function projectionIndex(state: State, connected: Set<string>, live: Map<string, LiveSession> = new Map()): ProjectionIndex {
-  const runsBySession = new Map<string, Run[]>(), sessionsByMember = new Map<string, Session[]>(), tasksByMember = new Map<string, Task[]>(), reservedWorkspaces = new Map<string, Run>();
+  const runsBySession = new Map<string, Run[]>(), sessionsByMember = new Map<string, Session[]>(), tasksByMember = new Map<string, Task[]>(), delegatedBySession = new Map<string, Task[]>(), reservedWorkspaces = new Map<string, Run>();
   for (const run of Object.values(state.runs)) {
     push(runsBySession, run.sessionId, run);
     const workspace = activeRun(run) && state.agents[state.sessions[run.sessionId]?.agentId]?.canonicalWorkspace;
     if (workspace && (!reservedWorkspaces.has(workspace) || run.status === "unknown")) reservedWorkspaces.set(workspace, run);
   }
   for (const session of Object.values(state.sessions)) push(sessionsByMember, memberKey(session.teamId || "", session.agentId), session);
-  for (const task of Object.values(state.tasks)) push(tasksByMember, memberKey(task.teamId, task.assigneeAgentId), task);
-  return { state, connected, live, runsBySession, sessionsByMember, tasksByMember, reservedWorkspaces };
+  for (const task of Object.values(state.tasks)) {
+    push(tasksByMember, memberKey(task.teamId, task.assigneeAgentId), task);
+    if (task.originSessionId) push(delegatedBySession, task.originSessionId, task);
+  }
+  return { state, connected, live, runsBySession, sessionsByMember, tasksByMember, delegatedBySession, reservedWorkspaces };
 }
 
 // Open: at least one window shows the conversation. Shared conversations are
@@ -39,6 +43,16 @@ export function projectionIndex(state: State, connected: Set<string>, live: Map<
 function isOpen(index: ProjectionIndex, session: Session) {
   const live = index.live.get(session.runtimeSessionId);
   return live ? live.watchers > 0 : !session.shared && index.connected.has(session.id);
+}
+
+// Waiting for delegated work: a task blocked on children, an interactive
+// session whose delegated tasks have not returned yet, or a delivery queued
+// to resume this session.
+function waitingOnDelegation(index: ProjectionIndex, sessionId: string, taskId?: string) {
+  const task = taskId ? index.state.tasks[taskId] : undefined;
+  if (task?.status === "blocked" && task.blockedOn?.responder === "children") return true;
+  if (index.state.deliveries[sessionId]?.texts.length) return true;
+  return (index.delegatedBySession.get(sessionId) || []).some(t => !t.returned && t.status !== "cancelled");
 }
 
 export function memberStatus(index: ProjectionIndex, agentId: string, teamId: string) {
@@ -53,7 +67,7 @@ export function memberStatus(index: ProjectionIndex, agentId: string, teamId: st
   if (runs.some(r => ["starting", "running"].includes(r.status))) return "Working";
   const tasks = index.tasksByMember.get(memberKey(teamId, agentId)) || [];
   if (tasks.some(t => t.status === "needs_attention" || (t.status === "blocked" && t.blockedOn?.responder !== "children"))) return "Needs input";
-  if (tasks.some(t => t.status === "blocked" && t.blockedOn?.responder === "children")) return "Delegated";
+  if (tasks.some(t => t.status === "blocked" && t.blockedOn?.responder === "children") || sessions.some(s => waitingOnDelegation(index, s.id, (index.runsBySession.get(s.id) || []).at(-1)?.taskId))) return "Delegated";
   if (tasks.some(t => t.status === "queued" && t.dispatch)) return "Queued";
   return sessions.some(s => isOpen(index, s)) ? "Open" : "Idle";
 }
@@ -91,6 +105,7 @@ export function sessionStatus(index: ProjectionIndex, sessionId: string) {
     : live?.turn === "running" ? "Working"
     : runningJob(live) ? "Running job"
     : active ? "Working"
+    : waitingOnDelegation(index, sessionId, last?.taskId) ? "Delegated"
     : session && isOpen(index, session) ? "Open" : "Idle";
   const lastActivity = [last?.lastObservedAt, live?.updatedAt].filter(Boolean).sort().at(-1);
   return { status, ...(lastActivity ? { lastActivity } : {}), ...(last?.taskId ? { taskId: last.taskId } : {}), ...(live ? { watchers: live.watchers } : {}) };

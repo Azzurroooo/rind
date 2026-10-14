@@ -33,14 +33,19 @@ test("CLI compact accepts rind send, resumes work and accepts the next turn", {t
       const body = JSON.parse(raw);
       requests.push(body);
       if (!body.stream) {
-        finishCompact = () => {
+        const respond = () => {
           if (response.writableEnded || response.destroyed) return;
           response.writeHead(200, {"Content-Type": "application/json"});
           response.end(JSON.stringify({id: "summary", model: "fake-model", choices: [
             {index: 0, message: {role: "assistant", content: "Keep the original task contract."}, finish_reason: "stop"},
           ], usage: {prompt_tokens: 100, completion_tokens: 10, total_tokens: 110}}));
         };
-        startedCompact();
+        if (!finishCompact) {
+          finishCompact = respond;
+          startedCompact();
+        } else {
+          respond();
+        }
         return;
       }
       const lastUser = body.messages.filter((message) => message.role === "user").at(-1)?.content;
@@ -91,8 +96,12 @@ test("CLI compact accepts rind send, resumes work and accepts the next turn", {t
     assert.ok(stdout.includes("Compact complete."), stdout);
     assert.equal(requests.filter((item) => item.stream).length, 2);
     send("next ordinary turn");
-    await waitFor(() => stdout.includes("NEXT_TURN_OK"));
+    await waitFor(() => /NEXT_TURN_OK[\s\S]*Worked for/.test(stdout));
     assert.equal(requests.filter((item) => item.stream).length, 3);
+    send("/compact");
+    await waitFor(() => (stdout.match(/Compact complete\./g) || []).length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.doesNotMatch(stdout, /Worked for 0ms/, "standalone /compact must not print Worked for 0ms");
     assert.doesNotMatch(stderr, /timed out|not active|failed/i);
     send("/exit");
     await exited;

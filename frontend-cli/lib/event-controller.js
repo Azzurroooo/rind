@@ -33,6 +33,7 @@ export function createEventController({
   // when a delivery names them, not when this window's next turn ends.
   const pendingDelegations = state.pendingDelegations || new Map();
   let toolStats = { completed: 0, failed: 0 };
+  let compactTurn = false;
 
   async function handle(message) {
     if (state.runtimeClosing) {
@@ -47,6 +48,7 @@ export function createEventController({
       return;
     }
     if (WORKING_EVENTS.has(eventType)) {
+      compactTurn = false;
       output.setActivityLabel?.("Working");
     }
     switch (eventType) {
@@ -88,6 +90,7 @@ export function createEventController({
         output.log?.(() => errorLine(event.error));
         return;
       case "turn_started":
+        compactTurn = event.operation === "compact";
         output.setBackgroundWait?.(null);
         // A turn that runs on a delivered result: show the delivery and stop
         // waiting for exactly the tasks it names.
@@ -205,6 +208,7 @@ export function createEventController({
         await input.answerQuestion?.(event);
         return;
       case "queued_input_delivered":
+        compactTurn = false;
         output.deliverQueuedInput?.(event.input || "", event.mode || "steering", event.input_id || "");
         return;
       case "turn_failed":
@@ -233,7 +237,7 @@ export function createEventController({
         } else if (waitingOnDelegations(event.session_id).length) {
           // Nothing runs here and nothing needs the user: work was handed out.
           output.log?.(() => delegatedWaitingLine(waitingOnDelegations(event.session_id).map(item => item.assignee)));
-        } else if (state.activeGoal?.status !== "active") {
+        } else if (!compactTurn && state.activeGoal?.status !== "active") {
           output.log?.(turnCompletedLine(event, toolStats));
         }
         resetTurnState();
@@ -259,6 +263,7 @@ export function createEventController({
   }
 
   function resetTurnState() {
+    compactTurn = false;
     toolStats = { completed: 0, failed: 0 };
     pendingFileChanges.clear();
     pendingPlanInputs.clear();
