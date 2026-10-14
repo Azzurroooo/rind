@@ -22,7 +22,6 @@ import {
 import { executeLocalSlashCommand } from "./local-slash-commands.js";
 import { applySavedTheme, loadCliState, saveCliState } from "./cli-state-store.js";
 import { loadPromptHistory, savePromptHistory } from "./prompt-history-store.js";
-import { setTheme } from "./theme.js";
 import { createTurnController } from "./turn-controller.js";
 import { createCommandController } from "./command-controller.js";
 import { createTaskMonitorController } from "./task-monitor-controller.js";
@@ -70,6 +69,7 @@ const LOGIN_METHODS = { oauth: "Sign in with an account", api_key: "Sign in with
 const LOGIN_CANCELED = "Login canceled.";
 
 export async function runFrontendCliApp(cliArgs = process.argv.slice(2)) {
+applySavedTheme();
 // A conversation opened from Agents hands navigation back to the window that
 // opened it instead of nesting another window inside itself.
 const handoffFile = takeHandoffPath();
@@ -80,7 +80,6 @@ const python = process.env.RIND_PYTHON || undefined;
 const runtimePath = process.env.RIND_RUNTIME_PATH || resolveInstalledRuntime();
 const managementLaunch = { python, repoRoot, runtimePath };
 if (cliArgs[0] === "agents") {
-  applySavedTheme();
   try { await runAgentsCommand(cliArgs.slice(1), managementLaunch); }
   catch (error) { process.stderr.write(error.message + "\n"); process.exitCode = 2; }
   return;
@@ -528,9 +527,6 @@ process.on("SIGINT", handleSigint);
 
 try {
   const persistedState = loadCliState();
-  if (persistedState.theme) {
-    setTheme(persistedState.theme);
-  }
   sessionState.info = { cwd: process.cwd(), management_label: management.label };
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
@@ -661,9 +657,18 @@ async function enterManagement(chat) {
     }
   } finally {
     agentsPageAbort = null;
-    if (next.action !== "leave") void runtimeClient.setVisible?.(true);
+    applySavedTheme(managementLaunch.home);
+    if (next.action !== "leave") {
+      void runtimeClient.setVisible?.(true);
+      const pending = await management.pendingDelegations?.(sessionState.info.session_id).catch(() => null);
+      if (Array.isArray(pending)) {
+        displayState.pendingDelegations.clear();
+        for (const task of pending) displayState.pendingDelegations.set(task.taskId, task);
+      }
+    }
     process.on("SIGINT", handleSigint);
     tui.start({ acquireInput: false });
+    refreshInputState();
     tui.replayAll();
     if (!inputStateData.session) { inputStateData.prefill = draft || ""; inputController.resume(); }
   }

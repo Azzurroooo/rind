@@ -69,10 +69,13 @@ class TaskNotifications:
         projected = set()
         for message in messages:
             meta = message.get("meta") or {}
-            if message.get("role") == "assistant":
-                pending_calls.update(call["id"] for call in meta.get("tool_calls", []) if call.get("id"))
-            if message.get("role") == "tool":
+            role = message.get("role")
+            if role == "assistant":
+                pending_calls = {call["id"] for call in meta.get("tool_calls", []) if call.get("id")}
+            elif role == "tool":
                 pending_calls.discard(message.get("tool_call_id"))
+            elif role == "user":
+                pending_calls.clear()
             if meta.get("kind") == "task_notification":
                 projected.update(meta.get("event_ids", []))
         if pending_calls:

@@ -348,7 +348,8 @@ function renderDelivery(view, width, height) {
   const offset = Math.min(view.detail.offset, Math.max(0, lines.length - room));
   view.detail.offset = offset;
   const position = lines.length > room ? paint.dim(" " + (offset + 1) + "–" + Math.min(lines.length, offset + room) + " of " + lines.length) : "";
-  return [fitLine(paint.bold(view.detail.title), width - textWidth(position)) + position, "", ...fill(lines.slice(offset, offset + room).map(line => " " + line), room)].map(line => fitLine(line, width));
+  const titleBar = paintBackground(fitLine(" " + paint.accent("◆ ") + paint.bold(view.detail.title), width - textWidth(position)) + position, "surface");
+  return [titleBar, "", ...fill(lines.slice(offset, offset + room).map(line => " " + line), room).map(line => fitLine(line, width))];
 }
 
 function headerLine(view, width) {

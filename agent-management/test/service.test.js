@@ -261,13 +261,25 @@ test("leader resumes after children return without a human polling every agent",
   const briefing = (await f.call("getTeam", { teamId: f.team.id })).briefing;
   assert.equal(briefing.needsAttention.length, 0);
   assert.equal(briefing.waiting[0].taskId, parent.id);
-  assert.equal((await f.call("snapshot")).memberships.find(m => m.agentId === f.leader.id).status, "Delegated");
+  const snap1 = await f.call("snapshot");
+  assert.equal(snap1.memberships.find(m => m.agentId === f.leader.id).status, "Delegated");
+  assert.equal(snap1.sessions.find(s => s.taskId === parent.id).status, "Delegated");
   f.starts[1].finish({ content: "Implemented" });
   await eventually(() => f.starts.length === 3);
   assert.equal(f.starts[2].input.task.id, parent.id);
   assert.match(f.starts[2].input.input, /Implemented/);
   assert.doesNotMatch(f.starts[2].input.instructions, /Implemented/, "results arrive as the input, not in the instructions");
   assert.deepEqual((await f.call("getTeam", { teamId: f.team.id })).briefing.delivered, [], "sub-agents never create delivered tasks");
+  await f.call("report", { outcome: "done", summary: "Feature complete", evidence: [] }, f.runner(f.starts[2]));
+  f.starts[2].finish({ content: "done" });
+  await eventually(() => f.store.state.tasks[parent.id].status === "done");
+
+  // Interactive session delegating to a member also shows Delegated on both session and member until returned.
+  const direct = await f.call("attachSession", { teamId: f.team.id, agentId: f.leader.id, runtimeSessionId: "r-direct", shared: true });
+  await f.call("delegate", { to: specialist.id, brief: "Follow-up check", start: false }, { kind: "agent", sessionId: direct.id });
+  const snap2 = await f.call("snapshot");
+  assert.equal(snap2.sessions.find(s => s.id === direct.id).status, "Delegated");
+  assert.equal(snap2.memberships.find(m => m.agentId === f.leader.id).status, "Delegated");
 });
 test("members cannot reorder or cancel team work, and the Manager reads every briefing", async t => {
   const f = await fixture(t), specialist = await f.member("specialist");

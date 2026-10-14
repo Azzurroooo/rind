@@ -40,6 +40,17 @@ function jobText(snapshot, runtimeSessionId) {
   const background = (snapshot.live || []).find(item => item.id === runtimeSessionId)?.background;
   return background?.count ? jobSummary(background) + paint.dim(" · continues by itself") : "";
 }
+function waitsOnText(snapshot, sessionIds, task) {
+  const ids = new Set(sessionIds.filter(Boolean));
+  const fromSessions = snapshot.sessions.filter(s => ids.has(s.id) || (task?.id && s.taskId === task.id))
+    .flatMap(s => s.pendingDelegations || []).map(d => single(d.assignee));
+  const parentIds = new Set([...(task?.id ? [task.id] : []), ...snapshot.runs.filter(r => ids.has(r.sessionId) && r.taskId).map(r => r.taskId)]);
+  const fromTasks = (snapshot.tasks || []).filter(t => ((t.originSessionId && ids.has(t.originSessionId)) || (t.parentTaskId && parentIds.has(t.parentTaskId))) && !t.returned && t.status !== "cancelled")
+    .map(t => single(byId(snapshot.agents, t.assigneeAgentId)?.name) || t.assigneeAgentId);
+  const names = [...new Set([...fromSessions, ...fromTasks].filter(Boolean))];
+  if (!names.length && !(task?.status === "blocked" && task.blockedOn?.responder === "children")) return "";
+  return (names.length ? names.join(", ") : "its members") + paint.dim(" · resumes on delivery");
+}
 const first = (...callouts) => callouts.find(Boolean);
 
 export function detailFor(view, row) {
@@ -53,16 +64,18 @@ export function detailFor(view, row) {
       const parent = byId(snapshot.agents, membership?.reportsToAgentId);
       const tasks = snapshot.tasks.filter(t => t.teamId === row.teamId && t.assigneeAgentId === row.agentId);
       const current = tasks.find(t => t.status === "running") || tasks.find(needsUser) || tasks.findLast(t => t.status !== "cancelled");
+      const memberSessions = snapshot.sessions.filter(s => s.teamId === row.teamId && s.agentId === row.agentId).map(s => s.id);
       const role = row.leader ? ["Leader", single(membership?.position)].filter(Boolean).join(" · ") : roleOf(snapshot, row.teamId, row.agentId);
       const { tone, label } = memberState(row.ownStatus || row.status, row.open);
       const model = folderRunsOn(view.folderDefaults?.[agent?.canonicalWorkspace], "Runs on");
       return {
         title: row.title, context: role + (parent ? " · reports to " + single(parent.name) : row.leader ? " · reports to you" : ""),
-        state: toned(tone, label[0].toUpperCase() + label.slice(1)),
+        state: toned(tone, label),
         callout: first(current && needsUser(current) && current.blockedOn && { text: "! Needs your answer · " + single(current.blockedOn.action) }, model.callout),
         facts: [
           model.fact,
           current && { label: "Task", value: [single(current.brief), paint.dim(taskStatus(current))], lines: 3 },
+          { label: "Waits on", value: waitsOnText(snapshot, memberSessions, current) },
           { label: "Owns", value: single(membership?.responsibility) },
           { label: "Folder", value: paint.path(agent?.canonicalWorkspace || "") },
           { label: "Team", value: [row.sessionCount ? row.sessionCount + (row.sessionCount === 1 ? " conversation" : " conversations") : "", row.reportCount ? row.reportCount + (row.reportCount === 1 ? " direct report" : " direct reports") : ""].filter(Boolean).join(" · ") },
@@ -80,13 +93,14 @@ export function detailFor(view, row) {
     case "session": {
       const model = sessionRunsOn(sessionSelection(view, row.sessionId));
       const task = byId(snapshot.tasks, row.taskId);
+      const sessionIds = snapshot.sessions.filter(s => s.runtimeSessionId === row.sessionId).map(s => s.id);
       const waiting = row.status === "Needs input" && { text: "! Waiting for your answer", tone: "warning" };
       return {
         title: row.title,
         context: row.manager ? "Manager conversation" : row.independent ? row.workspace : (single(agent?.name) || "Member") + " · " + (single(team?.name) || "Team"),
         state: stateLine(row.status, row.time),
         callout: first(waiting, model.callout),
-        facts: [model.fact, task && { label: "Task", value: single(task.brief), lines: 3 }, { label: "Job", value: jobText(snapshot, row.sessionId) }, { label: "Session", value: paint.dim(row.sessionId) }],
+        facts: [model.fact, task && { label: "Task", value: single(task.brief), lines: 3 }, { label: "Waits on", value: waitsOnText(snapshot, sessionIds, task) }, { label: "Job", value: jobText(snapshot, row.sessionId) }, { label: "Session", value: paint.dim(row.sessionId) }],
       };
     }
     case "more": return { title: row.title, context: (single(agent?.name) || "Member") + " · " + (single(team?.name) || "Team"), text: ["Every conversation this member has in the team."] };

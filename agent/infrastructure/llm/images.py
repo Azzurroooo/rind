@@ -41,7 +41,8 @@ def separate_tool_images(messages: list[dict]) -> list[dict]:
     return result
 
 
-def chat_messages(messages: list[dict]) -> list[dict]:
+def chat_messages(messages: list[dict], *, reasoning: bool = False) -> list[dict]:
+    include_reasoning = reasoning or any("reasoning_content" in m for m in messages)
     result = []
     for message in separate_tool_images(messages):
         copied = dict(message)
@@ -51,5 +52,7 @@ def chat_messages(messages: list[dict]) -> list[dict]:
                 {"type": "text", "text": str(copied.get("content") or "")},
                 *({"type": "image_url", "image_url": {"url": image_data_url(image)}} for image in images),
             ]
+        if include_reasoning and copied.get("role") == "assistant" and copied.get("reasoning_content") is None:
+            copied["reasoning_content"] = ""
         result.append(copied)
     return result

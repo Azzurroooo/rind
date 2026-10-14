@@ -71,7 +71,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   function entriesFor(page) {
     const options = { query: view.query, filter: view.filter };
     if (page.kind === "inbox") return inboxRows(view.snapshot);
-    if (page.kind === "manager") return managerRows(view.managerHistory?.entries, { ...options, live: view.snapshot.live || [] });
+    if (page.kind === "manager") return managerRows(view.managerHistory?.entries, { ...options, live: view.snapshot.live || [], sessions: view.snapshot.sessions || [] });
     if (page.kind === "folder") return folderRows(independentGroups().find(group => workspaceKey(group.workspace) === workspaceKey(page.workspace)), options);
     if (page.kind === "background") return backgroundRows(view.snapshot, view.service);
     if (page.kind === "archive") return archiveRows(view.archive, options);

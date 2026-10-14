@@ -259,3 +259,117 @@ async def test_bounded_event_queue_recovers_terminal_states_for_slow_client(tmp_
         assert calls == []
     finally:
         await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_interrupted_batch_and_empty_reasoning_do_not_break_background_continuation(tmp_path, monkeypatch, task_shell):
+    from agent.infrastructure.llm.images import chat_messages
+
+    class ThinkingScriptedClient:
+        def __init__(self, steps, calls):
+            self.steps = steps
+            self.calls = calls
+            self.closed = False
+
+        async def stream(self, messages, **kwargs):
+            assert validate_model_message_boundary(messages).ok
+            wire = chat_messages(messages, reasoning=True)
+            # DeepSeek thinking mode rule: after last user message, every assistant message must have reasoning_content
+            last_user_idx = max((i for i, m in enumerate(wire) if m.get("role") == "user"), default=-1)
+            assert last_user_idx != -1 and wire[-1].get("role") in {"user", "tool"}, (
+                f"Continuation or turn sent invalid tail message: {wire[-1]}"
+            )
+            for m in wire[last_user_idx + 1:]:
+                if m.get("role") == "assistant":
+                    assert "reasoning_content" in m and isinstance(m["reasoning_content"], str)
+            self.calls.append(wire)
+            step = self.steps.pop(0)
+            yield ModelStreamEvent(kind="reasoning_delta", reasoning=step.get("reasoning", ""))
+            for tc in step.get("tools", []):
+                yield ModelStreamEvent(kind="tool_start", tool_call_id=tc["id"], tool_name="bash")
+                yield ModelStreamEvent(kind="tool_arguments_delta", tool_call_id=tc["id"], arguments=json.dumps(tc["args"]))
+            if step.get("tools"):
+                yield ModelStreamEvent(kind="completed", stop_reason="tool_calls")
+            else:
+                yield ModelStreamEvent(kind="text_delta", text=step.get("text", ""))
+                yield ModelStreamEvent(kind="completed", stop_reason="stop")
+
+        async def close(self):
+            self.closed = True
+
+    steps = [
+        # Turn 1: 3 tool calls where the 1st succeeds and user interrupts before/during the rest
+        {
+            "reasoning": "plan 3 calls",
+            "tools": [
+                {"id": "call_00", "args": {"command": "fg1", "yield_time_ms": 0}},
+                {"id": "call_01", "args": {"command": "fg2", "yield_time_ms": 0}},
+                {"id": "call_02", "args": {"command": "fg3", "yield_time_ms": 0}},
+            ],
+        },
+        # Turn 2: launch 3 on_exit background tasks, then reply with empty reasoning_content=""
+        {
+            "reasoning": "launch 3 bg tasks",
+            "tools": [
+                {"id": "bg_00", "args": {"command": "bg1", "yield_time_ms": 0, "notify": "on_exit"}},
+                {"id": "bg_01", "args": {"command": "bg2", "yield_time_ms": 0, "notify": "on_exit"}},
+                {"id": "bg_02", "args": {"command": "bg3", "yield_time_ms": 0, "notify": "on_exit"}},
+            ],
+        },
+        {"reasoning": "", "text": "Three background tasks started."},
+        # Automatic continuation turn when bg tasks finish (empty reasoning_content="")
+        {"reasoning": "", "text": "All three background tasks finished."},
+        # Turn 3: user says "你好", model replies once with empty reasoning_content=""
+        {"reasoning": "", "text": "你好！有什么可以帮你的？"},
+    ]
+
+    tools, processes = task_shell
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("agent.runtime.server.worker.ShellTools", lambda store: tools)
+    worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"), enable_goal=False)
+    monkeypatch.setattr(worker.provider_service, "refresh_stale_models", AsyncMock())
+    calls = []
+
+    async def create(*args, **kwargs):
+        return ThinkingScriptedClient(steps, calls)
+
+    monkeypatch.setattr(worker.provider_service, "create_chat_client", create)
+    await worker.initialize()
+    info = await worker.create_conversation({})
+    sid = info["session_id"]
+
+    try:
+        # Turn 1: interrupt right as call_00 completes so call_01 and call_02 are cancelled mid-batch
+        turn1_events = []
+        async for event in worker.execution.run_turn(sid, query="Run 3 foreground tasks"):
+            turn1_events.append(event)
+            if event.get("type") == "tool_result" and event.get("tool_call_id") == "call_00":
+                worker.execution.interrupt(sid, "Interrupted by user")
+        assert turn1_events[-1]["type"] == "turn_cancelled"
+        tool_results = [e for e in turn1_events if e.get("type") == "tool_result"]
+        assert [e["tool_call_id"] for e in tool_results] == ["call_00", "call_01", "call_02"]
+        assert [e["status"] for e in tool_results] == ["completed", "cancelled", "cancelled"]
+        processes[0].finish(stdout=b"fg1 done\n")
+
+        # Turn 2: start 3 background on_exit tasks
+        worker.execution.begin_request(sid)
+        turn2_events = [event async for event in worker.execution.run_turn(sid, query="Start 3 bg tasks")]
+        assert turn2_events[-1]["type"] == "turn_completed"
+        assert turn2_events[-1]["background_wait"]["count"] == 3
+
+        waiting = asyncio.create_task(worker.execution.wait_request(sid))
+        for proc in processes[1:4]:
+            proc.finish(stdout=b"bg task completed\n")
+        result = await asyncio.wait_for(waiting, 5)
+        assert result["answer"] == "All three background tasks finished."
+
+        # Turn 3: user sends "你好" - should only run 1 LLM call and NOT trigger a spurious continuation
+        calls_before_hello = len(calls)
+        turn3_events = [event async for event in worker.execution.run_turn(sid, query="你好")]
+        assert turn3_events[-1]["type"] == "turn_completed"
+        await asyncio.sleep(0.05)
+        assert len(calls) == calls_before_hello + 1
+        assert not worker.execution._continuations.get(sid)
+    finally:
+        await worker.close()
+

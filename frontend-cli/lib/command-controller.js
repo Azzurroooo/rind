@@ -19,7 +19,7 @@ export function createCommandController({
 }) {
   async function handle(text) {
     if (text === "?") {
-      output.log?.(helpText(state.slashCommands || []));
+      output.log?.(() => helpText(state.slashCommands || []));
       return true;
     }
     if (!String(text || "").startsWith("/")) {

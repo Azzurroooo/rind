@@ -479,9 +479,8 @@ export function createCliRuntimeController({
 
   function printContextPages(data) {
     for (const pageIndex of [0, 1]) {
-      const text = contextPageText(data, pageIndex, process.stdout.columns || 0, { plain: true });
-      if (text.trim()) {
-        log(text);
+      if (contextPageText(data, pageIndex, process.stdout.columns || 0, { plain: true }).trim()) {
+        log(() => contextPageText(data, pageIndex, process.stdout.columns || 0, { plain: true }));
       }
     }
   }

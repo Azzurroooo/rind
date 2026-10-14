@@ -24,11 +24,11 @@ export const STATUS_FILTERS = ["All", ...Object.keys(STATUS)];
 
 // A member's state is described in terms of the person, so a member whose
 // conversation is open in a window reads "1 open" instead of repeating the child status.
-const MEMBER_STATE = { "Needs input": "needs you", Unconfirmed: "unconfirmed", Working: "working", "Running job": "running a job", Delegated: "delegated", Queued: "task queued" };
+const MEMBER_STATE = { "Needs input": "Needs you", Unconfirmed: "Unconfirmed", Working: "Working", "Running job": "Running a job", Delegated: "Delegated", Queued: "Task queued" };
 export function memberState(status, open = 0) {
   if (MEMBER_STATE[status]) return { tone: status, label: MEMBER_STATE[status] };
   if (open) return { tone: "Open", label: open + " open" };
-  return { tone: "Idle", label: "idle" };
+  return { tone: "Idle", label: "Idle" };
 }
 export const statusMeta = status => STATUS[status] || STATUS.Idle;
 
@@ -210,11 +210,16 @@ export function memberSessionRows(sessions, agentId, { query = "", filter = "All
   return [{ id: "new:" + agentId, kind: "new-session", title: "New conversation", agentId }, ...own.map(session => sessionRow(session, 0, now))];
 }
 
-const liveById = (live, id) => { const item = live.find(entry => entry.id === id); return item ? liveStatus(item) : "Idle"; };
-export function managerRows(history = [], { query = "", now = Date.now(), live = [] } = {}) {
+const liveById = (live, id, sessions = []) => {
+  const item = live.find(entry => entry.id === id);
+  const status = item ? liveStatus(item) : "Idle";
+  const registered = sessions.find(entry => entry.runtimeSessionId === id)?.status;
+  return registered && statusMeta(registered).rank < statusMeta(status).rank ? registered : status;
+};
+export function managerRows(history = [], { query = "", now = Date.now(), live = [], sessions = [] } = {}) {
   return [{ id: "new:manager", kind: "new-session", title: "New conversation with Manager", manager: true },
     ...history.filter(entry => matches(query, entry.title)).map(entry => ({ id: "s:" + entry.runtimeSessionId, kind: "session", depth: 0, title: single(live.find(item => item.id === entry.runtimeSessionId)?.title) || single(entry.title) || entry.runtimeSessionId,
-      status: liveById(live, entry.runtimeSessionId), time: relativeTime(entry.updatedAt, now), sessionId: entry.runtimeSessionId, manager: true }))];
+      status: liveById(live, entry.runtimeSessionId, sessions), time: relativeTime(entry.updatedAt, now), sessionId: entry.runtimeSessionId, manager: true }))];
 }
 
 export function teamSummary(snapshot, teamId, inbox = inboxItems(snapshot)) {
@@ -351,9 +356,15 @@ export function independentSessions(snapshot, groups = [], managerWorkspace = ""
   }
   // Conversations management registered outside any team, in case history
   // has not caught up (or could not be read).
-  const listed = new Set([...byWorkspace.values()].flatMap(group => group.sessions.map(s => s.runtimeSessionId)));
   for (const session of snapshot.sessions) {
-    if (session.teamId || !session.runtimeSessionId || listed.has(session.runtimeSessionId)) continue;
+    if (session.teamId || !session.runtimeSessionId) continue;
+    let found;
+    for (const group of byWorkspace.values()) found ||= group.sessions.find(s => s.runtimeSessionId === session.runtimeSessionId);
+    if (found) {
+      if (session.status && statusMeta(session.status).rank < statusMeta(found.status).rank) found.status = session.status;
+      found.updatedAt = later(found.updatedAt, session.lastActivity);
+      continue;
+    }
     const agent = byId(snapshot.agents, session.agentId);
     if (!agent || workspaceKey(agent.canonicalWorkspace) === manager) continue;
     const key = workspaceKey(agent.canonicalWorkspace);

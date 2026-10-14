@@ -177,7 +177,8 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       async pendingDelegations(id) {
         if (id !== runtimeSessionId || needsAttachment) return [];
         const snapshot = await client.request("snapshot");
-        return (snapshot.sessions.find(s => s.id === session.id)?.pendingDelegations || []).map(d => ({ ...d, sessionId: id }));
+        const sessions = snapshot.sessions.filter(s => s.id === session.id || s.runtimeSessionId === id);
+        return sessions.flatMap(s => s.pendingDelegations || []).map(d => ({ ...d, sessionId: id }));
       },
       async bind(info) {
         if (runtimeSessionId && info.session_id !== runtimeSessionId) throw new Error("Open another registered session in a separate rind process.");

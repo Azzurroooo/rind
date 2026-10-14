@@ -231,8 +231,10 @@ test("a conversation running a job reads Running job everywhere, and delegated w
   assert.equal(statusMeta("Running job").glyph, "↻");
   assert.equal(statusMeta("Delegated").glyph, "⋯");
   assert.ok(statusMeta("Working").rank < statusMeta("Running job").rank && statusMeta("Running job").rank < statusMeta("Delegated").rank);
-  assert.equal(memberState("Running job").label, "running a job");
-  assert.equal(memberState("Delegated").label, "delegated");
+  assert.equal(memberState("Working").label, "Working");
+  assert.equal(memberState("Running job").label, "Running a job");
+  assert.equal(memberState("Delegated").label, "Delegated");
+  assert.equal(memberState("Idle").label, "Idle");
   assert.equal(taskStatus({ status: "blocked", blockedOn: { responder: "children" } }), "Delegated");
   assert.equal(jobSummary(job.background), "npm test +1");
   assert.equal(jobSummary({ count: 1, commands: ["npm   run\n build"] }), "npm run build");
@@ -288,3 +290,59 @@ test("unconfirmed sub-agent runs roll up to the entry task or conversation owner
   assert.ok(menus[2].some(a => a.label === "Resolve unconfirmed run"));
 });
 
+test("delegating member and session surface Delegated status, Waits on details, and conversation waiting prompt", async () => {
+  const { detailLines } = await import("../lib/agents-detail.js");
+  const { promptActivityLine } = await import("../lib/rendering.js");
+  const { createEventController } = await import("../lib/event-controller.js");
+  const { createCliOutputController } = await import("../lib/cli-output-controller.js");
+  const strip = value => value.replace(/\x1b\[[0-9;]*m/g, "");
+
+  const { snapshot } = fixture();
+  snapshot.memberships.find(m => m.agentId === "lead").status = "Delegated";
+  snapshot.sessions.push({ id: "s-lead", agentId: "lead", teamId: "team", runtimeSessionId: "r-lead", status: "Delegated", lastActivity: "2026-10-06T11:55:00Z", pendingDelegations: [{ taskId: "d-child", assignee: "API" }] });
+  const sessions = teamSessions(snapshot, "team", [{ runtimeSessionId: "r-lead", agentId: "lead", teamId: "team", title: "Coordinate auth", updatedAt: "2026-10-06T11:50:00Z" }]);
+  assert.equal(sessions[0].status, "Delegated");
+
+  const orgRows = organizationRows(snapshot, "team", sessions, { now: NOW });
+  const memberRow = orgRows.find(r => r.id === "m:lead");
+  const sessionRow = orgRows.find(r => r.id === "s:r-lead");
+  assert.equal(memberRow.status, "Delegated");
+  assert.equal(sessionRow.status, "Delegated");
+
+  const memberDetail = detailLines({ snapshot }, memberRow, 60).map(strip).join("\n");
+  assert.match(memberDetail, /⋯ Delegated/);
+  assert.match(memberDetail, /Waits on\s+API · resumes on delivery/);
+
+  const sessionDetail = detailLines({ snapshot }, sessionRow, 60).map(strip).join("\n");
+  assert.match(sessionDetail, /⋯ Delegated/);
+  assert.match(sessionDetail, /Waits on\s+API · resumes on delivery/);
+
+  // Conversation UI shows live waiting activity line while waiting for delegated sub-agents.
+  const activity = strip(promptActivityLine({ running: false, delegatedWait: ["API"], frameWidth: 80 }));
+  assert.match(activity, /Waiting · API · wakes on delivery/);
+
+  // Manual /compact turn does not log "Worked for 0ms", whereas ordinary turns do.
+  const logs = [];
+  const state = { sessionInfo: { session_id: "r-lead" }, pendingDelegations: new Map() };
+  const events = createEventController({ state, output: { log: item => logs.push(typeof item === "function" ? strip(item()) : strip(String(item))) } });
+  await events.handle({ event: { type: "turn_started", operation: "compact", session_id: "r-lead" } });
+  await events.handle({ event: { type: "context_compacted", session_id: "r-lead" } });
+  await events.handle({ event: { type: "turn_completed", duration_ms: 0, session_id: "r-lead" } });
+  assert.equal(logs.length, 0, "compact-only turn must not emit Worked for 0ms");
+
+  await events.handle({ event: { type: "turn_started", operation: "prompt", session_id: "r-lead" } });
+  await events.handle({ event: { type: "turn_completed", duration_ms: 1200, session_id: "r-lead" } });
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /Worked for 1\.20s/);
+
+  // Output controller exposes delegatedWait in mainPromptText when delegations are pending.
+  const cliState = {
+    runtime: { status: "ready" },
+    turn: { active: false, interruptRequested: false },
+    display: { activeCompact: false, activityLabel: "", activityFrame: 0, activityStartedAt: 0, activityTimer: null, backgroundWait: null, pendingDelegations: new Map([["t-child", { taskId: "t-child", assignee: "API", sessionId: "r-lead" }]]), stats: {} },
+    input: { pending: [], session: { mode: "prompt", editor: { input: () => "" } } },
+    session: { info: { session_id: "r-lead", provider: "openai", model: "gpt" } },
+  };
+  const out = createCliOutputController({ state: cliState, terminalUi: null, transcript: { addChild() {}, changed() {}, clear() {} } });
+  assert.match(strip(out.mainPromptText(80)), /Waiting · API · wakes on delivery/);
+});

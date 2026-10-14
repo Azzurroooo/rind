@@ -498,7 +498,9 @@ class ExecutionCoordinator:
                         return
                     if goal and goal.get("status") in {"paused", "blocked", "budget_exhausted"}:
                         return
-                    if not pending and (not checkpoint or not goal or goal.get("status") != "active"):
+                    session_store = getattr(execution.container, "session_store", None)
+                    delivered = await self._task_notifications.deliver(session_store) if pending and session_store is not None else int(pending)
+                    if not delivered and (not checkpoint or not goal or goal.get("status") != "active"):
                         return
                 await self._apply_selection(execution)
                 if checkpoint:
