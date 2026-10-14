@@ -262,3 +262,29 @@ test("folders whose conversations have no recorded activity still sort", () => {
   ];
   assert.deepEqual(independentRows(workspaces).filter(r => r.kind === "workspace").map(r => r.title), ["b", "a"]);
 });
+
+test("unconfirmed sub-agent runs roll up to the entry task or conversation owner", async () => {
+  const { createActions } = await import("../lib/agents-actions.js");
+  const { snapshot } = fixture();
+  snapshot.tasks.push({ id: "t-entry", teamId: "team", assigneeAgentId: "lead", brief: "Coordinate release", status: "blocked", blockedOn: { responder: "children", action: "Wait" } });
+  snapshot.sessions.push({ id: "s-sub", agentId: "api", teamId: "team", runtimeSessionId: "r-sub", delegationId: "d1", taskId: "t-entry" });
+  snapshot.runs.push({ id: "run-sub", sessionId: "s-sub", taskId: "t-entry", delegationId: "d1", status: "unknown", startedAt: "2026-10-06T11:50:00Z" });
+
+  const inbox = inboxRows(snapshot).find(r => r.id === "r:run-sub");
+  assert.equal(inbox.agentId, "lead", "inbox attributes the unconfirmed run to the entry member");
+  assert.equal(inbox.title, "Confirm the previous run stopped");
+  assert.equal(inbox.context, "Product › Lead");
+
+  const bg = backgroundRows(snapshot, null, { now: NOW }).find(r => r.kind === "run" && r.runId === "run-sub");
+  assert.equal(bg.context, "Product › Lead", "background attributes the unconfirmed run to the entry member");
+
+  const menus = [];
+  const actions = createActions({ view: { snapshot }, choose: (_, items) => menus.push(items) });
+  actions.memberActions("team", "lead");
+  actions.memberActions("team", "api");
+  actions.taskActions("t-entry");
+  assert.ok(menus[0].some(a => a.label === "Resolve unconfirmed run"));
+  assert.ok(!menus[1].some(a => a.label === "Resolve unconfirmed run"));
+  assert.ok(menus[2].some(a => a.label === "Resolve unconfirmed run"));
+});
+

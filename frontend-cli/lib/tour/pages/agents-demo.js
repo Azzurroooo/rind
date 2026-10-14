@@ -21,21 +21,16 @@ export function agentsScene(phase = "organization") {
         : phase === "delegated" ? "blocked" : phase === "resumed" ? "running" : "done" };
     snapshot.tasks.push(parent);
     if (phase !== "queued") {
-      const child = { id: "review", teamId: "product", assigneeAgentId: "reviewer", createdBy: "demo",
-        brief: "Inspect Unicode handling", parentTaskId: "parser", status: phase === "delegated" ? "running" : "done" };
-      snapshot.tasks.push(child);
       if (phase === "delegated") parent.blockedOn = { responder: "children", action: "Continues when its members deliver." };
-      else Object.assign(child, { deliveredAt: AT, report: { outcome: "done", summary: "Unicode handling reviewed.",
-        evidence: ["4 parser tests passed (simulated)."], artifacts: [] } });
-      for (const [agentId, task, status] of [
-        ["demo", parent, phase === "delegated" ? "Delegated" : phase === "resumed" ? "Working" : "Idle"],
-        ["reviewer", child, phase === "delegated" ? "Working" : "Idle"],
+      for (const [agentId, title, status, delegationId] of [
+        ["demo", parent.brief, phase === "delegated" ? "Delegated" : phase === "resumed" ? "Working" : "Idle", undefined],
+        ["reviewer", "Inspect Unicode handling", phase === "delegated" ? "Working" : "Idle", "review"],
       ]) {
         snapshot.memberships.find(member => member.agentId === agentId).status = status;
         snapshot.sessions.push({ id: "s-" + agentId, runtimeSessionId: "r-" + agentId,
-          agentId, teamId: "product", origin: "managed", taskId: task.id, status, lastActivity: AT });
+          agentId, teamId: "product", origin: "managed", taskId: parent.id, ...(delegationId ? { delegationId } : {}), status, lastActivity: AT });
         snapshot.live ||= [];
-        snapshot.live.push({ id: "r-" + agentId, title: task.brief });
+        snapshot.live.push({ id: "r-" + agentId, title });
       }
     }
     if (["delivered", "report"].includes(phase)) {
@@ -46,16 +41,22 @@ export function agentsScene(phase = "organization") {
     }
   }
   if (phase === "direct") {
-    snapshot.sessions.push({ id: "direct-demo", runtimeSessionId: "demo-direct", agentId: "demo",
-      teamId: "product", origin: "direct", status: "Idle", lastActivity: AT });
-    snapshot.live = [{ id: "demo-direct", title: "A direct conversation" }];
-    // A direct conversation may assign a child, but has no parent task itself.
-    snapshot.tasks.push({ id: "standalone-review", teamId: "product", assigneeAgentId: "reviewer",
-      createdBy: "demo", brief: "Review requested from direct chat", status: "queued" });
+    snapshot.memberships.find(member => member.agentId === "reviewer").status = "Working";
+    snapshot.sessions.push(
+      { id: "direct-demo", runtimeSessionId: "demo-direct", agentId: "demo",
+        teamId: "product", origin: "direct", status: "Idle", lastActivity: AT,
+        pendingDelegations: [{ taskId: "8f21ab77", assignee: "reviewer" }] },
+      { id: "s-reviewer", runtimeSessionId: "r-reviewer", agentId: "reviewer",
+        teamId: "product", origin: "managed", delegationId: "8f21ab77", status: "Working", lastActivity: AT },
+    );
+    snapshot.live = [
+      { id: "demo-direct", title: "A direct conversation" },
+      { id: "r-reviewer", title: "Inspect Unicode handling" },
+    ];
   }
-  const tasks = taskPhases.includes(phase) || phase === "direct";
+  const tasks = taskPhases.includes(phase);
   return { snapshot, now: NOW, page: { kind: "team", teamId: "product", tab: tasks ? "tasks" : "org" },
-    selectedId: phase === "direct" ? "t:standalone-review" : tasks ? "t:parser" : "m:demo",
+    selectedId: phase === "direct" ? "m:reviewer" : tasks ? "t:parser" : "m:demo",
     focus: phase === "navigation" ? "sidebar" : "main", ...(phase === "report" ? { reportTaskId: "parser" } : {}),
     ...(phase === "assign" ? { dialog: { title: "Assign task", description: ["Owner: demo"],
       fields: [{ key: "brief", label: "Task and expected delivery", value: "Review the Unicode parser",

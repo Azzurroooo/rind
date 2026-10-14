@@ -66,9 +66,8 @@ test("a member is retired once its work is finished and its worktree is clean; t
   await assert.rejects(f.call("delegate", { retire: added.agentId }, leader), { code: "MEMBER_BUSY" });
   await eventually(() => f.starts.length === 1);
   await writeFile(path.join(added.workspace, "README.md"), "changed\n");
-  await f.call("report", { outcome: "done", summary: "B built", evidence: [] }, f.runner(f.starts[0]));
-  f.starts[0].finish({ content: "done" });
-  await eventually(() => f.store.state.tasks[added.taskId].status === "done");
+  f.starts[0].finish({ content: "B built" });
+  await eventually(() => f.store.state.delegations[added.taskId].status === "done");
   await assert.rejects(f.call("delegate", { retire: added.agentId }, leader), { code: "WORKTREE_DIRTY" });
   await commit(added.workspace, "feature b");
   const other = await f.member("other");

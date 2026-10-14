@@ -139,7 +139,8 @@ export async function startServer(options: { home?: string; python?: string; rep
     const agent = session ? store.state.agents[session.agentId] : undefined;
     const skills = agent?.skillRefs || [];
     const manager = principal.kind === "manager";
-    const task = session?.origin === "managed";
+    const managed = session?.origin === "managed";
+    const task = managed && !session.delegationId;
     const tools = toolsFor(manager ? "manager" : "agent", { supervises: Boolean(session?.teamId && supervises(store.state, session.teamId, session.agentId)), task });
     return {
       skill_files: principal.kind === "manager" ? [] : skills.filter(ref => path.isAbsolute(ref)),
@@ -147,7 +148,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       lifecycle: { before: "hostTurnStart", after: "hostTurnEnd", env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: hostToken } },
       tools,
       ...(manager ? { instructions: managerInstructions(path.dirname(paths.root)) }
-        : task || !session ? {} : { instructions: memberInstructions(store.state, session) }),
+        : managed || !session ? {} : { instructions: memberInstructions(store.state, session) }),
     };
   }
   const server = net.createServer(socket => {
@@ -297,7 +298,8 @@ export async function startServer(options: { home?: string; python?: string; rep
   // runs are already outside this service's control.
   function workload() {
     const runs = Object.values(store.state.runs).filter(r => r.status === "starting" || r.status === "running");
-    return { working: runs.length, tasks: runs.filter(r => r.taskId).length, conversations: runs.filter(r => !r.taskId).length, unconfirmed: Object.values(store.state.runs).filter(r => r.status === "unknown").length };
+    const managed = (r: { taskId?: string; delegationId?: string }) => Boolean(r.taskId || r.delegationId);
+    return { working: runs.length, tasks: runs.filter(managed).length, conversations: runs.filter(r => !managed(r)).length, unconfirmed: Object.values(store.state.runs).filter(r => r.status === "unknown").length };
   }
   // The services stop together; stopping one alone would leave the other
   // serving windows that can no longer be managed. Order matters:
@@ -306,7 +308,7 @@ export async function startServer(options: { home?: string; python?: string; rep
   //   3. the Runtime host stops (only a host that is already running is contacted);
   //   4. this service closes.
   async function stopEverything() {
-    const conversations = Object.values(store.state.runs).filter(r => activeRun(r) && !r.taskId).map(r => store.state.sessions[r.sessionId]?.runtimeSessionId).filter(Boolean);
+    const conversations = Object.values(store.state.runs).filter(r => activeRun(r) && !r.taskId && !r.delegationId).map(r => store.state.sessions[r.sessionId]?.runtimeSessionId).filter(Boolean);
     closing = true;
     await service.stop();
     const host = runtime || await executionHost(false).catch(() => undefined);

@@ -22,22 +22,21 @@ test("disconnecting a client after stop cannot write to the closed service", asy
   await assert.rejects(f.call("createTeam", { name: "Too late" }), { code: "SERVICE_STOPPING" });
 });
 
-test("a named member receives a blocker and its report resumes the blocked owner", async t => {
+test("task blockers only target the user and resume the owner when answered", async t => {
   const f = await fixture(t);
   const author = await f.member("author"), reviewer = await f.member("reviewer");
   await f.call("setSupervisor", { teamId: f.team.id, agentId: reviewer.id, reportsToAgentId: author.id });
-  const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: author.id, brief: "Need a review" });
+  const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: author.id, brief: "Need a decision" });
   await eventually(() => f.starts.length === 1);
-  await f.call("report", { blocked: { responder: reviewer.id, action: "Confirm the proposed tax category" } }, f.runner(f.starts[0]));
-  f.starts[0].finish({ content: "waiting for review" });
+  await assert.rejects(f.call("report", { blocked: { responder: reviewer.id, action: "Confirm category" } }, f.runner(f.starts[0])), { code: "INVALID_RESPONDER" });
+  await f.call("report", { blocked: { action: "Confirm the proposed tax category" } }, f.runner(f.starts[0]));
+  f.starts[0].finish({ content: "waiting for user" });
+  await eventually(() => f.store.state.tasks[task.id].status === "blocked");
+  assert.deepEqual(f.store.state.tasks[task.id].blockedOn, { responder: "user", action: "Confirm the proposed tax category" });
+  await f.call("postTaskNote", { taskId: task.id, text: "Category confirmed", answer: true });
   await eventually(() => f.starts.length === 2);
-  const response = f.starts[1];
-  assert.equal(response.input.agent.id, reviewer.id);
-  await f.call("report", { outcome: "completed", summary: "Category confirmed", evidence: [] }, f.runner(response));
-  response.finish({ content: "confirmed" });
-  await eventually(() => f.starts.length === 3);
-  assert.equal(f.starts[2].input.task.id, task.id);
-  assert.match(f.starts[2].input.input, /Category confirmed/, "the owner is told the answer, not its brief again");
+  assert.equal(f.starts[1].input.task.id, task.id);
+  assert.match(f.starts[1].input.input, /Category confirmed/, "the owner is told the answer, not its brief again");
 });
 test("an answer received before the blocked run exits still resumes its owner", async t => {
   const f = await fixture(t);
@@ -72,7 +71,7 @@ test("import previews and registers legacy files without changing them", async t
   assert.equal((await f.call("importTeam", { root, confirmation: preview.fingerprint })).id, imported.id);
 });
 
-test("three levels of delegation wait for grandchildren and deliver back through the original task chain", async t => {
+test("three levels of delegation wait for grandchildren and deliver back through the original task chain without creating subtasks", async t => {
   const f = await fixture(t), a = await f.member("a"), a1 = await f.member("a1");
   await f.call("setSupervisor", { teamId: f.team.id, agentId: a1.id, reportsToAgentId: a.id });
   const root = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Integrate" });
@@ -81,20 +80,20 @@ test("three levels of delegation wait for grandchildren and deliver back through
   await eventually(() => f.starts.length === 2);
   const leaf = await f.call("delegate", { to: a1.id, brief: "Implement" }, f.runner(f.starts[1]));
   await eventually(() => f.starts.length === 3);
-  await assert.rejects(f.call("report", { outcome: "done", summary: "Too early", evidence: [] }, f.runner(f.starts[1])), { code: "WORK_OUTSTANDING" });
+  assert.deepEqual(Object.keys(f.store.state.tasks), [root.id], "only the entry task exists in state.tasks");
+  await assert.rejects(f.call("report", { outcome: "done", summary: "Too early", evidence: [] }, f.runner(f.starts[0])), { code: "WORK_OUTSTANDING" });
+  await assert.rejects(f.call("report", { outcome: "done", summary: "Not a task", evidence: [] }, f.runner(f.starts[1])), { code: "NO_TASK" });
   f.starts[1].finish({ content: "Waiting for a1" });
-  await eventually(() => f.store.state.tasks[mid.taskId].status === "blocked");
+  await eventually(() => f.store.state.delegations[mid.taskId].status === "waiting");
   f.starts[0].finish({ content: "Waiting for a" });
   await eventually(() => f.store.state.tasks[root.id].status === "blocked");
   assert.equal(f.starts.length, 3);
-  await f.call("report", { outcome: "done", summary: "Leaf delivery", evidence: [] }, f.runner(f.starts[2]));
-  f.starts[2].finish({ content: "Done" });
+  f.starts[2].finish({ content: "Leaf delivery" });
   await eventually(() => f.starts.length === 4);
   assert.equal(f.starts[3].input.task.id, mid.taskId);
   assert.equal(f.starts[3].input.session.id, f.starts[1].input.session.id, "continuations preserve session identity");
-  assert.match(f.starts[3].input.input, new RegExp("a1 · task " + leaf.taskId + " · delivered: done\\n  Summary: Leaf delivery"));
-  await f.call("report", { outcome: "done", summary: "Integrated child", evidence: [] }, f.runner(f.starts[3]));
-  f.starts[3].finish({ content: "Done" });
+  assert.match(f.starts[3].input.input, new RegExp("a1 · task " + leaf.taskId + " · delivered: Leaf delivery"));
+  f.starts[3].finish({ content: "Integrated child" });
   await eventually(() => f.starts.length === 5);
   assert.equal(f.starts[4].input.task.id, root.id);
   assert.match(f.starts[4].input.input, /Integrated child/);
@@ -263,13 +262,12 @@ test("leader resumes after children return without a human polling every agent",
   assert.equal(briefing.needsAttention.length, 0);
   assert.equal(briefing.waiting[0].taskId, parent.id);
   assert.equal((await f.call("snapshot")).memberships.find(m => m.agentId === f.leader.id).status, "Delegated");
-  await f.call("report", { outcome: "done", summary: "Implemented", evidence: [] }, f.runner(f.starts[1]));
-  f.starts[1].finish({ content: "done" });
+  f.starts[1].finish({ content: "Implemented" });
   await eventually(() => f.starts.length === 3);
   assert.equal(f.starts[2].input.task.id, parent.id);
   assert.match(f.starts[2].input.input, /Implemented/);
   assert.doesNotMatch(f.starts[2].input.instructions, /Implemented/, "results arrive as the input, not in the instructions");
-  assert.equal((await f.call("getTeam", { teamId: f.team.id })).briefing.delivered[0].summary, "Implemented");
+  assert.deepEqual((await f.call("getTeam", { teamId: f.team.id })).briefing.delivered, [], "sub-agents never create delivered tasks");
 });
 test("members cannot reorder or cancel team work, and the Manager reads every briefing", async t => {
   const f = await fixture(t), specialist = await f.member("specialist");
@@ -282,18 +280,26 @@ test("members cannot reorder or cancel team work, and the Manager reads every br
   const manager = await f.call("attachSession", { manager: true });
   assert.equal((await f.call("getTeam", { teamId: f.team.id }, { kind: "manager", sessionId: manager.id })).briefing.inProgress.length, 2);
 });
-test("crash recovery retains workspace ownership and never repeats uncertain work", async t => {
+test("crash recovery retains workspace ownership, rolls sub-agent unconfirmed runs up to the entry owner, and never repeats uncertain work", async t => {
   const f = await fixture(t);
+  const specialist = await f.member("specialist");
   const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "write" });
   await eventually(() => f.starts.length === 1);
-  f.starts[0].fail(new Error("lost connection"));
+  await f.call("delegate", { to: specialist.id, brief: "subwork" }, f.runner(f.starts[0]));
+  f.starts[0].finish({ content: "delegating" });
+  await eventually(() => f.starts.length === 2);
+  f.starts[1].fail(new Error("lost connection"));
   await eventually(() => f.store.state.tasks[task.id].status === "needs_attention");
-  const run = Object.values(f.store.state.runs)[0];
+  const run = Object.values(f.store.state.runs).find(r => r.delegationId);
   assert.equal(run.status, "unknown");
+  const snap = await f.call("snapshot");
+  assert.equal(snap.memberships.find(m => m.agentId === f.leader.id).status, "Unconfirmed", "entry owner is marked Unconfirmed");
+  assert.equal(snap.memberships.find(m => m.agentId === specialist.id).status, "Idle", "sub-agent never shows Needs you / Unconfirmed");
   await assert.rejects(f.call("startTask", { taskId: task.id }), { code: "RUN_UNCONFIRMED" });
   await f.call("resolveRun", { runId: run.id, confirmStopped: true });
   await f.call("startTask", { taskId: task.id });
-  await eventually(() => f.starts.length === 2);
+  await eventually(() => f.starts.length === 3);
+  assert.equal(f.starts[2].input.task.id, task.id);
 });
 test("delivered files are copied for the delegator and cannot escape through a symlink or traversal", async t => {
   const f = await fixture(t);

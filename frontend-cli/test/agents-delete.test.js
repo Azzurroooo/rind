@@ -107,7 +107,11 @@ test("a hidden managed window renews its binding and tools after its conversatio
     await window?.shutdown(); await management?.close(); client.close(); await server.close();
     await (await import("./helpers/rind-home.js")).removeRindHome(home);
   });
-  management = await prepareManagement(["--manager"], launch, { interactive: true });
+  const team = await client.request("createTeam", { name: "Delegation recovery" });
+  const lead = await client.request("createWorkspace", { teamId: team.id, name: "Lead" });
+  await client.request("setLeader", { teamId: team.id, agentId: lead.id });
+  const agent = await client.request("createWorkspace", { teamId: team.id, name: "Worker", reportsToAgentId: lead.id });
+  management = await prepareManagement(["--cwd", lead.canonicalWorkspace, "--team", team.id], launch, { interactive: true });
   window = createSharedRuntimeClient({ rindHome: home, python: launch.python, repoRoot: launch.repoRoot,
     cliArgs: management.args, externalTools: management.externalTools, onMessage(message) {
       if (message.event?.type === "session_deleted") management.sessionDeleted(message.session_id);
@@ -127,17 +131,14 @@ test("a hidden managed window renews its binding and tools after its conversatio
   assert.notEqual(token, oldToken);
   const scoped = await connectClient({ endpoint: server.paths.endpoint, token, runtimeSessionId: replacement.session_id });
   try {
-    await scoped.request("snapshot");
-    const team = await client.request("createTeam", { name: "Delegation recovery" });
-    const agent = await client.request("createWorkspace", { teamId: team.id, name: "Worker" });
-    const task = await scoped.request("assignTask", { teamId: team.id, assigneeAgentId: agent.id, brief: "Queued local fixture", start: false });
-    assert.deepEqual(await management.pendingDelegations(replacement.session_id), [{ taskId: task.id, assignee: agent.name, sessionId: replacement.session_id }]);
+    const { taskId } = await scoped.request("delegate", { to: agent.id, brief: "Queued local fixture" });
+    assert.deepEqual(await management.pendingDelegations(replacement.session_id), [{ taskId, assignee: agent.name, sessionId: replacement.session_id }]);
     assert.deepEqual(await management.pendingDelegations(original.session_id), []);
-    await scoped.request("cancelTask", { taskId: task.id });
+    await scoped.request("delegate", { task: taskId, cancel: true });
     assert.deepEqual(await management.pendingDelegations(replacement.session_id), []);
   } finally { scoped.close(); }
   const snapshot = await client.request("snapshot");
   assert.ok(snapshot.sessions.some(s => s.runtimeSessionId === replacement.session_id));
   assert.ok(!snapshot.sessions.some(s => s.runtimeSessionId === original.session_id));
-  assert.equal(snapshot.sessions.length, 1, "concurrent requests share one replacement registration");
+  assert.equal(snapshot.sessions.filter(s => s.agentId === lead.id).length, 1, "concurrent requests share one replacement registration");
 });

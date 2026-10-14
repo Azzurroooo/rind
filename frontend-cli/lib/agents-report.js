@@ -41,7 +41,6 @@ function standing(report, width, now) {
   if (task.status === "done" && report.decide) return [paint.accent("New delivery · " + report.decide)];
   if (needsUser(task) && task.blockedOn) return block("Needs you", [task.blockedOn.action], width, paint.warning);
   if (task.blockedOn?.responder === "children") return block("Delegated", ["to its members. " + task.blockedOn.action], width);
-  if (task.blockedOn) return block("Asked", [report.name(task.blockedOn.responder) + ": " + task.blockedOn.action], width);
   if (task.error) return block("Problem", [task.error], width, paint.warning);
   return [];
 }
@@ -72,27 +71,26 @@ function delivery({ task, artifacts }, width) {
   ]);
 }
 
-function history({ task, runs, subtasks, name }, width, expanded) {
+function history({ task, runs, name }, width, expanded) {
   const notes = task.notes || [];
-  const counts = [["Notes", notes.length], ["Runs", runs.length], ["Subtasks", subtasks.length]].filter(([, count]) => count);
+  const counts = [["Notes", notes.length], ["Runs", runs.length]].filter(([, count]) => count);
   if (!counts.length) return [];
   if (!expanded) return [paint.dim("▸ History · " + counts.map(([label, count]) => label + " " + count).join(" · ") + "   z to show")];
   return gap([
     [paint.dim("▾ History   z to hide")],
     block("Notes", notes.map(note => stamp(note.createdAt) + "  " + name(note.author) + ": " + single(note.text)), width),
     block("Runs", runs.map(run => stamp(run.startedAt) + "  " + run.status), width),
-    block("Subtasks", subtasks.map(child => statusMeta(taskStatus(child)).glyph + " " + single(child.brief) + " · " + name(child.assigneeAgentId)), width),
   ]);
 }
 
 // report: { task (with notes), team, owner, artifacts [{name, path}], runs,
-// subtasks, archived, decide (the review keys offered, e.g. "a accept"),
-// name(id) for note authors and responders }.
+// archived, decide (the review keys offered, e.g. "a accept"),
+// name(id) for note authors }.
 export function renderReport(report, width, { expanded = false, now = Date.now() } = {}) {
   const { task } = report;
   const when = task.deliveredAt ? "delivered " + ago(task.deliveredAt, now) : "";
   const header = [badge(taskStatus(task)), single(report.team) + " › " + single(report.owner), when, task.priority ? task.priority + " priority" : ""].filter(Boolean).join(paint.dim(" · "));
-  const origin = [task.reworkOf ? "Rework of an earlier delivery" : "", task.parentTaskId ? "Subtask" : ""].filter(Boolean).join(" · ");
+  const origin = task.reworkOf ? "Rework of an earlier delivery" : "";
   return gap([
     [header, ...(origin ? [paint.dim(origin)] : [])],
     briefBlock(task.brief, width, expanded),

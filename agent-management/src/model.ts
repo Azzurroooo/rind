@@ -6,28 +6,33 @@ export interface Team { id: string; name: string; leaderAgentId?: string; create
 export interface Membership { teamId: string; agentId: string; reportsToAgentId?: string; position?: string; responsibility?: string }
 export interface Report { outcome: string; summary: string; evidence: string[]; artifacts: string[]; nextAction?: string }
 export interface Task {
-  id: string; teamId: string; assigneeAgentId: string; createdBy: string; brief: string;
+  id: string; teamId: string; assigneeAgentId: string; createdBy: "user" | "manager"; brief: string;
   status: "queued" | "running" | "done" | "blocked" | "needs_attention" | "cancelled";
-  parentTaskId?: string; blockedOn?: { responder: string; action: string };
+  blockedOn?: { responder: "user" | "children"; action: string };
   report?: Report; error?: string; dispatch?: boolean;
   priority?: "high" | "low";
   deliveredAt?: string; reworkOf?: string;
-  // Delegated from a conversation rather than a task: its result goes back to that conversation.
-  originSessionId?: string;
   // What the next run is told; the first run is told the brief.
   resume?: string;
-  // Its result was handed to whoever delegated it.
-  returned?: boolean;
   review?: { decision: "accepted" | "rework"; at: string; feedback?: string; reworkTaskId?: string };
+}
+// Work a member delegates to a direct report. It runs in the subordinate's
+// workspace without creating a user-facing Task or Report, and returns its
+// final assistant reply to the delegator once all sibling delegations settle.
+export interface Delegation {
+  id: string; teamId: string; fromAgentId: string; assigneeAgentId: string; brief: string;
+  status: "queued" | "running" | "waiting" | "done" | "failed" | "cancelled";
+  taskId?: string; parentDelegationId?: string; originSessionId?: string;
+  dispatch?: boolean; resume?: string; reply?: string; error?: string; returned?: boolean;
 }
 // Destructive requests from the Manager wait in the user's Inbox.
 // What the Manager changed on its own (a member's model), shown in the user's Inbox until dismissed.
 export interface Notice { id: string; teamId: string; agentId: string; title: string; createdAt: string }
 export interface Approval { id: string; kind: "deleteTeam" | "cancelRun"; teamId: string; runId?: string; taskId?: string; title: string; requestedBy: string; createdAt: string }
 // released: the session's team or membership ended while a window showed it; it is dropped on detach.
-export interface Session { id: string; agentId: string; teamId?: string; runtimeSessionId: string; origin: "managed" | "direct"; shared?: boolean; released?: boolean }
+export interface Session { id: string; agentId: string; teamId?: string; runtimeSessionId: string; origin: "managed" | "direct"; delegationId?: string; shared?: boolean; released?: boolean }
 export interface Run {
-  id: string; sessionId: string; taskId?: string; status: "starting" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
+  id: string; sessionId: string; taskId?: string; delegationId?: string; status: "starting" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
   startedAt: string; lastObservedAt: string; hostSequence: number; needsInput?: boolean;
 }
 export interface Note { id: string; taskId: string; author: string; text: string; createdAt: string }
@@ -37,12 +42,12 @@ export interface Artifact { id: string; taskId: string; name: string; file: stri
 export interface Delivery { texts: string[] }
 export interface State {
   seq: number; agents: Record<string, Agent>; teams: Record<string, Team>; memberships: Record<string, Membership>;
-  tasks: Record<string, Task>; sessions: Record<string, Session>; runs: Record<string, Run>;
+  tasks: Record<string, Task>; delegations: Record<string, Delegation>; sessions: Record<string, Session>; runs: Record<string, Run>;
   notes: Record<string, Note>; artifacts: Record<string, Artifact>; approvals: Record<string, Approval>; notices: Record<string, Notice>;
   deliveries: Record<string, Delivery>;
   receipts: Record<string, { input: string; result: unknown; at?: number }>;
 }
-export const emptyState = (): State => ({ seq: 0, agents: {}, teams: {}, memberships: {}, tasks: {}, sessions: {}, runs: {}, notes: {}, artifacts: {}, approvals: {}, notices: {}, deliveries: {}, receipts: {} });
+export const emptyState = (): State => ({ seq: 0, agents: {}, teams: {}, memberships: {}, tasks: {}, delegations: {}, sessions: {}, runs: {}, notes: {}, artifacts: {}, approvals: {}, notices: {}, deliveries: {}, receipts: {} });
 // A member's model is its workspace's folder default, kept by the Rind runtime.
 export type FolderDefaults = (method: "get" | "set" | "unset" | "resolve" | "models", params?: Record<string, unknown>) => Promise<any>;
 export class ManagementError extends Error {
@@ -57,7 +62,8 @@ export function text(value: unknown, label: string, limit = 16000): string {
 }
 export const memberKey = (teamId: string, agentId: string) => teamId + "/" + agentId;
 export const activeRun = (run: Run) => ["starting", "running", "unknown"].includes(run.status);
-export interface AdapterInput { agent: Agent; session: Session; task: Task; input: string; instructions: string; externalTools: object }
+export const awaitingDelegation = (d: Delegation) => ["queued", "running", "waiting"].includes(d.status);
+export interface AdapterInput { agent: Agent; session: Session; task: Task | Delegation; input: string; instructions: string; externalTools: object }
 export interface AdapterEvent { type: "working"; sequence: number }
 export interface AdapterHandle { runtimeSessionId: string; completion: Promise<{ content: string }>; cancel(): Promise<void> }
 export interface Adapter { start(input: AdapterInput, emit: (event: AdapterEvent) => void): Promise<AdapterHandle> }

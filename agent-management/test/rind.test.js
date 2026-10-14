@@ -202,11 +202,11 @@ test("a leader conversation delegates work and the delivery returns as its own t
       const names = (body.tools || []).map(tool => tool.function.name);
       const toolMessage = body.messages.find(message => message.role === "tool" && typeof message.content === "string");
       const delivered = body.messages.some(message => message.role === "user" && typeof message.content === "string" && message.content.startsWith("Delegated work settled:"));
+      const prompt = body.messages.findLast(message => message.role === "user")?.content || "";
       let delta;
-      if (names.includes("report")) {
-        delta = toolMessage && toolMessage.content.includes('"report"')
-          ? { content: "Reported." }
-          : { tool_calls: [{ index: 0, id: "report-1", type: "function", function: { name: "report", arguments: JSON.stringify({ outcome: "done", summary: "Fixture delivery", evidence: ["Local provider verified"] }) } }] };
+      if (prompt === "Build the fixture") {
+        if (names.includes("report") || names.includes("delegate")) trouble.push("delegated leaf member received unexpected tools: " + names.join(","));
+        delta = { content: "Fixture delivery" };
       } else {
         if (!names.includes("delegate")) trouble.push("the leader conversation cannot delegate: " + names.join(","));
         if (delivered) delta = { content: "Delivery received." };
@@ -257,10 +257,8 @@ test("a leader conversation delegates work and the delivery returns as its own t
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   assert.ok(started, "the delivery started a turn: " + JSON.stringify(events.map(event => event.type)));
-  assert.match(started.delivery_text, /Builder · task .* · delivered: done/);
-  assert.match(started.delivery_text, /Summary: Fixture delivery/);
-  const [task] = (await user.request("snapshot")).tasks;
-  assert.equal(task.status, "done");
+  assert.match(started.delivery_text, /Builder · task .* · delivered: Fixture delivery/);
+  assert.equal((await user.request("snapshot")).tasks.length, 0, "delegated sub-agent never creates a user-facing task");
   const replay = await window.request("session/replay", { session_id: info.session_id });
   const deliveredMessage = replay.messages.find(message => message._rind_meta?.kind === "team_delivery");
   assert.match(deliveredMessage.content, /Fixture delivery/);

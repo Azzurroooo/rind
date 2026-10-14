@@ -118,11 +118,11 @@ export function detailFor(view, row) {
         : task.review?.decision === "accepted" ? { text: "✓ Accepted", tone: "success" } : task.review?.decision === "rework" ? { text: "↺ Sent back for rework", tone: "warning" } : undefined;
       return {
         title: single(task.brief), titleLines: 3,
-        context: ["Owner " + row.owner, task.priority && task.priority + " priority", task.parentTaskId && "subtask"].filter(Boolean).join(" · "),
+        context: ["Owner " + row.owner, task.priority && task.priority + " priority"].filter(Boolean).join(" · "),
         state: stateLine(row.status),
         callout: first(needsUser(task) && task.blockedOn && { text: "! Needs your answer · " + single(task.blockedOn.action) }, task.error && { text: "! " + single(task.error) }, review),
         facts: [
-          asked && { label: task.blockedOn.responder === "children" ? "Waits on" : "Asked", value: (task.blockedOn.responder === "children" ? "its members · " : (single(byId(snapshot.agents, task.blockedOn.responder)?.name) || "a member") + " · ") + single(task.blockedOn.action) },
+          asked && { label: "Waits on", value: "its members · " + single(task.blockedOn.action) },
           task.status === "queued" && { label: "Queue", value: task.queueReason },
           { label: "Delivery", value: task.report ? [paint.dim(task.report.outcome), single(task.report.summary)] : paint.dim("No report yet"), lines: 4 },
         ],

@@ -198,7 +198,7 @@ export function taskRows(snapshot, teamId, { query = "", filter = "All" } = {}) 
     rows.push({ id: "section:" + section.id, kind: "section", title: section.title, count: items.length });
     for (const task of items) {
       const owner = single(byId(snapshot.agents, task.assigneeAgentId)?.name) || "Removed member";
-      rows.push({ id: "t:" + task.id, kind: "task", title: single(task.brief), status: taskStatus(task), owner, priority: task.priority, subtask: Boolean(task.parentTaskId),
+      rows.push({ id: "t:" + task.id, kind: "task", title: single(task.brief), status: taskStatus(task), owner, priority: task.priority,
         note: single(needsUser(task) ? task.blockedOn?.action || task.error : task.status === "queued" ? task.queueReason : task.report?.summary), taskId: task.id, teamId });
     }
   }
@@ -230,10 +230,9 @@ export function teamStatus(snapshot, teamId, inbox = inboxItems(snapshot)) {
   return statuses.sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Idle";
 }
 
-// A delivery the user has not accepted or sent back yet: a top-level task the
-// user or Manager gave out. Work members hand each other, and deliveries from
-// before reviews existed (no deliveredAt), are not marked new.
-export const unreviewed = task => task.status === "done" && Boolean(task.report && task.deliveredAt) && !task.review && !task.parentTaskId && ["user", "manager"].includes(task.createdBy);
+// A delivery the user has not accepted or sent back yet: a task the user or
+// Manager gave out. Deliveries from before reviews existed (no deliveredAt) are not marked new.
+export const unreviewed = task => task.status === "done" && Boolean(task.report && task.deliveredAt) && !task.review && ["user", "manager"].includes(task.createdBy);
 const FRESH_LIMIT = 20;
 
 export function inboxItems(snapshot) {
@@ -250,8 +249,12 @@ export function inboxItems(snapshot) {
   }
   for (const run of snapshot.runs.filter(r => r.status === "unknown")) {
     const session = snapshot.sessions.find(s => s.id === run.sessionId);
-    if (!session?.teamId) continue;
-    items.push({ id: "r:" + run.id, kind: "run", status: "Unconfirmed", title: "Confirm the previous run stopped", context: teamName(session.teamId) + " › " + name(session.agentId), runId: run.id, teamId: session.teamId, agentId: session.agentId });
+    const task = run.taskId && byId(snapshot.tasks, run.taskId);
+    const origin = run.originSessionId && byId(snapshot.sessions, run.originSessionId);
+    const teamId = task?.teamId || origin?.teamId || session?.teamId;
+    const agentId = task?.assigneeAgentId || origin?.agentId || session?.agentId;
+    if (!teamId) continue;
+    items.push({ id: "r:" + run.id, kind: "run", status: "Unconfirmed", title: "Confirm the previous run stopped", context: teamName(teamId) + " › " + name(agentId), runId: run.id, teamId, agentId });
   }
   // A running task that stops to ask a question is only visible through its
   // conversation; it is listed unless the task itself is already listed.
@@ -269,7 +272,7 @@ export function inboxRows(snapshot) {
   const rows = items.length ? [{ id: "section:needs", kind: "section", title: "Needs you", count: items.length }, ...items] : [{ id: "clear", kind: "clear", title: "Nothing needs you right now" }];
   // What was delivered lately: every delivery not reviewed yet (marked new),
   // then the latest reviewed ones, newest first.
-  const finished = task => task.deliveredAt || snapshot.runs.filter(run => run.taskId === task.id).reduce((max, run) => later(max, run.lastObservedAt), "");
+  const finished = task => task.deliveredAt || snapshot.runs.filter(run => run.taskId === task.id && !run.delegationId).reduce((max, run) => later(max, run.lastObservedAt), "");
   const done = snapshot.tasks.filter(task => task.status === "done").map(task => ({ task, at: finished(task) })).sort((a, b) => b.at.localeCompare(a.at));
   const fresh = done.filter(({ task }) => unreviewed(task));
   const delivered = [...fresh.slice(0, FRESH_LIMIT), ...done.filter(({ task }) => !unreviewed(task)).slice(0, Math.max(0, 8 - fresh.length))];
@@ -465,7 +468,11 @@ export function backgroundRows(snapshot, service, { now = Date.now() } = {}) {
     rows.push({ id: "section:unconfirmed", kind: "section", title: "Unconfirmed", count: unconfirmed.length });
     for (const run of unconfirmed) {
       const session = snapshot.sessions.find(s => s.id === run.sessionId);
-      rows.push({ id: "r:" + run.id, kind: "run", status: "Unconfirmed", title: "Confirm the previous run stopped", context: [teamName(session?.teamId), name(session?.agentId)].filter(Boolean).join(" › "), runId: run.id });
+      const task = run.taskId && byId(snapshot.tasks, run.taskId);
+      const origin = run.originSessionId && byId(snapshot.sessions, run.originSessionId);
+      const teamId = task?.teamId || origin?.teamId || session?.teamId;
+      const agentId = task?.assigneeAgentId || origin?.agentId || session?.agentId;
+      rows.push({ id: "r:" + run.id, kind: "run", status: "Unconfirmed", title: "Confirm the previous run stopped", context: [teamName(teamId), name(agentId)].filter(Boolean).join(" › "), runId: run.id });
     }
   }
   const age = value => relativeTime(value, now);

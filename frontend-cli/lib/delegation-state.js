@@ -2,7 +2,7 @@ import { delegatedTask } from "./tool-display.js";
 
 // Match the host's delivery headings, never task IDs mentioned in evidence.
 export function settledDelegations(text) {
-  return [...String(text || "").matchAll(/^- .+ · task (\S+) · (?:delivered:|blocked, needs |needs attention|cancelled)(?:.*)$/gm)]
+  return [...String(text || "").matchAll(/^- .+ · task (\S+) · (?:delivered:|failed:|blocked, needs |needs attention|cancelled)(?:.*)$/gm)]
     .map(match => match[1]);
 }
 

@@ -28,8 +28,8 @@ test("the Inbox puts Manager approvals first and marks deliveries not reviewed y
   const delivered = rows.filter(row => row.id.startsWith("d:"));
   assert.deepEqual(delivered.map(row => [row.taskId, Boolean(row.fresh), Boolean(row.reworked)]), [["bb", true, false], ["ccc", false, true], ["a", false, false]], "new deliveries first, then the newest reviewed");
   assert.match(rows.find(row => row.id === "section:delivered").title, /1 new/);
-  s.tasks.push(done("dddd", { createdBy: "lead", parentTaskId: "bb" }), done("eeeee", { deliveredAt: undefined }));
-  assert.deepEqual(inboxRows(s).filter(row => row.fresh).map(row => row.taskId), ["bb"], "delegated work and deliveries from before reviews are not new");
+  s.tasks.push(done("eeeee", { deliveredAt: undefined }));
+  assert.deepEqual(inboxRows(s).filter(row => row.fresh).map(row => row.taskId), ["bb"], "deliveries from before reviews are not new");
   assert.equal(sidebarRows(s)[0].badge, 1, "an approval needs the user");
   assert.equal(available({ focus: "main", page: { kind: "inbox" } }, rows[1])[0].label, "decide");
 });
@@ -50,7 +50,7 @@ test("deleted teams appear under Archive, read-only", () => {
 test("a report aligns its blocks, says what needs deciding and folds its history", () => {
   const task = { ...done("a"), priority: "high", notes: [{ id: "n", author: "lead", text: "Started", createdAt: "2026-10-06T10:00:00Z" }],
     report: { outcome: "completed", summary: "Shipped the new login page with a much longer summary that has to wrap onto a second line", evidence: ["unit tests pass", "screenshot attached"], artifacts: ["f"], nextAction: "Announce it" } };
-  const report = { task, team: "Product", owner: "Lead", artifacts: [{ name: "login.png", path: "/a/login.png" }], runs: [{ startedAt: "2026-10-06T10:00:00Z", status: "succeeded" }], subtasks: [], archived: false, decide: "a accept · b send back for rework", name: id => id === "lead" ? "Lead" : id };
+  const report = { task, team: "Product", owner: "Lead", artifacts: [{ name: "login.png", path: "/a/login.png" }], runs: [{ startedAt: "2026-10-06T10:00:00Z", status: "succeeded" }], archived: false, decide: "a accept · b send back for rework", name: id => id === "lead" ? "Lead" : id };
   const lines = renderReport(report, 60, { now: NOW }).map(strip);
   assert.match(lines[0], /✓ Done · Product › Lead · delivered 59m ago · high priority/);
   assert.match(lines.join("\n"), /New delivery · a accept · b send back for rework/);
@@ -74,7 +74,7 @@ test("a report aligns its blocks, says what needs deciding and folds its history
 
 test("a report shows file sizes, an honest empty evidence row, and no file row when nothing was delivered", () => {
   const task = { ...done("a"), report: { outcome: "completed", summary: "Done", evidence: [], artifacts: [] } };
-  const report = { task, team: "Product", owner: "Lead", runs: [], subtasks: [], archived: false, artifacts: [], name: id => id };
+  const report = { task, team: "Product", owner: "Lead", runs: [], archived: false, artifacts: [], name: id => id };
   const lines = renderReport({ ...report, artifacts: [{ name: "login.png", size: 2048, path: "/a/login.png" }, { name: "diff.patch", size: 1048576, path: "/a/diff.patch" }] }, 80, { now: NOW }).map(strip);
   assert.match(lines.join("\n"), /login\.png {2}2\.0 KiB {2}\/a\/login\.png/);
   assert.match(lines.join("\n"), /diff\.patch {2}1\.0 MiB/);
@@ -138,7 +138,7 @@ test("Stop all names jobs that will stop, and a running job is explained in word
 test("a long brief reads in full under Task, folds past six lines, and titles the page with its first line", () => {
   const brief = "Write the launch notes for v2\n" + "Cover every change in the changelog and link each one to its pull request. ".repeat(8) + "\nThen post a summary.";
   const task = { ...done("a"), brief, notes: [] };
-  const report = { task, team: "Product", owner: "Lead", artifacts: [], runs: [], subtasks: [], archived: false, decide: "", name: id => id };
+  const report = { task, team: "Product", owner: "Lead", artifacts: [], runs: [], archived: false, decide: "", name: id => id };
   assert.equal(briefTitle(brief), "Write the launch notes for v2");
   assert.equal(mayFoldBrief(brief), true);
   assert.equal(mayFoldBrief("Fix the typo"), false);

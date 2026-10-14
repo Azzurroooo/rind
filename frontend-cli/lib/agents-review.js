@@ -25,13 +25,11 @@ export function createReviewActions(ui, { agentName, display, teamOf, assignTask
     const archive = archivedTeam(task.teamId);
     const archived = Boolean(archive || snap().archivedTeams?.some(team => team.id === task.teamId));
     const artifacts = await Promise.all((task.report?.artifacts || []).map(artifactId => ui.request("readArtifact", { artifactId })));
-    const tasks = archive?.tasks || snap().tasks;
     const report = {
       task, archived, artifacts,
       team: teamOf(task.teamId)?.name || archive?.name || "Team",
       owner: name(task, task.assigneeAgentId),
-      runs: snap().runs.filter(run => run.taskId === taskId),
-      subtasks: tasks.filter(child => child.parentTaskId === taskId),
+      runs: snap().runs.filter(run => run.taskId === taskId && !run.delegationId),
       name: id => name(task, id),
     };
     const delivered = task.status === "done" && !task.review && !archived;
@@ -45,7 +43,7 @@ export function createReviewActions(ui, { agentName, display, teamOf, assignTask
       ...(!archived ? [{ key: "n", label: blocked ? "answer" : "add note", run: () => answer(taskId) }] : []),
       ...(artifacts.length || owner ? [{ key: "o", label: artifacts.length ? "open files" : "conversations", run: () => openFrom(task, artifacts, owner) }] : []),
       // z unfolds what is folded: a long brief and the history.
-      ...(mayFoldBrief(task.brief) || task.notes.length || report.runs.length || report.subtasks.length ? [{ key: "z", label: "show all", run: detail => { detail.expanded = !detail.expanded; } }] : []),
+      ...(mayFoldBrief(task.brief) || task.notes.length || report.runs.length ? [{ key: "z", label: "show all", run: detail => { detail.expanded = !detail.expanded; } }] : []),
       ...(!archived ? [{ key: "space", label: "more actions", run: () => taskActions(taskId) }] : []),
       { key: "r", label: "refresh", run: () => ui.run(() => delivery(taskId), "Refreshing…") },
     ];

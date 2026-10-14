@@ -172,7 +172,14 @@ export function createActions(ui) {
   }
 
   function unknownRun(teamId, agentId) {
-    return snap().runs.find(r => r.status === "unknown" && snap().sessions.some(s => s.id === r.sessionId && s.agentId === agentId && s.teamId === teamId));
+    return snap().runs.find(r => {
+      if (r.status !== "unknown") return false;
+      const task = r.taskId && snap().tasks.find(t => t.id === r.taskId);
+      if (task) return task.teamId === teamId && task.assigneeAgentId === agentId;
+      const origin = r.originSessionId && snap().sessions.find(s => s.id === r.originSessionId);
+      if (origin) return origin.teamId === teamId && origin.agentId === agentId;
+      return snap().sessions.some(s => s.id === r.sessionId && s.agentId === agentId && s.teamId === teamId);
+    });
   }
   function resolveRun(run) {
     ui.confirm("Release the workspace?", ["Only continue once the previous process has stopped. Until then its workspace stays reserved."], "Process stopped · release",

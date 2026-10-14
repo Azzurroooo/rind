@@ -1,4 +1,4 @@
-import { activeRun, memberKey, type Approval, type Membership, type Run, type Session, type State, type Task, type Team } from "./model.js";
+import { activeRun, memberKey, type Approval, type Delegation, type Membership, type Run, type Session, type State, type Task, type Team } from "./model.js";
 
 // Lookups shared by one snapshot. Built once, so projecting every member,
 // session and queued task is linear in the state instead of quadratic.
@@ -17,21 +17,36 @@ export interface ProjectionIndex {
   runsBySession: Map<string, Run[]>;
   sessionsByMember: Map<string, Session[]>;
   tasksByMember: Map<string, Task[]>;
+  delegationsByMember: Map<string, Delegation[]>;
+  delegationsByOriginSession: Map<string, Delegation[]>;
+  unknownByMember: Set<string>;
   reservedWorkspaces: Map<string, Run>;
 }
 
 const push = <T>(map: Map<string, T[]>, key: string, value: T) => { const list = map.get(key); if (list) list.push(value); else map.set(key, [value]); };
 
 export function projectionIndex(state: State, connected: Set<string>, live: Map<string, LiveSession> = new Map()): ProjectionIndex {
-  const runsBySession = new Map<string, Run[]>(), sessionsByMember = new Map<string, Session[]>(), tasksByMember = new Map<string, Task[]>(), reservedWorkspaces = new Map<string, Run>();
+  const runsBySession = new Map<string, Run[]>(), sessionsByMember = new Map<string, Session[]>(), tasksByMember = new Map<string, Task[]>(), delegationsByMember = new Map<string, Delegation[]>(), delegationsByOriginSession = new Map<string, Delegation[]>(), unknownByMember = new Set<string>(), reservedWorkspaces = new Map<string, Run>();
   for (const run of Object.values(state.runs)) {
     push(runsBySession, run.sessionId, run);
-    const workspace = activeRun(run) && state.agents[state.sessions[run.sessionId]?.agentId]?.canonicalWorkspace;
+    const session = state.sessions[run.sessionId];
+    const workspace = activeRun(run) && state.agents[session?.agentId]?.canonicalWorkspace;
     if (workspace && (!reservedWorkspaces.has(workspace) || run.status === "unknown")) reservedWorkspaces.set(workspace, run);
+    if (run.status === "unknown") {
+      const task = run.taskId ? state.tasks[run.taskId] : undefined;
+      const origin = run.delegationId ? state.delegations?.[run.delegationId]?.originSessionId : undefined;
+      const teamId = task?.teamId || session?.teamId || (origin ? state.sessions[origin]?.teamId : undefined);
+      const agentId = task?.assigneeAgentId || (origin ? state.sessions[origin]?.agentId : undefined) || session?.agentId;
+      if (teamId && agentId) unknownByMember.add(memberKey(teamId, agentId));
+    }
   }
   for (const session of Object.values(state.sessions)) push(sessionsByMember, memberKey(session.teamId || "", session.agentId), session);
   for (const task of Object.values(state.tasks)) push(tasksByMember, memberKey(task.teamId, task.assigneeAgentId), task);
-  return { state, connected, live, runsBySession, sessionsByMember, tasksByMember, reservedWorkspaces };
+  for (const d of Object.values(state.delegations || {})) {
+    push(delegationsByMember, memberKey(d.teamId, d.assigneeAgentId), d);
+    if (d.originSessionId && !d.parentDelegationId) push(delegationsByOriginSession, d.originSessionId, d);
+  }
+  return { state, connected, live, runsBySession, sessionsByMember, tasksByMember, delegationsByMember, delegationsByOriginSession, unknownByMember, reservedWorkspaces };
 }
 
 // Open: at least one window shows the conversation. Shared conversations are
@@ -42,19 +57,21 @@ function isOpen(index: ProjectionIndex, session: Session) {
 }
 
 export function memberStatus(index: ProjectionIndex, agentId: string, teamId: string) {
-  const sessions = index.sessionsByMember.get(memberKey(teamId, agentId)) || [];
+  const key = memberKey(teamId, agentId);
+  const sessions = index.sessionsByMember.get(key) || [];
   const runs = sessions.flatMap(s => index.runsBySession.get(s.id) || []);
   const lives = sessions.map(s => index.live.get(s.runtimeSessionId));
   const turns = lives.map(live => live?.turn);
-  if (runs.some(r => r.status === "unknown")) return "Unconfirmed";
+  if (index.unknownByMember.has(key)) return "Unconfirmed";
   if (turns.includes("question") || runs.some(r => r.status === "running" && r.needsInput)) return "Needs input";
   if (turns.includes("running")) return "Working";
   if (lives.some(runningJob)) return "Running job";
   if (runs.some(r => ["starting", "running"].includes(r.status))) return "Working";
-  const tasks = index.tasksByMember.get(memberKey(teamId, agentId)) || [];
-  if (tasks.some(t => t.status === "needs_attention" || (t.status === "blocked" && t.blockedOn?.responder !== "children"))) return "Needs input";
-  if (tasks.some(t => t.status === "blocked" && t.blockedOn?.responder === "children")) return "Delegated";
-  if (tasks.some(t => t.status === "queued" && t.dispatch)) return "Queued";
+  const tasks = index.tasksByMember.get(key) || [];
+  const delegations = index.delegationsByMember.get(key) || [];
+  if (tasks.some(t => t.status === "needs_attention" || (t.status === "blocked" && t.blockedOn?.responder === "user"))) return "Needs input";
+  if (tasks.some(t => t.status === "blocked" && t.blockedOn?.responder === "children") || delegations.some(d => d.status === "waiting")) return "Delegated";
+  if (tasks.some(t => t.status === "queued" && t.dispatch) || delegations.some(d => d.status === "queued" && d.dispatch)) return "Queued";
   return sessions.some(s => isOpen(index, s)) ? "Open" : "Idle";
 }
 
@@ -86,14 +103,22 @@ export function sessionStatus(index: ProjectionIndex, sessionId: string) {
   const active = runs.find(r => activeRun(r));
   const last = active || runs.at(-1);
   const live = session && index.live.get(session.runtimeSessionId);
-  const status = active?.status === "unknown" ? "Unconfirmed"
+  const status = active?.status === "unknown" && !active.delegationId ? "Unconfirmed"
     : live?.turn === "question" || active?.needsInput ? "Needs input"
     : live?.turn === "running" ? "Working"
     : runningJob(live) ? "Running job"
-    : active ? "Working"
+    : active && active.status !== "unknown" ? "Working"
     : session && isOpen(index, session) ? "Open" : "Idle";
   const lastActivity = [last?.lastObservedAt, live?.updatedAt].filter(Boolean).sort().at(-1);
-  return { status, ...(lastActivity ? { lastActivity } : {}), ...(last?.taskId ? { taskId: last.taskId } : {}), ...(live ? { watchers: live.watchers } : {}) };
+  const pending = (index.delegationsByOriginSession.get(sessionId) || []).filter(d => !d.returned && d.status !== "cancelled")
+    .map(d => ({ taskId: d.id, assignee: index.state.agents[d.assigneeAgentId]?.name || d.assigneeAgentId }));
+  return {
+    status,
+    ...(lastActivity ? { lastActivity } : {}),
+    ...(last?.taskId ? { taskId: last.taskId } : {}),
+    ...(live ? { watchers: live.watchers } : {}),
+    ...(pending.length ? { pendingDelegations: pending } : {}),
+  };
 }
 
 // The organization as the user and the Manager read it (the service's snapshot).

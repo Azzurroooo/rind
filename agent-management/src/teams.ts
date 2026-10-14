@@ -1,4 +1,4 @@
-import { activeRun, memberKey, type Session, type State, type Task } from "./model.js";
+import { activeRun, awaitingDelegation, memberKey, type Session, type State, type Task } from "./model.js";
 
 const unfinished = (task: Task) => !["done", "cancelled"].includes(task.status);
 
@@ -31,7 +31,9 @@ export function pruneAgents(state: State, candidates: Iterable<string>) {
   for (const task of Object.values(state.tasks)) {
     if (state.teams[task.teamId]?.archive) continue;
     used.add(task.assigneeAgentId);
-    used.add(task.createdBy);
+  }
+  for (const d of Object.values(state.delegations || {})) {
+    if (awaitingDelegation(d)) { used.add(d.assigneeAgentId); used.add(d.fromAgentId); }
   }
   for (const id of candidates) {
     const agent = state.agents[id];
@@ -63,6 +65,7 @@ export function dissolveTeam(state: State, teamId: string, note: (taskId: string
     task.status = "cancelled"; delete task.dispatch; delete task.blockedOn;
     note(task.id, "Team deleted.");
   }
+  for (const d of Object.values(state.delegations || {})) if (d.teamId === teamId) delete state.delegations[d.id];
   const memberIds = Object.values(state.memberships).filter(m => m.teamId === teamId).map(m => m.agentId);
   const owners = new Set([...tasks.map(task => task.assigneeAgentId), ...memberIds]);
   const members = Object.fromEntries([...owners].filter(id => state.agents[id]).map(id => [id, state.agents[id].name]));

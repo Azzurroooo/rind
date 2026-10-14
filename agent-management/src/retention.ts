@@ -27,9 +27,9 @@ export function retain(state: State, now = Date.now()) {
   const groups = new Map<string, Run[]>();
   for (const run of Object.values(state.runs)) {
     if (activeRun(run)) continue;
-    // Task runs are the task's execution history; direct turns only matter
-    // for the session's last activity.
-    const key = run.taskId ? "task:" + run.taskId : "session:" + run.sessionId;
+    // Task runs are the task's execution history; direct and delegated turns
+    // only matter for the session's last activity.
+    const key = run.taskId && !run.delegationId ? "task:" + run.taskId : "session:" + run.sessionId;
     const list = groups.get(key) || [];
     list.push(run);
     groups.set(key, list);

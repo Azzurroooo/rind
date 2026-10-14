@@ -37,8 +37,7 @@ export function renderTourAgents(scene, width, rows) {
         task, team: snapshot.teams.find(team => team.id === task.teamId).name,
         owner: name(task.assigneeAgentId), name,
         artifacts: snapshot.artifacts.filter(artifact => artifact.taskId === task.id),
-        runs: snapshot.runs.filter(run => run.taskId === task.id),
-        subtasks: snapshot.tasks.filter(child => child.parentTaskId === task.id),
+        runs: snapshot.runs.filter(run => run.taskId === task.id && !run.delegationId),
         decide: "a accept · w rework",
       }, reportWidth, { now }),
     };

@@ -35,29 +35,27 @@ test("tour organization uses the live Agents renderer and row projections", () =
   assert.deepEqual(renderTourAgents(scene, 116, 30), renderAgents(view, 116, 30, scene.now));
 });
 
-test("managed parent waits for its linked child and resumes in the same session", () => {
+test("managed parent waits for its delegated member and resumes in the same session without a child task", () => {
   const waiting = agentsScene("delegated").snapshot;
   const resumed = agentsScene("resumed").snapshot;
-  const parent = waiting.tasks.find(task => task.id === "parser");
-  const child = waiting.tasks.find(task => task.id === "review");
+  assert.equal(waiting.tasks.length, 1);
+  assert.equal(resumed.tasks.length, 1);
+  const parent = waiting.tasks[0];
+  assert.equal(parent.id, "parser");
   assert.equal(parent.status, "blocked");
   assert.equal(parent.blockedOn.responder, "children");
-  assert.equal(child.parentTaskId, parent.id);
-  assert.equal(child.status, "running");
-  assert.equal(resumed.tasks.find(task => task.id === child.id).status, "done");
-  assert.ok(resumed.tasks.find(task => task.id === child.id).report.evidence.length);
-  assert.equal(resumed.tasks.find(task => task.id === parent.id).status, "running");
-  assert.equal(resumed.sessions.find(session => session.taskId === parent.id).runtimeSessionId,
-    waiting.sessions.find(session => session.taskId === parent.id).runtimeSessionId);
+  assert.equal(waiting.memberships.find(m => m.agentId === "reviewer").status, "Working");
+  assert.equal(resumed.tasks[0].status, "running");
+  assert.equal(resumed.sessions.find(session => session.agentId === "demo").runtimeSessionId,
+    waiting.sessions.find(session => session.agentId === "demo").runtimeSessionId);
 });
 
-test("direct chat only creates the assigned specialist task, not an implicit parent", () => {
+test("direct chat delegation runs the specialist without creating a task", () => {
   const { snapshot } = agentsScene("direct");
-  assert.equal(snapshot.tasks.length, 1);
-  assert.equal(snapshot.tasks[0].assigneeAgentId, "reviewer");
-  assert.equal(snapshot.tasks[0].parentTaskId, undefined);
+  assert.equal(snapshot.tasks.length, 0);
   assert.equal(snapshot.sessions[0].origin, "direct");
-  assert.equal(snapshot.sessions[0].taskId, undefined);
+  assert.deepEqual(snapshot.sessions[0].pendingDelegations, [{ taskId: "8f21ab77", assignee: "reviewer" }]);
+  assert.equal(snapshot.memberships.find(m => m.agentId === "reviewer").status, "Working");
   assert.equal(snapshot.runs.length, 0);
 });
 
