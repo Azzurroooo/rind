@@ -8,19 +8,27 @@ import http from "node:http";
 import { createVirtualOutput } from "./helpers/virtual-terminal.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 
-// A fake model that asks one question, then answers with what it was told.
+// A fake model that asks one question per turn, then reports whether it got an answer or was skipped.
 function questionModel() {
   const server = http.createServer((request, response) => {
     let raw = ""; request.on("data", chunk => { raw += chunk; });
     request.on("end", () => {
       if (request.method !== "POST") { response.end(JSON.stringify({ data: [{ id: "fake" }] })); return; }
       const body = JSON.parse(raw);
-      const answered = body.messages.some(message => message.role === "tool");
+      const last = body.messages.at(-1);
       const chunk = (delta, finish_reason = null) => "data: " + JSON.stringify({ id: "x", model: "fake", choices: [{ index: 0, delta, finish_reason }] }) + "\n\n";
       response.writeHead(200, { "Content-Type": "text/event-stream" });
-      if (answered) { response.end(chunk({ role: "assistant", content: "GOT_THE_ANSWER" }) + chunk({}, "stop") + "data: [DONE]\n\n"); return; }
-      const args = JSON.stringify({ question: "Ship it now?", options: [{ label: "Yes (Recommended)", description: "go" }, { label: "No", description: "wait" }] });
-      response.end(chunk({ role: "assistant", tool_calls: [{ index: 0, id: "call_q", type: "function", function: { name: "ask_user_question", arguments: args } }] }) + chunk({}, "tool_calls") + "data: [DONE]\n\n");
+      if (last?.role === "tool") {
+        const skipped = String(last.content || "").includes("UserQuestionEmptyAnswer");
+        const reply = skipped ? "CONTINUED_AFTER_SKIP" : "GOT_THE_ANSWER";
+        response.end(chunk({ role: "assistant", content: reply }) + chunk({}, "stop") + "data: [DONE]\n\n");
+        return;
+      }
+      const secondTurn = body.messages.filter(message => message.role === "user").length > 1;
+      const question = secondTurn ? "Deploy to staging?" : "Ship it now?";
+      const callId = secondTurn ? "call_q2" : "call_q";
+      const args = JSON.stringify({ question, options: [{ label: "Yes (Recommended)", description: "go" }, { label: "No", description: "wait" }] });
+      response.end(chunk({ role: "assistant", tool_calls: [{ index: 0, id: callId, type: "function", function: { name: "ask_user_question", arguments: args } }] }) + chunk({}, "tool_calls") + "data: [DONE]\n\n");
     });
   });
   return new Promise(resolve => server.listen(0, "127.0.0.1", () => resolve(server)));
@@ -51,7 +59,7 @@ function window(windows, home, workspace, args) {
   };
 }
 
-test("answering a question in one window closes it in another window on the same conversation", { timeout: 90000 }, async t => {
+test("answering or skipping a question in one window updates another window and keeps the turn running on Esc", { timeout: 90000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-two-windows-"));
   const workspace = path.join(home, "work"); await mkdir(workspace);
   const model = await questionModel();
@@ -75,10 +83,24 @@ test("answering a question in one window closes it in another window on the same
   assert.ok(sessionId, "the first message saved a conversation");
 
   const second = window(windows, home, workspace, ["--session", sessionId]);
-  await second.visible("Ship it now?");
+  const menu = await second.visible("Ship it now?");
+  assert.match(menu, /esc skip/);
   second.key("\r");
   await second.visible("GOT_THE_ANSWER");
   const closed = await first.visible("answered in another window");
   assert.match(closed, /Yes/);
   await first.visible("GOT_THE_ANSWER");
+
+  // Skipping with Esc sends an empty answer, does not interrupt the turn, and
+  // lets the model continue after UserQuestionEmptyAnswer.
+  second.key("ask again\r");
+  await second.visible("Deploy to staging?");
+  await first.visible("Deploy to staging?");
+  second.key("\x1b");
+  const secondAfterSkip = await second.visible("CONTINUED_AFTER_SKIP");
+  assert.match(secondAfterSkip, /A: \(no answer\)/);
+  assert.doesNotMatch(secondAfterSkip, /Interrupted/);
+  const firstAfterSkip = await first.visible("(no answer) (answered in another window)");
+  assert.doesNotMatch(firstAfterSkip, /Interrupted/);
+  await first.visible("CONTINUED_AFTER_SKIP");
 });

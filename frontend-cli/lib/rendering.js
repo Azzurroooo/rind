@@ -775,7 +775,7 @@ export function questionMenuFrame(
       lines.push(dim("    ↳ press Tab to type"));
     }
   }
-  lines.push(dim("    ↑↓ select · enter confirm · esc cancel"));
+  lines.push(dim("    ↑↓ select · enter confirm · esc skip"));
   return { text: `${lines.join("\n")}\n`, cursor };
 }
 

@@ -1109,6 +1109,7 @@ test("questionMenuFrame shows the active option description and custom entry", (
   );
   assert.match(questionMenuFrame([], 0).text, /Type your own answer/);
   assert.match(questionMenuFrame([], 0).text, /press Tab to type/);
+  assert.match(questionMenuFrame([], 0).text, /↑↓ select · enter confirm · esc skip/);
 });
 
 test("questionMenuFrame renders custom input in its option row", () => {

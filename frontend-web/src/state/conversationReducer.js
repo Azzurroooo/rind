@@ -302,7 +302,11 @@ function applyTurnEvent(state, event, context) {
       if (state.question?.toolCallId === patch.id) {
         const result = parseToolResult(patch.result);
         const answer = result?.ok === true ? result?.data?.answer : undefined;
-        if (typeof answer === "string") next = markQuestionEntry(next, questionKey(state.question), { status: "answered", selectedAnswer: answer });
+        next = markQuestionEntry(
+          next,
+          questionKey(state.question),
+          typeof answer === "string" && answer ? { status: "answered", selectedAnswer: answer } : { status: "cancelled" },
+        );
         next = { ...next, question: null };
       }
       return next;

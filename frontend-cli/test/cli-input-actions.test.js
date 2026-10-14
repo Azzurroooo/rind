@@ -150,27 +150,47 @@ test("a question answered in another window closes here without answering twice"
   await local;
   assert.deepEqual(requests.map(([, params]) => params), [{ tool_call_id: "q-2", answer: "Yes" }]);
   assert.deepEqual(finished.at(-1), "Yes");
+
+  const skippedElsewhere = actions.answerQuestion({ ...question, tool_call_id: "q-3" });
+  await Promise.resolve();
+  actions.questionAnswered({ tool_call_id: "q-3", answer: "" });
+  await skippedElsewhere;
+  assert.equal(finished.at(-1), "(no answer) (answered in another window)");
 });
 
-test("Esc on a question interrupts the turn instead of answering it empty", async () => {
+test("Esc on a question leaves custom editing first and skips the question without interrupting the turn", async () => {
   const state = createCliState();
   state.runtime.status = "ready";
   state.session.commands = [];
-  const requests = [];
+  const requests = [], finished = [];
+  let interrupted = false;
   const actions = createCliInputActions({
     state, request: async (method, params) => { requests.push([method, params]); return {}; },
-    output: { terminalUi: {}, writeUserInput() {}, closeAssistant() {}, beginQuestion() {}, finishQuestion() {}, redraw() {}, writeError() {} },
-    getTurnController: () => ({ interrupt() { state.turn.interruptRequested = true; actions.cancel(); } }),
+    output: { terminalUi: {}, writeUserInput() {}, closeAssistant() {}, beginQuestion() {}, finishQuestion: (_event, answer) => finished.push(answer), redraw() {}, writeError() {} },
+    getTurnController: () => ({ interrupt() { interrupted = true; } }),
     getTaskMonitor: () => null, getLineInput: () => null,
     pausePrompt() {}, resumePrompt() {}, handleSigint() {},
   });
   const pending = actions.answerQuestion({ tool_call_id: "q-1", question: "Ship it?", options: [{ label: "Yes (Recommended)" }] });
   await Promise.resolve();
+
+  actions.handleTerminalInput("\x1b[B");
+  actions.handleTerminalInput("\t");
+  actions.handleTerminalInput("draft answer");
+  assert.equal(state.input.session.questionState.isEditing(), true);
+  assert.equal(state.input.session.editor.input(), "draft answer");
+
+  actions.handleTerminalInput("\x1b");
+  assert.equal(state.input.session.questionState.isEditing(), false);
+  assert.equal(state.input.session.editor.input(), "");
+  assert.equal(interrupted, false);
+
   actions.handleTerminalInput("\x1b");
   await pending;
-  assert.equal(state.turn.interruptRequested, true);
+  assert.equal(interrupted, false);
   assert.equal(state.input.session, null);
-  assert.deepEqual(requests, [], "no empty answer reaches the model");
+  assert.deepEqual(requests, [["rind/user-question/respond", { tool_call_id: "q-1", answer: "" }]]);
+  assert.deepEqual(finished, [""]);
 });
 
 test("prompt input restores persisted history and saves natural prompts only", async () => {
