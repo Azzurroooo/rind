@@ -4,6 +4,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { managementClient, overviewText, selectRecord } from "./agents-client.js";
 import { createHandoff, HANDOFF_ENV } from "./agents-handoff.js";
+import { applySavedTheme } from "./cli-state-store.js";
 import { terminalKeyboard, TERMINAL_KEYBOARD_ENV } from "./tui/tui.js";
 import { releaseInput, takeInput } from "./tui/console-input.js";
 
@@ -83,8 +84,10 @@ export function leaveSummary({ working = 0, notice = "" } = {}) {
 export async function followConversation(chat, { launch, input, open = openAgentChat }) {
   let next = { action: "open", chat };
   let last = chat;
-  while (next.action === "open") { last = next.chat; next = (await open({ ...next.chat, launch, input })) || { action: "return" }; }
-  return { ...next, chat: last };
+  try {
+    while (next.action === "open") { last = next.chat; next = (await open({ ...next.chat, launch, input })) || { action: "return" }; }
+    return { ...next, chat: last };
+  } finally { applySavedTheme(launch?.home); }
 }
 
 // The conversation the user just left, so Esc on the Agents page goes back to

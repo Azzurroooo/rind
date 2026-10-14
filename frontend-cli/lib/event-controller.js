@@ -133,10 +133,9 @@ export function createEventController({
         if (output.handleContextBuilt?.(event)) {
           output.resetContextUsage?.();
         }
-        const line = contextBuiltLine(event);
-        if (line) {
+        if (contextBuiltLine(event)) {
           output.closeAssistant?.();
-          output.log?.(() => line);
+          output.log?.(() => contextBuiltLine(event));
         }
         return;
       }
@@ -238,7 +237,8 @@ export function createEventController({
           // Nothing runs here and nothing needs the user: work was handed out.
           output.log?.(() => delegatedWaitingLine(waitingOnDelegations(event.session_id).map(item => item.assignee)));
         } else if (!compactTurn && state.activeGoal?.status !== "active") {
-          output.log?.(turnCompletedLine(event, toolStats));
+          const stats = { ...toolStats };
+          output.log?.(() => turnCompletedLine(event, stats));
         }
         resetTurnState();
         return;

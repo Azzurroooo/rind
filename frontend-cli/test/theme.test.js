@@ -161,15 +161,22 @@ test("cli state store merges patches atomically and tolerates corruption", async
   }
 });
 
-test("the saved theme applies to every surface, Agents included", async () => {
+test("the saved theme applies to every surface, Agents included, and syncs when a child conversation returns", async () => {
   const { applySavedTheme } = await import("../lib/cli-state-store.js");
+  const { followConversation } = await import("../lib/agents-commands.js");
   const { mkdtempSync, writeFileSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const pathModule = await import("node:path");
-  const home = mkdtempSync(pathModule.join(tmpdir(), "rind-theme-"));
-  writeFileSync(pathModule.join(home, "cli-state.json"), JSON.stringify({ theme: "gruvbox-dark" }));
+  const home = mkdtempSync(path.join(tmpdir(), "rind-theme-"));
+  writeFileSync(path.join(home, "cli-state.json"), JSON.stringify({ theme: "gruvbox-dark" }));
   try {
     applySavedTheme(home);
     assert.equal(currentTheme().name, "gruvbox-dark");
+    await followConversation({ manager: true }, {
+      launch: { home },
+      open: async () => {
+        saveCliState({ theme: "latte" }, home);
+        return { action: "agents" };
+      },
+    });
+    assert.equal(currentTheme().name, "latte");
   } finally { resetTheme(); await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
