@@ -15,7 +15,7 @@ flowchart LR
     VERIFY --> REPLACE["os.replace"]
 ~~~
 
-read_file 默认从第 1 行读取，原始读取结果还有 50 KiB 上限；模型投影进一步受 25 KiB 约束。一整行都放不下时返回 LineTooLong，不能生成一个跳过半行的伪游标。glob 和 grep 返回有界匹配；grep 优先使用 rg，另有本地实现路径。
+read_file 默认从第 1 行读取，原始读取结果还有 50 KiB 上限；模型投影进一步受 25 KiB 约束。一整行都放不下时返回 LineTooLong，不能生成一个跳过半行的伪游标。glob 和 grep 通过 rg 返回有界匹配。
 
 edit_file 要求 old_str 在当前文件中恰好出现一次，包括重叠匹配也不能歧义；write_file 是整文件替换。两者都保留原权限、临时暂存、替换前检查。Worker 共享 FileMutationQueue，使不同会话和 Team 子任务对同一路径的修改串行；不同路径可以独立进行。
 

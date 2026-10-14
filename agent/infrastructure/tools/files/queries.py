@@ -9,11 +9,15 @@ from agent.domain import tool_cancelled, tool_error, tool_ok
 from agent.domain.cancellation import CancellationToken
 
 
-_SKIP_DIRS = frozenset({
-    ".git", "node_modules", "venv", ".venv", "__pycache__",
-    "dist", "build", ".mypy_cache", ".pytest_cache", ".tox",
-    ".hg", ".svn", "site-packages",
-})
+_SKIP_GLOBS = tuple(
+    argument
+    for folder in (
+        ".git", "node_modules", "venv", ".venv", "__pycache__",
+        "dist", "build", ".mypy_cache", ".pytest_cache", ".tox",
+        ".hg", ".svn", "site-packages",
+    )
+    for argument in ("--glob", f"!**/{folder}/**")
+)
 _READ_MAX_LIMIT = 2000
 _READ_MAX_BYTES = 50 * 1024
 _MAX_LINE_CHARS = 2000
@@ -36,10 +40,6 @@ def _existing_path(tool_name: str, raw_path: str) -> tuple[Path, str | None]:
     except OSError as exc:
         return Path(raw_path), tool_error(tool_name, f"Cannot access path: {raw_path}: {exc}", "PathAccessError")
     return path, None
-
-
-def _is_skipped_path(path: Path) -> bool:
-    return bool(_SKIP_DIRS & set(path.parts))
 
 
 def _relative_path(file_path: Path, root: Path) -> str:
@@ -201,24 +201,37 @@ def glob(
         return tool_error("glob", "max_results must be an integer.", "InvalidMaxResults")
     if max_results < 1:
         return tool_error("glob", "max_results must be >= 1.", "InvalidMaxResults")
+    rg = shutil.which("rg")
+    if not rg:
+        return tool_error("glob", "rg executable not found.", "RgUnavailable")
 
+    # Like opencode's glob (rg --files) and pi's find (fd --glob): brace patterns match
+    # and skipped folders are never walked.
+    process: subprocess.Popen[str] | None = None
     try:
-        results: list[dict[str, object]] = []
-        truncated = False
-        for index, file_path in enumerate(sorted(search_path.rglob(pattern), key=lambda item: item.as_posix().lower())):
-            if index % 200 == 0 and (cancelled := _cancelled("glob", _cancellation_token)):
+        process = subprocess.Popen(
+            [rg, "--files", "--hidden", "--glob", pattern, *_SKIP_GLOBS, "."],
+            cwd=search_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        assert process.stdout is not None
+        paths: list[Path] = []
+        for line in process.stdout:
+            if cancelled := _cancelled("glob", _cancellation_token):
                 return cancelled
-            if not file_path.is_file() or _is_skipped_path(file_path):
-                continue
-            if len(results) >= max_results:
-                truncated = True
-                break
-            try:
-                size_bytes = file_path.stat().st_size
-            except PermissionError:
-                return tool_error("glob", f"Permission denied accessing file: {file_path}", "PermissionDenied")
-            results.append({"path": _relative_path(file_path, search_path), "size_bytes": int(size_bytes)})
-
+            paths.append(search_path / line.rstrip("\r\n"))
+        stderr = process.stderr.read() if process.stderr is not None else ""
+        if process.wait() not in (0, 1):
+            return tool_error("glob", stderr.strip() or "rg file lookup failed.", _rg_error(stderr, "GlobError"))
+        paths.sort(key=lambda item: item.as_posix().lower())
+        results = [
+            {"path": _relative_path(file_path, search_path), "size_bytes": file_path.stat().st_size}
+            for file_path in paths[:max_results]
+        ]
         return tool_ok(
             "glob",
             results,
@@ -227,23 +240,21 @@ def glob(
                 "pattern": pattern,
                 "count": len(results),
                 "max_results": max_results,
-                "truncated": truncated,
+                "truncated": len(paths) > max_results,
             },
         )
-    except ValueError as exc:
-        return tool_error("glob", f"Invalid glob pattern: {exc}", "InvalidPattern")
-    except PermissionError:
-        return tool_error("glob", f"Permission denied reading directory: {path}", "PermissionDenied")
+    except PermissionError as exc:
+        return tool_error("glob", f"Permission denied accessing file: {exc.filename}", "PermissionDenied")
     except OSError as exc:
         return tool_error("glob", f"File lookup failed: {exc}", "GlobError")
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait()
 
 
 def _rg_command(rg: str, pattern: str, search_path: Path, file_glob: str) -> list[str]:
-    command = [rg, "--json", "--color", "never", "--glob", file_glob]
-    for skipped in _SKIP_DIRS:
-        command.extend(("--glob", f"!**/{skipped}/**"))
-    command.extend(("--", pattern, str(search_path)))
-    return command
+    return [rg, "--json", "--color", "never", "--glob", file_glob, *_SKIP_GLOBS, "--", pattern, str(search_path)]
 
 
 def _rg_result_path(raw_path: str, search_path: Path) -> str:
@@ -254,13 +265,13 @@ def _rg_result_path(raw_path: str, search_path: Path) -> str:
     return _relative_path(candidate, search_path)
 
 
-def _rg_error(stderr: str) -> str:
+def _rg_error(stderr: str, fallback: str) -> str:
     lowered = stderr.lower()
     if "permission" in lowered or "access is denied" in lowered:
         return "PermissionDenied"
-    if "regex" in lowered or "pattern" in lowered:
+    if "regex" in lowered or "pattern" in lowered or "glob" in lowered:
         return "InvalidPattern"
-    return "GrepError"
+    return fallback
 
 
 def grep(
@@ -333,7 +344,7 @@ def grep(
         stderr = process.stderr.read() if process.stderr is not None else ""
         return_code = process.wait()
         if return_code not in (0, 1) and not truncated:
-            return tool_error("grep", stderr.strip() or "rg search failed.", _rg_error(stderr))
+            return tool_error("grep", stderr.strip() or "rg search failed.", _rg_error(stderr, "GrepError"))
         return tool_ok(
             "grep",
             results,

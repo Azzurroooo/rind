@@ -15,7 +15,7 @@ flowchart LR
     VERIFY --> REPLACE["os.replace"]
 ~~~
 
-read_file reads from line 1 by default, and the raw read result also has a 50 KiB limit; the model projection is further bounded to 25 KiB. When even a single line will not fit, it returns LineTooLong rather than producing a fake cursor that skips half a line. glob and grep return bounded matches; grep prefers rg, with a local implementation path as an alternative.
+read_file reads from line 1 by default, and the raw read result also has a 50 KiB limit; the model projection is further bounded to 25 KiB. When even a single line will not fit, it returns LineTooLong rather than producing a fake cursor that skips half a line. glob and grep return bounded matches through rg.
 
 edit_file requires old_str to appear exactly once in the current file, and even overlapping matches must not be ambiguous; write_file is a whole-file replacement. Both preserve the original permissions, stage in a temporary file, and check before replacement. The Worker shares FileMutationQueue, so modifications to the same path from different sessions and Team subtasks are serialized; different paths may proceed independently.
 

@@ -58,6 +58,15 @@ def test_glob_returns_files_sizes_and_skips_noise(tmp_path: Path) -> None:
         raise AssertionError(f"Expected compact file entries: {files}")
 
 
+def test_glob_matches_brace_patterns(tmp_path: Path) -> None:
+    write(tmp_path / "src" / "service.ts", "export {}\n")
+    write(tmp_path / "test" / "service.test.js", "test()\n")
+    write(tmp_path / "README.md", "# readme\n")
+
+    payload = assert_ok(glob_tool("**/*.{ts,js}", path=str(tmp_path)))
+    assert [item["path"] for item in payload["data"]] == ["src/service.ts", "test/service.test.js"]
+
+
 def test_glob_limits_results(tmp_path: Path) -> None:
     for name in ["a.py", "b.py", "c.py"]:
         write(tmp_path / name, name)
