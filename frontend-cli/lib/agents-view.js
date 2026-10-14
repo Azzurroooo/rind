@@ -4,7 +4,7 @@ import { textWidth, truncateToWidth, wrapTextWithAnsi, middleClipCells } from ".
 import { insertCursorMarker } from "./tui/cursor.js";
 import { CURSOR_MARKER } from "./tui/frame.js";
 import { prepareComposerFrame } from "./composer-terminal.js";
-import { statusMeta, single, clean, selectable, memberState } from "./agents-model.js";
+import { statusMeta, single, clean, selectable, memberState, entryTask } from "./agents-model.js";
 import { detailLines } from "./agents-detail.js";
 import { helpGroups, hintsFor, formatHints } from "./agents-keys.js";
 
@@ -174,7 +174,7 @@ function listLines(view, key, rows, selectedId, width, height, focused, empty) {
 
 function tabs(view, width) {
   const team = view.page.tab;
-  const openTasks = view.snapshot.tasks.filter(t => t.teamId === view.page.teamId && !["done", "cancelled"].includes(t.status)).length;
+  const openTasks = view.snapshot.tasks.filter(t => t.teamId === view.page.teamId && entryTask(t) && !["done", "cancelled"].includes(t.status)).length;
   const tab = (id, label) => id === team ? paintBackground(paint.bold(" " + label + " "), "selection") : paint.dim(" " + label + " ");
   return truncateToWidth(tab("org", "Organization") + " " + tab("tasks", "Tasks" + (openTasks ? " " + openTasks : "")), width, "…");
 }

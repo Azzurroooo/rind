@@ -43,7 +43,8 @@ export function jobSummary(background) {
 }
 
 const TASK_STATUS = { running: "Working", queued: "Queued", blocked: "Needs input", needs_attention: "Needs input", done: "Done", cancelled: "Cancelled" };
-export const needsUser = task => task.status === "needs_attention" || (task.status === "blocked" && task.blockedOn?.responder === "user");
+export const entryTask = task => !task.parentTaskId && (!task.createdBy || ["user", "manager"].includes(task.createdBy));
+export const needsUser = task => entryTask(task) && (task.status === "needs_attention" || (task.status === "blocked" && task.blockedOn?.responder === "user"));
 export function taskStatus(task) {
   if (task.status === "blocked" && !needsUser(task)) return "Delegated";
   return TASK_STATUS[task.status] || "Idle";
@@ -143,7 +144,7 @@ export function organizationRows(snapshot, teamId, sessions, { collapsed = new S
     const open = narrowed || !collapsed.has(member.agentId);
     const row = { id: "m:" + member.agentId, kind: "member", depth, title: single(agent?.name) || "Missing member", role: role === "Member" ? "" : role, status: member.status || "Idle", ownStatus: member.status || "Idle",
       agentId: member.agentId, teamId, leader: role === "Leader", sessionCount: own.length,
-      tasks: snapshot.tasks.filter(t => t.teamId === teamId && t.assigneeAgentId === member.agentId && !["done", "cancelled"].includes(t.status)).length, open: own.filter(s => s.status !== "Idle").length, reportCount: reports(member.agentId).length,
+      tasks: snapshot.tasks.filter(t => t.teamId === teamId && t.assigneeAgentId === member.agentId && entryTask(t) && !["done", "cancelled"].includes(t.status)).length, open: own.filter(s => s.status !== "Idle").length, reportCount: reports(member.agentId).length,
       expandable: own.length > 0 || reports(member.agentId).length > 0, expanded: open };
     if (!open) return [{ ...row, status: branchStatus(member.agentId) || row.status, hidden: own.length + descendants(member.agentId) }];
     const limit = narrowed ? Infinity : sessionLimit;
@@ -186,7 +187,7 @@ const TASK_SECTIONS = [
   { id: "cancelled", title: "Cancelled", test: task => task.status === "cancelled" },
 ];
 export function taskRows(snapshot, teamId, { query = "", filter = "All" } = {}) {
-  const tasks = snapshot.tasks.filter(t => t.teamId === teamId);
+  const tasks = snapshot.tasks.filter(t => t.teamId === teamId && entryTask(t));
   const rows = [{ id: "assign", kind: "assign", title: "Assign a task", teamId }];
   for (const section of TASK_SECTIONS) {
     const items = tasks.filter(section.test).filter(task => {
@@ -198,7 +199,7 @@ export function taskRows(snapshot, teamId, { query = "", filter = "All" } = {}) 
     rows.push({ id: "section:" + section.id, kind: "section", title: section.title, count: items.length });
     for (const task of items) {
       const owner = single(byId(snapshot.agents, task.assigneeAgentId)?.name) || "Removed member";
-      rows.push({ id: "t:" + task.id, kind: "task", title: single(task.brief), status: taskStatus(task), owner, priority: task.priority,
+      rows.push({ id: "t:" + task.id, kind: "task", title: single(task.brief), status: taskStatus(task), fresh: unreviewed(task), reworked: task.review?.decision === "rework", owner, priority: task.priority,
         note: single(needsUser(task) ? task.blockedOn?.action || task.error : task.status === "queued" ? task.queueReason : task.report?.summary), taskId: task.id, teamId });
     }
   }
@@ -224,7 +225,7 @@ export function managerRows(history = [], { query = "", now = Date.now(), live =
 
 export function teamSummary(snapshot, teamId, inbox = inboxItems(snapshot)) {
   const members = snapshot.memberships.filter(m => m.teamId === teamId);
-  const tasks = snapshot.tasks.filter(t => t.teamId === teamId);
+  const tasks = snapshot.tasks.filter(t => t.teamId === teamId && entryTask(t));
   return { members: members.length, working: members.filter(m => m.status === "Working").length, needs: inbox.filter(item => item.teamId === teamId).length,
     queued: tasks.filter(t => t.status === "queued").length, delivered: tasks.filter(t => t.status === "done").length };
 }
@@ -237,7 +238,7 @@ export function teamStatus(snapshot, teamId, inbox = inboxItems(snapshot)) {
 
 // A delivery the user has not accepted or sent back yet: a task the user or
 // Manager gave out. Deliveries from before reviews existed (no deliveredAt) are not marked new.
-export const unreviewed = task => task.status === "done" && Boolean(task.report && task.deliveredAt) && !task.review && ["user", "manager"].includes(task.createdBy);
+export const unreviewed = task => entryTask(task) && task.status === "done" && Boolean(task.report && task.deliveredAt) && !task.review && ["user", "manager"].includes(task.createdBy);
 const FRESH_LIMIT = 20;
 
 export function inboxItems(snapshot) {
@@ -265,7 +266,7 @@ export function inboxItems(snapshot) {
   // conversation; it is listed unless the task itself is already listed.
   const listed = new Set(items.map(item => item.taskId).filter(Boolean));
   for (const session of snapshot.sessions.filter(s => s.teamId && s.runtimeSessionId && s.status === "Needs input" && !listed.has(s.taskId))) {
-    const task = snapshot.tasks.find(t => t.id === session.taskId);
+    const task = snapshot.tasks.find(t => t.id === session.taskId && entryTask(t));
     items.push({ id: "s:" + session.runtimeSessionId, kind: "session", status: "Needs input", title: task ? "Task asks: " + single(task.brief) : "Conversation is waiting for your answer",
       context: teamName(session.teamId) + " › " + name(session.agentId), sessionId: session.runtimeSessionId, agentId: session.agentId, teamId: session.teamId, ...(task ? { taskId: task.id } : {}) });
   }
@@ -278,9 +279,9 @@ export function inboxRows(snapshot) {
   // What was delivered lately: every delivery not reviewed yet (marked new),
   // then the latest reviewed ones, newest first.
   const finished = task => task.deliveredAt || snapshot.runs.filter(run => run.taskId === task.id && !run.delegationId).reduce((max, run) => later(max, run.lastObservedAt), "");
-  const done = snapshot.tasks.filter(task => task.status === "done").map(task => ({ task, at: finished(task) })).sort((a, b) => b.at.localeCompare(a.at));
+  const done = snapshot.tasks.filter(task => entryTask(task) && task.status === "done").map(task => ({ task, at: finished(task) })).sort((a, b) => b.at.localeCompare(a.at));
   const fresh = done.filter(({ task }) => unreviewed(task));
-  const delivered = [...fresh.slice(0, FRESH_LIMIT), ...done.filter(({ task }) => !unreviewed(task)).slice(0, Math.max(0, 8 - fresh.length))];
+  const delivered = [...fresh.slice(0, FRESH_LIMIT), ...done.filter(({ task }) => !unreviewed(task)).slice(0, Math.max(8, FRESH_LIMIT - fresh.length))];
   // What the Manager changed on its own, until the user dismisses it.
   const notices = [...(snapshot.notices || [])].reverse();
   if (notices.length) rows.push({ id: "section:notices", kind: "section", title: "Changed by the Manager", count: notices.length },
@@ -314,7 +315,7 @@ export function archiveRows(archive, { query = "" } = {}) {
   const rows = [];
   for (const team of archive.teams) {
     const owner = id => single(team.archive?.members?.[id]) || "Removed member";
-    const tasks = team.tasks.filter(task => matches(query, task.brief, owner(task.assigneeAgentId), task.report?.summary))
+    const tasks = team.tasks.filter(task => entryTask(task) && matches(query, task.brief, owner(task.assigneeAgentId), task.report?.summary))
       .sort((a, b) => (b.deliveredAt || "").localeCompare(a.deliveredAt || "") || single(a.brief).localeCompare(single(b.brief)));
     if (!tasks.length) continue;
     rows.push({ id: "section:" + team.id, kind: "section", title: single(team.name) + " · deleted " + relativeTime(team.archive?.at), count: undefined },

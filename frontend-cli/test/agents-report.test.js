@@ -152,3 +152,82 @@ test("a long brief reads in full under Task, folds past six lines, and titles th
   assert.match(full, /Then post a summary\./);
   assert.doesNotMatch(full, /more lines/);
 });
+
+test("accepting a delivery keeps it in Inbox and legacy sub-agent tasks never crowd out entry deliveries", async () => {
+  const { taskRows } = await import("../lib/agents-model.js");
+  const s = snapshot();
+  for (let i = 0; i < 10; i++) {
+    s.tasks.push({
+      id: "entry-" + i, teamId: "team", assigneeAgentId: "lead", brief: "Entry task " + i,
+      status: "done", createdBy: "user", deliveredAt: `2026-10-06T11:${String(10 + i).padStart(2, "0")}:00Z`,
+      report: { outcome: "completed", summary: "Summary " + i, evidence: [], artifacts: [] },
+    });
+  }
+  for (let i = 0; i < 15; i++) {
+    s.tasks.push({
+      id: "sub-" + i, teamId: "team", assigneeAgentId: "lead", parentTaskId: "entry-0", brief: "Sub task " + i,
+      status: "done", createdBy: "lead", deliveredAt: `2026-10-06T11:${String(30 + i).padStart(2, "0")}:00Z`,
+      report: { outcome: "completed", summary: "Internal " + i, evidence: [], artifacts: [] },
+    });
+  }
+  // Accept the newest entry task while 9 others are still unreviewed.
+  s.tasks.find(t => t.id === "entry-9").review = { decision: "accepted", at: "2026-10-06T11:50:00Z" };
+  const inbox = inboxRows(s).filter(r => r.id.startsWith("d:"));
+  assert.ok(inbox.some(r => r.taskId === "entry-9" && !r.fresh), "the accepted task stays in Inbox even with 9 unreviewed siblings");
+  assert.ok(!inbox.some(r => r.taskId.startsWith("sub-")), "sub-agent tasks never appear in Inbox");
+
+  // Accept all remaining entry tasks; all 8 newest stay in Inbox without being crowded out by sub-agent tasks.
+  for (const t of s.tasks.filter(t => t.id.startsWith("entry-"))) t.review = { decision: "accepted", at: "2026-10-06T11:55:00Z" };
+  const afterAllAccepted = inboxRows(s).filter(r => r.id.startsWith("d:"));
+  assert.equal(afterAllAccepted.length, 10, "up to FRESH_LIMIT reviewed entry deliveries remain visible in Inbox");
+  assert.ok(afterAllAccepted.every(r => r.taskId.startsWith("entry-")));
+
+  // Tasks tab also surfaces fresh and reworked flags and excludes sub-agent tasks.
+  s.tasks.find(t => t.id === "entry-0").review = undefined;
+  s.tasks.find(t => t.id === "entry-1").review = { decision: "rework", at: "2026-10-06T11:56:00Z", feedback: "Refine" };
+  const teamTasks = taskRows(s, "team").filter(r => r.kind === "task");
+  assert.equal(teamTasks.length, 10);
+  assert.equal(teamTasks.find(r => r.taskId === "entry-0").fresh, true);
+  assert.equal(teamTasks.find(r => r.taskId === "entry-1").reworked, true);
+});
+
+test("renderReport formats Markdown headings, lists, inline code, bold and links across all review states", () => {
+  const richTask = {
+    ...done("rich"),
+    brief: "# Ship Demo\n- Verify `index.html`\n- Keep **zero** dependencies",
+    report: {
+      outcome: "completed (`v1`)",
+      summary: "# Highlights\n1) Built `index.html` with **responsive** layout\n- Verified [Docs](https://example.com)\n```sh\nnpm test\n```",
+      evidence: ["- `npm test` passed (**34** checks)", "Screenshot in `demo.png`"],
+      artifacts: ["f1"],
+      nextAction: "Run `rind agents` to review",
+    },
+  };
+  const baseReport = { task: richTask, team: "Product", owner: "Lead", artifacts: [{ name: "demo.png", size: 512, path: "/w/demo.png" }], runs: [], archived: false, decide: "a accept · b send back for rework", name: id => id };
+  const prevTty = process.stdout.isTTY;
+  process.stdout.isTTY = true;
+  try {
+    for (const variant of [
+      baseReport,
+      { ...baseReport, decide: "", task: { ...richTask, review: { decision: "accepted", at: "2026-10-06T11:30:00Z" } } },
+      { ...baseReport, decide: "", task: { ...richTask, review: { decision: "rework", at: "2026-10-06T11:30:00Z", feedback: "Fix `header` alignment" } } },
+      { ...baseReport, decide: "", archived: true },
+    ]) {
+      const rawLines = renderReport(variant, 72, { now: NOW });
+      const plainLines = rawLines.map(strip);
+      const joined = plainLines.join("\n");
+      assert.match(joined, /Outcome {3}Completed \(v1\)/);
+      assert.match(joined, /Summary {3}Highlights/);
+      assert.match(joined, /1\) Built index\.html with responsive layout/);
+      assert.match(joined, /• Verified Docs \(https:\/\/example\.com\)/);
+      assert.match(joined, /npm test/);
+      assert.match(joined, /Evidence {2}• npm test passed \(34 checks\)/);
+      assert.match(joined, /Files {5}demo\.png {2}512 B {2}\/w\/demo\.png/);
+      assert.match(joined, /Next {6}Run rind agents to review/);
+      assert.ok(rawLines.some(line => /\x1b\[[0-9;]*m/.test(line)), "SGR styling is preserved in every state");
+      assert.ok(plainLines.every(line => textWidth(line) <= 72));
+    }
+  } finally {
+    process.stdout.isTTY = prevTty;
+  }
+});

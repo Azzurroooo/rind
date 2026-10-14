@@ -81,3 +81,53 @@ test("every kind of row draws inside the panel at 28 and 46 columns", () => {
   assert.match(member, /! Needs your answer · Pick the release date/, "what needs doing is the callout");
   assert.doesNotMatch(member, /Enter /, "keys are the footer's job");
 });
+
+test("task detail panel renders structured Delivery, Evidence, Files and Next with ANSI styling in unreviewed, accepted, rework and archived states", () => {
+  const s = emptyAgentsSnapshot();
+  s.teams.push({ id: "team", name: "Product", leaderAgentId: "lead", createRoot: "/w" });
+  s.agents.push({ id: "lead", name: "Lead", canonicalWorkspace: "/w/lead" });
+  s.artifacts.push({ id: "art-1", taskId: "t1", name: "report.md", size: 2048 });
+  const baseTask = {
+    id: "t1", teamId: "team", assigneeAgentId: "lead", createdBy: "user",
+    brief: "Deliver the one-page summary", status: "done", deliveredAt: "2026-10-06T11:00:00Z",
+    report: {
+      outcome: "completed",
+      summary: "1) Built `report.md` with **clean** sections\n2) Verified all links",
+      evidence: ["`npm test` passed", "Manual check ok"],
+      artifacts: ["art-1"],
+      nextAction: "Share with the team",
+    },
+  };
+  const states = [
+    { task: { ...baseTask }, row: { kind: "task", taskId: "t1", owner: "Lead", status: "Done" }, callout: /● New delivery · open it to accept or send\s+back/ },
+    { task: { ...baseTask, review: { decision: "accepted", at: "2026-10-06T11:10:00Z" } }, row: { kind: "task", taskId: "t1", owner: "Lead", status: "Done" }, callout: /✓ Accepted/ },
+    { task: { ...baseTask, review: { decision: "rework", at: "2026-10-06T11:10:00Z", feedback: "Add metrics" } }, row: { kind: "task", taskId: "t1", owner: "Lead", status: "Done" }, callout: /↺ Sent back for rework · Add metrics/ },
+    { task: { ...baseTask, review: { decision: "accepted", at: "2026-10-06T11:10:00Z" } }, row: { kind: "task", taskId: "t1", owner: "Lead", status: "Done", archived: true }, callout: null },
+  ];
+  const prevTty = process.stdout.isTTY;
+  process.stdout.isTTY = true;
+  try {
+    for (const { task, row, callout } of states) {
+      s.tasks = row.archived ? [] : [task];
+      const archive = row.archived ? { teams: [{ id: "team", name: "Product", tasks: [task] }] } : undefined;
+      const raw = detailLines({ snapshot: s, archive }, row, 46, 28);
+      const text = plain(raw).join("\n");
+      if (callout) assert.match(text, callout);
+      assert.match(text, /Delivery {1}Completed\n {9}1\) Built report\.md with clean/);
+      assert.match(text, /Evidence {1}• npm test passed\n {9}• Manual check ok/);
+      assert.match(text, /Files {4}report\.md {2}2\.0 KiB/);
+      assert.match(text, /Next {5}Share with the team/);
+      // Ensure SGR colors inside facts are preserved by renderPanel.
+      const deliveryLine = raw.find(line => stripAnsi(line).startsWith("Delivery "));
+      assert.ok(/\x1b\[[0-9;]*mCompleted/.test(deliveryLine), "Outcome keeps its SGR styling in the panel");
+    }
+
+    // Even on a short terminal (height 10), the first fact (Delivery) is clamped to fit rather than dropped.
+    s.tasks = [{ ...baseTask, review: { decision: "accepted", at: "2026-10-06T11:10:00Z" } }];
+    const shortLines = plain(detailLines({ snapshot: s }, { kind: "task", taskId: "t1", owner: "Lead", status: "Done" }, 46, 10)).join("\n");
+    assert.match(shortLines, /✓ Accepted/);
+    assert.match(shortLines, /Delivery {1}Completed/);
+  } finally {
+    process.stdout.isTTY = prevTty;
+  }
+});

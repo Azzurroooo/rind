@@ -2,8 +2,9 @@
 // renderPanel draws (see agents-panel.js): the most important facts first, at
 // most one callout, and no prose about keys (the footer lists them).
 import { paint } from "./theme.js";
-import { single, statusMeta, roleOf, needsUser, taskStatus, memberState, sessionSelection, jobSummary } from "./agents-model.js";
+import { clean, single, statusMeta, roleOf, needsUser, taskStatus, memberState, sessionSelection, jobSummary, unreviewed } from "./agents-model.js";
 import { renderPanel } from "./agents-panel.js";
+import { cap, fileSize, formatInline, formatReportLines } from "./agents-report.js";
 
 const toned = (status, text) => (paint[statusMeta(status).tone] || paint.dim)(statusMeta(status).glyph + " " + text);
 const stateLine = (status, time) => toned(status, status) + (time ? paint.dim(" · " + time) : "");
@@ -42,12 +43,10 @@ function jobText(snapshot, runtimeSessionId) {
 }
 function waitsOnText(snapshot, sessionIds, task) {
   const ids = new Set(sessionIds.filter(Boolean));
-  const fromSessions = snapshot.sessions.filter(s => ids.has(s.id) || (task?.id && s.taskId === task.id))
-    .flatMap(s => s.pendingDelegations || []).map(d => single(d.assignee));
-  const parentIds = new Set([...(task?.id ? [task.id] : []), ...snapshot.runs.filter(r => ids.has(r.sessionId) && r.taskId).map(r => r.taskId)]);
-  const fromTasks = (snapshot.tasks || []).filter(t => ((t.originSessionId && ids.has(t.originSessionId)) || (t.parentTaskId && parentIds.has(t.parentTaskId))) && !t.returned && t.status !== "cancelled")
-    .map(t => single(byId(snapshot.agents, t.assigneeAgentId)?.name) || t.assigneeAgentId);
-  const names = [...new Set([...fromSessions, ...fromTasks].filter(Boolean))];
+  const names = [...new Set(
+    snapshot.sessions.filter(s => ids.has(s.id) || (task?.id && s.taskId === task.id))
+      .flatMap(s => s.pendingDelegations || []).map(d => single(d.assignee)).filter(Boolean),
+  )];
   if (!names.length && !(task?.status === "blocked" && task.blockedOn?.responder === "children")) return "";
   return (names.length ? names.join(", ") : "its members") + paint.dim(" · resumes on delivery");
 }
@@ -124,22 +123,50 @@ export function detailFor(view, row) {
       };
     }
     case "task": {
-      const task = byId(snapshot.tasks, row.taskId);
-      if (row.archived) return { title: row.title, titleLines: 3, context: "Owner " + row.owner + " · read-only, the team was deleted", state: stateLine(row.status), facts: [{ label: "Delivery", value: row.note || paint.dim("No report"), lines: 3 }] };
-      if (!task) return null;
+      const archivedTask = row.archived && view.archive?.teams?.flatMap(t => t.tasks || []).find(t => t.id === row.taskId);
+      const task = byId(snapshot.tasks, row.taskId) || archivedTask;
+      if (!task) {
+        if (row.archived) return { title: row.title, titleLines: 3, context: "Owner " + row.owner + " · read-only, the team was deleted", state: stateLine(row.status), facts: [{ label: "Delivery", value: formatReportLines(row.note).length ? formatReportLines(row.note) : paint.dim("No report"), lines: 6 }] };
+        return null;
+      }
       const asked = task.blockedOn && !needsUser(task);
-      const review = row.fresh ? { text: "● New delivery · open it to accept or send back", tone: "accent" }
-        : task.review?.decision === "accepted" ? { text: "✓ Accepted", tone: "success" } : task.review?.decision === "rework" ? { text: "↺ Sent back for rework", tone: "warning" } : undefined;
-      const outcome = single(task.report?.outcome);
+      const fresh = row.fresh ?? unreviewed(task);
+      const review = row.archived ? undefined
+        : fresh ? { text: "● New delivery · open it to accept or send back", tone: "accent" }
+        : task.review?.decision === "accepted" ? { text: "✓ Accepted", tone: "success" }
+        : task.review?.decision === "rework" ? { text: "↺ Sent back for rework" + (task.review.feedback ? " · " + single(task.review.feedback) : ""), tone: "warning" }
+        : undefined;
+      const r = task.report;
+      const outcome = cap(r?.outcome);
+      const summary = formatReportLines(r?.summary);
+      const deliveryValue = r ? [outcome && formatInline(outcome, text => paint.bold(paint.success(text))), ...summary].filter(Boolean) : paint.dim("No report yet");
+      const evidence = (r?.evidence || []).flatMap(item => {
+        const parts = formatReportLines(clean(item).trim().replace(/^[-*•]\s+/, ""));
+        return parts.map((line, i) => (i === 0 ? paint.success("• ") : "  ") + line);
+      });
+      const taskArtifacts = (snapshot.artifacts || []).filter(a => a.taskId === task.id);
+      const files = taskArtifacts.length
+        ? taskArtifacts.map(file => [paint.bold(paint.code(single(file.name))), file.size ? paint.notice(fileSize(file.size)) : ""].filter(Boolean).join("  "))
+        : r?.artifacts?.length ? [paint.dim(`${r.artifacts.length} published file${r.artifacts.length === 1 ? "" : "s"}`)] : [];
+      const next = formatReportLines(r?.nextAction, paint.notice);
       return {
         title: single(task.brief), titleLines: 3,
-        context: ["Owner " + row.owner, task.priority && task.priority + " priority"].filter(Boolean).join(" · "),
-        state: stateLine(row.status),
-        callout: first(needsUser(task) && task.blockedOn && { text: "! Needs your answer · " + single(task.blockedOn.action) }, task.error && { text: "! " + single(task.error) }, review),
+        context: row.archived
+          ? "Owner " + row.owner + " · read-only, the team was deleted"
+          : ["Owner " + row.owner, task.priority && task.priority + " priority"].filter(Boolean).join(" · "),
+        state: stateLine(row.status || taskStatus(task)),
+        callout: first(
+          !row.archived && needsUser(task) && task.blockedOn && { text: "! Needs your answer · " + single(task.blockedOn.action) },
+          !row.archived && task.error && { text: "! " + single(task.error), tone: "danger" },
+          review,
+        ),
         facts: [
           asked && { label: "Waits on", value: "its members · " + single(task.blockedOn.action) },
           task.status === "queued" && { label: "Queue", value: task.queueReason },
-          { label: "Delivery", value: task.report ? [paint.dim(outcome ? outcome[0].toUpperCase() + outcome.slice(1) : ""), single(task.report.summary)] : paint.dim("No report yet"), lines: 4 },
+          { label: "Delivery", value: deliveryValue, lines: 8 },
+          evidence.length && { label: "Evidence", value: evidence, lines: 4 },
+          files.length && { label: "Files", value: files, lines: 3 },
+          next.length && { label: "Next", value: next, lines: 2 },
         ],
       };
     }

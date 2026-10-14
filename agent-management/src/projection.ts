@@ -1,4 +1,4 @@
-import { activeRun, memberKey, type Approval, type Delegation, type Membership, type Run, type Session, type State, type Task, type Team } from "./model.js";
+import { activeRun, entryTask, memberKey, type Approval, type Delegation, type Membership, type Run, type Session, type State, type Task, type Team } from "./model.js";
 
 // Lookups shared by one snapshot. Built once, so projecting every member,
 // session and queued task is linear in the state instead of quadratic.
@@ -42,7 +42,7 @@ export function projectionIndex(state: State, connected: Set<string>, live: Map<
     }
   }
   for (const session of Object.values(state.sessions)) push(sessionsByMember, memberKey(session.teamId || "", session.agentId), session);
-  for (const task of Object.values(state.tasks)) push(tasksByMember, memberKey(task.teamId, task.assigneeAgentId), task);
+  for (const task of Object.values(state.tasks)) if (entryTask(task)) push(tasksByMember, memberKey(task.teamId, task.assigneeAgentId), task);
   for (const d of Object.values(state.delegations || {})) {
     push(delegationsByMember, memberKey(d.teamId, d.assigneeAgentId), d);
     if (d.originSessionId && !d.parentDelegationId) push(delegationsByOriginSession, d.originSessionId, d);

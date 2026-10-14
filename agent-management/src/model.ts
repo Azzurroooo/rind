@@ -63,6 +63,7 @@ export function text(value: unknown, label: string, limit = 16000): string {
 export const memberKey = (teamId: string, agentId: string) => teamId + "/" + agentId;
 export const activeRun = (run: Run) => ["starting", "running", "unknown"].includes(run.status);
 export const awaitingDelegation = (d: Delegation) => ["queued", "running", "waiting"].includes(d.status);
+export const entryTask = (task: Task & { parentTaskId?: string }) => !task.parentTaskId && (!task.createdBy || ["user", "manager"].includes(task.createdBy));
 export interface AdapterInput { agent: Agent; session: Session; task: Task | Delegation; input: string; instructions: string; externalTools: object }
 export interface AdapterEvent { type: "working"; sequence: number }
 export interface AdapterHandle { runtimeSessionId: string; completion: Promise<{ content: string }>; cancel(): Promise<void>; steer?(message: string): Promise<boolean> }

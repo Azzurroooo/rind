@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, stat, copyFile, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { activeRun, awaitingDelegation, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Delegation, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
+import { activeRun, awaitingDelegation, entryTask, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Delegation, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
@@ -533,7 +533,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   function filtered(state: State, actor: Principal) {
     const teams = Object.values(state.teams).filter(t => !t.archive);
     const teamIds = new Set(teams.map(t => t.id));
-    const tasks = Object.values(state.tasks).filter(t => teamIds.has(t.teamId));
+    const tasks = Object.values(state.tasks).filter(t => teamIds.has(t.teamId) && entryTask(t));
     const taskIds = new Set(tasks.map(t => t.id));
     const sessions = Object.values(state.sessions);
     const index = projectionIndex(state, connected, runtimeSessions);
@@ -603,7 +603,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       case "listArchive": {
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or Manager can read deleted teams.");
         const teams = Object.values(state.teams).filter(t => t.archive).sort((a, b) => b.archive!.at.localeCompare(a.archive!.at));
-        return { teams: teams.map(team => ({ ...team, tasks: Object.values(state.tasks).filter(t => t.teamId === team.id) })) };
+        return { teams: teams.map(team => ({ ...team, tasks: Object.values(state.tasks).filter(t => t.teamId === team.id && entryTask(t)) })) };
       }
       case "setLeader": {
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can change team leadership.");
