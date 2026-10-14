@@ -15,9 +15,20 @@ export async function fixture(t) {
   const starts = [];
   const adapter = { async start(input) {
     let finish, fail;
+    const steered = [];
     const completion = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
-    starts.push({ input, finish, fail });
-    return { runtimeSessionId: randomUUID(), completion, async cancel() { finish({ content: "" }); } };
+    const entry = { input, finish, fail, steered, steerResult: true };
+    starts.push(entry);
+    return {
+      runtimeSessionId: randomUUID(),
+      completion,
+      async cancel() { finish({ content: "" }); },
+      async steer(message) {
+        if (!entry.steerResult) return false;
+        steered.push(message);
+        return true;
+      },
+    };
   } };
   // Stands in for the Rind runtime's folder defaults: records each call, keeps the last value per folder.
   const folders = new Map(), folderCalls = [];

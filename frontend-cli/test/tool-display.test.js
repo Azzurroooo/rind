@@ -289,6 +289,27 @@ test("delegate shows its target, task and brief from the real contract", () => {
     event: { status: "completed", duration_ms: 4200, result: legacy },
   }, WIDTH);
   assert.match(stripAnsi(replayed[0]), /^  ◉ delegate → reviewer · task 8f21ab77c3 · 4\.20s$/);
+
+  const waitRunning = renderToolRunning({
+    name: "delegate", args: { wait: true }, phase: "running", elapsedMs: 2100,
+  }, WIDTH);
+  assert.match(stripAnsi(waitRunning[0]), /^  ◌ delegate → wait · 2s$/);
+
+  const waitResult = JSON.stringify({
+    ok: true, tool: "delegate",
+    data: {
+      settled: [{ taskId: "8f21ab77c3", assignee: "reviewer", status: "done", reply: "All good" }],
+      running: [],
+      timedOut: false,
+      output: "Delegated work settled:\n- reviewer · task 8f21ab77c3 · delivered: All good",
+    },
+  });
+  const waitFinished = renderToolFinished({
+    name: "delegate", args: { wait: true }, phase: "done", expanded: false,
+    event: { status: "completed", duration_ms: 1500, result: waitResult },
+  }, WIDTH).map(stripAnsi);
+  assert.match(waitFinished[0], /^  ◉ delegate → wait · 1 settled · 1\.50s$/);
+  assert.match(waitFinished[1], /Delegated work settled:/);
 });
 
 test("report shows the delivery head and counts", () => {

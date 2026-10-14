@@ -117,6 +117,7 @@ export function argsFromResult(name, result) {
     case "delegate": {
       const task = delegatedTask(result);
       put("to", task?.assignee);
+      if (task?.wait) put("wait", true);
       break;
     }
     case "agent_create":
@@ -152,6 +153,16 @@ export function delegatedTask(result) {
   }
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return null;
+  }
+  if (Array.isArray(data.settled)) {
+    return {
+      wait: true,
+      settled: data.settled.map(item => singleLineText(item?.taskId)).filter(Boolean),
+      running: Array.isArray(data.running) ? data.running.map(item => singleLineText(item?.taskId)).filter(Boolean) : [],
+      timedOut: Boolean(data.timedOut),
+      released: Boolean(data.released),
+      output: String(data.output || ""),
+    };
   }
   const taskId = singleLineText(data.taskId);
   return taskId ? { taskId, assignee: singleLineText(data.assignee), status: singleLineText(data.status) } : null;
@@ -618,11 +629,17 @@ const DELEGATE_RENDERER = {
   },
   finished(context, width, state) {
     const task = delegatedTask(context.event?.result);
-    const target = delegateTarget(context.args, width) || (task?.assignee ? agentArg(task.assignee, width) : dim("…"));
-    const id = task ? dim(` · task ${clipText(task.taskId, Math.max(8, width), 6)}`) : "";
+    const target = delegateTarget(context.args, width) || (task?.assignee ? agentArg(task.assignee, width) : task?.wait ? "wait" : dim("…"));
+    const id = task?.taskId ? dim(` · task ${clipText(task.taskId, Math.max(8, width), 6)}`)
+      : task?.wait ? dim(` · ${task.settled.length} settled${task.timedOut ? " · timed out" : task.released ? " · released" : ""}`) : "";
     return titleFor(state, `delegate → ${target}${id}`) + durationPart("delegate", context.event);
   },
   body(context, width, limit) {
+    const task = delegatedTask(context.event?.result);
+    if (task?.wait && task.output) {
+      const lines = task.output.split(/\r\n|\r|\n/).filter(line => line.trim()).map(line => dim(`    ${clipText(line, width, 6)}`));
+      return { lines: lines.slice(0, limit), total: lines.length };
+    }
     const brief = singleLineText(context.args.brief || context.args.message);
     const lines = brief ? [dim(`    ${clipText(brief, width, 6)}`)] : [];
     return { lines: lines.slice(0, limit), total: lines.length };
@@ -630,6 +647,9 @@ const DELEGATE_RENDERER = {
 };
 
 function delegateTarget(args, width) {
+  if (args?.wait === true) {
+    return singleLineText(args?.task) ? `wait task ${clipText(args.task, Math.max(8, width), 6)}` : "wait";
+  }
   if (singleLineText(args?.to)) {
     return agentArg(args.to, width);
   }

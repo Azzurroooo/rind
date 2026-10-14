@@ -65,5 +65,5 @@ export const activeRun = (run: Run) => ["starting", "running", "unknown"].includ
 export const awaitingDelegation = (d: Delegation) => ["queued", "running", "waiting"].includes(d.status);
 export interface AdapterInput { agent: Agent; session: Session; task: Task | Delegation; input: string; instructions: string; externalTools: object }
 export interface AdapterEvent { type: "working"; sequence: number }
-export interface AdapterHandle { runtimeSessionId: string; completion: Promise<{ content: string }>; cancel(): Promise<void> }
+export interface AdapterHandle { runtimeSessionId: string; completion: Promise<{ content: string }>; cancel(): Promise<void>; steer?(message: string): Promise<boolean> }
 export interface Adapter { start(input: AdapterInput, emit: (event: AdapterEvent) => void): Promise<AdapterHandle> }

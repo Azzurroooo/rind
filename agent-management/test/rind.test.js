@@ -263,3 +263,122 @@ test("a leader conversation delegates work and the delivery returns as its own t
   const deliveredMessage = replay.messages.find(message => message._rind_meta?.kind === "team_delivery");
   assert.match(deliveredMessage.content, /Fixture delivery/);
 });
+
+test("leader delegates in background, steers running sub-agent mid-turn, collects result via wait, and user steer releases wait", { timeout: 90000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-steer-wait-e2e-"));
+  const leaderWorkspace = path.join(home, "leader"), memberWorkspace = path.join(home, "member");
+  await mkdir(leaderWorkspace); await mkdir(memberWorkspace);
+  await writeFile(path.join(memberWorkspace, "notes.txt"), "alpha\n");
+
+  let memberAgentId = "", delegatedTaskId = "", slowTaskId = "";
+  let builderStep2Messages = [], waitResultPayload = null, releasedWaitPayload = null, leaderAfterUserSteerMessages = [];
+  let resolveMemberStarted, resolveMemberSteered, resolveSlowMember, resolveWaitStarted;
+  const memberStarted = new Promise(r => { resolveMemberStarted = r; });
+  const memberSteered = new Promise(r => { resolveMemberSteered = r; });
+  const allowSlowMember = new Promise(r => { resolveSlowMember = r; });
+  const waitStarted = new Promise(r => { resolveWaitStarted = r; });
+
+  const provider = http.createServer((request, response) => {
+    if (request.method === "GET") { response.end(JSON.stringify({ data: [{ id: "fixture" }] })); return; }
+    let raw = ""; request.on("data", chunk => raw += chunk); request.on("end", async () => {
+      const body = JSON.parse(raw);
+      const userMessages = body.messages.filter(m => m.role === "user").map(m => m.content);
+      const toolMessages = body.messages.filter(m => m.role === "tool");
+      let delta;
+
+      if (userMessages[0]?.includes("Build the fixture")) {
+        if (toolMessages.length === 0) {
+          resolveMemberStarted();
+          await memberSteered;
+          delta = { tool_calls: [{ index: 0, id: "read-1", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: "notes.txt" }) } }] };
+        } else {
+          builderStep2Messages = body.messages;
+          delta = { content: "Fixture built with metrics" };
+        }
+      } else if (userMessages.some(u => typeof u === "string" && u.includes("Slow work"))) {
+        await allowSlowMember;
+        delta = { content: "Slow work done" };
+      } else if (userMessages.includes("Wait for slow member")) {
+        const waitPromptIdx = body.messages.findIndex(m => m.role === "user" && m.content === "Wait for slow member");
+        const turnTools = body.messages.slice(waitPromptIdx).filter(m => m.role === "tool");
+        if (turnTools.length === 0) {
+          delta = { tool_calls: [{ index: 0, id: "del-slow", type: "function", function: { name: "delegate", arguments: JSON.stringify({ to: memberAgentId, brief: "Slow work" }) } }] };
+        } else if (turnTools.length === 1) {
+          slowTaskId = JSON.parse(turnTools[0].content).data.taskId;
+          setTimeout(() => resolveWaitStarted(), 250);
+          delta = { tool_calls: [{ index: 0, id: "wait-slow", type: "function", function: { name: "delegate", arguments: JSON.stringify({ wait: true, timeoutMs: 30000 }) } }] };
+        } else if (turnTools.length === 2) {
+          releasedWaitPayload = JSON.parse(turnTools[1].content).data;
+          leaderAfterUserSteerMessages = body.messages.slice(waitPromptIdx);
+          delta = { tool_calls: [{ index: 0, id: "cancel-slow", type: "function", function: { name: "delegate", arguments: JSON.stringify({ task: slowTaskId, cancel: true }) } }] };
+        } else {
+          delta = { content: "Skipped waiting per user steer." };
+        }
+      } else {
+        // First turn on Lead: "Coordinate in one turn"
+        if (toolMessages.length === 0) {
+          delta = { tool_calls: [{ index: 0, id: "del-1", type: "function", function: { name: "delegate", arguments: JSON.stringify({ to: memberAgentId, brief: "Build the fixture" }) } }] };
+        } else if (toolMessages.length === 1) {
+          delegatedTaskId = JSON.parse(toolMessages[0].content).data.taskId;
+          await memberStarted;
+          delta = { tool_calls: [{ index: 0, id: "steer-1", type: "function", function: { name: "delegate", arguments: JSON.stringify({ task: delegatedTaskId, message: "Include metrics" }) } }] };
+        } else if (toolMessages.length === 2) {
+          resolveMemberSteered();
+          delta = { tool_calls: [{ index: 0, id: "wait-1", type: "function", function: { name: "delegate", arguments: JSON.stringify({ wait: true, timeoutMs: 30000 }) } }] };
+        } else {
+          waitResultPayload = JSON.parse(toolMessages[2].content).data;
+          delta = { content: "All coordinated in one turn." };
+        }
+      }
+
+      const toolCall = Boolean(delta.tool_calls);
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write("data: " + JSON.stringify({ choices: [{ index: 0, delta, finish_reason: null }] }) + "\n\n");
+      response.write("data: " + JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: toolCall ? "tool_calls" : "stop" }] }) + "\n\n");
+      response.end("data: [DONE]\n\n");
+    });
+  });
+
+  await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture-key", model: "fixture" }));
+  const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
+  const server = await startServer(options);
+  const token = (await readFile(server.paths.token, "utf8")).trim();
+  const user = await connectClient({ endpoint: server.paths.endpoint, token });
+  t.after(async () => { resolveSlowMember(); user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+
+  const team = await user.request("createTeam", { name: "E2E Steer Wait" });
+  const leader = await user.request("registerAgent", { workspace: leaderWorkspace, name: "Lead" });
+  const member = await user.request("registerAgent", { workspace: memberWorkspace, name: "Builder" });
+  await user.request("addMember", { teamId: team.id, agentId: leader.id });
+  await user.request("addMember", { teamId: team.id, agentId: member.id, reportsToAgentId: leader.id });
+  await user.request("setLeader", { teamId: team.id, agentId: leader.id });
+  memberAgentId = member.id;
+
+  const session = await user.request("attachSession", { agentId: leader.id, teamId: team.id, shared: true });
+  const window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }) });
+  t.after(() => window.shutdown().catch(() => {}));
+  const info = await window.request("session/create", {});
+  await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
+
+  // 1. Non-blocking delegate + mid-flight steer + in-turn wait
+  const turn1 = await window.request("session/prompt", { session_id: info.session_id, input: "Coordinate in one turn", completion_scope: "request" });
+  assert.equal(turn1.answer, "All coordinated in one turn.");
+  assert.ok(builderStep2Messages.some(m => m.role === "user" && m.content === "From Lead: Include metrics"), "mid-flight steer injected into sub-agent active turn");
+  assert.ok(waitResultPayload);
+  assert.equal(waitResultPayload.timedOut, false);
+  assert.equal(waitResultPayload.settled.length, 1);
+  assert.equal(waitResultPayload.settled[0].reply, "Fixture built with metrics");
+
+  // 2. User steer releases active delegate({ wait: true }) immediately
+  const turn2Promise = window.request("session/prompt", { session_id: info.session_id, input: "Wait for slow member", completion_scope: "request" });
+  await waitStarted;
+  const steerAck = await window.request("rind/session/steer", { session_id: info.session_id, input: "User says skip waiting" });
+  assert.equal(steerAck.accepted, true);
+  const turn2 = await turn2Promise;
+  assert.equal(turn2.answer, "Skipped waiting per user steer.");
+  assert.ok(releasedWaitPayload);
+  assert.equal(releasedWaitPayload.released, true);
+  assert.ok(leaderAfterUserSteerMessages.some(m => m.role === "user" && m.content === "User says skip waiting"));
+});
+

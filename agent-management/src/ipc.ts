@@ -66,6 +66,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       onMessage(message: any) {
         if (message?.kind === "runtime" && message.type === "sessions_changed") { service.setLive(message.sessions || []); return; }
         if (message.event?.type === "folder_defaults_changed") { service.folderDefaultsChanged(); return; }
+        if (message.event?.type === "wait_released" || message.event?.type === "turn_cancelled") { service.releaseWait(message.session_id); if (message.event?.type === "wait_released") return; }
         if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "task_updated"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
         const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === message.session_id);
         if (session) void reconcile(session);

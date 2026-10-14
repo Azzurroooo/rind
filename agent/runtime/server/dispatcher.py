@@ -1139,7 +1139,8 @@ class RuntimeDispatcher:
                 raise ValueError("release_wait requires task_id or tool_call_id.")
             if any(not isinstance(value, str) or not value.strip() for value in params.values()):
                 raise ValueError("Task and tool call IDs must be nonempty strings.")
-            released = self._worker.shell_tools.supervisor.release_wait(session_id, params.get("task_id"), params.get("tool_call_id"))
+            release = getattr(self._worker.execution, "release_wait", None) or self._worker.shell_tools.supervisor.release_wait
+            released = release(session_id, params.get("task_id"), params.get("tool_call_id"))
             await self._respond(request, {"ok": True, "released": released})
             return
         if action == "list":
@@ -1212,6 +1213,8 @@ class RuntimeDispatcher:
         expected = params.get("turn_id")
         active = self._worker.execution.active_turn_id(session_id)
         if request.get("method") == RuntimeMethod.SESSION_CANCEL and expected in {None, ""}:
+            return True
+        if request.get("method") == RuntimeMethod.RIND_SESSION_STEER and expected in {None, ""} and active:
             return True
         if not isinstance(expected, str) or not expected.strip() or not active or expected != active:
             await self._respond_error(request, "The requested turn is no longer active.", "TurnNotActive")

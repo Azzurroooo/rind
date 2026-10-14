@@ -9,6 +9,10 @@ export function settledDelegations(text) {
 export function rememberDelegation(pending, result, sessionId) {
   const task = delegatedTask(result);
   if (!task) return;
+  if (task.wait) {
+    for (const id of task.settled) pending.delete(id);
+    return;
+  }
   if (task.status === "cancelled") pending.delete(task.taskId);
   else pending.set(task.taskId, { assignee: task.assignee || pending.get(task.taskId)?.assignee || "", sessionId: String(sessionId || "") });
 }

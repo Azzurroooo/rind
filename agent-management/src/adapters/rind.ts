@@ -33,6 +33,11 @@ export function createRindAdapter(options: { home?: string; python?: string; rep
         }).catch(error => { if (cancelled) return { content: "" }; throw new ManagementError((error as { code?: string }).code === "EXECUTION_UNCONFIRMED" ? "EXECUTION_UNCONFIRMED" : "EXECUTION_FAILED", String(error)); }).finally(() => client.shutdown());
         return {
           runtimeSessionId, completion,
+          async steer(message: string) {
+            if (cancelled) return false;
+            try { await client.request("rind/session/steer", { session_id: runtimeSessionId, input: message }); return true; }
+            catch { return false; }
+          },
           async cancel() { cancelled = true; await client.request("session/cancel", { session_id: runtimeSessionId }); await client.shutdown(); },
         };
       } catch (error) { await client.shutdown(); throw new ManagementError((error as { code?: string }).code === "EXECUTION_UNCONFIRMED" ? "EXECUTION_UNCONFIRMED" : "EXECUTION_FAILED", String(error)); }

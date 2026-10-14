@@ -15,7 +15,9 @@ import { publishArtifact } from "./artifacts.js";
 import { newWorkspacePath, addWorktree, removeWorktree } from "./workspaces.js";
 
 type Params = Record<string, any>;
-const END_TURN = "End your turn now; the results are delivered to you when your delegated work settles.";
+const DELEGATE_NEXT = "Keep working in parallel, call delegate({wait: true}) to collect results in this turn, or end your turn to receive them when they settle.";
+const WAIT_PENDING = Symbol("waitPending");
+interface WaitPending { [WAIT_PENDING]: { sessionId: string; ids: string[]; timeoutMs: number; includeReturned: boolean } }
 // Teams are picked by name in the sidebar and in `rind agents`; two live teams never share one.
 const teamNameTaken = (state: State, name: string) => Object.values(state.teams).some(t => !t.archive && t.name.trim().toLowerCase() === name.trim().toLowerCase());
 const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listArchive", "listModels", "getMemberModel", "listFolderDefaults"]);
@@ -32,6 +34,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   let scheduling = false;
   let scheduleRequested = false;
   const live = new Map<string, AdapterHandle>();
+  const cancelling = new Set<string>();
+  const waiters = new Map<string, Set<() => void>>();
   const executions = new Set<Promise<void>>();
   const listeners = new Set<() => void>();
   const connected = new Set<string>();
@@ -39,6 +43,12 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   let runtimeSessions = new Map<string, LiveSession>();
   // Bumped when the Runtime reports a changed folder default; pages refetch what they show.
   let folderDefaultsVersion = 0;
+  function releaseSessionWait(sessionId: string) {
+    const set = waiters.get(sessionId);
+    if (!set) return;
+    waiters.delete(sessionId);
+    for (const wake of set) wake();
+  }
   function transaction<T>(work: (state: State) => Promise<T> | T): Promise<T> {
     const result = serial.then(async () => {
       const next = structuredClone(store.state);
@@ -177,8 +187,16 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   const taskDelegations = (state: State, taskId: string) => Object.values(state.delegations).filter(d => d.taskId === taskId && !d.parentDelegationId);
   const childDelegations = (state: State, delegationId: string) => Object.values(state.delegations).filter(d => d.parentDelegationId === delegationId);
   const sessionDelegations = (state: State, sessionId: string) => Object.values(state.delegations).filter(d => d.originSessionId === sessionId && !d.parentDelegationId);
+  function ownDelegations(state: State, session: Session) {
+    const run = Object.values(state.runs).find(r => activeRun(r) && r.sessionId === session.id);
+    if (run?.delegationId) return childDelegations(state, run.delegationId);
+    if (run?.taskId) return taskDelegations(state, run.taskId);
+    return sessionDelegations(state, session.id);
+  }
   // Whoever delegated the work hears back once all of it has settled: a parent
-  // task or delegation runs again, a conversation gets a delivery.
+  // task or delegation runs again, a conversation gets a delivery. While the
+  // delegator is still running its own turn (or actively waiting in-turn),
+  // results remain unreturned so delegate({wait: true}) can claim them first.
   function wakeDelegator(state: State, d: Delegation) {
     if (d.parentDelegationId) {
       const parent = state.delegations[d.parentDelegationId];
@@ -192,6 +210,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       if (!children.some(awaitingDelegation)) returnDelegations(state, children, text => resumeWork(parent, text));
     } else if (d.originSessionId) {
       const sessionId = d.originSessionId;
+      if (waiters.has(sessionId) || Object.values(state.runs).some(r => activeRun(r) && r.sessionId === sessionId)) return;
       const children = sessionDelegations(state, sessionId);
       if (!children.some(awaitingDelegation)) returnDelegations(state, children, text => { (state.deliveries[sessionId] ||= { texts: [] }).texts.push(text); });
     }
@@ -260,7 +279,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     const task = state.tasks[run.taskId!];
     requireValue(task.status === "running", "TASK_NOT_RUNNING", "Report from an active task.");
     if (p.blocked !== undefined) { blockTask(state, actor, task, p.blocked); return { taskId: task.id, status: "blocked", next: "End your turn." }; }
-    requireValue(!taskDelegations(state, task.id).some(awaitingDelegation), "WORK_OUTSTANDING", "Your delegated work is not in yet. " + END_TURN + " Then report.");
+    const pending = taskDelegations(state, task.id);
+    requireValue(!pending.some(d => awaitingDelegation(d) || !d.returned), "WORK_OUTSTANDING",
+      pending.some(awaitingDelegation)
+        ? "Your delegated work is still running. Call delegate({wait: true}) or end your turn to receive the results before reporting."
+        : "Delegated results are ready. Call delegate({wait: true}) to read them before reporting.");
     const delivery = validateReport({ outcome: p.outcome, summary: p.summary, evidence: p.evidence ?? [], artifacts: [] });
     for (const file of p.artifacts === undefined ? [] : strings(p.artifacts, "Artifacts")) {
       const artifact = await publishArtifact(paths.artifacts, { workspace: state.agents[task.assigneeAgentId].canonicalWorkspace }, { teamId: task.teamId, recipient: "user", taskId: task.id }, file);
@@ -270,12 +293,85 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     note(state, task.id, author(state, actor), "Delivery submitted; awaiting confirmed execution completion.");
     return { taskId: task.id, delivered: true, next: "End your turn; your delivery goes to the user." };
   }
+  function claimWaitResult(state: State, ids: string[], outcome: { timedOut: boolean; released: boolean }, canClaim: boolean, includeReturned: boolean) {
+    const targets = ids.map(id => state.delegations[id]).filter(Boolean);
+    const settled = outcome.released || !canClaim ? [] : targets.filter(d => (includeReturned || !d.returned) && !awaitingDelegation(d));
+    const running = targets.filter(awaitingDelegation);
+    for (const d of settled) d.returned = true;
+    const output = outcome.released
+      ? "Wait interrupted by new input; delegated work continues in the background."
+      : settled.length
+        ? resultsText(state, settled)
+        : outcome.timedOut
+          ? "Timed out waiting for delegated work; still running: " + running.map(d => nameOf(state, d.assigneeAgentId) + " (task " + d.id + ")").join(", ") + "."
+          : "No pending delegated work.";
+    return {
+      settled: settled.map(d => ({
+        taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: d.status,
+        ...(d.reply ? { reply: d.reply } : {}), ...(d.error ? { error: d.error } : {}),
+      })),
+      running: running.map(d => ({ taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: d.status })),
+      timedOut: outcome.timedOut,
+      ...(outcome.released ? { released: true } : {}),
+      output,
+    };
+  }
+  function prepareWait(state: State, actor: Principal, session: Session, p: Params): WaitPending | ReturnType<typeof claimWaitResult> {
+    requireValue(p.to === undefined && p.new === undefined && p.brief === undefined && p.message === undefined && p.cancel === undefined && p.retire === undefined && p.interrupt === undefined,
+      "INVALID_INPUT", "Use {wait: true, task?, timeoutMs?} without other delegate actions.");
+    const rawTimeout = p.timeoutMs === undefined ? 30000 : Number(p.timeoutMs);
+    requireValue(Number.isFinite(rawTimeout) && rawTimeout >= 1000 && rawTimeout <= 60000, "INVALID_INPUT", "timeoutMs must be between 1000 and 60000.");
+    const timeoutMs = Math.floor(rawTimeout);
+    const includeReturned = p.task !== undefined;
+    let targets: Delegation[];
+    if (includeReturned) {
+      const id = text(p.task, "Task");
+      const d = state.delegations[id];
+      if (!d && state.tasks[id]) coordinate(state, actor, state.tasks[id].teamId, state.tasks[id].assigneeAgentId);
+      requireValue(d, "NOT_FOUND", "Delegated work not found.");
+      teamAccess(state, actor, d.teamId);
+      requireValue(d.fromAgentId === session.agentId || manages(state, d.teamId, session.agentId, d.assigneeAgentId), "FORBIDDEN", "Only this member's supervisor can coordinate its work.");
+      targets = [d];
+    } else {
+      targets = ownDelegations(state, session).filter(d => !d.returned);
+    }
+    const ids = targets.map(d => d.id);
+    if (!targets.length || targets.some(d => !awaitingDelegation(d))) {
+      return claimWaitResult(state, ids, { timedOut: false, released: false }, true, includeReturned);
+    }
+    return { [WAIT_PENDING]: { sessionId: session.id, ids, timeoutMs, includeReturned } };
+  }
+  function waitForDelegations(sessionId: string, ids: string[], timeoutMs: number): Promise<{ timedOut: boolean; released: boolean }> {
+    const ready = () => ids.some(id => { const d = store.state.delegations[id]; return !d || !awaitingDelegation(d); });
+    if (ready()) return Promise.resolve({ timedOut: false, released: false });
+    if (stopped) return Promise.resolve({ timedOut: false, released: true });
+    return new Promise(resolve => {
+      let done = false;
+      const finish = (outcome: { timedOut: boolean; released: boolean }) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        listeners.delete(onStateChange);
+        const set = waiters.get(sessionId);
+        if (set) { set.delete(onRelease); if (!set.size) waiters.delete(sessionId); }
+        resolve(outcome);
+      };
+      const onStateChange = () => { if (ready()) finish({ timedOut: false, released: false }); };
+      const onRelease = () => finish({ timedOut: false, released: true });
+      const timer = setTimeout(() => finish({ timedOut: true, released: false }), timeoutMs);
+      listeners.add(onStateChange);
+      let set = waiters.get(sessionId);
+      if (!set) { set = new Set(); waiters.set(sessionId, set); }
+      set.add(onRelease);
+    });
+  }
   async function delegate(state: State, actor: Principal, p: Params) {
     const session = sessionOf(state, actor)!;
     const teamId = session.teamId, me = session.agentId;
     requireValue(teamId && state.memberships[memberKey(teamId, me)], "FORBIDDEN", "This conversation has no team.");
+    if (p.wait === true) return prepareWait(state, actor, session, p);
     const forms = ["to", "new", "task", "retire"].filter(key => p[key] !== undefined);
-    requireValue(forms.length === 1, "INVALID_INPUT", "Use exactly one form: {to, brief}, {new, brief}, {task, message}, {task, cancel: true} or {retire}.");
+    requireValue(forms.length === 1, "INVALID_INPUT", "Use exactly one form: {to, brief}, {new, brief}, {task, message, interrupt?}, {task, cancel: true}, {wait: true, task?, timeoutMs?} or {retire}.");
     if (p.task !== undefined) return followUp(state, actor, text(p.task, "Task"), p);
     if (p.retire !== undefined) return retire(state, teamId, me, text(p.retire, "retire", 200));
     const brief = text(p.brief, "Brief");
@@ -286,7 +382,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       requireValue(state.memberships[memberKey(teamId, to)] && supervisor(state, teamId, to) === me, "NOT_DIRECT_REPORT", "Delegate only to your direct reports: " + JSON.stringify(directReports(state, teamId, me)));
     }
     const delegation = newDelegation(state, session, teamId, to, brief);
-    return { taskId: delegation.id, assignee: nameOf(state, to), ...(p.new !== undefined ? { agentId: to, workspace: state.agents[to].canonicalWorkspace } : {}), next: END_TURN };
+    return { taskId: delegation.id, assignee: nameOf(state, to), status: "queued", ...(p.new !== undefined ? { agentId: to, workspace: state.agents[to].canonicalWorkspace } : {}), next: DELEGATE_NEXT };
   }
   // A new direct report: a worktree on its own branch of a team repository, or an empty folder
   // that starts with its creator's chosen model, as a worktree starts with its repository's.
@@ -349,7 +445,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       d.status = "cancelled"; delete d.dispatch; d.returned = true;
     }
   }
-  function followUp(state: State, actor: Principal, id: string, p: Params) {
+  async function followUp(state: State, actor: Principal, id: string, p: Params) {
     const d = state.delegations[id];
     if (!d && state.tasks[id]) coordinate(state, actor, state.tasks[id].teamId, state.tasks[id].assigneeAgentId);
     requireValue(d, "NOT_FOUND", "Delegated work not found.");
@@ -366,11 +462,35 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       d.status = "cancelled"; delete d.dispatch; wakeDelegator(state, d);
       return { taskId: d.id, status: "cancelled" };
     }
-    requireValue(["done", "failed"].includes(d.status), "TASK_IN_PROGRESS", "This task is still in progress; its result is delivered to you first.");
+    requireValue(d.status !== "cancelled", "TASK_FINISHED", "This task was cancelled.");
     const message = text(p.message, "Message");
+    const from = "From " + nameOf(state, me) + ": " + message;
+    const run = Object.values(state.runs).find(r => r.delegationId === d.id && activeRun(r));
+    if (d.status === "running" && !p.interrupt) {
+      if (run && await live.get(run.id)?.steer?.(from)) {
+        releaseSessionWait(run.sessionId);
+        return { taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: "steered", next: DELEGATE_NEXT };
+      }
+    }
+    if (p.interrupt && (d.status === "running" || d.status === "waiting")) cancelDelegationTree(state, d.id);
+    if (d.status === "queued") {
+      const hadRuns = Object.values(state.runs).some(r => r.delegationId === d.id);
+      if (p.interrupt) {
+        if (hadRuns || d.resume) d.resume = from; else { d.brief = message; delete d.resume; }
+      } else {
+        d.resume = (d.resume || d.brief) + "\n\n" + from;
+      }
+      d.dispatch = true; d.returned = false;
+      return { taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: "queued", ...(p.interrupt ? { interrupted: true } : {}), next: DELEGATE_NEXT };
+    }
     delete d.reply; delete d.error; d.returned = false;
-    resumeWork(d, "From " + nameOf(state, me) + ": " + message);
-    return { taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: "queued", next: END_TURN };
+    resumeWork(d, from);
+    return {
+      taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: "queued",
+      ...(p.interrupt ? { interrupted: true } : {}),
+      ...(p.interrupt && run ? { runId: run.id, cancelling: true } : {}),
+      next: DELEGATE_NEXT,
+    };
   }
   function markDelivered(task: Task) { task.status = "done"; task.deliveredAt = new Date().toISOString(); delete task.blockedOn; }
   function deleteTeam(state: State, teamId: string) {
@@ -608,9 +728,20 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       case "postTaskNote": {
         const task = taskAccess(state, actor, p.taskId);
         const result = note(state, task.id, author(state, actor), text(p.text, "Note"));
+        const sender = nameOf(state, author(state, actor));
         if (p.answer === true) {
           requireValue(task.status === "blocked" && task.blockedOn?.responder === author(state, actor), "FORBIDDEN", "Only the named responder can resolve this blocker.");
-          resumeWork(task, nameOf(state, author(state, actor)) + " answered your blocker: " + result.text);
+          resumeWork(task, sender + " answered your blocker: " + result.text);
+        } else if (task.status === "running") {
+          const line = sender + " noted: " + result.text;
+          const run = Object.values(state.runs).find(r => r.taskId === task.id && !r.delegationId && activeRun(r));
+          const handle = run ? live.get(run.id) : undefined;
+          if (!handle?.steer || !(await handle.steer(line))) resumeWork(task, line);
+        } else if (task.status === "blocked" && task.blockedOn?.responder === "children") {
+          resumeWork(task, sender + " noted: " + result.text);
+        } else if (task.status === "queued") {
+          const line = sender + " noted: " + result.text;
+          task.resume = task.resume ? task.resume + "\n\n" + line : task.brief + "\n\n" + line;
         }
         return result;
       }
@@ -685,7 +816,13 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         const run = Object.values(state.runs).find(r => r.sessionId === session.id && activeRun(r));
         if (run) {
           run.lastObservedAt = new Date().toISOString();
-          if (!run.taskId && !run.delegationId && !p.pending) run.status = p.outcome === "turn_completed" ? "succeeded" : p.outcome === "turn_cancelled" ? "cancelled" : "failed";
+          if (!run.taskId && !run.delegationId && !p.pending) {
+            run.status = p.outcome === "turn_completed" ? "succeeded" : p.outcome === "turn_cancelled" ? "cancelled" : "failed";
+            const children = sessionDelegations(state, session.id);
+            if (!children.some(awaitingDelegation)) {
+              returnDelegations(state, children, text => { (state.deliveries[session.id] ||= { texts: [] }).texts.push(text); });
+            }
+          }
           run.needsInput = false;
         }
         return { observed: true };
@@ -705,7 +842,13 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         for (const run of Object.values(state.runs)) if (run.sessionId === session.id && activeRun(run)) {
           if (p.active) { run.status = "running"; run.needsInput = !!p.needsInput; }
           else if (!p.connected) run.status = "unknown";
-          else if (!run.taskId && !run.delegationId && ["completed", "failed", "cancelled"].includes(p.outcome)) run.status = p.outcome === "completed" ? "succeeded" : p.outcome;
+          else if (!run.taskId && !run.delegationId && ["completed", "failed", "cancelled"].includes(p.outcome)) {
+            run.status = p.outcome === "completed" ? "succeeded" : p.outcome;
+            const children = sessionDelegations(state, session.id);
+            if (!children.some(awaitingDelegation)) {
+              returnDelegations(state, children, text => { (state.deliveries[session.id] ||= { texts: [] }).texts.push(text); });
+            }
+          }
           if (run.delegationId && !live.has(run.id)) {
             const d = state.delegations[run.delegationId];
             const rootTask = d?.taskId ? state.tasks[d.taskId] : undefined;
@@ -837,14 +980,31 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       const receipt = state.receipts[key];
       if (receipt) { requireValue(receipt.input === input, "REQUEST_ID_REUSED", "A request ID cannot be reused for different input."); return receipt.result; }
       const result = await operate(state, actor, method, params);
-      if (remember) state.receipts[key] = { input, result: structuredClone(result), at: Date.now() };
+      if (remember && !(result as { [WAIT_PENDING]?: unknown })?.[WAIT_PENDING]) {
+        state.receipts[key] = { input, result: structuredClone(result), at: Date.now() };
+      }
       return result;
     });
-    const stopping = (result as { cancelling?: boolean; runId?: string })?.cancelling ? (result as { runId: string }).runId : undefined;
-    if (stopping) {
+    const waitSpec = (result as { [WAIT_PENDING]?: { sessionId: string; ids: string[]; timeoutMs: number; includeReturned: boolean } })?.[WAIT_PENDING];
+    if (waitSpec) {
+      void schedule().catch(reportServiceError);
+      const outcome = await waitForDelegations(waitSpec.sessionId, waitSpec.ids, waitSpec.timeoutMs);
+      const finalResult = await transaction(state => {
+        const session = state.sessions[waitSpec.sessionId];
+        const canClaim = !session || session.origin !== "managed" || Object.values(state.runs).some(r => r.sessionId === session.id && activeRun(r));
+        const res = claimWaitResult(state, waitSpec.ids, outcome, canClaim, waitSpec.includeReturned);
+        if (remember) state.receipts[key] = { input, result: structuredClone(res), at: Date.now() };
+        return res;
+      });
+      void schedule().catch(reportServiceError);
+      return finalResult;
+    }
+    const stopping = (result as { cancelling?: boolean; runId?: string })?.cancelling ? (result as { runId?: string }).runId : undefined;
+    if ((result as { cancelling?: boolean })?.cancelling) {
       for (const [id, handle] of live) {
         const r = store.state.runs[id];
         if (id === stopping || (r?.taskId && store.state.tasks[r.taskId]?.status === "cancelled") || (r?.delegationId && store.state.delegations[r.delegationId]?.status === "cancelled")) {
+          cancelling.add(id);
           void handle.cancel().catch(error => failRun(id, error));
         }
       }
@@ -853,7 +1013,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     if (method === "attachSession" || method === "reattachSession") connected.add((result as Session).id);
     if (method === "detachSession" && (!store.state.sessions[params.sessionId]?.shared || !store.state.sessions[params.sessionId]?.runtimeSessionId)) connected.delete(params.sessionId);
     if (["attachSession", "reattachSession", "detachSession"].includes(method)) for (const listener of listeners) listener();
-    if (["attachSession", "reattachSession", "reconcileSession"].includes(method)) void flushDeliveries();
+    if (["attachSession", "reattachSession", "reconcileSession", "hostTurnEnd"].includes(method)) void flushDeliveries();
     void schedule().catch(reportServiceError);
     return result;
   }
@@ -899,7 +1059,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       connected.add(session.id);
       await transaction(next => { next.sessions[session.id].runtimeSessionId = handle.runtimeSessionId; next.runs[runId].status = "running"; });
       const current = startRun.delegationId ? store.state.delegations[startRun.delegationId] : store.state.tasks[startRun.taskId!];
-      if (stopped || current?.status === "cancelled" || (startRun.taskId && store.state.tasks[startRun.taskId]?.status === "cancelled")) await handle.cancel();
+      if (stopped || cancelling.has(runId) || current?.status === "cancelled" || (startRun.taskId && store.state.tasks[startRun.taskId]?.status === "cancelled")) await handle.cancel();
       const { content } = await handle.completion;
       await transaction(next => {
         const run = next.runs[runId];
@@ -935,7 +1095,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         else { task.status = "needs_attention"; task.error = "Execution ended without a delivery report. " + (content.trim() ? "Its final reply: " + content.trim() : "It ended without a reply."); }
       });
     } catch (error) { await failRun(runId, error); }
-    finally { live.delete(runId); void schedule().catch(reportServiceError); }
+    finally { live.delete(runId); cancelling.delete(runId); const s = store.state.runs[runId]?.sessionId; if (s) releaseSessionWait(s); void schedule().catch(reportServiceError); }
   }
   async function schedule() {
     if (stopped) return;
@@ -1034,6 +1194,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       for (const listener of listeners) listener();
       void flushDeliveries();
     },
+    releaseWait(runtimeSessionId: string) {
+      for (const session of Object.values(store.state.sessions)) {
+        if (session.runtimeSessionId === runtimeSessionId) releaseSessionWait(session.id);
+      }
+    },
     async disconnect(sessionIds: string[]) {
       if (stopped) return;
       sessionIds = sessionIds.filter(id => !store.state.sessions[id]?.shared);
@@ -1043,6 +1208,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     },
     async stop() {
       stopped = true;
+      for (const sid of [...waiters.keys()]) releaseSessionWait(sid);
       await serial;
       await transaction(state => {
         for (const runId of live.keys()) {

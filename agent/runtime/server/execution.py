@@ -606,6 +606,13 @@ class ExecutionCoordinator:
         execution.pending_answers.clear()
         return interrupted
 
+    def release_wait(self, session_id: str, task_id: str | None = None, tool_call_id: str | None = None) -> int:
+        clean = validate_session_id(session_id)
+        released = self._shell_tools.supervisor.release_wait(clean, task_id, tool_call_id)
+        if not self._closed:
+            self._queue_task_event(f"{clean}:wait_released", {"type": "wait_released", "session_id": clean, "turn_id": ""})
+        return released
+
     def submit_input(self, session_id: str, mode: str, text: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         execution = self._active.get(clean)
@@ -617,7 +624,7 @@ class ExecutionCoordinator:
             else execution.container.runtime.submit_follow_up
         )
         result = submit(text)
-        self._shell_tools.supervisor.release_wait(clean)
+        self.release_wait(clean)
         if isinstance(result, dict):
             self.record_live_input(clean, {**result, "session_id": clean, "mode": mode})
         return result

@@ -19,7 +19,7 @@ test("a conversation hears once, when all the work it delegated has settled", as
   const { actor } = await leaderConversation(f);
   const first = await f.call("delegate", { to: ui.id, brief: "Build the page" }, actor);
   const second = await f.call("delegate", { to: api.id, brief: "Build the endpoint" }, actor);
-  assert.match(first.next, /End your turn/);
+  assert.match(first.next, /delegate\(\{wait: true\}\).*end your turn/);
   assert.equal(Object.keys(f.store.state.tasks).length, 0, "delegations never create user-facing tasks");
   await finishDelegation(f, first.taskId, "Page built");
   await eventually(() => f.store.state.delegations[first.taskId].status === "done");
@@ -47,16 +47,21 @@ test("a result waits for a conversation that is not hosted, and arrives when it 
   await eventually(() => !f.store.state.deliveries[session.id]);
 });
 
-test("work the delegator cancels is not reported back; work sent back is reported again", async t => {
+test("work the delegator cancels is not reported back; running work can be steered; finished work sent back is reported again", async t => {
   const f = await fixture(t);
   const ui = await f.member("ui"), api = await f.member("api");
   const { actor } = await leaderConversation(f);
   const kept = await f.call("delegate", { to: ui.id, brief: "Build" }, actor);
-  const dropped = await f.call("delegate", { to: api.id, brief: "Maybe later", }, actor);
+  const dropped = await f.call("delegate", { to: api.id, brief: "Maybe later" }, actor);
   await eventually(() => f.starts.some(s => s.input.task.id === dropped.taskId));
+  await eventually(() => f.starts.some(s => s.input.task.id === kept.taskId));
   await f.call("delegate", { task: dropped.taskId, cancel: true }, actor);
   await eventually(() => f.store.state.delegations[dropped.taskId].status === "cancelled");
-  await assert.rejects(f.call("delegate", { task: kept.taskId, message: "More" }, actor), { code: "TASK_IN_PROGRESS" });
+  await assert.rejects(f.call("delegate", { task: dropped.taskId, message: "Revive" }, actor), { code: "TASK_FINISHED" });
+  const steered = await f.call("delegate", { task: kept.taskId, message: "Keep header compact" }, actor);
+  assert.equal(steered.status, "steered");
+  const keptStart = f.starts.find(s => s.input.task.id === kept.taskId);
+  assert.deepEqual(keptStart.steered, ["From leader: Keep header compact"]);
   await finishDelegation(f, kept.taskId, "First version");
   await eventually(() => f.delivered.length === 1);
   assert.doesNotMatch(f.delivered[0].text, /api/);
@@ -67,6 +72,109 @@ test("work the delegator cancels is not reported back; work sent back is reporte
   await finishDelegation(f, kept.taskId, "Dark mode added");
   await eventually(() => f.delivered.length === 2);
   assert.match(f.delivered[1].text, /Dark mode added/);
+});
+
+test("delegate({ wait: true }) collects settled results in-turn, supports timeout and releaseWait, and prevents duplicate turn-end delivery", async t => {
+  const f = await fixture(t);
+  const ui = await f.member("ui"), api = await f.member("api");
+  const { session, actor } = await leaderConversation(f);
+  await f.call("hostTurnStart", { sessionId: session.id, runtimeSessionId: "leader-chat" });
+  const first = await f.call("delegate", { to: ui.id, brief: "Part A" }, actor);
+  const second = await f.call("delegate", { to: api.id, brief: "Part B" }, actor);
+  await eventually(() => f.store.state.delegations[first.taskId]?.status === "running" && f.store.state.delegations[second.taskId]?.status === "running");
+
+  // Wait times out when neither delegation has settled yet.
+  const timedOut = await f.call("delegate", { wait: true, timeoutMs: 1000 }, actor);
+  assert.equal(timedOut.timedOut, true);
+  assert.equal(timedOut.settled.length, 0);
+  assert.equal(timedOut.running.length, 2);
+
+  // Release wait wakes an active wait immediately without claiming results.
+  const waitingPromise = f.call("delegate", { wait: true, timeoutMs: 30000 }, actor);
+  await eventually(() => true);
+  setTimeout(() => f.service.releaseWait("leader-chat"), 30);
+  const released = await waitingPromise;
+  assert.equal(released.released, true);
+  assert.equal(released.settled.length, 0);
+
+  // When one delegation settles while waiting, wait returns immediately with that settled item and the remaining running item.
+  const collectFirst = f.call("delegate", { wait: true, timeoutMs: 30000 }, actor);
+  setTimeout(() => { void finishDelegation(f, first.taskId, "Part A ready"); }, 30);
+  const firstWait = await collectFirst;
+  assert.equal(firstWait.timedOut, false);
+  assert.equal(firstWait.settled.length, 1);
+  assert.equal(firstWait.settled[0].taskId, first.taskId);
+  assert.equal(firstWait.settled[0].reply, "Part A ready");
+  assert.equal(firstWait.running.length, 1);
+  assert.equal(firstWait.running[0].taskId, second.taskId);
+  assert.match(firstWait.output, /ui · task .* · delivered: Part A ready/);
+
+  // Re-reading a specific settled task by ID still returns its result.
+  const reread = await f.call("delegate", { wait: true, task: first.taskId }, actor);
+  assert.equal(reread.settled.length, 1);
+  assert.equal(reread.settled[0].reply, "Part A ready");
+
+  // Finish the second delegation while the turn is active, then call wait({ wait: true }) which returns immediately (0ms).
+  await finishDelegation(f, second.taskId, "Part B ready");
+  await eventually(() => f.store.state.delegations[second.taskId].status === "done");
+  const secondWait = await f.call("delegate", { wait: true }, actor);
+  assert.equal(secondWait.settled.length, 1);
+  assert.equal(secondWait.settled[0].taskId, second.taskId);
+  assert.equal(secondWait.running.length, 0);
+  await f.call("hostTurnEnd", { sessionId: session.id, runtimeSessionId: "leader-chat", outcome: "turn_completed" });
+  assert.equal(f.delivered.length, 0, "results claimed in-turn via wait are not delivered again on turn end");
+});
+
+test("delegate({ task, message, interrupt: true }) stops an active sub-agent run and restarts it with the new instructions", async t => {
+  const f = await fixture(t);
+  const ui = await f.member("ui");
+  const { actor } = await leaderConversation(f);
+  const d = await f.call("delegate", { to: ui.id, brief: "Old approach" }, actor);
+  await eventually(() => f.starts.some(s => s.input.task.id === d.taskId));
+  const interrupted = await f.call("delegate", { task: d.taskId, message: "Switch to new approach", interrupt: true }, actor);
+  assert.equal(interrupted.status, "queued");
+  assert.equal(interrupted.interrupted, true);
+  await eventually(() => f.starts.filter(s => s.input.task.id === d.taskId).length === 2);
+  const secondRun = f.starts.filter(s => s.input.task.id === d.taskId)[1];
+  assert.equal(secondRun.input.input, "From leader: Switch to new approach");
+  secondRun.finish({ content: "Completed with new approach" });
+  await eventually(() => f.delivered.length === 1);
+  assert.match(f.delivered[0].text, /Completed with new approach/);
+});
+
+test("entry task owner can delegate, wait in-turn, and report in a single run; report refuses if settled results were not yet read", async t => {
+  const f = await fixture(t);
+  const ui = await f.member("ui");
+  const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Deliver feature" });
+  await eventually(() => f.store.state.tasks[task.id].status === "running");
+  const leaderRun = f.starts.find(s => s.input.task.id === task.id);
+  const leaderActor = f.runner(leaderRun);
+
+  // Post a note while the leader's task is running -> steers the active run in place.
+  await f.call("postTaskNote", { taskId: task.id, text: "Include unit tests" });
+  assert.deepEqual(leaderRun.steered, ["the user noted: Include unit tests"]);
+
+  const sub = await f.call("delegate", { to: ui.id, brief: "Implement widget" }, leaderActor);
+  await finishDelegation(f, sub.taskId, "Widget implemented");
+  await eventually(() => f.store.state.delegations[sub.taskId].status === "done");
+
+  // Sub-agent finished while leader's turn is still running, so d.returned is still false!
+  // Calling report before reading the result via delegate({ wait: true }) is rejected.
+  await assert.rejects(
+    f.call("report", { outcome: "done", summary: "Premature report" }, leaderActor),
+    { code: "WORK_OUTSTANDING" },
+  );
+
+  // Leader collects the sub-agent result in-turn using delegate({ wait: true }).
+  const waited = await f.call("delegate", { wait: true }, leaderActor);
+  assert.equal(waited.settled.length, 1);
+  assert.equal(waited.settled[0].reply, "Widget implemented");
+
+  // Now leader can report and finish in the very same run!
+  await f.call("report", { outcome: "done", summary: "Feature delivered in one turn", evidence: ["Widget implemented"] }, leaderActor);
+  leaderRun.finish({ content: "All done" });
+  await eventually(() => f.store.state.tasks[task.id].status === "done");
+  assert.equal(f.store.state.tasks[task.id].report.summary, "Feature delivered in one turn");
 });
 
 test("delegated sub-agents cannot call report and return their reply or failure directly to the delegator", async t => {
