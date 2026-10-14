@@ -667,6 +667,26 @@ async def test_ask_user_question_empty_answer_fails_without_fake_answer() -> Non
 
 
 @pytest.mark.asyncio
+async def test_ask_user_question_released_by_interrupt_is_cancelled_not_answered() -> None:
+    session = FakeSession()
+    source = CancellationTokenSource()
+
+    def responder(event: UserQuestionRequestedEvent) -> str:
+        source.cancel("User interrupted")
+        return ""
+
+    processor = ToolCallProcessor(tool_executor=FakeToolExecutor(), user_question_responder=responder)
+    call = ParsedToolCall(call_id="call_question", name="ask_user_question", raw_args='{"question":"Which mode?"}')
+
+    events = [event async for event in processor.execute(session=session, tool_calls=[call], cancellation_token=source.token)]
+
+    result_event = events[-1]
+    payload = json.loads(result_event.result)
+    assert (result_event.status, result_event.error_type) == ("cancelled", "Cancelled")
+    assert payload["error"] == "Tool cancelled: User interrupted"
+
+
+@pytest.mark.asyncio
 async def test_ask_user_question_interrupted_input_fails_without_cancelling_turn() -> None:
     session = FakeSession()
 

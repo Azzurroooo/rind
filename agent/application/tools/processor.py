@@ -126,7 +126,7 @@ class ToolCallProcessor:
                         )
                     else:
                         yield question_event
-                        outcome = await self._run_user_question(question_event)
+                        outcome = await self._run_user_question(question_event, cancellation_token)
                 else:
                     tool_execution = self._run_tool_call(
                         call=call,
@@ -376,7 +376,9 @@ class ToolCallProcessor:
             options=options,
         )
 
-    async def _run_user_question(self, event: UserQuestionRequestedEvent) -> _ToolCallOutcome:
+    async def _run_user_question(
+        self, event: UserQuestionRequestedEvent, cancellation_token: CancellationToken | None,
+    ) -> _ToolCallOutcome:
         if self._user_question_responder is None:
             return _ToolCallOutcome(
                 status="unavailable",
@@ -410,6 +412,13 @@ class ToolCallProcessor:
                 result=tool_error("ask_user_question", str(exc), type(exc).__name__),
             )
 
+        # Interrupting the turn releases the question; the user did not answer it.
+        if cancellation_token and cancellation_token.is_cancelled:
+            return _ToolCallOutcome(
+                status="cancelled",
+                error_type="Cancelled",
+                result=tool_cancelled("ask_user_question", cancellation_token.reason),
+            )
         answer = str(answer_value or "").strip()
         if not answer:
             return _ToolCallOutcome(

@@ -152,6 +152,27 @@ test("a question answered in another window closes here without answering twice"
   assert.deepEqual(finished.at(-1), "Yes");
 });
 
+test("Esc on a question interrupts the turn instead of answering it empty", async () => {
+  const state = createCliState();
+  state.runtime.status = "ready";
+  state.session.commands = [];
+  const requests = [];
+  const actions = createCliInputActions({
+    state, request: async (method, params) => { requests.push([method, params]); return {}; },
+    output: { terminalUi: {}, writeUserInput() {}, closeAssistant() {}, beginQuestion() {}, finishQuestion() {}, redraw() {}, writeError() {} },
+    getTurnController: () => ({ interrupt() { state.turn.interruptRequested = true; actions.cancel(); } }),
+    getTaskMonitor: () => null, getLineInput: () => null,
+    pausePrompt() {}, resumePrompt() {}, handleSigint() {},
+  });
+  const pending = actions.answerQuestion({ tool_call_id: "q-1", question: "Ship it?", options: [{ label: "Yes (Recommended)" }] });
+  await Promise.resolve();
+  actions.handleTerminalInput("\x1b");
+  await pending;
+  assert.equal(state.turn.interruptRequested, true);
+  assert.equal(state.input.session, null);
+  assert.deepEqual(requests, [], "no empty answer reaches the model");
+});
+
 test("prompt input restores persisted history and saves natural prompts only", async () => {
   const state = createCliState();
   state.runtime.status = "ready";

@@ -649,7 +649,7 @@ export function createCliInputActions({
       completeTtyInput(session, session.questionState.selectedOption()?.label || "", false);
       return;
     }
-    if (!modified && key.name === "escape") return completeTtyInput(session, "", false);
+    if (!modified && key.name === "escape") return getTurnController().interrupt();
     if (!modified && session.questionState.handleNavigation(key)) {
       output.redraw();
     }
