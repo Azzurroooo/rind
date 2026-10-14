@@ -838,7 +838,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       connected.add(session.id);
       await transaction(next => { next.sessions[session.id].runtimeSessionId = handle.runtimeSessionId; next.runs[runId].status = "running"; });
       if (stopped || store.state.tasks[taskId].status === "cancelled") await handle.cancel();
-      await handle.completion;
+      const { content } = await handle.completion;
       await transaction(next => {
         const run = next.runs[runId]; const task = next.tasks[taskId];
         run.status = task.status === "cancelled" ? "cancelled" : "succeeded";
@@ -852,7 +852,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           task.status = "blocked"; task.blockedOn = { responder: "children", action: "Continues when its members deliver." }; delete task.report;
         } else if (task.report) markDelivered(task);
         else if (children.some(t => !t.returned)) returnResults(next, children, text => resume(task, text));
-        else { task.status = "needs_attention"; task.error = "Execution ended without a delivery report. Review the session and retry when ready."; }
+        // Its final reply travels with the result, as Codex reports a sub-agent's last message.
+        else { task.status = "needs_attention"; task.error = "Execution ended without a delivery report. " + (content.trim() ? "Its final reply: " + content.trim() : "It ended without a reply."); }
         wakeDelegator(next, task);
       });
     } catch (error) { await failRun(runId, error); }

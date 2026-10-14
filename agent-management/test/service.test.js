@@ -215,8 +215,9 @@ test("same workspace queues while distinct worktrees run independently; reports 
   running.finish({ content: "done" });
   await eventually(() => f.starts.length === 3);
   assert.equal(f.store.state.tasks[first.id].status, "done");
-  f.starts.find(s => s.input.task.id === second.id).finish({ content: "no report" });
+  f.starts.find(s => s.input.task.id === second.id).finish({ content: "Verdict: rejected, see line 12." });
   await eventually(() => f.store.state.tasks[second.id].status === "needs_attention");
+  assert.equal(f.store.state.tasks[second.id].error, "Execution ended without a delivery report. Its final reply: Verdict: rejected, see line 12.");
 });
 test("priority affects only queued work, cancellation is durable and status comes from the service", async t => {
   const f = await fixture(t);
