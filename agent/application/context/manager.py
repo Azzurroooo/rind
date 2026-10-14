@@ -113,11 +113,12 @@ class ContextManager:
         final_estimate = self._estimator.estimate_messages(messages, token_cache=token_cache)
 
         dropped_count = 0
-        while allow_rescue and final_estimate.over_hard_limit and len(final_messages) > 2:
+        while allow_rescue and final_estimate.over_hard_limit and len(final_messages) > 1:
+            previous_tokens = final_estimate.estimated_input_tokens
             messages, final_messages = self.rescue_context(messages, final_messages)
             final_estimate = self._estimator.estimate_messages(messages, token_cache=token_cache)
             dropped_count += 1
-            if dropped_count > 50:
+            if dropped_count > 50 or final_estimate.estimated_input_tokens >= previous_tokens:
                 break
 
         tool_messages = [dict(message) for message in final_messages if message.get("role") == "tool"]
@@ -289,10 +290,13 @@ class ContextManager:
         clean = value.strip()
         return clean or None
 
-    def reduce_hard_limit(self, factor: float = 0.8) -> int:
+    def reduce_hard_limit(self, factor: float = 0.8, reference_tokens: int | None = None) -> int:
         """Reduce the hard token limit by a factor and return the new value."""
         budget = self._estimator.budget
-        budget.hard_limit_tokens = int(budget.resolved_hard_limit_tokens() * factor)
+        base = budget.resolved_hard_limit_tokens()
+        if isinstance(reference_tokens, int) and not isinstance(reference_tokens, bool) and reference_tokens > 0:
+            base = min(base, reference_tokens)
+        budget.hard_limit_tokens = max(1, int(base * factor))
         return budget.resolved_hard_limit_tokens()
 
     def snapshot_hard_limit(self):
@@ -310,19 +314,59 @@ class ContextManager:
         self._estimator.budget.context_window_tokens = tokens
 
     def rescue_context(self, internal_messages: list[dict], final_messages: list[dict]) -> tuple[list[dict], list[dict]]:
-        """Surgical Context Rescue: Drops the oldest cold/tool messages instead of blindly shrinking budgets."""
-        # Find oldest non-system message that isn't already dropped
-        target_idx = -1
-        for i, msg in enumerate(final_messages):
-            if msg.get("role") != "system" and msg.get("content") != "[DROPPED FOR CONTEXT RESCUE]":
-                # Do not drop the very last few hot messages
-                if i < len(final_messages) - 2:
-                    target_idx = i
-                    break
+        """Surgical Context Rescue: Drops the oldest cold/tool payloads without inflating short messages."""
+        marker = "[DROPPED FOR CONTEXT RESCUE]"
 
+        def shrinkable(msg: dict) -> bool:
+            if msg.get("role") == "system":
+                return False
+            content = msg.get("content")
+            if isinstance(content, str) and content != marker and len(content) > len(marker):
+                return True
+            if msg.get("attachments") or msg.get("reasoning_content"):
+                return True
+            return any(
+                isinstance(call, dict) and len(str((call.get("function") or {}).get("arguments") or "")) > 200
+                for call in (msg.get("tool_calls") or [])
+            )
+
+        def strip_heavy_fields(item: dict) -> None:
+            item.pop("attachments", None)
+            item.pop("reasoning_content", None)
+            for call in item.get("tool_calls") or []:
+                fn = call.get("function") if isinstance(call, dict) else None
+                if isinstance(fn, dict) and len(str(fn.get("arguments") or "")) > 200:
+                    fn["arguments"] = "{}"
+
+        target_idx = next(
+            (i for i in range(max(0, len(final_messages) - 2)) if shrinkable(internal_messages[i])),
+            -1,
+        )
         if target_idx != -1:
-            internal_messages[target_idx]["content"] = "[DROPPED FOR CONTEXT RESCUE]"
-            final_messages[target_idx]["content"] = "[DROPPED FOR CONTEXT RESCUE]"
+            for collection in (internal_messages, final_messages):
+                item = collection[target_idx]
+                content = item.get("content")
+                if isinstance(content, str) and len(content) > len(marker):
+                    item["content"] = marker
+                strip_heavy_fields(item)
+            return internal_messages, final_messages
+
+        # If all older messages were already minimal, trim attachments/content on the newest non-system messages.
+        for i in range(len(final_messages) - 1, -1, -1):
+            if not shrinkable(internal_messages[i]):
+                continue
+            for collection in (internal_messages, final_messages):
+                item = collection[i]
+                strip_heavy_fields(item)
+                content = item.get("content")
+                if isinstance(content, str) and len(content) > 512:
+                    limit = max(256, len(content) // 2)
+                    head = limit // 2
+                    tail = limit - head
+                    item["content"] = content[:head] + "\n[... truncated for context rescue ...]\n" + content[-tail:]
+                elif isinstance(content, str) and len(content) > len(marker):
+                    item["content"] = marker
+            break
 
         return internal_messages, final_messages
 

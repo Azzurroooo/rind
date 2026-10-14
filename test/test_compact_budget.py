@@ -9,7 +9,7 @@ import pytest
 from agent.application.context.compaction import CompactionService
 from agent.application.context.estimator import ContextBudget, ContextEstimator
 from agent.application.context.manager import ContextManager
-from agent.domain.errors import BoundaryError
+from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.runtime.core.turn_runner import TurnRunner
@@ -56,16 +56,22 @@ def test_tool_body_shortens_only_when_needed_and_keeps_middle_constraint(window,
 
 
 @pytest.mark.parametrize("role", ["user", "assistant", "tool_arguments"])
-def test_irreducible_content_is_rejected_without_mutating_messages(role):
-    content = "unique constraint " * 6000
-    message = {"role": role, "content": content}
+def test_oversized_single_unit_is_bounded_without_mutating_messages(role):
+    content = "HEAD_CONSTRAINT " + ("unique constraint " * 6000) + " TAIL_CONSTRAINT"
+    message = {"role": role, "content": content, "attachments": [{"path": "huge.png", "mime_type": "image/png", "width": 1024, "height": 1024, "size_bytes": 4096}]}
     if role == "tool_arguments":
         message = {"role": "assistant", "tool_calls": [{"id": "c", "function": {"name": "write", "arguments": json.dumps({"content": content})}}]}
     before = copy.deepcopy(message)
-    with pytest.raises(BoundaryError, match="History was preserved") as failure:
-        CompactionService()._prepare_summary_request([message], 1, 8192, 800)
-    assert failure.value.code == "compact_input_too_large"
+    messages = CompactionService()._prepare_summary_request([message], 1, 8192, 800)
+    payload = corpus_from_request(messages)
     assert message == before
+    assert "truncated to fit the summary budget" in payload["note"]
+    serialized = json.dumps(payload["history"] + payload["retained_recent_messages"])
+    assert "HEAD_CONSTRAINT" in serialized
+    assert "TAIL_CONSTRAINT" in serialized
+    assert "characters omitted for summary budget" in serialized
+    assert not any(item.get("attachments") for item in messages)
+    assert ContextEstimator().estimate_messages(messages).estimated_input_tokens <= 8192 - 800 - 8192 // 20
 
 
 def test_oversized_history_is_trimmed_from_the_oldest_end_until_the_summary_fits():
@@ -134,29 +140,32 @@ async def test_a_history_too_large_to_summarize_still_compacts(tmp_path, monkeyp
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reason", ["manual", "auto", "context_length_error"])
-async def test_over_budget_never_calls_provider_or_commits_boundary(tmp_path, monkeypatch, reason):
+async def test_oversized_single_message_compacts_across_all_reasons(tmp_path, monkeypatch, reason):
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
     session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), system_prompt="sys")
     await session.initialize()
     await session.persist_message("user", "Keep every numbered requirement. " * 5000)
     before = await session.load_messages()
     provider = AsyncMock()
+    provider.create.return_value = ModelCompletion(content="summarized single oversized message", finish_reason="stop")
     manager = ContextManager(estimator=ContextEstimator(ContextBudget(context_window_tokens=8192)))
     runner = TurnRunner(chat_client=provider, tool_processor=None, stream_parser=None, tool_schemas=[], context_manager=manager)
     if reason == "manual":
-        with pytest.raises(BoundaryError, match="Compact input exceeds"):
-            await runner.compact_context(session)
-    elif reason == "auto":
-        events = [event async for event in runner.run_turn(session)]
-        assert events[-1].error_type == "BoundaryError"
-        assert "Compact input exceeds" in events[-1].error
+        record = await runner.compact_context(session)
     else:
-        with pytest.raises(BoundaryError, match="Compact input exceeds"):
-            await runner._run_compact(session=session, context=await manager.build_messages_async(session), reason=reason, phase="mid_turn")
-    provider.create.assert_not_called()
-    provider.stream.assert_not_called()
-    assert await session.get_latest_compaction() is None
-    assert await session.load_messages() == before
+        _, record = await runner._run_compact(
+            session=session,
+            context=await manager.build_messages_async(session),
+            reason=reason,
+            phase="mid_turn",
+        )
+    assert record["strategy"] == "llm_inline"
+    assert record["handoff_message"]["content"] == "summarized single oversized message"
+    request = provider.create.call_args.kwargs
+    assert ContextEstimator().estimate_messages(request["messages"]).estimated_input_tokens <= 8192 - request["max_output_tokens"] - 8192 // 20
+    assert (await session.load_messages())[: len(before)] == before
+    rebuilt = await manager.build_messages_async(session)
+    assert rebuilt.stats["estimated_input_tokens"] < 500
 
 
 @pytest.mark.asyncio
@@ -226,3 +235,137 @@ async def test_small_window_gets_smaller_output_cap(tmp_path, monkeypatch):
     provider.create.return_value = ModelCompletion(content="task pending", finish_reason="stop")
     await CompactionService().compact_async(session, await session.get_messages_slice(), provider, context_stats={"context_window_tokens": 8192})
     assert provider.create.call_args.kwargs["max_output_tokens"] == 819
+
+
+@pytest.mark.asyncio
+async def test_compaction_retries_with_smaller_budget_on_provider_context_overflow(tmp_path, monkeypatch):
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), system_prompt="sys")
+    await session.initialize()
+    for index in range(6):
+        await session.persist_message("user", f"requirement {index} " * 400)
+    provider = AsyncMock()
+    provider.create.side_effect = [
+        ProviderError("prompt is too long", status="rejected", code="context_length_exceeded"),
+        ModelCompletion(content="handoff after overflow retry", finish_reason="stop"),
+    ]
+    record = await CompactionService().compact_async(
+        session,
+        await session.get_messages_slice(),
+        provider,
+        context_stats={"context_window_tokens": 12000},
+    )
+    assert record["strategy"] == "llm_inline"
+    assert record["handoff_message"]["content"] == "handoff after overflow retry"
+    first_call, second_call = (call.kwargs for call in provider.create.call_args_list)
+    assert second_call["max_output_tokens"] < first_call["max_output_tokens"]
+
+
+@pytest.mark.parametrize("message_text,status_code,expected_code", [
+    ("prompt is too long: 205000 tokens > 200000 maximum", 400, "context_length_exceeded"),
+    ("Your input exceeds the context window of this model.", 400, "context_length_exceeded"),
+    ("The input token count (1050000) exceeds the maximum number of tokens allowed (1048576).", 400, "context_length_exceeded"),
+    ("invalid_request_error: context window exceeds limit", 400, "context_length_exceeded"),
+    ("exceeded model token limit", 400, "context_length_exceeded"),
+    ("Payload Too Large", 413, "context_length_exceeded"),
+    ("Too many tokens, please wait before trying again.", 429, ""),
+    ("Rate limit reached for tokens per minute (TPM).", 429, ""),
+])
+def test_provider_error_classifies_context_overflow_without_matching_rate_limits(message_text, status_code, expected_code):
+    from agent.infrastructure.llm.errors import provider_error
+
+    class StatusError(Exception):
+        def __init__(self, msg, code):
+            super().__init__(msg)
+            self.status_code = code
+
+    err = provider_error(StatusError(message_text, status_code))
+    assert err.code == expected_code
+
+
+def test_anthropic_and_responses_usage_normalization():
+    from agent.infrastructure.llm.anthropic_messages import _events as anthropic_events, _usage as anthropic_usage
+    from agent.infrastructure.llm.openai_responses import _events as responses_events, _usage as responses_usage
+
+    initial = anthropic_usage({"input_tokens": 50, "cache_read_input_tokens": 1200, "cache_creation_input_tokens": 300, "output_tokens": 1})
+    assert initial.input_tokens == 1550
+    assert initial.cached_tokens == 1200
+    assert initial.output_tokens == 1
+
+    delta_events, merged = anthropic_events(
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 42, "output_tokens_details": {"thinking_tokens": 15}}},
+        initial,
+    )
+    assert merged.input_tokens == 1550
+    assert merged.cached_tokens == 1200
+    assert merged.output_tokens == 42
+    assert merged.reasoning_tokens == 15
+    assert [e.kind for e in delta_events] == ["usage", "completed"]
+
+    resp_usage = responses_usage({"input_tokens": 500, "output_tokens": 80, "input_tokens_details": {"cached_tokens": 400}, "output_tokens_details": {"reasoning_tokens": 35}})
+    assert resp_usage.input_tokens == 500
+    assert resp_usage.cached_tokens == 400
+    assert resp_usage.reasoning_tokens == 35
+
+    with pytest.raises(ProviderError) as exc_info:
+        responses_events({"type": "response.failed", "response": {"error": {"code": "context_length_exceeded", "message": "Your input exceeds the context window."}}})
+    assert exc_info.value.code == "context_length_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_reduce_hard_limit_uses_reference_tokens_and_rescue_strips_heavy_fields(tmp_path, monkeypatch):
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), system_prompt="sys")
+    await session.initialize()
+    raw_args = json.dumps({"body": " ".join(f"line_{i}" for i in range(400))})
+    await session.persist_message("user", "start work")
+    await session.persist_message(
+        "assistant",
+        " ".join(f"reply_{i}" for i in range(300)),
+        reasoning_content=" ".join(f"thought_{i}" for i in range(300)),
+        meta={"tool_calls": [{"id": "c1", "name": "write", "raw_args": raw_args}]},
+    )
+    await session.persist_tool_call("c1", "write", {"body": "x"}, raw_args, "s", "e", '{"ok":true}', model_content=" ".join(f"out_{i}" for i in range(300)))
+    await session.persist_message("user", "latest question")
+    await session.persist_message("assistant", "latest answer")
+
+    manager = ContextManager(estimator=ContextEstimator(ContextBudget(context_window_tokens=256000)))
+    initial = await manager.build_messages_async(session)
+    initial_tokens = initial.stats["estimated_input_tokens"]
+    assert 1000 < initial_tokens < 256000
+
+    reduced = manager.reduce_hard_limit(factor=0.5, reference_tokens=initial_tokens)
+    assert reduced == int(initial_tokens * 0.5)
+
+    rescued = await manager.build_messages_async(session, allow_rescue=True)
+    assert rescued.stats["estimated_input_tokens"] <= reduced
+
+
+def test_handoff_builder_bounds_rendered_tool_lines():
+    from agent.application.context.handoff import CompactionHandoffBuilder
+
+    builder = CompactionHandoffBuilder()
+    ids = [f"call_{i}" for i in range(35)]
+    lines = builder.render_tool_lines(ids, [{"id": f"call_{i}", "name": "bash", "ok": True} for i in range(35)])
+    assert len(lines) == 21
+    assert lines[0] == "- [15 earlier tool calls omitted]"
+    assert lines[-1].startswith("- call_34:")
+
+
+def test_custom_connection_resolves_catalog_context_window_from_known_endpoint(tmp_path):
+    from agent.infrastructure.llm.catalog import ProviderDefinition
+    from agent.infrastructure.llm.provider_service import ProviderServiceImpl
+    from agent.infrastructure.settings import AppSettings
+
+    service = ProviderServiceImpl()
+    custom = ProviderDefinition(
+        id="my-anthropic-proxy",
+        name="My Anthropic",
+        api="anthropic-messages",
+        default_base_url="https://api.anthropic.com",
+        auth_methods=("connection",),
+    )
+    settings = AppSettings(tmp_path / "settings.json", False, "claude-opus-4-6", "my-anthropic-proxy", "https://api.anthropic.com", "")
+    resolved = service._resolve_model(settings, custom, "claude-opus-4-6", {"base_url": "https://api.anthropic.com"})
+    assert resolved.context_window == 1_000_000
+    assert resolved.image_input is True

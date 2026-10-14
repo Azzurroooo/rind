@@ -289,7 +289,7 @@ class TurnRunner:
                         )
 
                 except ProviderError as e:
-                    if e.code == "context_length_exceeded":
+                    if e.code == "context_length_exceeded" and context_length_recovery_count < 3:
                         context_length_recovery_count += 1
                         if context_length_recovery_count == 1:
                             _, record = await self._run_compact(
@@ -304,7 +304,10 @@ class TurnRunner:
                             )
                             yield ContextCompactedEvent(**event_meta(session, turn_id), record=record)
                         else:
-                            self._context_manager.reduce_hard_limit(factor=0.8)
+                            self._context_manager.reduce_hard_limit(
+                                factor=0.8,
+                                reference_tokens=context.stats.get("estimated_input_tokens"),
+                            )
                             force_rescue_next_build = True
                         continue
                     yield self._failed_event(session, turn_id, e)

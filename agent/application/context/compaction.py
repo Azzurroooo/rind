@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import uuid
@@ -15,7 +16,7 @@ from typing import Any
 from agent.domain.cancellation import CancellationToken
 from agent.domain.models import ModelCompletion
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
-from agent.domain.errors import BoundaryError, PersistenceError
+from agent.domain.errors import PersistenceError, ProviderError
 from agent.application.images import image_budget_exceeded
 from agent.prompts import build_compact_prompt
 
@@ -25,6 +26,15 @@ from .token_usage import build_usage_record, normalize_sampling_usage, positive_
 
 
 logger = logging.getLogger(__name__)
+
+
+def _truncate_for_budget(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    omitted = len(text) - limit
+    head = max(1, limit // 2)
+    tail = max(1, limit - head)
+    return text[:head] + f"\n[... {omitted} characters omitted for summary budget ...]\n" + text[-tail:]
 
 
 @dataclass(slots=True)
@@ -55,6 +65,8 @@ class CompactionService:
         raw_messages = await self._load_raw_messages(session, context_messages)
         tool_records = await self._load_tool_records(session)
         previous = await self._load_latest_compaction(session)
+        stats = context_stats or {}
+        window = positive_int(stats.get("context_window_tokens"), DEFAULT_CONTEXT_WINDOW_TOKENS)
         record = self.build_compaction(
             raw_messages,
             tool_records,
@@ -76,42 +88,75 @@ class CompactionService:
                              if message.get("id") in retained_ids or message.get("tool_call_id") in retained_calls), len(corpus))
         for message in corpus:
             message.pop("id", None)
-        stats = context_stats or {}
-        window = positive_int(stats.get("context_window_tokens"), DEFAULT_CONTEXT_WINDOW_TOKENS)
-        max_output_tokens = max(1, min(8192, window // 10))
-        messages = await asyncio.to_thread(self._prepare_summary_request, corpus, recent_start, window, max_output_tokens)
-        if cancellation_token and cancellation_token.is_cancelled:
-            raise asyncio.CancelledError(cancellation_token.reason)
-        if prepare_messages is not None:
-            messages = await prepare_messages(messages, compact=True)
-        try:
-            response = await chat_client.create(
-                messages=messages,
-                tools=None,
-                cancellation_token=cancellation_token,
-                max_output_tokens=max_output_tokens,
-                reasoning_effort="low",
+        if recent_start < len(corpus) and (
+            image_budget_exceeded(corpus[recent_start:])
+            or ContextEstimator().estimate_messages(corpus[recent_start:]).estimated_input_tokens >= max(1, window // 2)
+        ):
+            record = self.build_compaction(
+                raw_messages,
+                tool_records,
+                previous_compaction=previous,
+                created_at=created_at,
+                reason=reason,
+                phase=phase,
+                diagnostics=diagnostics,
+                handoff_messages=context_messages,
+                strategy="deterministic_fallback",
+                keep_recent_chars=0,
             )
-            usage = self._sampling_usage(response, context_stats)
-            if usage:
-                record["usage"] = usage
-                usage_error = await self._try_persist_sampling_usage(session, usage)
-                if usage_error:
-                    record["usage_persist_error"] = usage_error
-                await self._record_usage(session, usage)
-            content = self._assistant_content(response).strip()
-            if not content:
-                raise ValueError("compact model returned empty handoff")
-            record["strategy"] = "llm_inline"
-            record["handoff_message"] = {"role": "assistant", "content": content}
-        except Exception as exc:
-            record["strategy"] = "deterministic_fallback"
-            record["fallback_error"] = {
-                "type": type(exc).__name__,
-                "message": str(exc),
-            }
-            if hasattr(exc, "status"):
-                record["fallback_error"]["status"] = str(exc.status)
+            cut = record["source"]["message_end_index_exclusive"]
+            recent_start = len(corpus)
+        effective_window = window
+        messages: list[dict[str, Any]] = []
+        for attempt in range(3):
+            max_output_tokens = max(1, min(8192, effective_window // 10))
+            messages = await asyncio.to_thread(
+                self._prepare_summary_request, corpus, recent_start, effective_window, max_output_tokens
+            )
+            if cancellation_token and cancellation_token.is_cancelled:
+                raise asyncio.CancelledError(cancellation_token.reason)
+            if prepare_messages is not None:
+                messages = await prepare_messages(messages, compact=True)
+            try:
+                response = await chat_client.create(
+                    messages=messages,
+                    tools=None,
+                    cancellation_token=cancellation_token,
+                    max_output_tokens=max_output_tokens,
+                    reasoning_effort="low",
+                )
+                usage = self._sampling_usage(response, context_stats)
+                if usage:
+                    record["usage"] = usage
+                    usage_error = await self._try_persist_sampling_usage(session, usage)
+                    if usage_error:
+                        record["usage_persist_error"] = usage_error
+                    await self._record_usage(session, usage)
+                content = self._assistant_content(response).strip()
+                if not content:
+                    raise ValueError("compact model returned empty handoff")
+                record["strategy"] = "llm_inline"
+                record["handoff_message"] = {"role": "assistant", "content": content}
+                break
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if (
+                    isinstance(exc, ProviderError)
+                    and exc.code == "context_length_exceeded"
+                    and attempt < 2
+                    and effective_window > 2048
+                ):
+                    effective_window = max(2048, effective_window * 2 // 3)
+                    continue
+                record["strategy"] = "deterministic_fallback"
+                record["fallback_error"] = {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                }
+                if hasattr(exc, "status"):
+                    record["fallback_error"]["status"] = str(exc.status)
+                break
 
         if any(message.get("attachments") for message in corpus):
             if record["strategy"] != "llm_inline" or not any(message.get("images") for message in messages):
@@ -250,7 +295,7 @@ class CompactionService:
             retained_start = unit_start
             retained_size += unit_size
             retained_images = images
-        return retained_start
+        return len(messages) if retained_start <= units[0][0] else retained_start
 
     def _conversation_units(
         self,
@@ -424,17 +469,26 @@ class CompactionService:
             logger.debug("Usage ledger append failed.", exc_info=True)
 
     def _prepare_summary_request(self, corpus: list[dict], recent_start: int, window: int, max_output_tokens: int) -> list[dict]:
+        corpus = copy.deepcopy(corpus)
         input_budget = window - max_output_tokens - max(1, window // 20)
         estimator = ContextEstimator()
 
-        def build_request(history_start: int = 0, dropped_messages: int = 0):
-            payload = {"history": corpus[history_start:recent_start], "retained_recent_messages": corpus[recent_start:]}
+        def build_request(history_start: int = 0, dropped_messages: int = 0, truncated_content: bool = False):
+            split = max(history_start, recent_start)
+            payload = {"history": corpus[history_start:split], "retained_recent_messages": corpus[split:]}
+            notes: list[str] = []
             if dropped_messages:
                 # Say it plainly, so the handoff never claims knowledge it lost.
-                payload["note"] = (
+                notes.append(
                     f"{dropped_messages} oldest history messages did not fit the summary budget and were dropped; "
-                    "they stay saved on disk but were not re-examined. Do not claim knowledge of them."
+                    "they stay saved on disk but were not re-examined."
                 )
+            if truncated_content:
+                notes.append(
+                    "Oversized message content was truncated to fit the summary budget; full records stay saved on disk."
+                )
+            if notes:
+                payload["note"] = " ".join([*notes, "Do not claim knowledge of them."])
             messages = build_compact_prompt(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
             included = corpus[history_start:]
             attachments = [item for message in included for item in message.get("attachments", [])]
@@ -451,7 +505,7 @@ class CompactionService:
         messages = build_request()
         if estimated(messages) <= input_budget:
             return messages
-        # Only shorten tool bodies; never cut user constraints or tool arguments.
+        # Only shorten tool bodies first; never cut user constraints or tool arguments when avoidable.
         for message in corpus:
             content = message.get("content")
             if message.get("role") == "tool" and isinstance(content, str) and len(content) > 4000:
@@ -460,18 +514,12 @@ class CompactionService:
         messages = build_request()
         if estimated(messages) <= input_budget:
             return messages
-        # Still too large: drop the oldest history units until the summary fits,
-        # the way codex trims from the beginning while keeping recent messages
-        # intact. The conversation record is untouched and the corpus says what
-        # was dropped, so compaction always makes progress instead of refusing.
-        history_units = [unit for unit in self._conversation_units(corpus, 0) if unit[1] <= recent_start]
-        starts = [end for _, end in history_units if end < len(corpus)]
-        # Locate a likely cut using each unit once, then check the actual request.
-        # Retokenizing every growing suffix would be quadratic on long histories.
-        # These weights only guide the search; JSON overhead and images are always
-        # included by the exact checks below, including the image-limit transition.
+        # Still too large: drop the oldest units until the summary fits, the way
+        # codex trims from the beginning while keeping recent messages intact.
+        units = self._conversation_units(corpus, 0)
+        starts = [end for _, end in units if end < len(corpus)]
         weights = [estimated([{"role": "user", "content": json.dumps(corpus[start:end], ensure_ascii=False, sort_keys=True, default=str)}])
-                   for start, end in history_units if end < len(corpus)]
+                   for start, end in units if end < len(corpus)]
         remaining = estimated(messages)
         index = 0
         for weight in weights:
@@ -479,7 +527,7 @@ class CompactionService:
             if remaining <= input_budget:
                 break
             index += 1
-        index = min(index, len(starts) - 1)
+        index = min(index, len(starts) - 1) if starts else 0
         smallest = messages
         if image_budget_exceeded(corpus):
             # Dropping an image can re-enable vision and increase token usage.
@@ -504,12 +552,35 @@ class CompactionService:
                     smallest = previous
                     index -= 1
                 return smallest
-        raise BoundaryError(
-            f"Compact input exceeds its budget even after dropping older history "
-            f"({estimated(smallest)} estimated tokens, {input_budget} available). "
-            "History was preserved; use a model with a larger context window or start a new session.",
-            status="rejected", code="compact_input_too_large",
-        )
+        # When even the newest remaining unit exceeds input_budget, strip its
+        # attachments and truncate oversized text fields with head+tail preservation
+        # (matching codex compact.rs truncate_text + media strip) so compaction
+        # always makes progress without mutating persisted messages.
+        last_start = starts[-1] if starts else 0
+        for message in corpus[last_start:]:
+            message.pop("attachments", None)
+        smallest = build_request(last_start, last_start)
+        if estimated(smallest) <= input_budget:
+            return smallest
+        tail_originals = copy.deepcopy(corpus[last_start:])
+        char_limit = max(256, (input_budget - 450) * 3 // max(1, len(tail_originals)))
+        for _ in range(6):
+            for target, source in zip(corpus[last_start:], tail_originals):
+                content = source.get("content")
+                if isinstance(content, str) and len(content) > char_limit:
+                    target["content"] = _truncate_for_budget(content, char_limit)
+                for call, src_call in zip(target.get("tool_calls") or [], source.get("tool_calls") or []):
+                    fn = call.get("function") if isinstance(call, dict) else None
+                    src_fn = src_call.get("function") if isinstance(src_call, dict) else None
+                    args = src_fn.get("arguments") if isinstance(src_fn, dict) else None
+                    if isinstance(fn, dict) and isinstance(args, str) and len(args) > char_limit:
+                        fn["arguments"] = _truncate_for_budget(args, char_limit)
+            smallest = build_request(last_start, last_start, truncated_content=True)
+            tokens = estimated(smallest)
+            if tokens <= input_budget or char_limit <= 64:
+                return smallest
+            char_limit = max(64, int(char_limit * input_budget / max(1, tokens) * 0.8))
+        return smallest
 
     def _get(self, value: Any, key: str) -> Any:
         if isinstance(value, dict):

@@ -54,12 +54,13 @@ class AnthropicMessagesClient(ChatClient):
         if tools:
             payload["tools"] = [_anthropic_tool(tool) for tool in tools]
         response = None
+        usage: ModelUsage | None = None
         try:
             response = await await_with_cancellation(self._client.messages.create(**payload), cancellation_token)
             async with aclosing(iterate_with_cancellation(response, cancellation_token)) as chunks:
                 async for raw in chunks:
-                    event = _event(raw)
-                    if event:
+                    events, usage = _events(raw, usage)
+                    for event in events:
                         yield event
         except asyncio.CancelledError:
             raise
@@ -124,30 +125,38 @@ def _anthropic_tool(tool):
     return {"name": function.get("name", ""), "description": function.get("description", ""), "input_schema": function.get("parameters", {})}
 
 
-def _event(raw):
+def _events(raw, previous_usage: ModelUsage | None = None) -> tuple[list[ModelStreamEvent], ModelUsage | None]:
     event_type = str(_get(raw, "type") or "")
     if event_type == "content_block_start":
         block = _get(raw, "content_block")
         if _get(block, "type") == "tool_use":
-            return ModelStreamEvent("tool_start", tool_call_id=str(_get(block, "id") or ""), tool_name=str(_get(block, "name") or ""))
-    if event_type == "content_block_delta":
+            return [ModelStreamEvent("tool_start", tool_call_id=str(_get(block, "id") or ""), tool_name=str(_get(block, "name") or ""))], previous_usage
+    elif event_type == "content_block_delta":
         delta = _get(raw, "delta")
         kind = _get(delta, "type")
         if kind == "text_delta":
-            return ModelStreamEvent("text_delta", text=str(_get(delta, "text") or ""))
+            return [ModelStreamEvent("text_delta", text=str(_get(delta, "text") or ""))], previous_usage
         if kind == "thinking_delta":
-            return ModelStreamEvent("reasoning_delta", reasoning=str(_get(delta, "thinking") or ""))
+            return [ModelStreamEvent("reasoning_delta", reasoning=str(_get(delta, "thinking") or ""))], previous_usage
         if kind == "input_json_delta":
-            return ModelStreamEvent("tool_arguments_delta", arguments=str(_get(delta, "partial_json") or ""))
-    if event_type == "content_block_stop":
-        return ModelStreamEvent("tool_end")
-    if event_type == "message_delta":
+            return [ModelStreamEvent("tool_arguments_delta", arguments=str(_get(delta, "partial_json") or ""))], previous_usage
+    elif event_type == "content_block_stop":
+        return [ModelStreamEvent("tool_end")], previous_usage
+    elif event_type == "message_delta":
         delta = _get(raw, "delta")
-        return ModelStreamEvent("completed", stop_reason={"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(str(_get(delta, "stop_reason") or ""), "error"))
-    if event_type == "message_start":
-        usage = _usage(_get(_get(raw, "message"), "usage"))
-        return ModelStreamEvent("usage", usage=usage) if usage else None
-    return None
+        usage = _usage(_get(raw, "usage"), previous_usage)
+        events: list[ModelStreamEvent] = []
+        if usage is not None:
+            events.append(ModelStreamEvent("usage", usage=usage))
+        events.append(ModelStreamEvent("completed", stop_reason={"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(str(_get(delta, "stop_reason") or ""), "error")))
+        return events, usage or previous_usage
+    elif event_type == "message_start":
+        usage = _usage(_get(_get(raw, "message"), "usage"), previous_usage)
+        return ([ModelStreamEvent("usage", usage=usage)] if usage else []), usage or previous_usage
+    elif event_type == "error":
+        error = _get(raw, "error") or raw
+        raise provider_error(RuntimeError(str(_get(error, "message") or error)), code="stream_interrupted")
+    return [], previous_usage
 
 
 def _completion(response):
@@ -167,10 +176,24 @@ def _completion(response):
     return ModelCompletion("".join(content), tuple(calls), "".join(reasoning) or None, _usage(_get(response, "usage")), reason)
 
 
-def _usage(value):
+def _usage(value, previous: ModelUsage | None = None) -> ModelUsage | None:
     if value is None:
         return None
-    return ModelUsage(int(_get(value, "input_tokens") or 0), int(_get(value, "output_tokens") or 0), int(_get(value, "cache_read_input_tokens") or 0), 0)
+    raw_input = _get(value, "input_tokens")
+    raw_cache_read = _get(value, "cache_read_input_tokens")
+    raw_cache_write = _get(value, "cache_creation_input_tokens")
+    cache_read = int(raw_cache_read) if raw_cache_read is not None else (previous.cached_tokens if previous else 0)
+    if raw_input is not None or raw_cache_read is not None or raw_cache_write is not None:
+        uncached = int(raw_input or 0) if raw_input is not None else max(0, (previous.input_tokens - previous.cached_tokens) if previous else 0)
+        input_tokens = uncached + cache_read + int(raw_cache_write or 0)
+    else:
+        input_tokens = previous.input_tokens if previous else 0
+    raw_output = _get(value, "output_tokens")
+    output_tokens = int(raw_output) if raw_output is not None else (previous.output_tokens if previous else 0)
+    details = _get(value, "output_tokens_details")
+    raw_reasoning = _get(details, "thinking_tokens") if details is not None else _get(value, "thinking_tokens")
+    reasoning_tokens = int(raw_reasoning) if raw_reasoning is not None else (previous.reasoning_tokens if previous else 0)
+    return ModelUsage(input_tokens, output_tokens, cache_read, reasoning_tokens)
 
 
 def _get(value, key):

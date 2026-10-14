@@ -38,6 +38,9 @@ class CompactionHandoffBuilder:
             if isinstance(record, dict) and record.get("id")
         }
         lines: list[str] = []
+        if len(tool_ids) > 20:
+            lines.append(f"- [{len(tool_ids) - 20} earlier tool calls omitted]")
+            tool_ids = tool_ids[-20:]
         for call_id in tool_ids:
             record = records.get(call_id, {})
             suffix = f", error_type={record.get('error_type')}" if record.get("error_type") else ""

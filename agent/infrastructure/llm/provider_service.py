@@ -259,7 +259,7 @@ class ProviderServiceImpl:
             catalog_endpoint = endpoint.rstrip("/")
             if catalog_endpoint == "https://api.deepseek.com":
                 catalog_endpoint += "/v1"
-            candidates = self.providers.values() if definition.id == "openai-compatible" else (definition,)
+            candidates = self.providers.values() if not definition.fallback_models else (definition,)
             for candidate in candidates:
                 if catalog_endpoint and catalog_endpoint == candidate.default_base_url.rstrip("/"):
                     known = next((model for model in candidate.fallback_models if model.id == model_id), None)

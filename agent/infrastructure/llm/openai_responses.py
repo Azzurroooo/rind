@@ -71,8 +71,6 @@ class OpenAIResponsesClient(ChatClient):
                         yield event
         except asyncio.CancelledError:
             raise
-        except ProviderError:
-            raise
         except Exception as exc:
             raise provider_error(exc, code="stream_interrupted") from None
         finally:
@@ -155,6 +153,11 @@ def _events(raw: Any, call_ids: dict[str, str] | None = None) -> list[ModelStrea
             events.append(ModelStreamEvent("usage", usage=usage))
         status = str(_get(response, "status") or "completed")
         events.append(ModelStreamEvent("completed", stop_reason="stop" if kind.endswith("completed") and status == "completed" else "length" if status == "incomplete" else "error"))
+    elif kind in {"response.failed", "error"}:
+        error = _get(_get(raw, "response"), "error") or _get(raw, "error") or raw
+        message = str(_get(error, "message") or error)
+        code = str(_get(error, "code") or "")
+        raise provider_error(RuntimeError(f"{code}: {message}" if code else message), code="stream_interrupted")
     return [event for event in events if event.kind != "text_delta" or event.text]
 
 
@@ -180,7 +183,14 @@ def _completion(response: Any) -> ModelCompletion:
 def _usage(value: Any) -> ModelUsage | None:
     if value is None:
         return None
-    return ModelUsage(int(_get(value, "input_tokens") or 0), int(_get(value, "output_tokens") or 0), int(_get(value, "input_tokens_details") and _get(_get(value, "input_tokens_details"), "cached_tokens") or 0), int(_get(value, "reasoning_tokens") or 0))
+    input_details = _get(value, "input_tokens_details")
+    output_details = _get(value, "output_tokens_details")
+    return ModelUsage(
+        int(_get(value, "input_tokens") or 0),
+        int(_get(value, "output_tokens") or 0),
+        int((input_details and _get(input_details, "cached_tokens")) or 0),
+        int((output_details and _get(output_details, "reasoning_tokens")) or _get(value, "reasoning_tokens") or 0),
+    )
 
 
 def _get(value: Any, key: str) -> Any:
