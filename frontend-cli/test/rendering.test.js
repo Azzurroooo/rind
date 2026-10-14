@@ -647,25 +647,50 @@ test("slashDisplayText groups skills by layer with overrides, imports and proble
     `  ── Skills · 2 available ${"─".repeat(70)}`,
     "  Rind · built-in  E:\\rind\\agent\\skills",
     "    skill-creator  Create skills",
-    "  Claude · user  off · 1 skill · /import to enable",
+    "",
     "  Rind · project  E:\\work\\.rind\\skills",
     "    manual         only via /skill:name · Release",
     "    skill-creator  overridden by E:\\work\\.rind\\skills\\x",
+    "",
+    "  Claude · user    off · 1 skill · /import to enable",
+    "",
     "  Problems",
     "    E:\\work\\.rind\\skills\\bad  missing description.",
   ].join("\n"));
 });
 
-test("skill paths collapse the home directory and long descriptions are clipped", () => {
-  const text = slashDisplayText({
+test("skill paths collapse the home directory, clip long descriptions, and apply semantic colors in TTY", () => {
+  const display = {
     type: "skills",
-    sources: [{ label: "Rind · user", paths: [path.join(homedir(), ".rind", "skills")], enabled: true, importable: false,
-      skills: [{ name: "calc", description: "x".repeat(140), status: "active" }] }],
+    sources: [
+      { label: "Claude · user", paths: ["~/.claude/skills"], enabled: false, importable: true,
+        skills: [{ name: "pdf", description: "Forms", status: "off" }] },
+      { label: "Codex · user", paths: ["~/.codex/skills"], enabled: false, importable: true,
+        skills: [{ name: "a", status: "off" }, { name: "b", status: "off" }] },
+      { label: "Rind · user", paths: [path.join(homedir(), ".rind", "skills")], enabled: true, importable: false,
+        skills: [{ name: "calc", description: "x".repeat(140), status: "active" }] },
+    ],
     problems: [],
-  });
-
+  };
+  const text = slashDisplayText(display);
   assert.match(text, /Rind · user  ~[\\/]\.rind[\\/]skills$/m);
   assert.match(text, /x+\.\.\.$/m);
+  assert.match(text, /  Claude · user   off · 1 skill  · \/import to enable\n  Codex · user    off · 2 skills · \/import to enable$/);
+
+  const tty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+  const priorNoColor = process.env.NO_COLOR;
+  Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+  delete process.env.NO_COLOR;
+  try {
+    const colored = slashDisplayText(display);
+    assert.ok(colored.includes(paintRaw.accent("calc        ")));
+    assert.ok(colored.includes(paintRaw.accent("/import")));
+    assert.equal(stripAnsi(colored), text);
+  } finally {
+    if (tty) Object.defineProperty(process.stdout, "isTTY", tty);
+    else delete process.stdout.isTTY;
+    if (priorNoColor !== undefined) process.env.NO_COLOR = priorNoColor;
+  }
 });
 
 test("slashResultText prefers structured display and falls back to raw text", () => {
