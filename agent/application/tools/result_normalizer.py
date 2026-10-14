@@ -94,7 +94,7 @@ class ToolResultNormalizer:
             model_content = self._project_mutation_for_model(payload)
         elif needs_preview:
             model_content = self._project_for_model(
-                rendered, total_bytes, total_lines, identity, output_path,
+                self._output_text(payload, identity[0], rendered), total_bytes, total_lines, identity, output_path,
                 truncation_marker=_READ_PREVIEW_MARKER if is_read else _TRUNCATION_MARKER,
             )
         else:
@@ -133,10 +133,12 @@ class ToolResultNormalizer:
             return self._project_task(payload, self.terminal_max_bytes, output_path)
         if read_content is not None and json.loads(read_content).get("ok") is False:
             return read_content
+        total_bytes, total_lines = self._text_metrics(rendered)
+        if total_bytes <= self.terminal_max_bytes:
+            return rendered
         read_payload = self._read_payload(payload)
         return self._project_by_bytes(
-            rendered, self.terminal_max_bytes, *self._text_metrics(rendered), identity,
-            output_path=None, include_notice=False,
+            self._output_text(payload, identity[0], rendered), self.terminal_max_bytes, total_bytes, total_lines, identity,
             metadata=dict(read_payload["meta"]) if read_payload is not None else None,
         )
 
@@ -225,12 +227,8 @@ class ToolResultNormalizer:
         total_lines: int,
         identity: tuple[bool, str, str],
         *,
-        output_path: str | None,
-        include_notice: bool,
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        if total_bytes <= limit:
-            return text
         return self._bounded_projection(
             text,
             total_bytes,
@@ -238,8 +236,8 @@ class ToolResultNormalizer:
             identity,
             min(len(text), limit),
             lambda candidate: len(candidate.encode("utf-8")) <= limit,
-            output_path=output_path,
-            include_notice=include_notice,
+            output_path=None,
+            include_notice=False,
             metadata=metadata,
         )
 
@@ -415,6 +413,14 @@ class ToolResultNormalizer:
             return None, False
         output_path = meta.get("output_path")
         return (str(output_path) if isinstance(output_path, str) and output_path else None), bool(meta.get("truncated"))
+
+    def _output_text(self, payload: Any, ok: bool, rendered: str) -> str:
+        # Previews cut the tool's own output, like Codex and opencode truncating output
+        # text; quoting the whole envelope would escape it twice.
+        if not isinstance(payload, dict):
+            return rendered
+        output = payload.get("data") if ok else payload.get("error")
+        return output if isinstance(output, str) else json.dumps(output, ensure_ascii=False, separators=(",", ": "))
 
     def _read_payload(self, parsed: Any) -> dict[str, Any] | None:
         if not isinstance(parsed, dict) or parsed.get("tool") != "read_file":

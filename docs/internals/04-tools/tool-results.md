@@ -21,7 +21,7 @@ The unified payload uses ok, tool, data or error, and may carry error_type, meta
 | read_file | Only consecutive complete lines are kept, and next_offset points to the first line not displayed; head and tail must not be spliced together to pretend that the middle was read. |
 | edit_file / write_file | The model gets locations and change statistics; the bounded diff stays in the tool record and on the display path, so that context is not consumed repeatedly. |
 | Managed task | Status, task_id, output path, and paging notice are preserved together; after the preview is shortened, no misleading resume position is kept. |
-| Generically oversized results | An output file may be written; the preview clearly marks the truncation and gives a path for continued reading. |
+| Generically oversized results | An output file may be written; the preview is cut from the tool's own data or error, not from a quoted copy of the envelope, and clearly marks the truncation with a path for continued reading. |
 
 The saved model_content is the basis for replay; later changes to the display rules do not re-truncate old sessions. Complete output is not guaranteed indefinitely either: Shell has its own output quota and expiry cleanup, and when output is missing the reason must be reported.
 

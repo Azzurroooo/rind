@@ -60,6 +60,21 @@ async def test_large_output_uses_one_absolute_output_path(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_large_structured_output_previews_its_data_without_quoting_the_envelope(tmp_path: Path) -> None:
+    matches = [{"file": "service.ts", "line": n, "text": f'request("assignTask", {n})'} for n in range(2000)]
+    source = json.dumps({"ok": True, "tool": "grep", "data": matches, "meta": {"count": 2000}})
+
+    result = await ToolResultNormalizer().normalize(
+        source, tool_name="grep", output_store=MemoryOutputStore(tmp_path), session_id="s", call_id="c",
+    )
+
+    preview = json.loads(result.model_content)["data"]
+    assert preview.startswith('[{"file": "service.ts","line": 0,"text": "request(\\"assignTask\\", 0)"}')
+    assert '"ok"' not in preview
+    assert '"ok"' not in result.terminal_content.split('"data"', 1)[1]
+
+
+@pytest.mark.asyncio
 async def test_existing_output_path_is_reused_without_duplicate_write() -> None:
     path = "C:/sessions/session-a/tool-output/call-1.txt"
     payload = {"ok": True, "tool": "bash", "data": "preview", "meta": {"truncated": True, "output_path": path}}
