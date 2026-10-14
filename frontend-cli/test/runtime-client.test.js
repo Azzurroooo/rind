@@ -1,10 +1,28 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
-import { createRuntimeClient, resolveRuntimeLaunch } from "../lib/runtime-client.js";
+import { createRuntimeClient, resolveRuntimeLaunch, resolveSourcePython } from "../lib/runtime-client.js";
+
+test("a source checkout runs its own virtual environment when no interpreter is chosen", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "rind-python-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const windows = process.platform === "win32";
+  const venv = path.join(root, ".venv", windows ? "Scripts" : "bin");
+  const executable = path.join(venv, windows ? "python.exe" : "python");
+
+  assert.equal(resolveSourcePython(undefined, root), windows ? "python" : "python3");
+  await mkdir(venv, { recursive: true });
+  await writeFile(executable, "");
+  assert.equal(resolveSourcePython(undefined, root), executable);
+  assert.equal(resolveSourcePython(null, root), executable);
+  assert.equal(resolveSourcePython("python", root), "python");
+  assert.equal(resolveSourcePython("python3", root), "python3");
+  assert.equal(resolveSourcePython("/usr/bin/python3", root), "/usr/bin/python3");
+  assert.equal(resolveRuntimeLaunch({ repoRoot: root }).command, executable);
+});
 
 async function shutdownFixture(t, handler) {
   const root = await mkdtemp(path.join(tmpdir(), "rind-shutdown-"));
@@ -172,6 +190,7 @@ test("runtime exit rejects an in-flight request and reports a recoverable failur
   assert.notEqual(result.code, 0);
   assert.equal(result.details.closing, false);
   assert.match(result.details.error.message, /Runtime exited/);
+  await client.shutdown(); // A worker already released by close needs no further shutdown.
 });
 
 test("runtime client stays stopped until explicit start", async () => {

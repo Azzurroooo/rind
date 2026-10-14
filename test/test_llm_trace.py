@@ -105,7 +105,7 @@ async def test_chat_client_stream_traces_when_enabled(monkeypatch, tmp_path):
     mock_openai.chat.completions.create = AsyncMock(return_value=_aiter())
 
     client = OpenAIChatCompletionsClient(mock_openai, "test-model")
-    client.set_trace_session_id_provider(lambda: "sess-trace")
+    client.set_session_id_provider(lambda: "sess-trace")
 
     received = []
     async for chunk in client.stream(messages=[{"role": "user", "content": "go"}], tools=[{"name": "bash"}]):
@@ -137,7 +137,7 @@ async def test_chat_client_stream_does_not_trace_when_disabled(monkeypatch, tmp_
     mock_openai.chat.completions.create = AsyncMock(return_value=_aiter())
 
     client = OpenAIChatCompletionsClient(mock_openai, "test-model")
-    client.set_trace_session_id_provider(lambda: "sess-trace")
+    client.set_session_id_provider(lambda: "sess-trace")
 
     async for _ in client.stream(messages=[{"role": "user", "content": "go"}]):
         pass
@@ -160,7 +160,8 @@ def test_call_trace_survives_missing_end(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_manual_compact_traces_before_the_first_turn_in_a_worker(monkeypatch, tmp_path):
+@pytest.mark.parametrize("replace_client", [False, True])
+async def test_manual_compact_traces_before_the_first_turn_in_a_worker(monkeypatch, tmp_path, replace_client):
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("RIND_TRACE_LLM", "1")
     sdk = MagicMock()
@@ -178,6 +179,8 @@ async def test_manual_compact_traces_before_the_first_turn_in_a_worker(monkeypat
         workspace_root=str(tmp_path),
     )
     try:
+        if replace_client:
+            container.turn_runner.replace_chat_client(OpenAIChatCompletionsClient(sdk, "replacement"), image_input=None)
         await container.session_store.initialize()
         await container.session_store.persist_message("user", "Remember the delivery code.")
         await container.session_store.persist_message("assistant", "Understood.")
@@ -185,6 +188,7 @@ async def test_manual_compact_traces_before_the_first_turn_in_a_worker(monkeypat
         assert record["strategy"] == "llm_inline"
         trace_files = list((tmp_path / "home" / "sessions" / container.session_store.session_id / "_llm_trace").glob("*.jsonl"))
         assert len(trace_files) == 1
+        assert sdk.chat.completions.create.call_args.kwargs["prompt_cache_key"].startswith("rind:")
         records = [json.loads(line) for line in trace_files[0].read_text(encoding="utf-8").splitlines()]
         assert records[0]["stream"] is False
         assert "Remember the delivery code." in json.dumps(records[0]["messages"])

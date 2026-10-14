@@ -72,6 +72,17 @@ test("a report aligns its blocks, says what needs deciding and folds its history
   assert.match(rework, /↺ Sent back for rework 1h ago\nFeedback {2}Add the dark theme/);
 });
 
+test("a report shows file sizes, an honest empty evidence row, and no file row when nothing was delivered", () => {
+  const task = { ...done("a"), report: { outcome: "completed", summary: "Done", evidence: [], artifacts: [] } };
+  const report = { task, team: "Product", owner: "Lead", runs: [], subtasks: [], archived: false, artifacts: [], name: id => id };
+  const lines = renderReport({ ...report, artifacts: [{ name: "login.png", size: 2048, path: "/a/login.png" }, { name: "diff.patch", size: 1048576, path: "/a/diff.patch" }] }, 80, { now: NOW }).map(strip);
+  assert.match(lines.join("\n"), /login\.png {2}2\.0 KiB {2}\/a\/login\.png/);
+  assert.match(lines.join("\n"), /diff\.patch {2}1\.0 MiB/);
+  assert.match(lines.join("\n"), /Evidence {2}none given/);
+  const empty = renderReport(report, 80, { now: NOW }).map(strip).join("\n");
+  assert.doesNotMatch(empty, /^Files/m, "no Files row when the report published nothing");
+});
+
 test("report keys accept a delivery or send it back with feedback", async () => {
   const { createReviewActions } = await import("../lib/agents-review.js");
   const s = snapshot();

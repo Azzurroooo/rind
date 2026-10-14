@@ -41,6 +41,7 @@ from agent.infrastructure.persistence.session_meta import (
     normalize_skill_catalog,
     normalize_skill_sources,
     session_index_entry,
+    session_index_summary,
     sync_session_counts,
 )
 from agent.infrastructure.paths import (
@@ -110,10 +111,12 @@ class JsonlSessionStore(SessionStore):
         reasoning_effort: str = "",
         provider: str = "openai-compatible",
         selection_source: dict[str, str] | None = None,
+        create_missing: bool = True,
     ):
         self._session_dir = session_dir
         self._session_id = session_id
         self._resume_latest = resume_latest
+        self._create_missing = create_missing
         self._model = model
         self._provider = str(provider or "openai-compatible").strip()
         from agent.infrastructure.settings import normalize_reasoning_effort
@@ -132,6 +135,7 @@ class JsonlSessionStore(SessionStore):
         self._session_paths = {}
         self._session_meta = None
         self._has_user_message = False
+        self._index_entry: dict[str, Any] | None = None
         self._last_preview = ""
         self._projected_caches: dict[tuple[bool, bool, bool], tuple[tuple[Any, ...], list[dict[str, Any]]]] = {}
         self._files = SessionFiles()
@@ -148,6 +152,10 @@ class JsonlSessionStore(SessionStore):
     @property
     def is_persisted(self) -> bool:
         return self._msg_repo is not None
+
+    def mark_deleted(self) -> None:
+        """The session was deleted: a late write must never recreate it."""
+        self._create_missing = False
 
     async def get_metadata(self) -> dict[str, Any]:
         async with self._write_lock:
@@ -232,38 +240,105 @@ class JsonlSessionStore(SessionStore):
         limit: int = 20,
         workspace_root: str | None = None,
         exclude_workspace_roots: list[str] | None = None,
+        exclude_session_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        root = cls.resolve_session_root(session_dir)
+        sessions, _ = cls._scan_session_metadata(
+            session_dir, limit=limit, workspace_root=workspace_root,
+            exclude_workspace_roots=exclude_workspace_roots, exclude_session_ids=exclude_session_ids,
+        )
+        return sessions
+
+    @classmethod
+    def list_session_metadata_by_workspace(
+        cls,
+        session_dir: str | None = None,
+        *,
+        limit: int = 500,
+        per_workspace_limit: int = 3,
+        exclude_workspace_roots: list[str] | None = None,
+        exclude_session_ids: list[str] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """The newest conversations per folder, at most `per_workspace_limit` each
+        and `limit` in total, plus each folder's full count. One pass, so busy
+        folders cannot crowd others out and callers need no per-folder queries.
+        Totals include every matching folder, including those outside the preview cap."""
+        return cls._scan_session_metadata(
+            session_dir, limit=limit, exclude_workspace_roots=exclude_workspace_roots,
+            exclude_session_ids=exclude_session_ids, per_workspace_limit=per_workspace_limit,
+        )
+
+    @classmethod
+    def _scan_session_metadata(
+        cls,
+        session_dir: str | None = None,
+        *,
+        limit: int = 20,
+        workspace_root: str | None = None,
+        exclude_workspace_roots: list[str] | None = None,
+        exclude_session_ids: list[str] | None = None,
+        per_workspace_limit: int | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         index_path = cls.index_path_for(session_dir)
         files = SessionFiles()
-        index = files.load_json(index_path) or {}
+        index = SessionIndexRepository(files, index_path).load_index()
+        # Cache canonical paths only for this scan: symlink targets may change.
+        roots: dict[str, str] = {}
+
+        def normalized_workspace(value: str) -> str:
+            key = os.path.abspath(os.path.expanduser(str(value)))
+            if key not in roots:
+                roots[key] = os.path.normcase(os.path.realpath(key))
+            return roots[key]
+
         entries = index.get("sessions") if isinstance(index, dict) else []
         if not isinstance(entries, list):
-            return []
-        def normalize(value: str) -> str:
-            return os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(value))))
-
-        expected_root = normalize(workspace_root) if workspace_root else None
+            return [], []
+        expected_root = normalized_workspace(workspace_root) if workspace_root else None
         # Excluded before the limit applies, so callers can page past busy folders.
-        excluded = {normalize(value) for value in exclude_workspace_roots or [] if isinstance(value, str) and value}
-        result = []
+        excluded = {normalized_workspace(value) for value in exclude_workspace_roots or [] if isinstance(value, str) and value}
+        skipped = {value for value in exclude_session_ids or [] if isinstance(value, str) and value}
+        result: list[dict[str, Any]] = []
+        totals: dict[str, list[Any]] = {}
         for entry in entries:
             if not isinstance(entry, dict) or not _valid_session_id_value(entry.get("id")):
+                continue
+            if entry.get("id") in skipped:
                 continue
             if entry.get("has_user_message") is False:
                 continue
             entry_root = entry.get("workspace_root")
-            if excluded and isinstance(entry_root, str) and normalize(entry_root) in excluded:
+            if excluded and isinstance(entry_root, str) and normalized_workspace(entry_root) in excluded:
                 continue
             if expected_root is not None:
                 if not isinstance(entry_root, str):
                     continue
-                normalized = os.path.normcase(os.path.realpath(os.path.abspath(entry_root)))
-                if normalized != expected_root:
+                if normalized_workspace(entry_root) != expected_root:
                     continue
             result.append(copy.deepcopy(entry))
+            if per_workspace_limit is not None and isinstance(entry_root, str) and entry_root:
+                bucket = totals.setdefault(normalized_workspace(entry_root), [entry_root, 0])
+                bucket[1] += 1
         result.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
-        return result[: max(0, int(limit))]
+        if per_workspace_limit is None:
+            return result[: max(0, int(limit))], []
+        # Keep the newest `per_workspace_limit` conversations of each folder; the
+        # total keeps naming the folder by a raw path callers already received.
+        kept: list[dict[str, Any]] = []
+        representatives: dict[str, str] = {}
+        counts: dict[str, int] = {}
+        for entry in result:
+            key = normalized_workspace(str(entry.get("workspace_root") or ""))
+            if counts.get(key, 0) >= per_workspace_limit:
+                continue
+            counts[key] = counts.get(key, 0) + 1
+            representatives.setdefault(key, str(entry.get("workspace_root") or ""))
+            kept.append(entry)
+        workspace_totals = [
+            {"workspace_root": representatives[key], "count": totals[key][1]}
+            for key in counts
+            if key in totals and representatives.get(key)
+        ]
+        return kept[: max(0, int(limit))], workspace_totals
 
     def _resolve_workspace_root(self) -> str:
         if self._workspace_root:
@@ -534,6 +609,7 @@ class JsonlSessionStore(SessionStore):
         if not self._has_user_message:
             if self._session_id:
                 self._index_repo.remove_session(self._session_id)
+            self._index_entry = None
             return
 
         entry = session_index_entry(
@@ -543,7 +619,10 @@ class JsonlSessionStore(SessionStore):
             tool_call_count=self._session_meta["tool_call_count"],
             preview=self._last_preview,
         )
-        self._index_repo.update_index(entry)
+        if self._index_entry is not None and session_index_summary(self._index_entry) == session_index_summary(entry):
+            return
+        if self._index_repo.update_index(entry):
+            self._index_entry = entry
 
     def _persist_meta_sync(self, updated_at: str | None = None) -> None:
         if not self._session_meta:
@@ -621,6 +700,8 @@ class JsonlSessionStore(SessionStore):
             session_paths = self._get_session_paths(session_id)
             if os.path.isdir(session_paths["base"]):
                 return self._load_session(session_id)
+            if not self._create_missing:
+                raise LookupError(f"Session not found: {session_id}")
             self._create_session(session_id)
             return []
 
@@ -646,6 +727,9 @@ class JsonlSessionStore(SessionStore):
     def _materialize_draft_sync(self) -> None:
         if self.is_persisted:
             return
+        # A deleted session must never be recreated by a write that raced the deletion.
+        if not self._create_missing:
+            raise LookupError(f"Session not found: {self._session_id or 'unknown'}")
         if self._session_id is None:
             self._bind_draft_sync(new_session_id())
         self._create_session_files_sync()

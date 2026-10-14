@@ -179,7 +179,7 @@ class ProviderServiceImpl:
     def logout(self, provider_id: str) -> bool:
         return self.credentials.delete(provider_id)
 
-    async def create_chat_client(self, settings: AppSettings, selection: ModelSelection, *, workspace_root: str | None):
+    async def create_chat_client(self, settings: AppSettings, selection: ModelSelection):
         definition = self._provider(selection.provider_id)
         credential = self._resolve_credential(settings, definition)
         if credential is None:
@@ -198,14 +198,14 @@ class ProviderServiceImpl:
 
             return OpenAIChatCompletionsClient(
                 build_async_client(key, endpoint, max_retries=14), selection.model_id, reasoning_effort,
-                workspace_root=workspace_root, reasoning_efforts=efforts,
+                reasoning_efforts=efforts,
             )
         if definition.api == "openai-responses":
             from agent.infrastructure.llm.openai_responses import OpenAIResponsesClient
 
             return OpenAIResponsesClient(
                 build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort,
-                workspace_root=workspace_root, reasoning_efforts=efforts, subscription=credential.type == "oauth",
+                reasoning_efforts=efforts, subscription=credential.type == "oauth",
             )
         if definition.api == "anthropic-messages":
             from agent.infrastructure.llm.anthropic_messages import AnthropicMessagesClient
@@ -235,7 +235,10 @@ class ProviderServiceImpl:
             result.extend(models)
         current = ModelSelection(settings.provider, settings.model)
         definition = self.providers.get(current.provider_id)
-        if definition is not None and not any(
+        # The current selection is kept listed only while its connection can run;
+        # a model whose provider was logged out is not a choice (opencode hides
+        # providers without credentials the same way).
+        if definition is not None and self._credential_source(settings, definition) != "none" and not any(
             model.provider_id == current.provider_id and model.id == current.model_id for model in result
         ):
             result.append(self._resolve_model(settings, definition, current.model_id, cache.get(definition.id)))
@@ -266,6 +269,7 @@ class ProviderServiceImpl:
                         if context_window is None:
                             context_window = known.context_window
                     break
+        context_window = settings.model_context_windows.get(definition.id, {}).get(model_id, context_window)
         return replace(base, image_input=capability, context_window=context_window)
 
     async def _fetch_models(self, settings: AppSettings, definition) -> bool:

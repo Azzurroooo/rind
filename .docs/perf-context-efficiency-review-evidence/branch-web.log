@@ -1,0 +1,12 @@
+
+> rind-browser-surface@0.1.0 test
+> vitest run
+
+
+ RUN  v5.0.0 /home/azzurro/code/agent/rind/frontend-web
+
+
+ Test Files  43 passed (43)
+      Tests  386 passed (386)
+   Start at  11:30:41
+   Duration  7.03s (environment 62%, transform 15%, tests 15%, import 8%, worker 1%)

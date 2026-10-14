@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url"
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
 const originalRuntimePath = process.env.RIND_RUNTIME_PATH
+const originalSourceEnv = Object.fromEntries(["ELECTRON_RENDERER_URL", "RIND_PYTHON", "RIND_HOME"].map(key => [key, process.env[key]]))
 const testDirectory = await mkdtemp(join(tmpdir(), "rind-runtime-test-"))
 const workspace = join(testDirectory, "workspace")
 const fakeRuntime = join(dirname(fileURLToPath(import.meta.url)), "fake-runtime.mjs")
@@ -33,9 +34,22 @@ try {
   await runtime.initializeRuntime()
   await runtime.shutdownRuntime()
   assert.equal(runtime.getRuntimeSnapshot(), undefined, "application shutdown must close the worker")
+
+  delete process.env.RIND_RUNTIME_PATH
+  delete process.env.RIND_PYTHON
+  process.env.ELECTRON_RENDERER_URL = "http://localhost:5173"
+  process.env.RIND_HOME = join(testDirectory, "home")
+  runtime.startRuntime(workspace)
+  await runtime.initializeRuntime()
+  assert.equal(runtime.getRuntimeSnapshot()?.status, "ready", "source desktop starts the real worker with the shared interpreter selection")
+  await runtime.shutdownRuntime()
 } finally {
   await runtime.shutdownRuntime()
   if (originalRuntimePath === undefined) delete process.env.RIND_RUNTIME_PATH
   else process.env.RIND_RUNTIME_PATH = originalRuntimePath
+  for (const [key, value] of Object.entries(originalSourceEnv)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
   await rm(testDirectory, { recursive: true, force: true })
 }

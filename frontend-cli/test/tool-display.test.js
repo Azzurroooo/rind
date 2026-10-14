@@ -268,27 +268,58 @@ test("search_web shows result count and expanded entries", () => {
   assert.ok(plain.some((line) => line.includes("https://example.com/rind")));
 });
 
-test("delegate shows status, summary head and published paths", () => {
+test("delegate shows its target, task and brief from the real contract", () => {
   const result = JSON.stringify({
-    ok: true,
-    data: { agent_id: "reviewer", status: "completed", summary: "All good\nDetails here", published_paths: ["a.md"] },
+    ok: true, tool: "delegate",
+    data: { taskId: "8f21ab77c3", assignee: "reviewer", next: "End your turn now; the results are delivered to you when your delegated work settles." },
   });
   const collapsed = renderToolFinished({
-    name: "delegate", args: { agent_id: "reviewer", task: "review" }, phase: "done", expanded: false,
+    name: "delegate", args: { to: "reviewer", brief: "Inspect Unicode handling" }, phase: "done", expanded: false,
     event: { status: "completed", duration_ms: 4200, result },
   }, WIDTH);
   const plain = collapsed.map(stripAnsi);
-  assert.match(plain[0], /^  ◉ delegate → reviewer · completed · 4\.20s$/);
-  assert.equal(plain.length, 3); // title + summary head + footer
-  assert.match(plain[1], /All good/);
+  assert.match(plain[0], /^  ◉ delegate → reviewer · task 8f21ab77c3 · 4\.20s$/);
+  assert.equal(plain.length, 2); // title + brief
+  assert.match(plain[1], /Inspect Unicode handling/);
 
-  const expanded = renderToolFinished({
-    name: "delegate", args: { agent_id: "reviewer", task: "review" }, phase: "done", expanded: true,
-    event: { status: "completed", duration_ms: 4200, result },
+  // A result recorded before results carried objects is read the same way.
+  const legacy = JSON.stringify({ ok: true, tool: "delegate", data: JSON.stringify({ ok: true, result: { taskId: "8f21ab77c3", assignee: "reviewer" } }) });
+  const replayed = renderToolFinished({
+    name: "delegate", args: {}, phase: "done", expanded: false,
+    event: { status: "completed", duration_ms: 4200, result: legacy },
   }, WIDTH);
-  const expandedPlain = expanded.map(stripAnsi);
-  assert.ok(expandedPlain.some((line) => line.includes("Details here")));
-  assert.ok(expandedPlain.some((line) => line.includes("published 1 path")));
+  assert.match(stripAnsi(replayed[0]), /^  ◉ delegate → reviewer · task 8f21ab77c3 · 4\.20s$/);
+});
+
+test("report shows the delivery head and counts", () => {
+  const result = JSON.stringify({ ok: true, tool: "report", data: { taskId: "8f21ab77c3", delivered: true, next: "End your turn; your delivery goes to the leader." } });
+  const collapsed = renderToolFinished({
+    name: "report", phase: "done", expanded: false,
+    args: { outcome: "Reviewed the parser", summary: "Combining marks now round-trip", evidence: ["pytest -q -> 41 passed"], artifacts: ["/w/report.md"] },
+    event: { status: "completed", duration_ms: 300, result },
+  }, WIDTH);
+  const plain = collapsed.map(stripAnsi);
+  assert.match(plain[0], /^  ◉ report → delivered · Reviewed the parser$/);
+  assert.ok(plain.some((line) => line.includes("summary: Combining marks now round-trip")));
+  assert.ok(plain.some((line) => line.includes("evidence: 1 item")));
+  assert.ok(plain.some((line) => line.includes("files: report.md")));
+
+  const blocked = renderToolFinished({
+    name: "report", phase: "done", expanded: false,
+    args: { blocked: { responder: "user", action: "Choose the database" } },
+    event: { status: "completed", duration_ms: 300, result: JSON.stringify({ ok: true, tool: "report", data: { taskId: "t", delivered: false } }) },
+  }, WIDTH);
+  assert.match(stripAnsi(blocked[0]), /^  ◉ report → blocked$/);
+  assert.match(stripAnsi(blocked[1]), /needs user: Choose the database/);
+});
+
+test("agent management shows the operation it ran", () => {
+  const lines = renderToolFinished({
+    name: "agent_management", phase: "done", expanded: false,
+    args: { action: "snapshot", parameters: {} },
+    event: { status: "completed", duration_ms: 40, result: JSON.stringify({ ok: true, tool: "agent_management", data: { teams: [] } }) },
+  }, WIDTH);
+  assert.match(stripAnsi(lines[0]), /^  ◉ agent management · snapshot$/);
 });
 
 test("failed tools show error detail line", () => {

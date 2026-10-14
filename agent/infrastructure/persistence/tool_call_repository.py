@@ -29,6 +29,8 @@ class ToolCallRepository:
         if not isinstance(model_content, str) or not model_content:
             raise ValueError("tool record schema v2 requires non-empty model_content")
         parsed = self._parse_tool_result(result)
+        if attachments and isinstance(parsed, dict):
+            parsed.pop("attachments", None)
         ok = None
         error_type = None
         error_message = None

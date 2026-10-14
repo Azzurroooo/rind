@@ -1,4 +1,4 @@
-import { memberKey, requireValue, type State } from "./model.js";
+import { memberKey, requireValue, type Session, type State } from "./model.js";
 
 // What a conversation runs on, as its saved history reports it.
 export interface Selection { provider?: string; model?: string; reasoningEffort?: string; selectionSource?: Record<string, string>; connectionReady?: boolean }
@@ -57,50 +57,100 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
 }
 
 export interface WorkspaceSession extends Selection { runtimeSessionId: string; title: string; updatedAt?: string; sessionId?: string }
-export interface WorkspaceGroup { workspace: string; agentId?: string; name: string; teams: string[]; sessions: WorkspaceSession[] }
-type ListQuery = { workspace_root?: string; exclude_workspace_roots?: string[] };
-type ListAll = (query: ListQuery) => Promise<Array<Record<string, unknown>>>;
+export interface WorkspaceGroup { workspace: string; agentId?: string; name: string; teams: string[]; sessions: WorkspaceSession[]; total?: number }
+type ListQuery = { workspace_root?: string; limit?: number; exclude_workspace_roots?: string[]; exclude_session_ids?: string[]; per_workspace_limit?: number };
+type ListPage = { sessions?: Array<Record<string, unknown>>; totals?: Array<{ workspace_root?: unknown; count?: unknown }> };
+type ListAll = (query: ListQuery) => Promise<ListPage>;
 
 const workspaceKey = (value: string) => {
   const normal = value.replace(/[\\/]+$/, "");
   return process.platform === "win32" ? normal.replace(/\//g, "\\").toLowerCase() : normal;
 };
 
-// Conversations outside every team, grouped by the folder they run in. Team
-// and Manager conversations are excluded; the folder is named after its agent
-// when it is registered, otherwise after its basename.
+const workspaceOf = (raw: Record<string, unknown>) => string(raw.workspace_root) || "";
+const sessionOf = (raw: Record<string, unknown>, owner: Session | undefined): WorkspaceSession | null => {
+  const runtimeSessionId = string(raw.id) || string(raw.session_id);
+  if (!runtimeSessionId) return null;
+  return {
+    runtimeSessionId,
+    title: shownTitle(raw) || runtimeSessionId,
+    ...(string(raw.updated_at) ? { updatedAt: string(raw.updated_at) } : {}),
+    ...(owner ? { sessionId: owner.id } : {}),
+    ...selectionOf(raw),
+  };
+};
+
+// Conversations outside every team, grouped by folder. One query returns the
+// newest few per folder plus each folder's count, so a busy folder cannot crowd
+// others out and nothing is fetched per folder; team conversations are excluded
+// by id (they are known here) and the Manager's folder by path. The folder is
+// named after its agent when it is registered, otherwise after its basename.
 export async function independentHistory(state: State, managerWorkspace: string, list: ListAll): Promise<WorkspaceGroup[]> {
   const registered = new Map(Object.values(state.sessions).filter(s => s.runtimeSessionId).map(s => [s.runtimeSessionId, s]));
   const agents = new Map(Object.values(state.agents).map(a => [workspaceKey(a.canonicalWorkspace), a]));
   const manager = workspaceKey(managerWorkspace);
   const groups = new Map<string, WorkspaceGroup>();
-  // Each registered folder gets its own page, and one more page covers every
-  // other folder, so busy team folders cannot crowd independent history out.
-  const registeredFolders = [...new Set(Object.values(state.agents).map(a => a.canonicalWorkspace))].filter(w => workspaceKey(w) !== manager);
-  const pages = await Promise.all([
-    ...registeredFolders.map(workspace => list({ workspace_root: workspace })),
-    list({ exclude_workspace_roots: [...registeredFolders, managerWorkspace] }),
-  ]);
-  for (const raw of pages.flat()) {
-    const runtimeSessionId = string(raw.id) || string(raw.session_id);
-    const workspace = string(raw.workspace_root);
-    if (!runtimeSessionId || !workspace) continue;
-    const owner = registered.get(runtimeSessionId);
+  const page = await list({
+    per_workspace_limit: 3,
+    limit: 500,
+    exclude_workspace_roots: [managerWorkspace],
+    exclude_session_ids: teamSessionIds(state),
+  });
+  const totals = new Map((page.totals || []).map(item => [String(item.workspace_root || ""), Number(item.count) || 0]));
+  // The preview cap may contain no conversations from an older folder. Its
+  // total still makes that folder discoverable and opens its own bounded page.
+  const ensureGroup = (workspace: string) => {
     const key = workspaceKey(workspace);
-    if (owner?.teamId || key === manager) continue;
+    if (!workspace || key === manager) return undefined;
     let group = groups.get(key);
     if (!group) {
       const agent = agents.get(key);
       const teams = agent ? Object.values(state.memberships).filter(m => m.agentId === agent.id).map(m => state.teams[m.teamId]?.name).filter((name): name is string => Boolean(name)) : [];
-      // Registered folders are reported by their canonical path so clients can match them to agents.
-      group = { workspace: agent?.canonicalWorkspace || workspace, ...(agent ? { agentId: agent.id } : {}), name: agent?.name || workspace.split(/[\\/]/).filter(Boolean).at(-1) || workspace, teams, sessions: [] };
+      group = { workspace: agent?.canonicalWorkspace || workspace, ...(agent ? { agentId: agent.id } : {}), name: agent?.name || workspace.split(/[\\/]/).filter(Boolean).at(-1) || workspace, teams, sessions: [], total: totals.get(workspace) };
       groups.set(key, group);
     }
-    if (group.sessions.some(s => s.runtimeSessionId === runtimeSessionId)) continue;
-    group.sessions.push({ runtimeSessionId, title: shownTitle(raw) || runtimeSessionId,
-      ...(string(raw.updated_at) ? { updatedAt: string(raw.updated_at) } : {}), ...(owner ? { sessionId: owner.id } : {}), ...selectionOf(raw) });
+    return group;
+  };
+  for (const workspace of totals.keys()) ensureGroup(workspace);
+  for (const raw of page.sessions || []) {
+    const workspace = workspaceOf(raw);
+    const key = workspaceKey(workspace);
+    if (!workspace || key === manager) continue;
+    const owner = registered.get(string(raw.id) || string(raw.session_id) || "");
+    if (owner?.teamId) continue;
+    const session = sessionOf(raw, owner);
+    if (!session) continue;
+    const group = ensureGroup(workspace)!;
+    if (group.sessions.some(s => s.runtimeSessionId === session.runtimeSessionId)) continue;
+    group.sessions.push(session);
+    const total = totals.get(workspace);
+    if (total !== undefined) group.total = total;
   }
   const latest = (group: WorkspaceGroup) => group.sessions.reduce((max, s) => (s.updatedAt || "") > max ? s.updatedAt || "" : max, "");
-  for (const group of groups.values()) group.sessions.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+  for (const group of groups.values()) {
+    group.sessions.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+    group.total ??= group.sessions.length;
+  }
   return [...groups.values()].sort((a, b) => latest(b).localeCompare(latest(a)));
 }
+
+// One folder's conversations, on demand for its page; the same exclusions as
+// the overview, so both always agree.
+export async function independentFolder(state: State, managerWorkspace: string, workspace: string, list: ListAll, excludeSessionIds: string[] = []): Promise<WorkspaceSession[]> {
+  if (!workspace || workspaceKey(workspace) === workspaceKey(managerWorkspace)) return [];
+  const registered = new Map(Object.values(state.sessions).filter(s => s.runtimeSessionId).map(s => [s.runtimeSessionId, s]));
+  const page = await list({ workspace_root: workspace, limit: 100, exclude_session_ids: [...teamSessionIds(state), ...excludeSessionIds] });
+  const sessions: WorkspaceSession[] = [];
+  const seen = new Set<string>();
+  for (const raw of page.sessions || []) {
+    const owner = registered.get(string(raw.id) || string(raw.session_id) || "");
+    if (owner?.teamId) continue;
+    const session = sessionOf(raw, owner);
+    if (!session || seen.has(session.runtimeSessionId)) continue;
+    seen.add(session.runtimeSessionId);
+    sessions.push(session);
+  }
+  return sessions;
+}
+
+const teamSessionIds = (state: State) => Object.values(state.sessions).filter(s => s.teamId && s.runtimeSessionId).map(s => s.runtimeSessionId);

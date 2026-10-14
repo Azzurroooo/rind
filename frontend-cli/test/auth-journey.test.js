@@ -7,6 +7,7 @@ import path from "node:path";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { removeRindHome } from "./helpers/rind-home.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -234,7 +235,10 @@ test("one-shot run works against a configured endpoint", async () => {
   } finally {
     child.kill();
     await fixture.stop().catch(() => {});
-    await rm(parent, { recursive: true, force: true });
+    // A run shares the Runtime with windows, so the host it started must be
+    // stopped before its files can be removed.
+    await removeRindHome(rindHome).catch(() => {});
+    await rm(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
   }
 });
 
@@ -373,7 +377,7 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
       const before = await readFile(path.join(base(historyId), "messages.jsonl"), "utf8");
       const result = await command("run", "--session", historyId, "--dir", parent, "--prompt", "must not run");
       assert.notEqual(result.code, 0);
-      assert.match(result.stderr, /conflicts with --cwd/);
+      assert.match(result.stderr, /conflicts with --cwd|does not match the requested workspace/);
       assert.equal(await readFile(path.join(base(historyId), "messages.jsonl"), "utf8"), before);
     });
     await t.test("run opens a closed empty session already persisted by an older version", async () => {
@@ -424,6 +428,8 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
     for (const cli of clients) if (cli.child.exitCode === null) cli.child.kill();
     await Promise.all(clients.map((cli) => cli.exited));
     await fixture.stop();
-    await rm(parent, { recursive: true, force: true });
+    // Every `run` shares the Runtime now; stop the host it started first.
+    await removeRindHome(home).catch(() => {});
+    await rm(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
   }
 });

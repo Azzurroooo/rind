@@ -93,8 +93,9 @@ def project_messages(
             if role == "assistant":
                 _add_reasoning_content(projected, message)
             metadata = message.get("meta")
-            if isinstance(metadata, dict) and metadata.get("kind") == "skill_snapshot":
-                projected["_rind_meta"] = {"kind": "skill_snapshot"}
+            metadata_kind = metadata.get("kind") if isinstance(metadata, dict) else None
+            if metadata_kind in {"skill_snapshot", "team_delivery"}:
+                projected["_rind_meta"] = {"kind": metadata_kind}
             built_messages.append(projected)
 
     # UI replay opts into persisted identity. Keep its timestamp alongside the

@@ -68,6 +68,70 @@ def test_irreducible_content_is_rejected_without_mutating_messages(role):
     assert message == before
 
 
+def test_oversized_history_is_trimmed_from_the_oldest_end_until_the_summary_fits():
+    corpus = [
+        {"role": "user", "content": "huge old requirement " * 3000},
+        {"role": "user", "content": "still-relevant older fact"},
+        {"role": "user", "content": "latest correction"},
+        {"role": "assistant", "content": "pending task"},
+    ]
+
+    messages = CompactionService()._prepare_summary_request(corpus, 2, 8192, 800)
+    payload = corpus_from_request(messages)
+
+    assert payload["history"] == [{"role": "user", "content": "still-relevant older fact"}], "the oldest messages are dropped, the rest kept"
+    assert [message["content"] for message in payload["retained_recent_messages"]] == ["latest correction", "pending task"]
+    assert "dropped" in payload["note"] and "1 oldest history messages" in payload["note"]
+    assert ContextEstimator().estimate_messages(messages).estimated_input_tokens <= 8192 - 800 - 8192 // 20
+
+
+def test_trimmed_history_does_not_send_its_images():
+    corpus = [
+        {"role": "user", "content": "large old history " * 6000, "attachments": [{"path": "old.png", "mime_type": "image/png", "size_bytes": 100, "width": 32, "height": 32}]},
+        {"role": "user", "content": "recent constraint"},
+    ]
+    messages = CompactionService()._prepare_summary_request(corpus, 1, 8192, 800)
+    assert corpus_from_request(messages)["history"] == []
+    assert not any(message.get("attachments") for message in messages)
+
+
+def test_one_large_old_unit_does_not_discard_other_constraints():
+    corpus = [{"role": "user", "content": "obsolete detail " * 10000}]
+    corpus.extend({"role": "user", "content": f"Keep constraint {index}"} for index in range(20))
+    corpus.append({"role": "assistant", "content": "recent task"})
+    request = CompactionService()._prepare_summary_request(corpus, 21, 8192, 800)
+    payload = corpus_from_request(request)
+    assert payload["history"] == corpus[1:21]
+    assert "1 oldest history messages" in payload["note"]
+
+
+@pytest.mark.asyncio
+async def test_a_history_too_large_to_summarize_still_compacts(tmp_path, monkeypatch):
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), system_prompt="sys")
+    await session.initialize()
+    for index in range(4):
+        await session.persist_message("user", f"old requirement {index} " * 800)
+        await session.persist_message("assistant", f"old answer {index} " * 800)
+    await session.persist_message("user", "latest correction")
+    await session.persist_message("assistant", "pending task")
+    provider = AsyncMock()
+    provider.create.return_value = ModelCompletion(content="handoff after trimming", finish_reason="stop")
+    manager = ContextManager(estimator=ContextEstimator(ContextBudget(context_window_tokens=8192)))
+    runner = TurnRunner(chat_client=provider, tool_processor=None, stream_parser=None, tool_schemas=[], context_manager=manager)
+
+    record = await runner.compact_context(session)
+
+    assert record["handoff_message"]["content"] == "handoff after trimming", "the summary runs instead of being refused"
+    assert record["strategy"] == "llm_inline"
+    request = provider.create.call_args.kwargs
+    corpus = corpus_from_request(request["messages"])
+    assert [message["content"] for message in corpus["retained_recent_messages"]] == ["latest correction", "pending task"], "the newest messages stay verbatim"
+    assert "dropped" in corpus["note"]
+    assert ContextEstimator().estimate_messages(request["messages"]).estimated_input_tokens <= 8192 - request["max_output_tokens"] - 8192 // 20
+    assert await session.get_latest_compaction() is not None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reason", ["manual", "auto", "context_length_error"])
 async def test_over_budget_never_calls_provider_or_commits_boundary(tmp_path, monkeypatch, reason):

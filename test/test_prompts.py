@@ -19,7 +19,7 @@ def test_system_info_omits_start_time(monkeypatch):
     info = environment.get_system_info()
 
     assert "Start Time:" not in info
-    assert "Start Time:" not in prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
+    assert "Start Time:" not in prompts.build_system_prompt(environment=environment.get_system_info(PROJECT_ROOT))
 
 
 def test_system_info_includes_current_date_without_time(monkeypatch):
@@ -29,9 +29,9 @@ def test_system_info_includes_current_date_without_time(monkeypatch):
     info = environment.get_system_info()
 
     assert f"Current Date: {today}" in info
-    assert f"Current Date: {today}" in prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
+    assert f"Current Date: {today}" in prompts.build_system_prompt(environment=environment.get_system_info(PROJECT_ROOT))
     assert "Current Time:" not in info
-    assert "Current Time:" not in prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
+    assert "Current Time:" not in prompts.build_system_prompt(environment=environment.get_system_info(PROJECT_ROOT))
 
 
 def test_system_info_uses_detected_shell_backend(monkeypatch):
@@ -45,10 +45,8 @@ def test_system_info_uses_detected_shell_backend(monkeypatch):
 
 
 def test_system_prompt_contains_rind_doc_rules():
-    text = prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
+    text = prompts.build_system_prompt(environment=environment.get_system_info(PROJECT_ROOT))
 
-    assert "`write_file`" in text
-    assert "`edit_file`" in text
     assert "`apply_patch`" not in text
     assert "RIND.md Context Docs" in text
     assert "32 KiB byte budget" in text
@@ -56,31 +54,44 @@ def test_system_prompt_contains_rind_doc_rules():
     assert "not automatically updated memory" in text
 
 
-def test_system_prompt_describes_file_mutation_contracts():
-    text = prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
+def test_system_prompt_environment_is_last_and_the_rest_is_workspace_independent():
+    info = environment.get_system_info(PROJECT_ROOT)
+    text = prompts.build_system_prompt(environment=info)
+    static = text[: text.index("<environment_context>")]
 
-    assert "Atomically create or completely overwrite a UTF-8 text file" in text
-    assert "Atomically replace one unique, exact text block" in text
+    assert text.endswith(info)
+    assert "</operational_guidelines>" in static
+    assert str(PROJECT_ROOT) not in static
+    assert prompts.build_system_prompt(environment=environment.get_system_info("/elsewhere"))[: len(static)] == static
+
+
+def test_file_tool_contracts_live_in_their_schemas_not_in_the_prompt():
+    from agent.infrastructure.tools.files.specs import build_file_tool_specs
+
+    descriptions = " ".join(spec.schema["function"]["description"] for spec in build_file_tool_specs(None))
+    assert "Atomically create or fully overwrite a UTF-8 text file" in descriptions
+    assert "Atomically replace one unique, exact text block" in descriptions
+
+    text = prompts.build_system_prompt(environment=environment.get_system_info(PROJECT_ROOT))
     assert "Each edit sees earlier changes" in text
-    assert "No hash parameter is required" in text and "SHA-256" not in text
+    assert "SHA-256" not in text
 
 
 def test_system_prompt_strongly_limits_emojis():
-    text = prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
+    text = prompts.build_system_prompt(environment=environment.get_system_info(PROJECT_ROOT))
 
     assert 'Use emojis ONLY if the user explicitly requests them' in text
     assert 'AVOID using emojis in all communication unless asked' in text
 
 def test_system_prompt_describes_path_roots():
-    text = prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
+    text = prompts.build_system_prompt(environment=environment.get_system_info(PROJECT_ROOT))
 
-    assert "`cwd` for a command-specific directory" in text
     assert "File tools still resolve paths from the project directory" in text
     assert "Project-level `RIND.md` and project skills are rooted at the Current Working Directory" in text
 
 
 def test_system_prompt_requires_parallel_independent_tool_calls():
-    text = prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
+    text = prompts.build_system_prompt(environment=environment.get_system_info(PROJECT_ROOT))
 
     assert "independent" in text
     assert "in parallel in the same response" in text

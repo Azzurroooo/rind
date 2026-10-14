@@ -57,6 +57,17 @@ A generic Chat Completions endpoint can use the following settings.json; set MY_
 }
 ~~~
 
+For a custom model whose token window is missing or incorrect, add `modelContextWindows` to the same user settings. Keys are exact connection ids (including named connections) and model ids; values must be positive integer token counts. These explicit limits take precedence over endpoint metadata and the built-in catalog, and follow the selected model when creating, resuming or switching a conversation. Omitted models retain the normal metadata/catalog fallback; an unknown limit uses the runtime default.
+
+~~~json
+{
+  "modelContextWindows": {
+    "openai-compatible": { "custom-1m": 1048576 },
+    "office": { "small-model": 8192 }
+  }
+}
+~~~
+
 ## The real limits of how credentials are stored
 
 auth.json is a local JSON file that uses a file lock, temporary-file replacement, and best-effort file permissions; there is no OS keychain or encrypted-storage promise. A single read or write is locked, but that does not mean the whole read-modify-write transaction holds the lock throughout. The mobile secure storage holds remote connection credentials and is a different system from the Python provider credentials.

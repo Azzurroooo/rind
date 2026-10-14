@@ -139,7 +139,7 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
             name="write_file",
             handler=write,
             normalize_arguments=_normalize_mutation_arguments,
-            description="Atomically create or fully overwrite a UTF-8 text file. Use for new files or complete rewrites. Edits and writes to the same file run in order. No hash parameter is needed.",
+            description="Atomically create or fully overwrite a UTF-8 text file. Use for new files or complete rewrites.",
             param_descriptions={
                 "path": "Absolute or relative file path",
                 "content": "Full file content",
@@ -149,7 +149,7 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
             name="edit_file",
             handler=edit,
             normalize_arguments=_normalize_mutation_arguments,
-            description="Atomically replace one unique, exact text block in the current UTF-8 file. Edits and writes to the same file run in order; later edits see earlier changes. No hash parameter is needed.",
+            description="Atomically replace one unique, exact text block in the current UTF-8 file.",
             param_descriptions={
                 "path": "Absolute or relative file path",
                 "old_str": "Text block to replace. Include surrounding context to make it unique.",

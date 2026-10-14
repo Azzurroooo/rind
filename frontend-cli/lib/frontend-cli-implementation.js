@@ -76,7 +76,7 @@ const handoffFile = takeHandoffPath();
 const handoffWindow = Boolean(handoffFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const python = process.env.RIND_PYTHON || "python";
+const python = process.env.RIND_PYTHON || undefined;
 const runtimePath = process.env.RIND_RUNTIME_PATH || resolveInstalledRuntime();
 const managementLaunch = { python, repoRoot, runtimePath };
 if (cliArgs[0] === "agents") {
@@ -334,6 +334,7 @@ const runtimeController = createCliRuntimeController({
   renderHistory,
   clearTranscript,
   onSessionRestored: rebindSendEndpoint,
+  getPendingDelegations: async id => management.pendingDelegations ? management.pendingDelegations(id) : null,
   openManagedSession: management.chatContext ? (runtimeSessionId, prefill) => enterManagement({ ...management.chatContext, runtimeSessionId, prefill }) : null,
   clearPendingInputs: (...args) => inputActions.clearPendingInputs(...args),
   closeAssistant,
@@ -382,6 +383,7 @@ commandController = createCommandController({
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
     runForkSelector: runtimeController.runForkSelector,
+    runHistoryLoader: runtimeController.runHistoryLoader,
     runContextBoard: runtimeController.runContextBoard,
     printContextReport: runtimeController.printContextReport,
     runLocalCommand: async (text) => {
@@ -441,6 +443,7 @@ taskMonitorController = createTaskMonitorController({
 });
 const eventController = createEventController({
   state: {
+    get pendingDelegations() { return displayState.pendingDelegations; },
     get sessionInfo() {
       return sessionState.info;
     },
@@ -473,10 +476,12 @@ const eventController = createEventController({
     },
     setActivityLabel: outputController.setActivityLabel,
     setBackgroundWait: outputController.setBackgroundWait,
+    writeDelivery: outputController.writeDelivery,
     redraw: redrawInput,
     clearCompactContext: () => compactContextState.clear(),
     deliverQueuedInput: (...args) => inputActions.deliverQueuedInput(...args),
     clearQueuedInputs: (...args) => inputActions.clearPendingInputs(...args),
+    sessionDeleted: id => { runtimeController.sessionDeleted(id); management.sessionDeleted?.(id); },
   },
 });
 inputActions = createCliInputActions({

@@ -171,5 +171,5 @@ test("the saved theme applies to every surface, Agents included", async () => {
   try {
     applySavedTheme(home);
     assert.equal(currentTheme().name, "gruvbox-dark");
-  } finally { resetTheme(); }
+  } finally { resetTheme(); await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });

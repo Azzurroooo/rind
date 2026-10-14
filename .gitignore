@@ -76,3 +76,6 @@ figs/
 
 # Local exploratory QA harness and runs; never tracked
 /qa/
+
+# Private end-to-end acceptance specifications, helpers, evidence and reports
+/.e2e/

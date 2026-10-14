@@ -157,8 +157,8 @@ def test_jc1_fresh_exchange_shows_board_rows_with_small_deviation(context_worker
     # assembled messages plus the request's tool specifications.
     assert "chat_user" in sections
     assert "system_prompt" in sections
-    assert "goal_policy" in sections
     assert "tool_specs" in sections
+    assert "goal_policy" not in sections, "the goal policy is composed only while a goal is active"
     # Assembly order: the system prompt row always leads the board.
     assert breakdown["sections"][0]["key"] == "system_prompt"
     # Every number on page 1 traces to the snapshot: rows sum to the total.

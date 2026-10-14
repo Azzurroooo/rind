@@ -1,10 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { createInterface } from "node:readline"
-import { delimiter, dirname, join } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import log from "electron-log/main"
 import { RuntimeInputs } from "./runtime-inputs.ts"
 import { runtimeRequestTimeout } from "./runtime-request-policy.ts"
+import { buildRuntimeEnv, resolveSourcePython } from "../../../rind-runtime-client/runtime-env.js"
 
 import { buildAuthReply, parseAuthPrompt, parseAuthUpdate, validateAuthReply } from "./auth-messages.ts"
 import {
@@ -135,9 +136,8 @@ function runtimeLaunch() {
     const executable = process.platform === "win32" ? "rind-runtime.exe" : "rind-runtime"
     return { command: join(process.resourcesPath, "runtime", executable), args: [] }
   }
-  const python = process.env.RIND_PYTHON || (process.platform === "win32" ? "python" : "python3")
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
-  return { command: python, args: [join(repoRoot, "main.py")] }
+  return { command: resolveSourcePython(process.env.RIND_PYTHON, repoRoot), args: [join(repoRoot, "main.py")] }
 }
 
 let runtimeGeneration = 0
@@ -150,17 +150,12 @@ export function startRuntime(workspace: string) {
   runtimeGeneration += 1
   const launch = runtimeLaunch()
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
-  const python = process.env.RIND_PYTHON || (process.platform === "win32" ? "python" : "python3")
-  const environment: NodeJS.ProcessEnv = launch.command === python
-    ? {
-        ...process.env,
-        PYTHONIOENCODING: "utf-8",
-        PYTHONPATH: process.env.PYTHONPATH ? `${repoRoot}${delimiter}${process.env.PYTHONPATH}` : repoRoot,
-        PYTHONUTF8: "1",
-      }
-    : launch.command === process.execPath && /\.(?:c|m)?js$/i.test(process.env.RIND_RUNTIME_PATH || "")
-      ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" }
-      : process.env
+  const environment: NodeJS.ProcessEnv = buildRuntimeEnv(repoRoot, process.env, {
+    sourceRuntime: Boolean(process.env.ELECTRON_RENDERER_URL) && !process.env.RIND_RUNTIME_PATH,
+  })
+  if (launch.command === process.execPath && /\.(?:c|m)?js$/i.test(process.env.RIND_RUNTIME_PATH || "")) {
+    environment.ELECTRON_RUN_AS_NODE = "1"
+  }
   const current = spawn(
     launch.command,
     [...launch.args, "app-server", "--stdio", "--cwd", workspace],

@@ -92,7 +92,7 @@ test("three levels of delegation wait for grandchildren and deliver back through
   await eventually(() => f.starts.length === 4);
   assert.equal(f.starts[3].input.task.id, mid.taskId);
   assert.equal(f.starts[3].input.session.id, f.starts[1].input.session.id, "continuations preserve session identity");
-  assert.match(f.starts[3].input.input, new RegExp("a1 · task " + leaf.taskId + " · delivered: done\\n  Leaf delivery"));
+  assert.match(f.starts[3].input.input, new RegExp("a1 · task " + leaf.taskId + " · delivered: done\\n  Summary: Leaf delivery"));
   await f.call("report", { outcome: "done", summary: "Integrated child", evidence: [] }, f.runner(f.starts[3]));
   f.starts[3].finish({ content: "Done" });
   await eventually(() => f.starts.length === 5);
@@ -364,4 +364,26 @@ test("the Manager's snapshot is an overview; the user's keeps every detail", asy
   const full = await f.call("snapshot");
   assert.ok(full.notes.some(n => n.text === "Context"));
   assert.ok(full.sessions.length && full.memberships.length);
+});
+
+test("forgetSession drops a deleted conversation's registration", async t => {
+  const f = await fixture(t);
+  const session = await f.call("attachSession", { agentId: f.leader.id });
+  await f.call("bindSession", { sessionId: session.id, runtimeSessionId: "gone" });
+
+  await f.call("forgetSession", { sessionId: session.id });
+
+  assert.equal(f.store.state.sessions[session.id], undefined, "the registration is dropped");
+  assert.ok(Object.values(f.store.state.runs).every(run => run.sessionId !== session.id), "its runs are dropped with it");
+  assert.ok((await f.call("snapshot")).sessions.every(item => item.id !== session.id));
+});
+
+test("forgetSession refuses while the conversation is running", async t => {
+  const f = await fixture(t);
+  const session = await f.call("attachSession", { agentId: f.leader.id });
+  await f.call("bindSession", { sessionId: session.id, runtimeSessionId: "live" });
+  await f.call("beginRun", { sessionId: session.id });
+
+  await assert.rejects(f.call("forgetSession", { sessionId: session.id }), { code: "SESSION_BUSY" });
+  assert.ok(f.store.state.sessions[session.id]);
 });

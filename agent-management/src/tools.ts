@@ -40,7 +40,7 @@ const DELEGATE: ToolDeclaration = {
 
 const REPORT: ToolDeclaration = {
   name: "report",
-  description: "Finish your task. Deliver with {outcome, summary, evidence, artifacts}: artifacts are paths of files in your workspace, copied for whoever delegated the task. Or, when you cannot go on, {blocked: {responder, action}}: responder is \"user\", your supervisor's or a direct report's agent ID. Then end your turn.",
+  description: "Finish your task. Deliver with {outcome, summary, evidence, artifacts, nextAction}: artifacts are paths of files in your workspace, copied for whoever delegated the task; nextAction says what the recipient should do with the delivery, if anything. Or, when you cannot go on, {blocked: {responder, action}}: responder is \"user\", your supervisor's or a direct report's agent ID. Then end your turn.",
   parameters: {
     type: "object",
     properties: {
@@ -48,6 +48,7 @@ const REPORT: ToolDeclaration = {
       summary: { type: "string" },
       evidence: { type: "array", items: { type: "string" }, description: "How the result was checked." },
       artifacts: { type: "array", items: { type: "string" }, description: "Files in your workspace to hand over." },
+      nextAction: { type: "string", description: "What the recipient should do next, if anything." },
       blocked: { type: "object", properties: { responder: { type: "string" }, action: { type: "string" } }, required: ["responder", "action"] },
     },
   },

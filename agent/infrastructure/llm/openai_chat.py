@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing
-import hashlib
-import json
-import os
 from typing import Any, AsyncIterator, Callable
 
 import openai
@@ -20,6 +17,7 @@ from agent.domain.tool_payload import ParsedToolCall
 from agent.infrastructure.llm.cancellation import await_with_cancellation, close_resource, iterate_with_cancellation
 from agent.infrastructure.llm.catalog import resolve_reasoning_effort
 from agent.infrastructure.llm.trace import make_trace
+from .prompt_cache import prompt_cache_key, rejects_prompt_cache_key
 
 
 class OpenAIChatCompletionsClient(ChatClient):
@@ -30,7 +28,6 @@ class OpenAIChatCompletionsClient(ChatClient):
         async_client: Any,
         model: str,
         reasoning_effort: str | None = None,
-        workspace_root: str | None = None,
         *,
         reasoning_efforts: tuple[str, ...] = (),
     ):
@@ -40,12 +37,10 @@ class OpenAIChatCompletionsClient(ChatClient):
         self._reasoning_efforts = reasoning_efforts
         self._reasoning_effort_disabled = False
         self._prompt_cache_key_disabled = False
-        self._trace_session_id_provider: Callable[[], str] | None = None
-        self._workspace_root = workspace_root
+        self._session_id_provider: Callable[[], str] | None = None
 
-    def set_trace_session_id_provider(self, provider: Callable[[], str] | None) -> None:
-        """Bind request traces to the active session."""
-        self._trace_session_id_provider = provider
+    def set_session_id_provider(self, provider: Callable[[], str] | None) -> None:
+        self._session_id_provider = provider
 
     @property
     def model(self) -> str:
@@ -63,7 +58,7 @@ class OpenAIChatCompletionsClient(ChatClient):
         max_output_tokens: int | None = None,
         reasoning_effort: str | None = None,
     ) -> ModelCompletion:
-        trace = make_trace(self._trace_session_id_provider, label="create")
+        trace = make_trace(self._session_id_provider, label="create")
         if trace:
             payload = self._trace_payload(messages, tools, stream=False)
             payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
@@ -95,7 +90,7 @@ class OpenAIChatCompletionsClient(ChatClient):
         tools: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
     ) -> AsyncIterator[ModelStreamEvent]:
-        trace = make_trace(self._trace_session_id_provider, label="stream")
+        trace = make_trace(self._session_id_provider, label="stream")
         if trace:
             trace.request(self._trace_payload(messages, tools, stream=True))
 
@@ -186,7 +181,7 @@ class OpenAIChatCompletionsClient(ChatClient):
             except openai.APIStatusError as exc:
                 if "max_tokens" in payload and self._should_retry_with_max_completion_tokens(exc):
                     payload["max_completion_tokens"] = payload.pop("max_tokens")
-                elif "prompt_cache_key" in payload and self._should_retry_without_prompt_cache_key(exc):
+                elif "prompt_cache_key" in payload and rejects_prompt_cache_key(exc):
                     payload.pop("prompt_cache_key")
                     self._prompt_cache_key_disabled = True
                 elif "reasoning_effort" in payload and self._should_retry_without_reasoning_effort(exc):
@@ -205,27 +200,9 @@ class OpenAIChatCompletionsClient(ChatClient):
     def _add_prompt_cache_key(self, kwargs: dict[str, Any]) -> None:
         if self._prompt_cache_key_disabled:
             return
-        kwargs["prompt_cache_key"] = self._build_prompt_cache_key(
-            messages=kwargs.get("messages") or [],
-            tools=kwargs.get("tools") or [],
-        )
-
-    def _build_prompt_cache_key(self, *, messages: list[dict], tools: list[dict]) -> str:
-        system_parts = [
-            str(message.get("content") or "")
-            for message in messages
-            if isinstance(message, dict) and message.get("role") == "system"
-        ]
-        payload = {
-            "model": self._model,
-            "cwd": os.path.normcase(os.path.realpath(self._workspace_root or os.getcwd())),
-            "system": system_parts,
-            "tools": tools,
-        }
-        digest = hashlib.sha256(
-            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-        ).hexdigest()[:24]
-        return f"rind:{digest}"
+        session_id = self._session_id_provider() if self._session_id_provider else ""
+        if session_id:
+            kwargs["prompt_cache_key"] = prompt_cache_key(session_id)
 
     def _should_retry_without_reasoning_effort(self, exc: Exception) -> bool:
         text = str(exc).lower()
@@ -244,22 +221,6 @@ class OpenAIChatCompletionsClient(ChatClient):
                 "extra_forbidden",
             )
         )
-
-    def _should_retry_without_prompt_cache_key(self, exc: Exception) -> bool:
-        text = str(exc).lower()
-        return "prompt_cache_key" in text and any(
-            marker in text
-            for marker in (
-                "unsupported",
-                "unknown",
-                "invalid",
-                "unrecognized",
-                "not support",
-                "not supported",
-                "extra_forbidden",
-            )
-        )
-
 
 def _events(chunk: Any, call_ids: dict[int, str] | None = None) -> list[ModelStreamEvent]:
     usage = _usage(_get(chunk, "usage"))

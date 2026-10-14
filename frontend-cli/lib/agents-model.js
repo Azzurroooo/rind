@@ -323,9 +323,14 @@ export const workspaceKey = (value, platform = process.platform) => {
 
 // Conversations outside every team, grouped by folder. Saved history gives
 // titles; the shared Runtime's live table gives what runs and what is open,
-// including plain conversations that management never registered.
-export function independentSessions(snapshot, groups = [], managerWorkspace = "") {
-  const byWorkspace = new Map(groups.map(group => [workspaceKey(group.workspace), { ...group, sessions: group.sessions.map(s => ({ ...s, status: "Idle" })) }]));
+// including plain conversations that management never registered. A folder
+// whose page has been opened passes its full list, which replaces the bounded
+// overview window before live state is merged in.
+export function independentSessions(snapshot, groups = [], managerWorkspace = "", folderSessions = {}) {
+  const byWorkspace = new Map(groups.map(group => {
+    const page = folderSessions[workspaceKey(group.workspace)];
+    return [workspaceKey(group.workspace), { ...group, hasMore: page?.hasMore, sessions: (page?.sessions || group.sessions).map(s => ({ ...s, status: "Idle" })) }];
+  }));
   const scoped = new Set(snapshot.sessions.filter(s => s.teamId && s.runtimeSessionId).map(s => s.runtimeSessionId));
   const manager = workspaceKey(managerWorkspace);
   for (const item of snapshot.live || []) {
@@ -368,12 +373,16 @@ export function independentRows(workspaces, { query = "", filter = "All", now = 
     const working = group.sessions.filter(s => s.status === "Working").length;
     const narrowed = Boolean(query) || filter !== "All";
     const open = narrowed || !collapsed.has(group.workspace);
+    // The folder's own count, not just the loaded window: the row and its
+    // "+N more" stay truthful while only a few conversations are fetched.
+    const total = Math.max(group.total ?? group.sessions.length, sessions.length);
     rows.push({ id: "w:" + group.workspace, kind: "workspace", depth: 0, title: single(group.name), workspace: group.workspace, agentId: group.agentId, teams: group.teams,
-      status: group.sessions.map(s => s.status).sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Idle", sessionCount: group.sessions.length, working, expanded: open });
+      status: group.sessions.map(s => s.status).sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Idle", sessionCount: total, working, expanded: open });
     if (!open) continue;
     const limit = narrowed ? Infinity : sessionLimit;
     for (const session of sessions.slice(0, limit)) rows.push(independentSessionRow(session, group, 1, now));
-    if (sessions.length > limit) rows.push({ id: "more:" + group.workspace, kind: "more", depth: 1, title: "+" + (sessions.length - limit) + " more conversations", workspace: group.workspace });
+    const shown = Math.min(sessions.length, limit);
+    if (!narrowed && total > shown) rows.push({ id: "more:" + group.workspace, kind: "more", depth: 1, title: "+" + (total - shown) + " more conversations", workspace: group.workspace });
   }
   return withGuides(rows);
 }
@@ -402,6 +411,7 @@ export function folderRows(group, { query = "", filter = "All", now = Date.now()
     if (title !== "Active") items.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
     rows.push(...items.map(session => independentSessionRow(session, group, 0, now)));
   }
+  if (group.hasMore) rows.push({ id: "folder-more:" + group.workspace, kind: "folder-more", title: "Load earlier conversations", workspace: group.workspace });
   return rows;
 }
 

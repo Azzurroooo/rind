@@ -103,7 +103,7 @@ async def test_legacy_head_tail_preview_resumes_at_first_gap():
 
 
 @pytest.mark.asyncio
-async def test_projected_read_failure_is_reported_and_persisted_as_failure(tmp_path, monkeypatch):
+async def test_projected_read_failure_retains_source_and_replays_as_failure(tmp_path, monkeypatch):
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
     (tmp_path / "wide.txt").write_bytes(("界" * 12000).encode())
     session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), system_prompt="sys")
@@ -114,4 +114,11 @@ async def test_projected_read_failure_is_reported_and_persisted_as_failure(tmp_p
     events = [event async for event in processor.execute(session=session, tool_calls=[call])]
     assert events[-1].status == "failed" and events[-1].error_type == "LineTooLong"
     record = (await session.get_tool_records())[0]
-    assert record["ok"] is False and record["error_type"] == "LineTooLong"
+    assert record["ok"] is True and "界" * 12000 in record["result"]["data"]
+    assert json.loads(record["model_content"])["error_type"] == "LineTooLong"
+    from agent.runtime.server.replay_events import iter_durable_events
+
+    replay = list(iter_durable_events(await session.load_messages(), [record], None, session.session_id))[-1]
+    assert replay["status"] == events[-1].status
+    assert replay["error_type"] == events[-1].error_type
+    assert replay["result"] == events[-1].result

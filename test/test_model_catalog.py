@@ -70,6 +70,21 @@ def test_compatible_endpoint_inherits_metadata_without_changing_api(service, mon
     assert selected.context_window == 1048576
 
 
+@pytest.mark.asyncio
+async def test_user_context_limits_override_metadata_only_for_the_selected_connection_and_model(service, monkeypatch):
+    from dataclasses import replace
+    instance, settings = service
+    settings = replace(settings, api_key="local", model_context_windows={"longcat": {settings.model: 8192}})
+    monkeypatch.setattr(module, "load_settings", lambda: settings)
+    listed = next(model for model in (await instance.list_models()).models if model.id == settings.model)
+    assert listed.context_window == instance.resolve_selection(ModelSelection("longcat", settings.model)).context_window == 8192
+    assert instance.resolve_selection(ModelSelection("longcat", "other")).context_window is None
+    compatible = replace(settings, provider="openai-compatible", base_url="https://custom.example/v1",
+                         model_context_windows={"openai-compatible": {settings.model: 1000000}})
+    assert instance.resolve_selection(ModelSelection("openai-compatible", settings.model), settings=compatible).context_window == 1000000
+    assert instance.resolve_selection(ModelSelection("longcat", settings.model), settings=compatible).context_window == 1048576
+
+
 @pytest.mark.parametrize('provider,raw,expected', [
     ('openrouter', {'context_length': 123456}, 123456),
     ('mistral', {'max_context_length': 262144}, 262144),
@@ -162,7 +177,7 @@ async def test_longcat_login_discovery_and_streamed_tool_round_trip(service, mon
     tools = [{'type': 'function', 'function': {'name': 'read_file', 'description': 'Read file',
               'parameters': {'type': 'object', 'properties': {'path': {'type': 'string'}}}}}]
     messages = [{'role': 'user', 'content': 'Read note.txt'}]
-    client = await instance.create_chat_client(settings, ModelSelection('longcat', settings.model, 'high'), workspace_root=None)
+    client = await instance.create_chat_client(settings, ModelSelection('longcat', settings.model, 'high'))
     try:
         events = [event async for event in client.stream(messages, tools)]
         assert any(e.kind == 'reasoning_delta' and e.reasoning == 'Inspect the file.' for e in events)

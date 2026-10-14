@@ -665,11 +665,23 @@ class RuntimeDispatcher:
 
     async def _list_sessions(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        per_workspace_limit = params.get("per_workspace_limit")
+        if per_workspace_limit is not None and (
+            isinstance(per_workspace_limit, bool) or not isinstance(per_workspace_limit, int) or not 1 <= per_workspace_limit <= 20
+        ):
+            await self._respond_error(request, "session/list per_workspace_limit must be an integer from 1 to 20.", "InvalidRequest")
+            return
         limit = params.get("limit", 20)
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
-            await self._respond_error(request, "session/list limit must be an integer from 1 to 100.", "InvalidRequest")
+        # A grouped query returns up to `per_workspace_limit` per folder, so its
+        # overall cap is larger; an ordinary listing keeps the 100-entry cap.
+        max_limit = 1000 if per_workspace_limit is not None else 100
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= max_limit:
+            await self._respond_error(request, f"session/list limit must be an integer from 1 to {max_limit}.", "InvalidRequest")
             return
         workspace_root = params.get("workspace_root")
+        if workspace_root is not None and per_workspace_limit is not None:
+            await self._respond_error(request, "A grouped session/list cannot also select one workspace_root.", "InvalidRequest")
+            return
         if workspace_root is not None:
             if not isinstance(workspace_root, str) or not workspace_root.strip():
                 await self._respond_error(request, "workspace_root must be a non-empty string.", "InvalidRequest")
@@ -678,13 +690,27 @@ class RuntimeDispatcher:
         if excluded is not None and (not isinstance(excluded, list) or not all(isinstance(item, str) for item in excluded)):
             await self._respond_error(request, "exclude_workspace_roots must be a list of strings.", "InvalidRequest")
             return
-        sessions = await self._worker.repository.list(limit=limit, workspace_root=workspace_root, exclude_workspace_roots=excluded)
+        skipped = params.get("exclude_session_ids")
+        if skipped is not None and (not isinstance(skipped, list) or not all(isinstance(item, str) for item in skipped)):
+            await self._respond_error(request, "exclude_session_ids must be a list of strings.", "InvalidRequest")
+            return
+        totals = None
+        if per_workspace_limit is not None:
+            sessions, totals = await self._worker.repository.list_by_workspace(
+                limit=limit, per_workspace_limit=per_workspace_limit,
+                exclude_workspace_roots=excluded, exclude_session_ids=skipped,
+            )
+        else:
+            sessions = await self._worker.repository.list(
+                limit=limit, workspace_root=workspace_root, exclude_workspace_roots=excluded, exclude_session_ids=skipped
+            )
         ready = self._ready_connections()
         await self._respond(
             request,
             {
                 # Whether each conversation's connection can run, so lists can warn before its next turn fails.
                 "sessions": [session | {"connection_ready": session.get("provider") in ready} for session in sessions],
+                **({"totals": totals} if totals is not None else {}),
                 "current_session_id": self._worker.session_id or "",
             },
         )
@@ -723,6 +749,8 @@ class RuntimeDispatcher:
             await self._respond_error(request, "Cannot delete a session with an active turn.", "TurnActive")
             return
         await self._worker.delete_session(session_id)
+        # Before the subscription is dropped, so a window holding the conversation hears it.
+        await self._send_event({"type": "session_deleted", "session_id": session_id, "turn_id": ""})
         self._subscribed.discard(session_id)
         await self._respond(request, {"ok": True, "deleted": session_id})
 
@@ -850,7 +878,15 @@ class RuntimeDispatcher:
             return
         start = params.get("start") if isinstance(params.get("start"), int) else None
         end = params.get("end") if isinstance(params.get("end"), int) else None
-        result = await self._worker.replay(session_id, start=start, end=end)
+        tail = params.get("tail")
+        if tail is not None:
+            if isinstance(tail, bool) or not isinstance(tail, int) or not 1 <= tail <= 5000:
+                await self._respond_error(request, "session/replay tail must be an integer from 1 to 5000.", "InvalidRequest")
+                return
+            if start is not None or end is not None:
+                await self._respond_error(request, "session/replay tail cannot be combined with start or end.", "InvalidRequest")
+                return
+        result = await self._worker.replay(session_id, start=start, end=end, tail=tail)
         await self._respond(request, result)
 
     async def _replay_event_pages(self, request: dict[str, Any], after_cursor: int) -> None:

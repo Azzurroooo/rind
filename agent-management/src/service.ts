@@ -214,9 +214,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       const head = "- " + nameOf(state, task.assigneeAgentId) + " · task " + task.id + " · ";
       if (task.status === "done" && task.report) {
         const files = task.report.artifacts.map(id => state.artifacts[id]).filter(Boolean).map(a => path.join(paths.artifacts, a.file));
-        return [head + "delivered: " + task.report.outcome, "  " + task.report.summary,
+        return [head + "delivered: " + task.report.outcome,
+          "  Summary: " + task.report.summary,
           task.report.evidence.length ? "  Evidence: " + task.report.evidence.join("; ") : "",
-          files.length ? "  Files (read them with read_file): " + files.join(", ") : ""].filter(Boolean).join("\n");
+          files.length ? "  Files (read them with read_file): " + files.join(", ") : "",
+          task.report.nextAction ? "  Next: " + task.report.nextAction : ""].filter(Boolean).join("\n");
       }
       if (task.status === "blocked" && task.blockedOn) return head + "blocked, needs " + nameOf(state, task.blockedOn.responder) + ": " + task.blockedOn.action;
       return head + task.status.replace("_", " ") + (task.error ? ": " + task.error : "");
@@ -347,7 +349,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       // Cancelled by its delegator: nothing to report back.
       task.returned = true;
       const run = Object.values(state.runs).find(r => r.taskId === task.id && activeRun(r));
-      if (run && live.has(run.id)) return stopRun(state, by, run, task);
+      if (run && live.has(run.id)) return { ...stopRun(state, by, run, task), taskId: task.id, status: "cancelled" };
       requireValue(!["done", "cancelled"].includes(task.status), "TASK_FINISHED", "This task has already finished.");
       task.status = "cancelled"; delete task.dispatch; delete task.blockedOn;
       note(state, task.id, by, "Cancelled task."); wakeDelegator(state, task);
@@ -358,7 +360,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     note(state, task.id, by, message);
     delete task.report; delete task.deliveredAt; task.returned = false;
     resume(task, "From " + nameOf(state, by) + ": " + message);
-    return { taskId: task.id, status: "queued", next: END_TURN };
+    return { taskId: task.id, assignee: nameOf(state, task.assigneeAgentId), status: "queued", next: END_TURN };
   }
   function markDelivered(task: Task) { task.status = "done"; task.deliveredAt = new Date().toISOString(); delete task.blockedOn; }
   function deleteTeam(state: State, teamId: string) {
@@ -709,6 +711,15 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         const unused = session.released || (!session.runtimeSessionId && !Object.values(state.runs).some(r => r.sessionId === session.id));
         if (unused && !Object.values(state.runs).some(r => r.sessionId === session.id && activeRun(r))) { dropSession(state, session.id); pruneAgents(state, [session.agentId]); }
         return { detached: true };
+      }
+      case "forgetSession": {
+        // The Runtime already removed the conversation; its registration and
+        // anything that waited to be delivered to it go with it.
+        userOnly(actor); const session = ownSession(state, actor, p.sessionId);
+        requireValue(!Object.values(state.runs).some(r => r.sessionId === session.id && activeRun(r)), "SESSION_BUSY", "This conversation is running. Stop it or wait for it to finish before deleting it.");
+        dropSession(state, session.id);
+        delete state.deliveries[session.id];
+        return { forgotten: session.id };
       }
       case "resolveRun": {
         userOnly(actor); const run = state.runs[p.runId];

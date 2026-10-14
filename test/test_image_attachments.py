@@ -10,12 +10,17 @@ from PIL import Image
 import pytest
 
 from agent.application.tools.result_normalizer import ToolResultNormalizer
+from agent.application.tools.executor import ToolExecutor
+from agent.application.tools.processor import ToolCallProcessor
+from agent.domain import ParsedToolCall
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.errors import ProviderError
 from agent.infrastructure.images import process_image
 from agent.infrastructure.persistence.image_attachments import capture_image, load_image
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.tools.files.queries import read_file
+from agent.infrastructure.tools.files.specs import build_file_tool_specs
+from agent.infrastructure.tools.registry import DefaultToolRegistry
 
 
 @pytest.mark.parametrize("format", ["PNG", "JPEG", "WEBP", "GIF", "BMP"])
@@ -67,6 +72,38 @@ async def test_read_result_preserves_image_outside_text_budget(tmp_path):
     assert "Read image" in normalized.terminal_content
     assert json.loads(read_file(str(source), image_input=False))["error_type"] == "ImageInputUnsupported"
     assert json.loads(read_file(str(source), offset=2))["error_type"] == "InvalidImagePagination"
+
+
+@pytest.mark.asyncio
+async def test_image_tool_replay_preserves_one_attachment_after_reopening(tmp_path):
+    source = tmp_path / "image.png"
+    Image.new("RGB", (12, 10), "blue").save(source)
+    session_dir = str(tmp_path / "sessions")
+    store = JsonlSessionStore(session_dir=session_dir, workspace_root=str(tmp_path), system_prompt="test")
+    await store.initialize()
+    await store.persist_message("user", "Inspect image.png")
+    call = ParsedToolCall(call_id="read-image", name="read_file", raw_args='{"path":"image.png"}')
+    await store.persist_message("assistant", "", meta={"tool_calls": [{"id": call.call_id, "name": call.name}]})
+    registry = DefaultToolRegistry(specs=build_file_tool_specs(tmp_path, capture_image=store.capture_image))
+    processor = ToolCallProcessor(ToolExecutor(registry))
+    events = [event async for event in processor.execute(store, [call])]
+    assert events[-1].status == "completed"
+    record, = await store.get_tool_records()
+    assert len(record["attachments"]) == 1
+    assert "attachments" not in record["result"]
+    assert "attachments" not in json.loads(record["model_content"])
+    attachment, = record["attachments"]
+    image = await store.load_image(attachment)
+    source.unlink()
+
+    resumed = JsonlSessionStore(session_dir=session_dir, session_id=store.session_id, system_prompt="test")
+    await resumed.initialize()
+    repeated = [event async for event in processor.execute(resumed, [call])]
+    assert len(repeated) == 1 and repeated[0].result == events[-1].result
+    assert await resumed.get_tool_records() == [record]
+    message = (await resumed.get_messages_slice())[-1]
+    assert message["role"] == "tool" and message["attachments"] == [attachment]
+    assert await resumed.load_image(attachment) == image
 
 
 @pytest.mark.asyncio

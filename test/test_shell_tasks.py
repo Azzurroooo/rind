@@ -7,6 +7,7 @@ import pytest
 import pytest_asyncio
 
 from agent.domain.cancellation import CancellationTokenSource
+from agent.application.tools.result_normalizer import ToolResultNormalizer
 from agent.infrastructure.persistence import ToolOutputStore
 from agent.infrastructure.tools.registry import DefaultToolRegistry
 from agent.infrastructure.tools.shell.session_pool import ShellState
@@ -82,6 +83,35 @@ async def test_yield_reuse_nonzero_repeatable_reads_and_session_isolation(task_s
     assert result["handoff"]
     assert data(await tools.task_control("list"))["tasks"][0]["handoff"]
     assert not json.loads(await tools.task_control("read", first["task_id"], _session_id="other"))["ok"]
+
+
+@pytest.mark.asyncio
+async def test_model_projection_preserves_real_task_paging(task_shell):
+    tools, processes = task_shell
+    first = data(await tools.bash("work", yield_time_ms=0))
+    stdout = "".join(f"row {i:04d}\n" for i in range(3000))
+    processes[0].finish(stdout=stdout.encode())
+    completed = json.loads(await tools.task_control("wait", first["task_id"]))
+    normalizer = ToolResultNormalizer()
+    snapshot = await normalizer.normalize(completed)
+    assert f"cursor {completed['data']['start_cursor']}" in snapshot.model_content
+    assert completed["meta"]["output_path"] in snapshot.model_content
+    assert len(snapshot.model_content.splitlines()) <= 2000
+    assert len(snapshot.model_content.encode()) <= 25 * 1024
+    cursor = completed["data"]["start_cursor"]
+    output = []
+    while True:
+        page = json.loads(await tools.task_control("read", first["task_id"], cursor=cursor, max_output_chars=1500))
+        projected = await normalizer.normalize(page)
+        assert page["data"]["stdout"].rstrip("\n") in projected.model_content
+        output.append(page["data"]["stdout"])
+        if not page["meta"]["truncated"]:
+            break
+        next_cursor = page["data"]["next_cursor"]
+        assert f"cursor {next_cursor}" in projected.model_content
+        assert next_cursor != cursor
+        cursor = next_cursor
+    assert "".join(output) == stdout
 
 
 @pytest.mark.asyncio

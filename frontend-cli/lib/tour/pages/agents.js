@@ -82,7 +82,7 @@ export const agentsPages = [
       info({ session_id: "demo-direct" }, true),
       agents(null, "The demo joined the selected conversation. Ask the member to assign work, just as you would in ordinary chat."),
       type("Ask reviewer to inspect Unicode handling and deliver a report."), submit(),
-      tool("delegate", "reviewer", { status: "ok", output: "Task queued for reviewer. End your turn now; the results are delivered to you when your delegated work settles.", durationMs: 120 },
+      tool("delegate", "reviewer", { status: "ok", data: { taskId: "8f21ab77", assignee: "reviewer", next: "End your turn now; the results are delivered to you when your delegated work settles." }, durationMs: 120 },
         { to: "reviewer", brief: "Inspect Unicode handling" }),
       assistant("The reviewer has a tracked task. Its report comes back to this conversation when it is done."),
       turnDone(2500, 1, 0),

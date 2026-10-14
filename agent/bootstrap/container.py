@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import Any
 
-from agent.application.context import CompactionService, ContextEstimator, ContextManager
+from agent.application.context import CompactionService, ContextBudget, ContextEstimator, ContextManager
 from agent.application.ports.session_store import SessionStore
 from agent.application.skill_selection import SkillTurnCoordinator
 from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultNormalizer
@@ -25,7 +24,7 @@ from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
 from agent.infrastructure.tools.shell.tool import ShellTools
 from agent.infrastructure.tools.web.session_pool import WebSessions
 from agent.application.images import prepare_image_messages
-from agent.prompts import build_goal_policy_prompt, build_system_prompt, build_tool_guidance
+from agent.prompts import build_goal_policy_prompt, build_system_prompt
 from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
 from agent.application.task_notifications import TaskNotifications
 
@@ -81,6 +80,7 @@ def build_agent_container(
     web_sessions: WebSessions | None = None,
     task_notifications: TaskNotifications | None = None,
     external_tool=None,
+    context_window: int | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     prompt_workspace = str(Path(workspace_root or Path.cwd()).expanduser().resolve())
@@ -95,7 +95,7 @@ def build_agent_container(
         session_id=session_id,
         resume_latest=resume_latest,
         model=model,
-        system_prompt=system_prompt or build_system_prompt(prompt_workspace, environment=get_system_info(prompt_workspace)),
+        system_prompt=system_prompt or build_system_prompt(environment=get_system_info(prompt_workspace)),
         workspace_root=workspace_root,
         project_id=project_id,
         owner_agent_id=owner_agent_id,
@@ -103,10 +103,9 @@ def build_agent_container(
         parent_session_id=parent_session_id,
         reasoning_effort=settings.reasoning_effort,
         provider=settings.provider,
+        # A requested conversation must exist; only a fresh store creates one.
+        create_missing=not session_id,
     )
-    trace_setter = getattr(chat_client, "set_trace_session_id_provider", None)
-    if callable(trace_setter) and not inspect.iscoroutinefunction(trace_setter):
-        trace_setter(lambda: session_store.session_id)
     skill_repository = SkillRepository(
         prompt_workspace,
         skill_files=external_tool.skill_files if external_tool else (),
@@ -134,13 +133,10 @@ def build_agent_container(
     )
     tool_specs = (*catalog, *external_tool.specs(session_store.session_id)) if external_tool else catalog
     tool_registry = DefaultToolRegistry(tool_specs)
-    # The system prompt describes only tools this session has.
     runtime_system_messages = [
         {"role": "system", "content": content, "_context_kind": kind}
         for kind, content in (
-            ("tool_guidance", build_tool_guidance(spec.name for spec in tool_specs)),
             ("external_tools", external_tool.instructions if external_tool else ""),
-            ("goal_policy", build_goal_policy_prompt() if enable_goal else ""),
         )
         if content
     ]
@@ -155,8 +151,9 @@ def build_agent_container(
     )
     stream_parser = shared_resources.stream_parser if shared_resources else MessageStreamParser()
     context_manager = ContextManager(
-        estimator=ContextEstimator(),
+        estimator=ContextEstimator(ContextBudget(context_window_tokens=context_window)),
         rind_doc_provider=lambda: build_rind_doc_context(workspace_root),
+        goal_policy_provider=build_goal_policy_prompt if enable_goal else None,
     )
     usage_recorder = partial(append_usage_record, default_usage_ledger_path())
     compaction_service = shared_resources.compaction_service if shared_resources else CompactionService(

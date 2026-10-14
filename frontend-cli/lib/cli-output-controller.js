@@ -1,6 +1,8 @@
 import { AssistantRenderer } from "./assistant-renderer.js";
 import {
   assistantHeaderText,
+  deliveryBlockText,
+  delegatedWaitingLine,
   outputBlockText,
   promptText,
   startupText,
@@ -11,6 +13,7 @@ import {
   questionAnswerText,
   questionText,
 } from "./rendering.js";
+import { rememberDelegation, settledDelegations } from "./delegation-state.js";
 import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
@@ -206,9 +209,29 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     }));
   }
 
+  // A message delivered from the team, not typed here: it reads as a report.
+  function writeDelivery(text) {
+    const value = String(text ?? "");
+    if (!value.trim()) {
+      return;
+    }
+    if (!terminalUi) {
+      process.stdout.write(outputBlockText(deliveryBlockText(value, 1000).join("\n"), state.display.outputStarted));
+      state.display.outputStarted = true;
+      return;
+    }
+    const leading = blockCount > 0;
+    appendBlock(new DynamicBlock((width) => {
+      const lines = deliveryBlockText(value, width);
+      return leading ? ["", ...lines] : lines;
+    }));
+  }
+
   function writeError(text) {
     const value = String(text ?? "");
-    if (!terminalUi || state.runtime.status === "closing") {
+    // Before the terminal UI starts, appending would be painted only after a
+    // startup that may already be failing; a fatal start must reach the screen.
+    if (!terminalUi || !terminalUi.started || state.runtime.status === "closing") {
       process.stderr.write(value);
       return;
     }
@@ -395,8 +418,13 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     return value ? `${turnContext}:${value}` : "";
   }
 
-  function renderHistory(messages) {
+  function renderHistory(messages, { notice = "", pendingDelegations = null } = {}) {
+    if (notice) {
+      appendBlock(new TextBlock(outputBlockText(notice), { leading: blockCount > 0 }));
+    }
     const pendingTools = new Map();
+    const delegated = state.display.pendingDelegations ||= new Map();
+    delegated.clear();
     const flushPendingTools = () => {
       for (const [toolCallId, tool] of pendingTools.entries()) {
         beginTool({
@@ -418,7 +446,15 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       if (role === "user") {
         flushPendingTools();
         closeAssistant();
-        writeUserInput(messageText(message?.content));
+        const content = messageText(message?.content);
+        if (message?._rind_meta?.kind === "team_delivery") {
+          for (const taskId of settledDelegations(content)) {
+            delegated.delete(taskId);
+          }
+          writeDelivery(content);
+        } else {
+          writeUserInput(content);
+        }
         continue;
       }
       if (role === "assistant") {
@@ -444,6 +480,10 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         const toolCallId = String(message?.tool_call_id || "");
         const tool = pendingTools.get(toolCallId) || { name: "tool", arguments: "" };
         pendingTools.delete(toolCallId);
+        const content = messageText(message?.content);
+        if (tool.name === "delegate") {
+          rememberDelegation(delegated, content, state.session.info.session_id);
+        }
         beginTool({
           tool_call_id: toolCallId,
           tool_name: tool.name,
@@ -453,12 +493,24 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
           tool_call_id: toolCallId,
           tool_name: tool.name,
           status: "completed",
-          result: messageText(message?.content),
+          result: content,
         });
       }
     }
     flushPendingTools();
     closeAssistant();
+    // A tail page may omit the delegate call. Management owns the full task
+    // state and overrides reconstruction when that snapshot is available.
+    if (Array.isArray(pendingDelegations)) {
+      delegated.clear();
+      for (const task of pendingDelegations) delegated.set(task.taskId, task);
+    }
+    // Restoring a leader that still waits for delegated work says so, the same
+    // way a finished turn does.
+    if (delegated.size) {
+      const assignees = [...delegated.values()].map(task => task.assignee);
+      log(() => delegatedWaitingLine(assignees));
+    }
     redraw(true);
   }
 
@@ -472,6 +524,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     mainPromptText,
     log,
     writeUserInput,
+    writeDelivery,
     writeError,
     closeAssistant,
     clearTranscript,

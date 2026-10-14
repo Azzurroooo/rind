@@ -26,6 +26,8 @@ export function createCliState() {
       activeCompact: false,
       activityLabel: "",
       backgroundWait: null,
+      history: null,
+      pendingDelegations: new Map(),
       stats: {},
       lastEventSequence: 0,
       lastTurnId: "",

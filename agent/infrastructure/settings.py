@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 import platform
@@ -84,6 +84,7 @@ class AppSettings:
     server_token: str = ""
     provider: str = DEFAULT_PROVIDER
     api: str = "openai-chat"
+    model_context_windows: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
 def default_settings_path() -> Path:
@@ -137,7 +138,20 @@ def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:
         server_token=_string(data, "serverToken"),
         provider=provider,
         api=_string(data, "api") or "openai-chat",
+        model_context_windows=_model_context_windows(data.get("modelContextWindows", {})),
     )
+
+
+def _model_context_windows(value: Any) -> dict[str, dict[str, int]]:
+    if not isinstance(value, dict):
+        raise ValueError("modelContextWindows must map connection ids to model token limits.")
+    for connection, models in value.items():
+        if not isinstance(connection, str) or not connection.strip() or not isinstance(models, dict):
+            raise ValueError("modelContextWindows must map connection ids to model token limits.")
+        for model, tokens in models.items():
+            if not isinstance(model, str) or not model.strip() or type(tokens) is not int or tokens <= 0:
+                raise ValueError("modelContextWindows requires model ids and positive integer token limits.")
+    return value
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:

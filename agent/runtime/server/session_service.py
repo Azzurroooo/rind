@@ -52,6 +52,7 @@ class SessionService:
             return False
         self._drafts.pop(store.session_id, None)
         self._created.pop(store.session_id, None)
+        store.mark_deleted()
         return True
 
     def abandoned(self) -> list[str]:
@@ -123,7 +124,8 @@ class SessionService:
         return await asyncio.to_thread(JsonlSessionStore.load_session_metadata, clean, self.session_dir)
 
     async def list(
-        self, limit: int = 20, workspace_root: str | None = None, exclude_workspace_roots: list[str] | None = None
+        self, limit: int = 20, workspace_root: str | None = None, exclude_workspace_roots: list[str] | None = None,
+        exclude_session_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         return await asyncio.to_thread(
             JsonlSessionStore.list_session_metadata,
@@ -131,14 +133,30 @@ class SessionService:
             limit,
             workspace_root,
             exclude_workspace_roots,
+            exclude_session_ids,
+        )
+
+    async def list_by_workspace(
+        self, *, limit: int = 500, per_workspace_limit: int = 3,
+        exclude_workspace_roots: list[str] | None = None, exclude_session_ids: list[str] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        return await asyncio.to_thread(
+            JsonlSessionStore.list_session_metadata_by_workspace,
+            self.session_dir,
+            limit=limit,
+            per_workspace_limit=per_workspace_limit,
+            exclude_workspace_roots=exclude_workspace_roots,
+            exclude_session_ids=exclude_session_ids,
         )
 
     async def delete(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         meta = await self.metadata(clean)
-        if self.draft_store(clean) is not None:
-            self._drafts.pop(clean, None)
-            return {"session_id": clean, "workspace_root": str(meta.get("workspace_root") or "")}
+        draft = self.draft_store(clean)
+        self._created.pop(clean, None)
+        if draft is not None:
+            self._drafts.pop(draft.session_id, None)
+            draft.mark_deleted()
 
         def _remove() -> None:
             root = JsonlSessionStore.resolve_session_root(self.session_dir)
@@ -179,7 +197,7 @@ class SessionService:
         if selection is None:
             selection, selection_source = await asyncio.to_thread(self.choose_selection, root)
         model, reasoning_effort, provider = selection.model_id, selection.reasoning_effort, selection.provider_id
-        system_prompt = build_system_prompt(str(root), environment=get_system_info(root))
+        system_prompt = build_system_prompt(environment=get_system_info(root))
         store = JsonlSessionStore(
             session_dir=self.session_dir,
             session_id=session_id or new_session_id(),
@@ -248,7 +266,7 @@ class SessionService:
             "updated_at": str(meta.get("updated_at") or ""),
         }
 
-    async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
+    async def replay(self, session_id: str, start: int | None = None, end: int | None = None, tail: int | None = None) -> dict[str, Any]:
         info = await self.info(session_id)
         store = await self._open_store_from_info(
             session_id,
@@ -256,13 +274,16 @@ class SessionService:
             persist_system_prompt=False,
         )
         messages = await store.get_messages_slice(
-            start=start,
-            end=end,
             include_ids=True,
             compacted=False,
         )
+        total = len(messages)
+        messages = messages[start:end]
+        if tail is not None:
+            messages = messages[max(0, len(messages) - tail):]
         return {
             "messages": messages,
+            "message_total": total,
             "turn_state": await store.get_turn_state(),
             "session_id": session_id,
             "model": store.model,
@@ -319,9 +340,11 @@ class SessionService:
             session_id=clean,
             model=info["model"],
             provider=info.get("provider") or "openai-compatible",
-            system_prompt=build_system_prompt(str(root), environment=get_system_info(root)),
+            system_prompt=build_system_prompt(environment=get_system_info(root)),
             workspace_root=root,
             reasoning_effort=info.get("reasoning_effort") or "",
+            # Opening an existing conversation must never recreate a deleted one.
+            create_missing=False,
         )
         await store.initialize(persist_system_prompt=persist_system_prompt)
         return store

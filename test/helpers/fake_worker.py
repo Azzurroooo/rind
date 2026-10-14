@@ -124,11 +124,21 @@ class FakeRepository:
             "workspace_root": self.worker.workspace_root,
         }
 
-    async def list(self, limit=20, workspace_root=None, exclude_workspace_roots=None) -> list[dict]:
+    async def list(self, limit=20, workspace_root=None, exclude_workspace_roots=None, exclude_session_ids=None) -> list[dict]:
         return [{"id": session_id, "title": f"session {session_id}"} for session_id in self.worker.sessions][:limit]
 
-    async def replay(self, session_id, start=None, end=None) -> dict:
-        return {"messages": self.worker.messages, "turn_state": None, "session_id": session_id, "model": "m1"}
+    async def list_by_workspace(self, *, limit=500, per_workspace_limit=3, exclude_workspace_roots=None, exclude_session_ids=None) -> tuple[list[dict], list[dict]]:
+        sessions = [{"id": session_id, "title": f"session {session_id}", "workspace_root": self.worker.workspace_root}
+                    for session_id in self.worker.sessions][:limit]
+        totals = [{"workspace_root": self.worker.workspace_root, "count": len(self.worker.sessions)}]
+        return sessions, totals
+
+    async def replay(self, session_id, start=None, end=None, tail=None) -> dict:
+        messages = list(self.worker.messages)
+        total = len(messages)
+        if tail is not None:
+            messages = messages[max(0, total - tail):]
+        return {"messages": messages, "turn_state": None, "session_id": session_id, "model": "m1", "message_total": total}
 
     async def replay_event_pages(self, session_id) -> dict:
         return {
@@ -208,8 +218,8 @@ class FakeWorker:
     async def create_session(self, workspace_root=None) -> dict:
         return {"session_id": "new-session", "model": "m2", "provider": "p1", "workspace_root": workspace_root or self.workspace_root}
 
-    async def replay(self, session_id, start=None, end=None) -> dict:
-        return await self.repository.replay(session_id, start, end)
+    async def replay(self, session_id, start=None, end=None, tail=None) -> dict:
+        return await self.repository.replay(session_id, start, end, tail)
 
     async def replay_event_pages(self, session_id) -> dict:
         return await self.repository.replay_event_pages(session_id)

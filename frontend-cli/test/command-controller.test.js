@@ -178,6 +178,7 @@ test("local command catalog stays complete before the runtime starts", async () 
     "fork",
     "goal",
     "help",
+    "history",
     "import",
     "init",
     "login",

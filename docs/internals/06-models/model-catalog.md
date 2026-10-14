@@ -21,7 +21,7 @@ flowchart TD
 
 An ordinary list_models sends no HTTP request; only an explicit refresh pulls actively, and initialization also schedules one refresh for a stale cache. The 24-hour TTL is a refresh condition, **not a read deadline**: as long as the endpoint matches, an expired cache still serves the catalog. A failed refresh returns a notice and keeps showing the already-saved models.
 
-A successful refresh treats the new list as authoritative, and models the remote side deleted are no longer mixed in. Old capability fields are reused only under the same endpoint and the same ID; an empty list, exceptions, and invalid IDs do not overwrite the old cache. Even when the currently selected model is not in the enumerated list, the catalog still adds that selection, so custom models can be displayed.
+A successful refresh treats the new list as authoritative, and models the remote side deleted are no longer mixed in. Old capability fields are reused only under the same endpoint and the same ID; an empty list, exceptions, and invalid IDs do not overwrite the old cache. A selection whose connection has no credentials is not added at all: `/model` and the Agents page list only connections that are actually configured (a key in `auth.json`, the matching `settings.json` entry, or the connection's environment variable). A currently selected model that is simply missing from its connection's list is still added, so custom models can be displayed as long as their connection is configured.
 
 ## Three-state capabilities are more reliable than guessing
 

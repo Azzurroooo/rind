@@ -413,6 +413,35 @@ def test_readonly_session_replay_is_handled_while_run_turn_is_blocked():
     assert replay["result"]["session_id"] == "s1"
 
 
+def test_session_replay_tail_returns_the_newest_messages_and_the_total():
+    worker = FakeWorker()
+    worker.messages = [{"role": "user", "content": f"m{index}"} for index in range(5)]
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 39, "method": "session/replay", "params": {"session_id": "s1", "tail": 2}})
+
+    asyncio.run(run())
+
+    result = _response(payloads, 39)["result"]
+    assert [message["content"] for message in result["messages"]] == ["m3", "m4"]
+    assert result["message_total"] == 5
+
+
+def test_session_replay_rejects_tail_together_with_a_range():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 40, "method": "session/replay", "params": {"session_id": "s1", "tail": 2, "start": 0}})
+        await server._dispatch({"kind": "request", "request_id": 41, "method": "session/replay", "params": {"session_id": "s1", "tail": 0}})
+
+    asyncio.run(run())
+
+    assert _response(payloads, 40)["error"]["type"] == "InvalidRequest"
+    assert _response(payloads, 41)["error"]["type"] == "InvalidRequest"
+
+
 # -- user questions ----------------------------------------------------------------
 
 
@@ -461,6 +490,41 @@ def test_session_list_returns_recent_sessions_and_current_id():
     result = _response(payloads, 27)["result"]
     assert result["current_session_id"] == "s1"
     assert result["sessions"] == [{"id": "s1", "title": "session s1", "connection_ready": False}]
+    assert "totals" not in result
+
+
+def test_session_list_groups_per_workspace_with_totals():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+    worker.workspace_root = "C:/work/notes"
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 28, "method": "session/list", "params": {"per_workspace_limit": 3, "limit": 500}})
+
+    asyncio.run(run())
+
+    result = _response(payloads, 28)["result"]
+    assert result["totals"] == [{"workspace_root": "C:/work/notes", "count": 1}]
+    assert result["sessions"][0]["workspace_root"] == "C:/work/notes"
+
+
+def test_session_list_rejects_an_invalid_per_workspace_limit():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 29, "method": "session/list", "params": {"per_workspace_limit": 0}})
+
+    asyncio.run(run())
+
+    assert _response(payloads, 29)["error"]["type"] == "InvalidRequest"
+
+
+def test_grouped_session_list_cannot_silently_ignore_a_workspace_filter():
+    server, payloads = make_server(FakeWorker())
+    asyncio.run(server._dispatch({"kind": "request", "request_id": 29, "method": "session/list",
+                                 "params": {"per_workspace_limit": 3, "workspace_root": "C:/notes"}}))
+    assert _response(payloads, 29)["error"]["type"] == "InvalidRequest"
 
 
 def test_session_new_returns_created_metadata():
@@ -918,7 +982,7 @@ def test_project_durable_events_maps_raw_meta_shapes_and_failures():
         "content_chars": len("calling"),
         "text": "calling",
     }
-    assert events[3]["status"] == "error"
+    assert events[3]["status"] == "failed"
     assert events[3]["result"] == "boom"
     assert "duration_ms" not in events[3]
     assert events[4] == {
@@ -927,6 +991,56 @@ def test_project_durable_events_maps_raw_meta_shapes_and_failures():
         "turn_id": "turn-9",
         "reason": "model exploded",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task_status,event_status,error_type", [
+    ("completed", "completed", ""),
+    ("timed_out", "timed_out", "Timeout"),
+    ("cancelled", "cancelled", "Cancelled"),
+    ("lost", "failed", "TaskLost"),
+    ("failed", "failed", "ToolExecutionError"),
+])
+async def test_tool_replay_bounds_raw_output_and_preserves_live_status(tmp_path, task_status, event_status, error_type):
+    import copy
+    from agent.application.tools.processor import ToolCallProcessor
+    from agent.domain import ParsedToolCall, tool_ok
+    from agent.domain.tool_result import ToolExecutionResult
+    from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
+
+    source = "界" * 40000
+    output_path = str(tmp_path / "output.txt")
+    Path(output_path).write_text(source, encoding="utf-8")
+    payload = tool_ok("bash", {
+        "task_id": "task-1", "status": task_status, "reason": "test reason",
+        "stdout": source, "stderr": "", "start_cursor": "0",
+    }, meta={"output_path": output_path, "truncated": True})
+
+    class Executor:
+        def is_async_tool(self, name):
+            return True
+
+        async def execute_async(self, name, args):
+            return ToolExecutionResult(status="ok", result_str=payload)
+
+    store = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "Run command")
+    call = ParsedToolCall("call-1", "bash", "{}")
+    processor = ToolCallProcessor(Executor())
+    live = [event async for event in processor.execute(session=store, tool_calls=[call])][-1]
+    records = await store.get_tool_records()
+    before = copy.deepcopy(records)
+    replay = list(iter_durable_events(await store.load_messages(), records, None, store.session_id))[-1]
+    assert replay["result"] == live.result
+    assert replay["status"] == live.status == event_status
+    assert replay["error_type"] == live.error_type == error_type
+    assert replay["tool_name"] == live.tool_name == "bash"
+    assert len(replay["result"].encode("utf-8")) <= 8192
+    assert records == before and records[0]["result"]["data"]["stdout"] == source
+    assert len(records[0]["model_content"].encode("utf-8")) <= 25 * 1024
+    reused = [event async for event in processor.execute(session=store, tool_calls=[call])][-1]
+    assert (reused.result, reused.status, reused.error_type) == (live.result, live.status, live.error_type)
 
 
 # -- process and stdio plumbing ----------------------------------------------------

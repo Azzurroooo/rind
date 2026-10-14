@@ -64,7 +64,7 @@ async def test_a_named_connection_is_kept_in_the_auth_file_and_offered_like_a_pr
 async def test_a_client_for_a_named_connection_uses_its_own_endpoint_and_key(service, tmp_path):
     await service.login("", "connection", Answers("Client A", "https://client-a.example/v1", "m", "client-key"))
 
-    client = await service.create_chat_client(_settings(tmp_path), ModelSelection("client-a", "m"), workspace_root=None)
+    client = await service.create_chat_client(_settings(tmp_path), ModelSelection("client-a", "m"))
     try:
         assert str(client._client.base_url).rstrip("/") == "https://client-a.example/v1"
         assert client._client.api_key == "client-key"
@@ -106,7 +106,7 @@ async def test_a_connection_needs_its_own_name_a_web_url_and_a_key(service, tmp_
 @pytest.mark.asyncio
 async def test_a_missing_connection_is_reported_not_replaced(service, tmp_path):
     with pytest.raises(ProviderError) as raised:
-        await service.create_chat_client(_settings(tmp_path), ModelSelection("removed", "m"), workspace_root=None)
+        await service.create_chat_client(_settings(tmp_path), ModelSelection("removed", "m"))
 
     assert raised.value.code == "connection_missing"
     assert "/login" in str(raised.value)
@@ -135,18 +135,30 @@ async def test_a_model_change_for_a_queued_turn_also_changes_image_support(tmp_p
     from agent.runtime.server.worker import RuntimeWorker
 
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "settings.json").write_text(json.dumps({"modelContextWindows": {
+        "deepseek": {"deepseek-v4-pro": 1048576, "deepseek-flash": 8192},
+    }}), encoding="utf-8")
     worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
     gate, waiting, seen = asyncio.Event(), asyncio.Event(), []
 
     async def create(settings, selection, *, workspace_root=None):
+        session_provider = None
+
+        def set_session_id_provider(provider):
+            nonlocal session_provider
+            session_provider = provider
+
         async def stream(*args, **kwargs):
-            seen.append((selection.model_id, worker.execution.active_container(session_id).turn_runner.image_input))
+            container = worker.execution.active_container(session_id)
+            seen.append((selection.model_id, container.turn_runner.image_input,
+                         container.context_manager.context_window, session_provider()))
             waiting.set()
             await gate.wait()
             yield ModelStreamEvent(kind="text_delta", text="ok")
             yield ModelStreamEvent(kind="completed", stop_reason="stop")
 
-        return SimpleNamespace(stream=stream, close=AsyncMock())
+        return SimpleNamespace(stream=stream, close=AsyncMock(), set_session_id_provider=set_session_id_provider)
 
     monkeypatch.setattr(worker.provider_service, "create_chat_client", create)
     try:
@@ -160,7 +172,7 @@ async def test_a_model_change_for_a_queued_turn_also_changes_image_support(tmp_p
         gate.set()
         await first
         await second
-        assert seen == [("deepseek-v4-pro", False), ("deepseek-flash", True)]
+        assert seen == [("deepseek-v4-pro", False, 1048576, session_id), ("deepseek-flash", True, 8192, session_id)]
     finally:
         await worker.close()
 

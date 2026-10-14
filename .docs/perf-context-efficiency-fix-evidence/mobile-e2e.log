@@ -1,0 +1,5 @@
+
+> rind-mobile@0.9.0 test:e2e
+> node scripts/remote-smoke.mjs
+
+PASS: pairing, authenticated gateway, replay, six viewports including landscape/reduced height, drawers, files/upload, prompt/queue/stop, reconnect with draft, credential isolation and forget.

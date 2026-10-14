@@ -35,7 +35,7 @@ def test_execution_reads_configuration_once_and_refreshes_between_turns(tmp_path
 
         configurations = []
 
-        async def create(settings, selection, *, workspace_root):
+        async def create(settings, selection):
             configurations.append(settings)
             return SimpleNamespace(close=AsyncMock())
 

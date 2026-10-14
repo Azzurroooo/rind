@@ -17,7 +17,7 @@ from agent.domain.tasks import TERMINAL_STATES, public_task
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.errors import ProviderError
 from agent.domain.events import UserQuestionRequestedEvent
-from agent.domain.models import ModelSelection
+from agent.domain.models import ModelDefinition, ModelSelection
 from agent.infrastructure.llm import ProviderServiceImpl
 from agent.infrastructure.paths import validate_session_id, validate_workspace_root
 from agent.infrastructure.settings import load_settings
@@ -166,10 +166,10 @@ class ExecutionCoordinator:
             self._schedule_continuation(session_id)
 
     async def background_wait(self, session_id: str) -> dict | None:
-        records = await self._task_notifications.store.relevant(session_id)
-        goal = await self._repository.get_goal(session_id) if self._enable_goal else None
         if self._closed or session_id in self._suppressed or session_id in self._closed_sessions:
             return None
+        records = await self._task_notifications.store.relevant(session_id)
+        goal = await self._repository.get_goal(session_id) if self._enable_goal else None
         if goal and goal.get("status") in {"paused", "blocked", "budget_exhausted"}:
             return None
         scope = self._scopes.get(session_id)
@@ -520,8 +520,15 @@ class ExecutionCoordinator:
                         run_kwargs["resume"] = True
                     if compact:
                         run_kwargs["compact"] = "manual"
+                    if delivery:
+                        run_kwargs["delivery"] = True
                     async for event in execution.container.runtime.run_turn(**run_kwargs):
                         event_data = event.to_dict()
+                        # Why this turn runs and what it carries, so windows can
+                        # show a delivery instead of an unexplained Working.
+                        if delivery and event_data.get("type") == "turn_started":
+                            event_data["delivery"] = True
+                            event_data["delivery_text"] = str(query or "")
                         if event_data.get("type") == "queued_input_delivered":
                             business_started = True
                         if event_data.get("type") in {"turn_completed", "turn_failed", "turn_cancelled"}:
@@ -699,7 +706,8 @@ class ExecutionCoordinator:
             str(metadata.get("model") or settings.model),
             str(metadata.get("reasoning_effort") or settings.reasoning_effort),
         )
-        chat_client = await self._chat_client_for(settings, selection, root)
+        chat_client = await self._chat_client_for(settings, selection)
+        definition = self._definition(selection, settings)
         container = None
         try:
             container = build_agent_container(
@@ -710,7 +718,8 @@ class ExecutionCoordinator:
                     reasoning_effort=selection.reasoning_effort,
                 ),
                 chat_client=chat_client,
-                image_input=self._image_input(selection, settings),
+                image_input=definition.image_input if definition else None,
+                context_window=definition.context_window if definition else None,
                 session_dir=self.session_dir,
                 session_id=clean,
                 session_store=self._repository.draft_store(clean),
@@ -737,18 +746,19 @@ class ExecutionCoordinator:
         self._active[clean] = _ActiveExecution(container=container, chat_client=chat_client, selection=selection)
         return container
 
-    async def _chat_client_for(self, settings, selection: ModelSelection, root):
+    async def _chat_client_for(self, settings, selection: ModelSelection):
         """A client, or one whose every request reports why the connection cannot be used."""
         try:
-            return await self._provider_service.create_chat_client(settings, selection, workspace_root=root)
+            return await self._provider_service.create_chat_client(settings, selection)
         except ProviderError as exc:
             if exc.code not in UNUSABLE_CONNECTION_CODES:
                 raise
             return self._provider_service.unavailable_client(selection, exc)
 
-    def _image_input(self, selection: ModelSelection, settings) -> bool | None:
+    def _definition(self, selection: ModelSelection, settings) -> ModelDefinition | None:
+        """The selected model's declared capabilities, or None while its connection is unusable."""
         try:
-            return self._provider_service.resolve_selection(selection, settings=settings).image_input
+            return self._provider_service.resolve_selection(selection, settings=settings)
         except ProviderError as exc:
             if exc.code not in UNUSABLE_CONNECTION_CODES:
                 raise
@@ -767,11 +777,14 @@ class ExecutionCoordinator:
         selection = ModelSelection(str(store.provider or ""), str(store.model or ""), str(store.reasoning_effort or ""))
         if not selection.model_id or selection == execution.selection:
             return
-        root = str(getattr(store, "workspace_root", "") or "")
         settings = await asyncio.to_thread(load_settings)
-        replacement = await self._chat_client_for(settings, selection, root or None)
+        definition = self._definition(selection, settings)
+        replacement = await self._chat_client_for(settings, selection)
         previous = execution.chat_client
-        execution.container.turn_runner.replace_chat_client(replacement, image_input=self._image_input(selection, settings))
+        execution.container.turn_runner.replace_chat_client(
+            replacement, image_input=definition.image_input if definition else None,
+        )
+        execution.container.context_manager.context_window = definition.context_window if definition else None
         execution.chat_client, execution.selection = replacement, selection
         if previous is not None:
             await previous.close()

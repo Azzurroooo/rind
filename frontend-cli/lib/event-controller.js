@@ -2,12 +2,14 @@ import { runtimeEventType } from "./runtime-protocol.js";
 import {
   cancelledText,
   contextBuiltLine,
+  delegatedWaitingLine,
   errorLine,
   planUpdatedLine,
   systemNoticeLine,
   turnCompletedLine,
   backgroundWaitingLine,
 } from "./rendering.js";
+import { rememberDelegation, settledDelegations } from "./delegation-state.js";
 
 const WORKING_EVENTS = new Set([
   "assistant_delta",
@@ -27,6 +29,9 @@ export function createEventController({
   const pendingFileChanges = new Map();
   const pendingPlanInputs = new Map();
   const imageNotices = new Map();
+  // Delegated tasks this conversation handed out and still waits for; they end
+  // when a delivery names them, not when this window's next turn ends.
+  const pendingDelegations = state.pendingDelegations || new Map();
   let toolStats = { completed: 0, failed: 0 };
 
   async function handle(message) {
@@ -64,6 +69,16 @@ export function createEventController({
         // this window is new again, and its next message creates it.
         if (state.sessionInfo && event.session_id === state.sessionInfo.session_id) { state.sessionInfo.session_id = ""; output.redraw?.(); }
         return;
+      case "session_deleted":
+        // Deleted here or in another window: nothing is left to continue, so
+        // the window is new again and its next message starts a conversation.
+        if (state.sessionInfo && event.session_id === state.sessionInfo.session_id) {
+          pendingDelegations.clear();
+          if (output.sessionDeleted) output.sessionDeleted(event.session_id);
+          else state.sessionInfo.session_id = "";
+          output.log?.("This conversation was deleted. Your next message starts a new one.");
+        }
+        return;
       case "task_updated":
       case "task_output":
         monitor.recordTask?.(event);
@@ -74,6 +89,17 @@ export function createEventController({
         return;
       case "turn_started":
         output.setBackgroundWait?.(null);
+        // A turn that runs on a delivered result: show the delivery and stop
+        // waiting for exactly the tasks it names.
+        if (event.delivery) {
+          const delivering = String(event.delivery_text || "");
+          for (const taskId of settledDelegations(delivering)) {
+            pendingDelegations.delete(taskId);
+          }
+          if (delivering.trim()) {
+            output.writeDelivery?.(delivering);
+          }
+        }
         return;
       case "context_compacted":
       case "assistant_message_completed":
@@ -137,6 +163,9 @@ export function createEventController({
         const planInput = takePlanInput(event);
         monitor.recordResult?.(event);
         recordToolResult(event);
+        if (event.tool_name === "delegate" && event.status === "completed") {
+          rememberDelegation(pendingDelegations, event.result, event.session_id || state.sessionInfo?.session_id);
+        }
         const plan = event.tool_name === "update_plan" && event.status === "completed"
           ? parsePlanInput(planInput)
           : null;
@@ -201,6 +230,9 @@ export function createEventController({
         output.setBackgroundWait?.(event.background_wait);
         if (event.background_wait) {
           output.log?.(() => backgroundWaitingLine(event.background_wait.count));
+        } else if (waitingOnDelegations(event.session_id).length) {
+          // Nothing runs here and nothing needs the user: work was handed out.
+          output.log?.(() => delegatedWaitingLine(waitingOnDelegations(event.session_id).map(item => item.assignee)));
         } else if (state.activeGoal?.status !== "active") {
           output.log?.(turnCompletedLine(event, toolStats));
         }
@@ -238,6 +270,12 @@ export function createEventController({
       return;
     }
     toolStats.completed += 1;
+  }
+
+  // Only this conversation's delegations; another window may share the session.
+  function waitingOnDelegations(sessionId) {
+    const id = String(sessionId || "");
+    return [...pendingDelegations.values()].filter(item => item.sessionId === id);
   }
 
   function rememberPlanInputStart(event) {

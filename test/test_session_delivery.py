@@ -71,6 +71,19 @@ async def test_an_idle_conversation_runs_the_delivery_and_its_watchers_see_it(wo
     replay = await worker.repository.replay(session_id)
     assert [m["content"] for m in replay["messages"] if m["role"] == "user"][-1] == "fe-ui delivered: 15 x 4 = 60"
 
+    # The turn says why it runs, the stored message keeps that meaning, and a
+    # client rebuilding durable events sees the same thing.
+    started = [e for e in worker.events if e["type"] == "turn_started" and e.get("delivery")]
+    assert started and started[0]["delivery_text"] == "fe-ui delivered: 15 x 4 = 60"
+    delivered = next(m for m in replay["messages"] if m.get("role") == "user" and m.get("content") == "fe-ui delivered: 15 x 4 = 60")
+    assert delivered["_rind_meta"] == {"kind": "team_delivery"}
+    from agent.runtime.server.replay_events import iter_durable_events
+
+    materials = await worker.replay_event_pages(session_id)
+    events = list(iter_durable_events(materials["messages"], materials["tool_records"], materials["turn_state"], session_id))
+    replayed = [e for e in events if e.get("delivery")]
+    assert replayed and replayed[-1]["delivery_text"] == "fe-ui delivered: 15 x 4 = 60"
+
 
 @pytest.mark.asyncio
 async def test_deliveries_during_a_turn_wait_for_it_and_arrive_together(worker):

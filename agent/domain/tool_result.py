@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from .errors import FailureStatus
+from .errors import FailureStatus, ToolEventStatus
 from .images import ImageAttachment
 
 
@@ -58,3 +58,47 @@ def tool_cancelled(tool: str, reason: str | None = None) -> str:
         "Cancelled",
         meta={"reason": normalized_reason},
     )
+
+
+def parse_tool_result_payload(value: Any) -> dict | None:
+    if isinstance(value, dict):
+        return value if "ok" in value and "tool" in value else None
+    if not isinstance(value, str) or not value or not value.lstrip().startswith("{"):
+        return None
+    try:
+        payload = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(payload, dict) and "ok" in payload and "tool" in payload:
+        return payload
+    return None
+
+
+def classify_tool_payload(payload: dict) -> tuple[ToolEventStatus, str] | None:
+    if payload.get("ok") is False:
+        error_type = payload.get("error_type")
+        if not isinstance(error_type, str) or not error_type:
+            error_type = "ToolExecutionError"
+        return classify_tool_error(error_type), error_type
+    data = payload.get("data")
+    status = data.get("status") if isinstance(data, dict) else None
+    if status == "cancelled":
+        return "cancelled", "Cancelled"
+    if status == "timed_out":
+        return "timed_out", "Timeout"
+    if status in {"lost", "failed"}:
+        return "failed", "TaskLost" if status == "lost" else "ToolExecutionError"
+    return None
+
+
+def classify_tool_error(error_type: str) -> ToolEventStatus:
+    normalized = error_type.lower()
+    if normalized == "cancelled":
+        return "cancelled"
+    if normalized in {"toolnotfound", "notfound", "userquestionunsupported"}:
+        return "unavailable"
+    if "timeout" in normalized or normalized in {"deadlineexceeded"}:
+        return "timed_out"
+    if normalized in {"toolargsjsonerror", "invalidarguments", "invaliduserquestion", "typeerror", "valueerror"}:
+        return "rejected"
+    return "failed"

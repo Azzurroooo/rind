@@ -27,8 +27,8 @@ test("a conversation hears once, when all the work it delegated has settled", as
   await deliverTask(f, second.taskId, "Endpoint built");
   await eventually(() => f.delivered.length === 1);
   assert.equal(f.delivered[0].runtimeSessionId, "leader-chat");
-  assert.match(f.delivered[0].text, /ui · task .* · delivered: done\n  Page built\n  Evidence: checked/);
-  assert.match(f.delivered[0].text, /api · task .* · delivered: done\n  Endpoint built/);
+  assert.match(f.delivered[0].text, /ui · task .* · delivered: done\n  Summary: Page built\n  Evidence: checked/);
+  assert.match(f.delivered[0].text, /api · task .* · delivered: done\n  Summary: Endpoint built/);
   await eventually(() => !Object.keys(f.store.state.deliveries).length);
 });
 

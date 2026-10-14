@@ -24,8 +24,9 @@ test("one-shot parser requires run prompt and accepts explicit workspace/session
   assert.equal(parseOneShotArgs(["hello"]), null);
 });
 
-test("one-shot execution keeps stdout to the assistant and writes a compact log", async () => {
+test("one-shot execution keeps stdout to the assistant and writes a compact log", async (t) => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "rind-one-shot-"));
+  t.after(() => rm(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const output = [];
   const errors = [];
   let options;

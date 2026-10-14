@@ -157,7 +157,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   let management;
   try {
     management = clientFactory === createRuntimeClient
-      ? await prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false })
+      ? await prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false, shareRuntime: true })
       : { args: runtimeArgs };
     progress.begin();
     client = observeRuntime((management.shared && clientFactory === createRuntimeClient ? createSharedRuntimeClient : clientFactory)({
@@ -225,7 +225,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     });
     progress.done(finishedAt - startedAt);
     progress.note(`log ${logPath}`);
-    if (requestCompletion) progress.note("Worker exiting; remaining managed services will be stopped.");
+    if (requestCompletion && !management.shared) progress.note("Worker exiting; remaining managed services will be stopped.");
     stdout(finalText);
     return true;
   } catch (error) {

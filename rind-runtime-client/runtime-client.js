@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 
-import { buildRuntimeEnv } from "./runtime-env.js";
+import { buildRuntimeEnv, resolveSourcePython } from "./runtime-env.js";
+export { resolveSourcePython } from "./runtime-env.js";
 import {
   createRuntimeRequest,
   isRuntimeEvent,
@@ -14,7 +15,7 @@ import {
 export function resolveRuntimeLaunch({ python, repoRoot, runtimePath = "", cliArgs = [] }) {
   const executable = runtimePath
     ? { command: runtimePath, args: [] }
-    : { command: python, args: [path.join(repoRoot, "main.py")] };
+    : { command: resolveSourcePython(python, repoRoot), args: [path.join(repoRoot, "main.py")] };
   const traceFlag = isTraceLlmEnvSet() ? ["--trace-llm"] : [];
   return {
     command: executable.command,
@@ -41,7 +42,7 @@ function isLongRunningRequest(method, params) {
 export function runHelpVersion({ python, repoRoot, runtimePath = "", cliArgs, cwd = process.cwd() }) {
   const executable = runtimePath
     ? { command: runtimePath, args: [] }
-    : { command: python, args: [path.join(repoRoot, "main.py")] };
+    : { command: resolveSourcePython(python, repoRoot), args: [path.join(repoRoot, "main.py")] };
   const result = spawnSync(executable.command, [...executable.args, ...cliArgs], {
     cwd,
     env: buildRuntimeEnv(repoRoot, process.env, { sourceRuntime: !runtimePath }),
@@ -225,6 +226,9 @@ export function createRuntimeClient({
     closing = true;
     if (!child) return Promise.resolve();
     const runtime = child;
+    if (runtime.exitCode !== null || runtime.signalCode !== null) {
+      return runtime.exitCode === 0 ? Promise.resolve() : Promise.reject(new Error(`Runtime already exited with ${runtime.signalCode || runtime.exitCode}`));
+    }
     const exited = new Promise((resolve) => {
       runtime.once("close", (code, signal) => resolve({ code, signal }));
       runtime.once("error", (error) => resolve({ error }));
@@ -240,9 +244,10 @@ export function createRuntimeClient({
     }).then(async () => {
       closeInput();
       const { code, signal, error } = await exited;
-      if (shutdownError) throw shutdownError;
       if (error) throw error;
-      if (code !== 0) throw new Error(`Runtime exited during shutdown with ${signal || code}`);
+      // A clean exit is a finished shutdown even when the acknowledgement raced
+      // it; anything else keeps the request's error when there is one.
+      if (code !== 0) throw shutdownError || new Error(`Runtime exited during shutdown with ${signal || code}`);
     }).finally(clearKillTimer);
     return shutdownPromise;
   }

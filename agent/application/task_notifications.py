@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import Any
 
 from agent.application.ports.task_store import TaskStore
 from agent.application.ports.session_store import SessionStore
@@ -18,6 +19,12 @@ def pending_notification(record: dict) -> bool:
 
 def task_reference(record: dict) -> dict:
     return {key: record.get(key) for key in ("task_id", "status", "notify", "origin_tool_call_id", "event_id")}
+
+
+def _structured_result_text(record: dict[str, Any]) -> str:
+    """The stored payload feeds task state; the model projection never does."""
+    payload = record.get("result")
+    return json.dumps(payload, ensure_ascii=False) if isinstance(payload, dict) else ""
 
 
 class TaskNotifications:
@@ -74,7 +81,7 @@ class TaskNotifications:
         tool_messages = {m.get("tool_call_id"): m for m in messages if m.get("role") == "tool"}
         for tool in await session.get_tool_records(call_ids=list(tool_messages)):
             if tool.get("name") in {"task_control", "bash_output"}:
-                result = str(tool.get("model_content") or "{}")
+                result = _structured_result_text(tool)
                 try:
                     payload = json.loads(result)
                 except ValueError:
@@ -87,7 +94,7 @@ class TaskNotifications:
             if not record.get("committed") and origin in tool_messages:
                 tools = await session.get_tool_records(call_ids=[origin])
                 if tools:
-                    await self.result_committed(session.session_id, "bash", origin, str(tools[-1].get("model_content") or "{}"))
+                    await self.result_committed(session.session_id, "bash", origin, _structured_result_text(tools[-1]))
         records = await self.store.relevant(session.session_id)
         pending = [r for r in records.values() if pending_notification(r)]
         fresh = [r for r in pending if r["event_id"] not in projected]

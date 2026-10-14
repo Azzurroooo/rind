@@ -201,7 +201,7 @@ function pageHeader(view, width) {
 function searchLine(view, width) {
   if (view.searching) return editorLines(view.searchEditor, width, 1, paint.accent("/ "))[0];
   if (!view.query && view.filter === "All") return null;
-  return paint.dim([view.query && "/ " + single(view.query), view.filter !== "All" && "status: " + view.filter].filter(Boolean).join(" · ") + " · esc clears");
+  return paint.dim([view.query && "/ " + single(view.query), view.query && ["independent", "folder"].includes(view.page.kind) && "loaded conversations", view.filter !== "All" && "status: " + view.filter].filter(Boolean).join(" · ") + " · esc clears");
 }
 
 function emptyText(view) {

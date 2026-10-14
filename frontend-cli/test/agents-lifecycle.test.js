@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readFile, realpath } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
@@ -9,7 +10,9 @@ import { fileURLToPath } from "node:url";
 import { createHandoff, writeHandoff, takeHandoffPath, HANDOFF_ENV } from "../lib/agents-handoff.js";
 import { clearForConversation, followConversation, openAgentChat, returnTarget } from "../lib/agents-commands.js";
 import { runAgentsPage } from "../lib/agents-page.js";
-import { plainSession } from "../lib/agents-session.js";
+import { plainSession, prepareManagement } from "../lib/agents-session.js";
+import { managementClient } from "../lib/agents-client.js";
+import { workspaceKey } from "../lib/agents-model.js";
 import { startServer } from "../../agent-management/dist/ipc.js";
 import { connectClient } from "../../agent-management/dist/client.js";
 import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
@@ -25,6 +28,41 @@ test("resuming a plain conversation from another folder opens it in the folder i
   assert.deepEqual(await plainSession(["--session", "../escape"], true, home), { args: ["--session", "../escape"], shared: true });
   assert.deepEqual(await plainSession(["--session", "20261006_abc"], false, home), { args: ["--session", "20261006_abc"], shared: false }, "scripts keep a private worker");
   assert.equal((await plainSession(["--trace-llm"], true, home)).shared, false);
+});
+
+test("running Rind inside the Manager's folder enters the Manager, not a plain session", { timeout: 90000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-manager-entry-"));
+  const launch = { home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  const managerFolder = path.join(home, "agents-management", "manager");
+  await mkdir(managerFolder, { recursive: true });
+  const stopServices = () => new Promise(resolve => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL("../bin/rind.js", import.meta.url)), "agents", "stop", "--all"],
+      { cwd: home, env: { ...process.env, RIND_HOME: home, NO_COLOR: "1" }, windowsHide: true, stdio: "ignore" });
+    child.once("error", () => resolve());
+    child.once("close", () => resolve());
+  });
+  t.after(async () => { await stopServices(); await removeRindHome(home); });
+  assert.equal(existsSync(path.join(home, "agents-management", "state", "user-token")), false, "the service has never run here");
+
+  const previous = process.cwd();
+  process.chdir(managerFolder);
+  let management;
+  try { management = await prepareManagement([], launch, { interactive: true }); }
+  finally { process.chdir(previous); }
+  try {
+    assert.equal(management.chatContext.manager, true, "the window is the Manager window");
+    assert.equal(management.label, "Manager");
+    assert.ok((management.externalTools.tools || []).some(tool => tool.name === "agent_management"), "the Manager's own tool is granted");
+    const client = await managementClient({ ...launch, start: false });
+    const snapshot = await client.request("snapshot");
+    client.close();
+    const manager = snapshot.agents.find(agent => agent.name === "Manager");
+    assert.ok(manager, "the folder is registered as the Manager");
+    assert.equal(workspaceKey(manager.canonicalWorkspace), workspaceKey(await realpath(managerFolder)));
+    assert.ok(snapshot.sessions.some(session => session.agentId === manager.id && session.origin === "direct"), "the window's conversation is tracked under the Manager");
+  } finally {
+    await management.close();
+  }
 });
 
 test("a handoff without a decision means return, and only valid decisions are accepted", async t => {

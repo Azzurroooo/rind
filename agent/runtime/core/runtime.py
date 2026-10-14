@@ -244,6 +244,7 @@ class AgentRuntime:
         transient_system_messages: list[dict] | None = None,
         resume: bool = False,
         compact: str | None = None,
+        delivery: bool = False,
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Run a single conversational turn asynchronously, yielding runtime events.
@@ -274,7 +275,7 @@ class AgentRuntime:
             self.discard_pending_inputs()
             try:
                 if query and not resume:
-                    await self._persist_user_input(query)
+                    await self._persist_user_input(query, {"kind": "team_delivery"} if delivery else None)
                 await self.sync_skill_catalog()
 
                 started_event = TurnStartedEvent(
@@ -458,8 +459,10 @@ class AgentRuntime:
     def _is_cancelled(self, cancellation_token: CancellationToken | None) -> bool:
         return bool(cancellation_token and cancellation_token.is_cancelled)
 
-    async def _persist_user_input(self, content: str) -> None:
-        if self._skills is not None:
+    async def _persist_user_input(self, content: str, meta: dict | None = None) -> None:
+        # A message from outside the conversation (a delivered result) is not a
+        # typed prompt: it is persisted as itself, without Skill invocation parsing.
+        if self._skills is not None and meta is None:
             try:
                 await self._skills.persist_user_input(self._session_store, content)
                 return
@@ -472,7 +475,10 @@ class AgentRuntime:
                     f"Failed to persist user input: {exc}",
                     code=type(exc).__name__,
                 ) from exc
-        await self._session_store.persist_user_input(content)
+        if meta is None:
+            await self._session_store.persist_user_input(content)
+        else:
+            await self._session_store.persist_user_input(content, meta=meta)
 
     async def _persist_message(self, role: str, content: str, meta: dict | None = None) -> None:
         try:

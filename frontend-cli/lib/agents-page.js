@@ -30,7 +30,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   const view = {
     snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
     sidebar: [], navId: "inbox", focus: "sidebar", member: null, folder: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
-    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, folderDefaults: {}, managerPath: "", service: null, stopped: false,
+    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, folderHistory: {}, folderDefaults: {}, managerPath: "", service: null, stopped: false,
     query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, standalone, leaveArmed: false,
     // The conversation Esc goes back to: the one just left. `own` is this
     // window's own conversation, which is still loaded behind the page.
@@ -67,7 +67,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (nav?.kind === "independent" && view.folder) return { kind: "folder", workspace: view.folder };
     return { kind: nav?.kind || "inbox" };
   }
-  const independentGroups = () => independentSessions(view.snapshot, view.independent?.workspaces, view.managerPath);
+  const independentGroups = () => independentSessions(view.snapshot, view.independent?.workspaces, view.managerPath, view.folderHistory);
   function entriesFor(page) {
     const options = { query: view.query, filter: view.filter };
     if (page.kind === "inbox") return inboxRows(view.snapshot);
@@ -137,6 +137,15 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (view.page.kind === "archive" && view.connection === "connected" && !view.archiveLoading && view.archive?.key !== archiveKey && Date.now() - (view.archive?.failedAt || 0) > RETRY_MS) void loadArchive(archiveKey);
     if (view.page.kind === "background" && view.connection === "connected" && !view.serviceLoading && Date.now() - (view.serviceAt || 0) > 5000) void loadService();
     if (["independent", "folder"].includes(view.page.kind) && view.connection === "connected" && !view.independent?.loading && Date.now() - (view.independent?.at || 0) > INDEPENDENT_REFRESH_MS) void loadIndependent();
+    // The overview carries a bounded window per folder; its own page reads the folder's list.
+    if (view.page.kind === "folder" && view.connection === "connected" && staleFolder(view.page.workspace)) void loadFolderSessions(view.page.workspace);
+  }
+  function staleFolder(workspace) {
+    const current = view.folderHistory[workspaceKey(workspace)];
+    // Paging is deliberate browsing. Keep its position until an explicit
+    // refresh instead of replacing older pages on the next clock tick.
+    if (current?.sessions?.length > 100) return false;
+    return !current?.loading && Date.now() - (current?.at || 0) > INDEPENDENT_REFRESH_MS;
   }
   async function loadArchive(key) {
     view.archiveLoading = true;
@@ -158,6 +167,19 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     catch (error) { view.independent = { workspaces: view.independent?.workspaces || [], at: Date.now() }; notify("Could not load independent conversations: " + error.message, "error"); }
     project();
     void loadFolderDefaults();
+  }
+  async function loadFolderSessions(workspace, more = false) {
+    const key = workspaceKey(workspace);
+    const previous = view.folderHistory[key];
+    if (previous?.loading) return;
+    const retained = more ? previous?.sessions || [] : [];
+    view.folderHistory[key] = { ...previous, loading: true };
+    try {
+      const { sessions = [] } = await client.request("listSessions", { independent: true, workspace, excludeSessionIds: retained.map(s => s.runtimeSessionId) });
+      view.folderHistory[key] = { sessions: [...retained, ...sessions], hasMore: sessions.length === 100, at: Date.now() };
+    }
+    catch (error) { view.folderHistory[key] = { ...previous, loading: false, at: Date.now() }; notify("Could not load this folder's conversations: " + error.message, "error"); }
+    project();
   }
   async function loadHistory(teamId, key = view.history[teamId]?.key) {
     view.history[teamId] = { ...view.history[teamId], key, loading: true };
@@ -216,7 +238,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       view.connection = "connected"; view.stopped = false;
       view.service = replacement.service ? { ...replacement.service, stale: replacement.stale } : null;
       if (replacement.stale) notify("A newer Rind is installed. Background services keep the old version until their agents finish.", "info");
-      view.history = {}; view.managerHistory = null; view.independent = null;
+      view.history = {}; view.managerHistory = null; view.independent = null; view.folderHistory = {};
       acceptSnapshot(await client.request("subscribe", { afterSeq: view.snapshot.seq || 0 }));
     })().catch(error => { view.connection = start ? "offline · r retries" : "stopped · r starts again"; if (start) notify(error.message, "error"); })
       .finally(() => { connecting = null; redraw(); });
@@ -323,7 +345,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       else {
         tui.start({ acquireInput: false });
         // A finished conversation may have created history that the lists should show.
-        if (manager) view.managerHistory = null; else if (teamId) delete view.history[teamId]; else view.independent = null;
+        if (manager) view.managerHistory = null; else if (teamId) delete view.history[teamId]; else { view.independent = null; view.folderHistory = {}; }
         project();
         selectReturn();
       }
@@ -371,11 +393,19 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   // Titles come from history; after a rename every list reads it again.
   async function rename(sessionId, name) {
     const renamed = await renameConversation(launch, sessionId, name);
-    view.history = {}; view.managerHistory = null; view.independent = null;
+    view.history = {}; view.managerHistory = null; view.independent = null; view.folderHistory = {};
     project();
     return renamed;
   }
-  const ui = { view, request, choose, form, showReport, rename, run: (action, label) => perform(action, null, label), restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter,
+  // A deleted conversation leaves every list, and Esc no longer goes back to it.
+  async function deleteConversation(runtimeSessionId) {
+    const result = await request("deleteSession", { runtimeSessionId });
+    if (view.returnTo?.runtimeSessionId === runtimeSessionId) view.returnTo = null;
+    view.history = {}; view.managerHistory = null; view.independent = null; view.folderHistory = {};
+    project();
+    return result;
+  }
+  const ui = { view, request, choose, form, showReport, rename, deleteConversation, run: (action, label) => perform(action, null, label), restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter,
     join: row => open({ ...where(row), runtimeSessionId: row.sessionId }), startNew: target => open(where(target)) };
   const actions = createActions(ui);
   const currentRow = () => (view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));
@@ -389,6 +419,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     switch (row.kind) {
       case "member": return openMember(row.teamId, row.agentId);
       case "more": return row.workspace ? openFolder(row.workspace) : openMember(row.teamId, row.agentId);
+      case "folder-more": return perform(() => loadFolderSessions(row.workspace, true), null, "Loading earlier conversations…");
       case "workspace": return openFolder(row.workspace);
       case "session": return ui.join(row);
       case "new-session": return ui.startNew({ ...row, teamId: row.teamId || view.page.teamId });
@@ -610,6 +641,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (view.page.teamId) delete view.history[view.page.teamId];
     if (view.page.kind === "manager") view.managerHistory = null;
     if (["independent", "folder"].includes(view.page.kind)) view.independent = null;
+    if (view.page.kind === "folder") delete view.folderHistory[workspaceKey(view.page.workspace)];
     if (view.page.kind === "background") view.serviceAt = 0;
     if (view.page.kind === "archive") view.archive = null;
     // A refresh that changes nothing still says it happened.

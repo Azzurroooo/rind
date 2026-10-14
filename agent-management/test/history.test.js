@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sessionHistory, independentHistory } from "../dist/history.js";
+import { sessionHistory, independentHistory, independentFolder } from "../dist/history.js";
 import { emptyState } from "../dist/model.js";
 
 function fixture() {
@@ -48,7 +48,7 @@ test("history scopes are validated before reading any workspace", async () => {
   await assert.rejects(sessionHistory(state, {}, list), /Agent not found/);
 });
 
-test("independent history groups non-team conversations by workspace and skips team and Manager history", async () => {
+test("independent history reads one grouped page and skips team and Manager history", async () => {
   const { state } = fixture();
   state.sessions.s5 = { id: "s5", agentId: "lead", runtimeSessionId: "r-standalone", origin: "direct" };
   const all = [
@@ -56,21 +56,75 @@ test("independent history groups non-team conversations by workspace and skips t
     { id: "r-standalone", workspace_root: "/w/lead/", title: "Quick fix", updated_at: "2026-10-06T04:00:00Z" },
     { id: "r-loose", workspace_root: "/home/me/scratch", title: "Try an idea", updated_at: "2026-10-06T06:00:00Z" },
     { id: "r-manager", workspace_root: "/rind/manager", title: "Coordinate" },
-    { id: "r-loose", workspace_root: "/home/me/scratch", title: "duplicate" },
   ];
   const queries = [];
-  const groups = await independentHistory(state, "/rind/manager", async query => {
+  // Stands in for the Runtime's grouped query: newest per folder plus totals.
+  const list = async query => {
     queries.push(query);
-    return query.workspace_root ? all.filter(e => e.workspace_root.replace(/\/$/, "") === query.workspace_root) : all.filter(e => !query.exclude_workspace_roots.some(w => e.workspace_root.startsWith(w)));
-  });
-  assert.deepEqual(queries.map(q => q.workspace_root || "others").sort(), ["/w/dev", "/w/lead", "others"], "each registered folder is listed on its own");
-  assert.deepEqual(queries.find(q => !q.workspace_root).exclude_workspace_roots.sort(), ["/rind/manager", "/w/dev", "/w/lead"]);
-  assert.deepEqual(groups.map(g => g.name), ["scratch", "Lead"]);
-  assert.deepEqual(groups[0].sessions.map(s => s.runtimeSessionId), ["r-loose"]);
-  assert.equal(groups[0].agentId, undefined);
-  assert.equal(groups[1].agentId, "lead");
-  assert.deepEqual(groups[1].teams, ["A"]);
-  assert.deepEqual(groups[1].sessions, [{ runtimeSessionId: "r-standalone", title: "Quick fix", updatedAt: "2026-10-06T04:00:00Z", sessionId: "s5" }]);
+    const skipped = new Set(query.exclude_session_ids || []);
+    const excluded = (query.exclude_workspace_roots || []).map(w => w.replace(/\/+$/, ""));
+    const matches = all.filter(e => !skipped.has(e.id) && !excluded.some(w => e.workspace_root.replace(/\/+$/, "").startsWith(w)));
+    const byFolder = new Map();
+    for (const entry of matches) {
+      const key = entry.workspace_root.replace(/\/+$/, "");
+      if (!byFolder.has(key)) byFolder.set(key, { total: 0, sessions: [] });
+      const bucket = byFolder.get(key);
+      bucket.total += 1;
+      if (bucket.sessions.length < query.per_workspace_limit) bucket.sessions.push(entry);
+    }
+    return {
+      sessions: [...byFolder.values()].flatMap(bucket => bucket.sessions),
+      totals: [...byFolder.entries()].map(([workspace_root, bucket]) => ({ workspace_root, count: bucket.total })),
+    };
+  };
+  const groups = await independentHistory(state, "/rind/manager", list);
+  assert.equal(queries.length, 1, "one grouped query, not one per folder");
+  assert.equal(queries[0].per_workspace_limit, 3);
+  assert.deepEqual(queries[0].exclude_workspace_roots, ["/rind/manager"]);
+  assert.deepEqual(queries[0].exclude_session_ids.sort(), ["r-other-team", "r-team", "r-unsaved"], "team conversations are excluded by id");
+  assert.deepEqual(groups.map(g => g.name).sort(), ["Lead", "scratch"]);
+  const lead = groups.find(g => g.agentId === "lead");
+  assert.deepEqual(lead.sessions.map(s => s.runtimeSessionId), ["r-standalone"]);
+  assert.equal(lead.total, 1);
+  assert.deepEqual(groups.find(g => g.name === "scratch").sessions.map(s => s.runtimeSessionId), ["r-loose"]);
+  assert.equal(groups.find(g => g.name === "scratch").total, 1);
+});
+
+test("a folder's page reads that folder's conversations with the same exclusions", async () => {
+  const { state } = fixture();
+  const queries = [];
+  const list = async query => {
+    queries.push(query);
+    return { sessions: [
+      { id: "r-team", workspace_root: "/w/lead", title: "Team work" },
+      { id: "r-standalone", workspace_root: "/w/lead", title: "Quick fix", updated_at: "2026-10-06T04:00:00Z" },
+    ] };
+  };
+  const sessions = await independentFolder(state, "/rind/manager", "/w/lead", list);
+  assert.deepEqual(queries, [{ workspace_root: "/w/lead", limit: 100, exclude_session_ids: ["r-team", "r-other-team", "r-unsaved"] }]);
+  assert.deepEqual(sessions.map(s => s.runtimeSessionId), ["r-standalone"]);
+  assert.deepEqual(await independentFolder(state, "/rind/manager", "/rind/manager", list), []);
+});
+
+test("overview keeps folders omitted by the preview cap", async () => {
+  const groups = await independentHistory(emptyState(), "/manager", async () => ({
+    sessions: [{ id: "r1", workspace_root: "/new" }],
+    totals: [{ workspace_root: "/new", count: 1 }, { workspace_root: "/old", count: 200 }],
+  }));
+  const old = groups.find(group => group.workspace === "/old");
+  assert.equal(old.total, 200);
+  assert.deepEqual(old.sessions, []);
+});
+
+test("folder paging excludes already loaded conversations before the limit", async () => {
+  const entries = Array.from({ length: 205 }, (_, i) => ({ id: `r${i}`, workspace_root: "/folder" }));
+  const list = async query => ({ sessions: entries.filter(entry => !query.exclude_session_ids.includes(entry.id)).slice(0, query.limit) });
+  const state = emptyState();
+  const first = await independentFolder(state, "/manager", "/folder", list);
+  const second = await independentFolder(state, "/manager", "/folder", list, first.map(s => s.runtimeSessionId));
+  const third = await independentFolder(state, "/manager", "/folder", list, [...first, ...second].map(s => s.runtimeSessionId));
+  assert.deepEqual([first.length, second.length, third.length], [100, 100, 5]);
+  assert.equal(new Set([...first, ...second, ...third].map(s => s.runtimeSessionId)).size, 205);
 });
 
 test("history carries what each conversation runs on, and whether its connection can run", async () => {
@@ -78,6 +132,6 @@ test("history carries what each conversation runs on, and whether its connection
   const list = async () => [{ id: "r-team", title: "Plan", provider: "deepseek", model: "deepseek-flash", reasoning_effort: "high", selection_source: { model: "folder", effort: "session" }, connection_ready: false }];
   const [row] = await sessionHistory(state, { teamId: "a", agentId: "lead" }, list);
   assert.deepEqual([row.provider, row.model, row.reasoningEffort, row.selectionSource.model, row.connectionReady], ["deepseek", "deepseek-flash", "high", "folder", false]);
-  const [group] = await independentHistory(state, "/w/manager", async () => [{ id: "r-free", title: "Free", workspace_root: "/w/free", provider: "openai", model: "gpt-5.5" }]);
+  const [group] = await independentHistory(state, "/w/manager", async () => ({ sessions: [{ id: "r-free", title: "Free", workspace_root: "/w/free", provider: "openai", model: "gpt-5.5" }] }));
   assert.deepEqual([group.sessions[0].provider, group.sessions[0].model, group.sessions[0].reasoningEffort], ["openai", "gpt-5.5", undefined]);
 });

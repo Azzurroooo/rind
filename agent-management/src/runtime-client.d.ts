@@ -12,6 +12,11 @@ declare module "*shared-runtime.js" {
 
 declare module "*local-files.js" { export function privateDirectory(directory: string): Promise<void>; }
 
+declare module "*endpoint.js" {
+  export function listenOwned(server: any, endpoint: string): Promise<void>;
+  export class EndpointOccupiedError extends Error { code: string }
+}
+
 declare module "*build-id.js" {
   export function buildId(sources: Array<{ root?: string; extensions?: string[]; file?: string }>): Promise<string>;
   export function runtimeBuildId(options?: { repoRoot?: string; runtimePath?: string }): Promise<string>;

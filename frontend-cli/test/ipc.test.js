@@ -1,6 +1,6 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -11,6 +11,7 @@ import { createCliState } from "../lib/cli-state.js";
 
 const ipcHome = await mkdtemp(path.join(tmpdir(), "rind-ipc-home-"));
 process.env.RIND_HOME = ipcHome;
+after(() => rm(ipcHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
 function defer() {
   return new Promise((resolve) => setTimeout(resolve, 0));

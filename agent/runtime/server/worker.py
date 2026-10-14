@@ -174,9 +174,9 @@ class RuntimeWorker:
         self.execution.forget_options(clean)
         return self.repository.discard_unsaved(clean)
 
-    async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
+    async def replay(self, session_id: str, start: int | None = None, end: int | None = None, tail: int | None = None) -> dict[str, Any]:
         await self.shell_tools.maintain_tasks(session_id)
-        result = await self.repository.replay(session_id, start=start, end=end)
+        result = await self.repository.replay(session_id, start=start, end=end, tail=tail)
         result["live_turn"] = self.execution.live_turn(session_id)
         result["hosted"] = self.execution.owns_session(session_id)
         result["tasks"] = (await self.shell_tools.monitor_tasks(session_id))["tasks"]

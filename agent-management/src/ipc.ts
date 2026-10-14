@@ -1,18 +1,19 @@
 import net from "node:net";
 import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
-import { readFile, writeFile, unlink, chmod, link } from "node:fs/promises";
+import { readFile, writeFile, unlink, link } from "node:fs/promises";
 import type { Principal } from "./model.js";
 import { ManagementError, requireValue } from "./model.js";
 import { managementPaths, privateDirectory } from "./paths.js";
 import { openStore } from "./store.js";
 import { createService } from "./service.js";
 import { createRindAdapter } from "./adapters/rind.js";
-import { sessionHistory, independentHistory } from "./history.js";
+import { sessionHistory, independentHistory, independentFolder } from "./history.js";
 import { managementBuildId } from "./build.js";
 import { activeRun } from "./model.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { listenOwned, EndpointOccupiedError } from "../../rind-runtime-client/endpoint.js";
 import { managerInstructions, memberInstructions, supervises, toolsFor } from "./tools.js";
 
 const RUNTIME_START_MS = 30000;
@@ -29,11 +30,6 @@ export async function startServer(options: { home?: string; python?: string; rep
   const build = managementBuildId();
   const paths = managementPaths(options.home);
   await privateDirectory(paths.state);
-  if (process.platform !== "win32") {
-    const inUse = await new Promise<boolean>(resolve => { const probe = net.connect(paths.endpoint); probe.once("connect", () => { probe.destroy(); resolve(true); }); probe.once("error", () => resolve(false)); });
-    requireValue(!inUse, "ALREADY_RUNNING", "Management service is already running.");
-    try { await unlink(paths.endpoint); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  }
   let readyResolve: () => void;
   let readyReject: (error: unknown) => void;
   const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
@@ -249,13 +245,33 @@ export async function startServer(options: { home?: string; python?: string; rep
           const manager = managerPath ? Object.values(store.state.agents).find(a => a.canonicalWorkspace === managerPath) : undefined;
           if (params.independent === true) {
             const host = await executionHost();
-            result = { workspaces: await independentHistory(store.state, await realManager, async query => (await host.request("session/list", { limit: 100, ...query })).sessions) };
+            const list = (query: Record<string, unknown>) => host.request("session/list", query);
+            const workspace = typeof params.workspace === "string" ? params.workspace.trim() : "";
+            const excluded = params.excludeSessionIds ?? [];
+            requireValue(Array.isArray(excluded) && excluded.every(id => typeof id === "string"), "INVALID_INPUT", "excludeSessionIds must be a list of conversation IDs.");
+            result = workspace
+              ? { sessions: await independentFolder(store.state, await realManager, workspace, list, excluded) }
+              : { workspaces: await independentHistory(store.state, await realManager, list) };
           } else if (params.manager === true && !manager) result = { sessions: [] };
           else {
             const host = await executionHost();
             const list = async (workspace: string) => (await host.request("session/list", { workspace_root: workspace, limit: 100 })).sessions;
             result = { sessions: await sessionHistory(store.state, manager ? { agentId: manager.id } : { agentId: params.agentId, teamId: params.teamId }, list) };
           }
+        } else if (message.method === "deleteSession") {
+          requireValue(principal.kind === "user", "FORBIDDEN", "Private session history is available only to the user.");
+          const runtimeSessionId = typeof message.params.runtimeSessionId === "string" ? message.params.runtimeSessionId.trim() : "";
+          requireValue(runtimeSessionId, "INVALID_INPUT", "A conversation is required.");
+          const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === runtimeSessionId);
+          const busy = "This conversation is running. Stop it or wait for it to finish before deleting it.";
+          requireValue(!session || !Object.values(store.state.runs).some(r => r.sessionId === session.id && activeRun(r)), "SESSION_BUSY", busy);
+          const host = await executionHost();
+          const live = ((await host.request("runtime/sessions", {})).sessions || []).find((item: any) => item.id === runtimeSessionId);
+          requireValue(!live || live.turn === "idle", "SESSION_BUSY", busy);
+          requireValue(!(live?.watchers > 0), "SESSION_OPEN", "A Rind window is showing this conversation. Close it before deleting it.");
+          await host.request("session/delete", { session_id: runtimeSessionId });
+          if (session) await service.request({ kind: "user" }, "forgetSession", { requestId: "delete-" + randomBytes(12).toString("hex"), sessionId: session.id });
+          result = { deleted: true, runtimeSessionId };
         } else {
           result = await service.request(principal, message.method, message.params);
           if (message.method === "attachSession" || message.method === "reattachSession") attached.push(result.id);
@@ -270,7 +286,12 @@ export async function startServer(options: { home?: string; python?: string; rep
     socket.on("error", () => {});
     socket.on("close", () => { sockets.delete(socket); if (unsubscribe) watchRuntime(false); unsubscribe?.(); if (service && !closing) void service.disconnect(attached).catch(() => {}); });
   });
-  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(paths.endpoint, () => { server.off("error", reject); resolve(); }); });
+  try {
+    await listenOwned(server, paths.endpoint);
+  } catch (error) {
+    if (error instanceof EndpointOccupiedError) throw new ManagementError("ALREADY_RUNNING", "Management service is already running.");
+    throw error;
+  }
   const reportError = (error: unknown) => process.stderr.write("agents management: " + String((error as Error)?.stack || error) + "\n");
   // Work that a restart would interrupt: running or starting runs. Unconfirmed
   // runs are already outside this service's control.
@@ -300,7 +321,6 @@ export async function startServer(options: { home?: string; python?: string; rep
   // Awaited by the requests that need it; a failure surfaces there, never as an unhandled rejection.
   realManager.catch(() => {});
   try {
-    if (process.platform !== "win32") await chmod(paths.endpoint, 0o600);
     try { userToken = (await readFile(paths.token, "utf8")).trim(); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (!userToken) {
@@ -323,15 +343,18 @@ export async function startServer(options: { home?: string; python?: string; rep
     return closed ||= (async () => {
       closing = true;
       if (probe) clearInterval(probe);
-      await service.stop();
-      // The Manager folder may still be being secured; finish before reporting closed.
-      await realManager.catch(() => {});
-      // A Runtime still starting comes up after this; wait so that whoever
-      // cleans up next (tests, `rind agents stop`) can see and stop it.
-      await runtimeConnecting?.catch(() => {});
-      runtime?.close();
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>(resolve => server.close(() => resolve()));
+      // The process always lets go of its endpoint, even when stopping the
+      // service failed: a service nobody can stop is worse than a loud error.
+      try {
+        await service.stop();
+      } finally {
+        // Even failed service cleanup must join an in-flight host connection.
+        await realManager.catch(() => {});
+        await runtimeConnecting?.catch(() => {});
+        runtime?.close();
+        for (const socket of sockets) socket.destroy();
+        await new Promise<void>(resolve => server.close(() => resolve()));
+      }
     })();
   }
   return { paths, close };

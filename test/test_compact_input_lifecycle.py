@@ -37,6 +37,9 @@ class CompactHarness:
     def snapshot_hard_limit(self):
         return None
 
+    def restore_hard_limit(self, hard_limit):
+        assert hard_limit is None
+
     async def build_messages_async(self, **_kwargs):
         messages = await self.session.get_messages_slice()
         for message in messages:

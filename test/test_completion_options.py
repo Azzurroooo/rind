@@ -82,6 +82,7 @@ async def test_compatible_chat_keeps_cap_during_parameter_fallbacks():
 
     sdk.chat.completions.create = send
     client = OpenAIChatCompletionsClient(sdk, "model", "high", reasoning_efforts=("low", "high"))
+    client.set_session_id_provider(lambda: "session")
     assert (await client.create([], max_output_tokens=8192, reasoning_effort="low")).content == "summary"
     assert len(calls) == 3
     assert all(p.get("max_tokens", p.get("max_completion_tokens")) == 8192 for p in calls)
@@ -117,5 +118,5 @@ async def test_factory_passes_only_known_reasoning_capabilities(tmp_path, monkey
     monkeypatch.setattr("agent.infrastructure.llm.provider_service.build_async_client", lambda *_args, **_kwargs: SimpleNamespace())
     factory = MagicMock()
     monkeypatch.setattr("agent.infrastructure.llm.openai_responses.OpenAIResponsesClient", factory)
-    await service.create_chat_client(_settings(tmp_path, provider="openai"), ModelSelection("openai", model, "high"), workspace_root=str(tmp_path))
+    await service.create_chat_client(_settings(tmp_path, provider="openai"), ModelSelection("openai", model, "high"))
     assert factory.call_args.kwargs["reasoning_efforts"] == efforts

@@ -1371,7 +1371,8 @@ def test_model_boundary_accepts_completed_tool_call():
 
 
 @pytest.mark.asyncio
-async def test_context_length_recovery_hard_limit_is_turn_local():
+@pytest.mark.parametrize("hard_limit", [None, 1000])
+async def test_context_length_recovery_hard_limit_is_turn_local(hard_limit):
     class LocalEmptyStream:
         def __aiter__(self):
             return self
@@ -1444,7 +1445,7 @@ async def test_context_length_recovery_hard_limit_is_turn_local():
 
     manager = ContextManager(
         estimator=ContextEstimator(
-            ContextBudget(hard_limit_tokens=1000, context_window_tokens=2000)
+            ContextBudget(hard_limit_tokens=hard_limit, context_window_tokens=2000)
         )
     )
     parser = MagicMock()
@@ -1460,7 +1461,49 @@ async def test_context_length_recovery_hard_limit_is_turn_local():
     events = [event async for event in runner.run_turn(FakeSession())]
 
     assert any(isinstance(event, TurnCompletedEvent) for event in events)
-    assert manager._estimator.budget.hard_limit_tokens == 1000
+    assert manager.snapshot_hard_limit() == hard_limit
+    manager.context_window = 1048576
+    assert manager._estimator.budget.resolved_hard_limit_tokens() == (hard_limit or 1048576)
+
+
+@pytest.mark.asyncio
+async def test_goal_schema_and_policy_follow_persisted_status(tmp_path, monkeypatch):
+    from agent.bootstrap.container import build_agent_container
+    from agent.infrastructure.settings import AppSettings
+    from agent.domain.models import ModelStreamEvent
+
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    requests = []
+
+    async def stream(messages, tools, **kwargs):
+        requests.append((messages, tools))
+        yield ModelStreamEvent(kind="completed", stop_reason="stop")
+
+    container = build_agent_container(
+        chat_client=SimpleNamespace(stream=stream), enable_goal=True,
+        settings=AppSettings(tmp_path / "settings.json", False, "fixture", "local", "http://localhost/v1", ""),
+        workspace_root=str(tmp_path),
+    )
+    session = container.session_store
+    try:
+        await session.initialize()
+        await session.persist_message("user", "Ship it")
+        for status in [None, "active", "paused", "blocked", "complete", "active", None]:
+            if status is None:
+                await session.clear_goal()
+            elif status == "active":
+                await session.set_goal("Ship it")
+            else:
+                await session.set_goal_status(status)
+            events = [event async for event in container.turn_runner.run_turn(session, turn_id=f"turn-{len(requests)}")]
+            assert isinstance(events[-1], TurnCompletedEvent)
+            messages, tools = requests[-1]
+            assert any(tool["function"]["name"] == "update_goal" for tool in tools) == (status == "active")
+            assert any("goal execution policy" in str(m.get("content", "")) for m in messages) == (status == "active")
+        assert "update_goal" in [tool["function"]["name"] for tool in container.tool_registry.schemas]
+    finally:
+        await container.shell_tools.close()
+        container.web_sessions.close()
 
 
 def main() -> int:
@@ -1486,7 +1529,8 @@ def main() -> int:
     test_model_boundary_rejects_naked_tool()
     test_model_boundary_rejects_incomplete_tool_call_tail()
     test_model_boundary_accepts_completed_tool_call()
-    asyncio.run(test_context_length_recovery_hard_limit_is_turn_local())
+    asyncio.run(test_context_length_recovery_hard_limit_is_turn_local(None))
+    asyncio.run(test_context_length_recovery_hard_limit_is_turn_local(1000))
     print("Async runtime tests passed.")
     return 0
 

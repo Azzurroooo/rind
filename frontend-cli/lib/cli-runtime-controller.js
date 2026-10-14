@@ -1,4 +1,7 @@
-import { commandResultText, contextBoardText, goalCommandText, modelListErrorText, sessionSwitchedText, usageBoardText } from "./rendering.js";
+import { commandResultText, contextBoardText, goalCommandText, historyTruncatedText, modelListErrorText, sessionSwitchedText, usageBoardText } from "./rendering.js";
+
+// A conversation opens on its newest messages; /history loads the previous page.
+const HISTORY_WINDOW = 200;
 
 export function createCliRuntimeController({
   client,
@@ -20,6 +23,7 @@ export function createCliRuntimeController({
   askContextBoard = null,
   restoreLiveTurn,
   renderHistory = () => {},
+  getPendingDelegations = async () => null,
   clearTranscript = () => {},
   onSessionRestored = () => {},
   openManagedSession = null,
@@ -85,6 +89,27 @@ export function createCliRuntimeController({
     await onSessionRestored();
   }
   const hasConversation = () => Boolean(state.session.info.session_id);
+
+  function sessionDeleted(sessionId) {
+    if (state.session.info.session_id !== sessionId) return;
+    ++switchGeneration;
+    state.session.reservedId = "";
+    state.session.pendingName = "";
+    state.session.pendingSkillSources = null;
+    Object.assign(state.session.info, { session_id: "", name: null, title: "", goal: null, usage: null, team_main: null, message_count: 0 });
+    state.display.history = null;
+    state.display.backgroundWait = null;
+    state.display.stats = {};
+    state.display.lastTurnId = "";
+    state.display.activeCompact = false;
+    state.display.activityLabel = "";
+    state.turn.id = "";
+    state.turn.active = false;
+    state.turn.interruptRequested = false;
+    state.display.pendingDelegations?.clear();
+    clearPendingInputs();
+    clearTranscript();
+  }
 
   // /rename: the conversation's own command once it exists. Before the first
   // message the window keeps the name and creates the conversation with it.
@@ -183,24 +208,35 @@ export function createCliRuntimeController({
       throw new Error("Session ID is required.");
     }
     const switching = options.switchSession === true;
-    const switchToken = switching ? ++switchGeneration : 0;
+    const switchToken = switching ? ++switchGeneration : switchGeneration;
     const update = switching
       ? await request(methods.sessionSwitch, { session_id: targetId })
       : state.session.info;
-    if (switching && (switchToken !== switchGeneration || state.runtime.status === "closing")) {
+    if (switchToken !== switchGeneration || state.runtime.status === "closing") {
       return false;
     }
     const switchedId = String(update?.session_id || targetId);
     if (switchedId !== targetId) {
       throw new Error("Runtime returned a different session.");
     }
-    const replay = await request(methods.sessionReplay, { session_id: switchedId });
-    if (switching && (switchToken !== switchGeneration || state.runtime.status === "closing")) {
+    // Read management first: never add another round trip after the runtime's
+    // replay snapshot while live events continue arriving.
+    const delegationSequence = state.display.lastEventSequence;
+    let pendingDelegations = await getPendingDelegations(switchedId).catch(() => null);
+    if (switchToken !== switchGeneration || state.runtime.status === "closing") return false;
+    const replay = await request(methods.sessionReplay, { session_id: switchedId, tail: HISTORY_WINDOW });
+    if (switchToken !== switchGeneration || state.runtime.status === "closing"
+        || (!switching && state.session.info.session_id !== switchedId)) {
       return false;
     }
     if (replay?.session_id && String(replay.session_id) !== switchedId) {
       throw new Error("Runtime replay returned a different session.");
     }
+    const messages = Array.isArray(replay?.messages) ? replay.messages : [];
+    if (state.display.lastEventSequence !== delegationSequence) pendingDelegations = null;
+    const messageTotal = Number.isInteger(replay?.message_total) ? replay.message_total : messages.length;
+    const historyStart = Math.max(0, messageTotal - messages.length);
+    state.display.history = { sessionId: switchedId, start: historyStart, total: messageTotal };
 
     const liveTurn = replay?.live_turn || update?.live_turn || null;
     const turnState = replay?.turn_state || update?.turn_state || null;
@@ -230,7 +266,7 @@ export function createCliRuntimeController({
     state.turn.interruptRequested = false;
     state.display.backgroundWait = replay?.background_wait || null;
     options.announce?.(state.session.info);
-    renderHistory(replay?.messages);
+    renderHistory(messages, { notice: historyStart > 0 ? historyTruncatedText(historyStart) : "", pendingDelegations });
     restoreLiveTurn(liveTurn);
     for (const task of replay?.tasks || []) {
       getTaskMonitor()?.recordTask?.({ type: "task_updated", session_id: switchedId, task });
@@ -279,6 +315,44 @@ export function createCliRuntimeController({
     } catch (error) {
       log(`Session switch failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // The transcript shows the newest part of a long conversation; this loads the
+  // previous page and rebuilds the transcript from the wider range.
+  async function runHistoryLoader() {
+    if (state.turn.active || state.display.activeCompact) {
+      log("Cannot load earlier messages while a turn is running.");
+      return;
+    }
+    const history = state.display.history;
+    if (!history?.start) {
+      if (history) log("The whole conversation is shown.");
+      else needsConversation("/history");
+      return;
+    }
+    const sessionId = state.session.info.session_id;
+    const eventSequence = state.display.lastEventSequence;
+    const lastTurnId = state.display.lastTurnId;
+    const start = Math.max(0, history.start - HISTORY_WINDOW);
+    let replay, pendingDelegations;
+    try {
+      replay = await request(methods.sessionReplay, { session_id: sessionId, start });
+      pendingDelegations = await getPendingDelegations(sessionId).catch(() => null);
+    } catch (error) {
+      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    if (state.runtime.status === "closing" || state.turn.active || state.display.activeCompact
+        || state.session.info.session_id !== sessionId || state.display.history !== history
+        || state.display.lastEventSequence !== eventSequence || state.display.lastTurnId !== lastTurnId) {
+      return;
+    }
+    const messages = Array.isArray(replay?.messages) ? replay.messages : [];
+    const messageTotal = Number.isInteger(replay?.message_total) ? replay.message_total : start + messages.length;
+    state.display.history = { sessionId, start, total: messageTotal };
+    clearTranscript();
+    renderHistory(messages, { notice: start > 0 ? historyTruncatedText(start) : "", pendingDelegations });
+    redraw();
   }
 
   async function runForkSelector() {
@@ -610,6 +684,7 @@ export function createCliRuntimeController({
 
   return {
     request,
+    sessionDeleted,
     ensureRuntime,
     restoreSession,
     runGoalCommand,
@@ -617,6 +692,7 @@ export function createCliRuntimeController({
     refreshGoalState,
     runSessionsSelector,
     runForkSelector,
+    runHistoryLoader,
     runContextBoard,
     printContextReport,
     startCompactCommand,

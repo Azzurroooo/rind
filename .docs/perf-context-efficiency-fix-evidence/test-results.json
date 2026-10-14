@@ -1,0 +1,351 @@
+{
+  "date": "2026-10-13",
+  "branch": "perf/context-efficiency",
+  "code_head": "5ffe2ac0a6991aa9ea7499808bd49109c805d31d",
+  "before_fixes": "cdf5ff8",
+  "main": "42c20485416a8942585ff6423d7b6b3f6dd67e4d",
+  "environment": {
+    "os": "Linux",
+    "python": "3.14.6",
+    "node": "24.21.0",
+    "npm": "11.19.0",
+    "RIND_PYTHON": "<repo>/.venv/bin/python",
+    "PATH_prefix": "<repo>/.venv/bin",
+    "model_requests": "mock / local fake provider"
+  },
+  "upstream_commits": {
+    "codex": "12cca49c81c8aa6a37a5cc4e39964ee3b70f9458",
+    "pi": "7d75a0e3eb273dff753d49c066ea29fbe7b3b6f6",
+    "opencode": "b4a57f6849b9a368439b5fc2511fe167db1a6863"
+  },
+  "commands": [
+    {
+      "command": ".venv/bin/python -m pytest test/ -q --junitxml=/tmp/rind-context-fixes-python.xml",
+      "exit_code": 1,
+      "counts": {
+        "passed": 1480,
+        "failed": 23,
+        "skipped": 1,
+        "subtests_passed": 4
+      },
+      "log": "python.log",
+      "junit": "python.xml"
+    },
+    {
+      "command": "npm --prefix frontend-cli test",
+      "exit_code": 1,
+      "counts": {
+        "tests": 656,
+        "pass": 653,
+        "fail": 3,
+        "skipped": 0
+      },
+      "failures": [
+        "bar segments and legend markers follow the assembly order",
+        "every theme paints the board only with its own palette",
+        "occupancy 33/70/90 percent picks neutral/warn/err theme colors"
+      ],
+      "log": "cli.log"
+    },
+    {
+      "command": "npm --prefix agent-management test",
+      "exit_code": 0,
+      "counts": {
+        "tests": 74,
+        "pass": 74,
+        "fail": 0,
+        "skipped": 0
+      },
+      "failures": [],
+      "log": "management.log"
+    },
+    {
+      "command": "npm --prefix frontend-web test",
+      "exit_code": 0,
+      "counts": {
+        "passed": 386,
+        "failed": 0,
+        "files": 43
+      },
+      "log": "web.log"
+    },
+    {
+      "command": "npm --prefix mobile test",
+      "exit_code": 0,
+      "counts": {
+        "passed": 34,
+        "failed": 0,
+        "files": 4
+      },
+      "log": "mobile.log"
+    },
+    {
+      "command": "npm --prefix desktop test",
+      "exit_code": 0,
+      "counts": {
+        "tests": 234,
+        "pass": 232,
+        "fail": 0,
+        "skipped": 2
+      },
+      "failures": [],
+      "log": "desktop.log"
+    },
+    {
+      "command": "npm --prefix mobile run test:e2e",
+      "exit_code": 0,
+      "log": "mobile-e2e.log"
+    },
+    {
+      "command": "npm --prefix desktop run typecheck",
+      "exit_code": 0,
+      "log": "desktop-typecheck.log"
+    },
+    {
+      "command": "npm --prefix desktop run build",
+      "exit_code": 0,
+      "log": "desktop-build.log"
+    },
+    {
+      "command": "npm --prefix mobile run build",
+      "exit_code": 0,
+      "log": "mobile-build.log"
+    }
+  ],
+  "python_comparison": {
+    "junit_suites": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "23",
+        "skipped": "1",
+        "tests": "1508",
+        "time": "101.349",
+        "timestamp": "2026-10-13T12:55:40.729592+00:00",
+        "hostname": "dhyr430"
+      }
+    ],
+    "before_fixes_failures": [
+      "test.test_bash_shell_detection::test_detect_shell_prefers_rind_bash_path",
+      "test.test_chatgpt_oauth::test_a_signed_in_client_sends_a_fresh_token_and_persists_the_rotated_one",
+      "test.test_gateway_onboarding::test_auto_install_sdk_round_trips_through_yaml",
+      "test.test_gateway_onboarding::test_numeric_sender_ids_survive_the_yaml_round_trip",
+      "test.test_image_requests::test_sdk_serializes_user_and_tool_images[google]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[hunyuan-https://api.hunyuan.cloud.tencent.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[longcat-https://api.longcat.chat/openai/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[tencent-coding-plan-https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[tencent-token-plan-https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[tencent-tokenhub-https://tokenhub.tencentmaas.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[volcengine-coding-plan-https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[volcengine-https://ark.cn-beijing.volces.com/api/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-https://api.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-ams-https://token-plan-ams.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-cn-https://token-plan-cn.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-sgp-https://token-plan-sgp.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_compatible_endpoint_cache_false_overrides_official_catalog",
+      "test.test_provider_auth::test_list_models_falls_back_to_builtin_catalog_without_cache",
+      "test.test_provider_auth::test_list_models_uses_cache_fallback_and_reports_refresh_warning",
+      "test.test_provider_e2e::test_google_login_static_catalog_and_tool_turn_journey",
+      "test.test_provider_e2e::test_provider_login_model_and_tool_turn_journey",
+      "test.test_runtime_server_files::test_path_validation_rejects_escapes",
+      "test.test_session_settings::test_the_session_list_carries_each_conversation_settings"
+    ],
+    "main_failures": [
+      "test.test_bash_shell_detection::test_detect_shell_prefers_rind_bash_path",
+      "test.test_chatgpt_oauth::test_a_signed_in_client_sends_a_fresh_token_and_persists_the_rotated_one",
+      "test.test_gateway_onboarding::test_auto_install_sdk_round_trips_through_yaml",
+      "test.test_gateway_onboarding::test_numeric_sender_ids_survive_the_yaml_round_trip",
+      "test.test_image_requests::test_sdk_serializes_user_and_tool_images[google]",
+      "test.test_journeys_user::test_j9_cli_one_shot_channel",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[hunyuan-https://api.hunyuan.cloud.tencent.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[longcat-https://api.longcat.chat/openai/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[tencent-coding-plan-https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[tencent-token-plan-https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[tencent-tokenhub-https://tokenhub.tencentmaas.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[volcengine-coding-plan-https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[volcengine-https://ark.cn-beijing.volces.com/api/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-https://api.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-ams-https://token-plan-ams.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-cn-https://token-plan-cn.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-sgp-https://token-plan-sgp.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_compatible_endpoint_cache_false_overrides_official_catalog",
+      "test.test_provider_auth::test_list_models_falls_back_to_builtin_catalog_without_cache",
+      "test.test_provider_auth::test_list_models_uses_cache_fallback_and_reports_refresh_warning",
+      "test.test_provider_e2e::test_google_login_static_catalog_and_tool_turn_journey",
+      "test.test_provider_e2e::test_provider_login_model_and_tool_turn_journey",
+      "test.test_runtime_server_files::test_path_validation_rejects_escapes",
+      "test.test_session_settings::test_the_session_list_carries_each_conversation_settings"
+    ],
+    "final_failures": [
+      "test.test_bash_shell_detection::test_detect_shell_prefers_rind_bash_path",
+      "test.test_chatgpt_oauth::test_a_signed_in_client_sends_a_fresh_token_and_persists_the_rotated_one",
+      "test.test_gateway_onboarding::test_auto_install_sdk_round_trips_through_yaml",
+      "test.test_gateway_onboarding::test_numeric_sender_ids_survive_the_yaml_round_trip",
+      "test.test_image_requests::test_sdk_serializes_user_and_tool_images[google]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[hunyuan-https://api.hunyuan.cloud.tencent.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[longcat-https://api.longcat.chat/openai/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[tencent-coding-plan-https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[tencent-token-plan-https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[tencent-tokenhub-https://tokenhub.tencentmaas.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[volcengine-coding-plan-https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[volcengine-https://ark.cn-beijing.volces.com/api/v3/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-https://api.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-ams-https://token-plan-ams.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-cn-https://token-plan-cn.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_added_providers_login_and_send_sdk_requests[xiaomi-token-plan-sgp-https://token-plan-sgp.xiaomimimo.com/v1/chat/completions]",
+      "test.test_provider_auth::test_compatible_endpoint_cache_false_overrides_official_catalog",
+      "test.test_provider_auth::test_list_models_falls_back_to_builtin_catalog_without_cache",
+      "test.test_provider_auth::test_list_models_uses_cache_fallback_and_reports_refresh_warning",
+      "test.test_provider_e2e::test_google_login_static_catalog_and_tool_turn_journey",
+      "test.test_provider_e2e::test_provider_login_model_and_tool_turn_journey",
+      "test.test_runtime_server_files::test_path_validation_rejects_escapes",
+      "test.test_session_settings::test_the_session_list_carries_each_conversation_settings"
+    ],
+    "new_failures_vs_before_fixes": [],
+    "resolved_failures_vs_before_fixes": [],
+    "new_failures_vs_main": [],
+    "counts_note": "JUnit tests includes 4 passed subtests; pytest reports 1504 top-level tests plus these 4 subtests."
+  },
+  "cli_comparison": {
+    "before_fixes": {
+      "counts": {
+        "tests": 656,
+        "pass": 653,
+        "fail": 3,
+        "skipped": 0
+      },
+      "failures": [
+        "bar segments and legend markers follow the assembly order",
+        "every theme paints the board only with its own palette",
+        "occupancy 33/70/90 percent picks neutral/warn/err theme colors"
+      ]
+    },
+    "main": {
+      "counts": {
+        "tests": 655,
+        "pass": 651,
+        "fail": 4,
+        "skipped": 0
+      },
+      "failures": [
+        "bar segments and legend markers follow the assembly order",
+        "every theme paints the board only with its own palette",
+        "occupancy 33/70/90 percent picks neutral/warn/err theme colors",
+        "team page edits members, nests team conversations and drives tasks from the keyboard"
+      ]
+    },
+    "final": {
+      "counts": {
+        "tests": 656,
+        "pass": 653,
+        "fail": 3,
+        "skipped": 0
+      },
+      "failures": [
+        "bar segments and legend markers follow the assembly order",
+        "every theme paints the board only with its own palette",
+        "occupancy 33/70/90 percent picks neutral/warn/err theme colors"
+      ]
+    },
+    "new_failures_vs_before_fixes": [],
+    "note": "The main-only agents-page worker connection failure is not claimed as a repair by this change."
+  },
+  "focused_verification": [
+    {
+      "passed": 163,
+      "log": "tools.log",
+      "scope": "tool output, processor, attachments, persistence, paging"
+    },
+    {
+      "passed": 142,
+      "log": "replay.log",
+      "scope": "replay, processor, protocol, paging, compact lifecycle, architecture"
+    }
+  ],
+  "logs": {
+    "cli.log": {
+      "bytes": 55857,
+      "sha256": "aefbee4712b8e3abd99772490ad737bd8ebce8cd1de05f5dd6ce1e08f35cd41f",
+      "source_bytes": 55861,
+      "source_sha256": "a0ac4c06aa8e20958c668f87707a1be47611f1fee221f7e3ecae2e851050bb95"
+    },
+    "desktop-build.log": {
+      "bytes": 3312,
+      "sha256": "b6f32279fe5a3ac12c8a6ef2e83faebfd126b008c3d1c72f543cb22ebe13587e",
+      "source_bytes": 3312,
+      "source_sha256": "b6f32279fe5a3ac12c8a6ef2e83faebfd126b008c3d1c72f543cb22ebe13587e"
+    },
+    "desktop-typecheck.log": {
+      "bytes": 47,
+      "sha256": "a338c2828b4d72b82c383a9553a7c6a379513a3ee85bc68c534b1adfb8b77466",
+      "source_bytes": 48,
+      "source_sha256": "680fd7e684ee4362d0d204002bca706a2990179c699e0ad479c4b4081dd73f4f"
+    },
+    "desktop.log": {
+      "bytes": 18218,
+      "sha256": "a2fdf918a3733eb8061150d49a0f65e8cdf983f75d75e3fa3d8772f9aa8abfbd",
+      "source_bytes": 18218,
+      "source_sha256": "a2fdf918a3733eb8061150d49a0f65e8cdf983f75d75e3fa3d8772f9aa8abfbd"
+    },
+    "management.log": {
+      "bytes": 7457,
+      "sha256": "6338aa24727ba1b4693560307eeb9c90a201054d70d2ac7cdec242051cf78e72",
+      "source_bytes": 7457,
+      "source_sha256": "6338aa24727ba1b4693560307eeb9c90a201054d70d2ac7cdec242051cf78e72"
+    },
+    "mobile-build.log": {
+      "bytes": 2412,
+      "sha256": "737a12edf40c1c584df5bd9f70eb58b3f276830097a8054a872f84422c77543f",
+      "source_bytes": 2412,
+      "source_sha256": "737a12edf40c1c584df5bd9f70eb58b3f276830097a8054a872f84422c77543f"
+    },
+    "mobile-e2e.log": {
+      "bytes": 256,
+      "sha256": "c3c1472ac99c6834f5cf365d0c6e75d86f27edd8a9f796073817042dc8351013",
+      "source_bytes": 256,
+      "source_sha256": "c3c1472ac99c6834f5cf365d0c6e75d86f27edd8a9f796073817042dc8351013"
+    },
+    "mobile.log": {
+      "bytes": 253,
+      "sha256": "289deee6f0b1ffbfee8d46b7a0b81e69d84e2c35e4409f024148286475926127",
+      "source_bytes": 254,
+      "source_sha256": "76d2c426a5d3c15bb95ef94b926bb4bb1b916260eb01ba0b73d7896428e40e18"
+    },
+    "python.log": {
+      "bytes": 94567,
+      "sha256": "1062bf775b4508cc29b26af5e3f1294dd2d380cf94b0aa7f026feeb9bbe48082",
+      "source_bytes": 94854,
+      "source_sha256": "3fad48806e8c5fa1d732b65df234a8fa714560448b533a9331530bb048d5ea22"
+    },
+    "python.xml": {
+      "bytes": 469804,
+      "sha256": "4d857cd2983eb59ec158071ccb3ee04f6265f32d349e063b111c10930d780c0a",
+      "source_bytes": 470090,
+      "source_sha256": "a0e86a03a9d3d2c6df3ba56bc25e4bb9b152ad5d6e97b8cb66472b6d8ec98437"
+    },
+    "replay.log": {
+      "bytes": 180,
+      "sha256": "5594c6eeeb1efa830b7614c582b6a5e1eea425598f5f3d1ff14549cf253c7b7d",
+      "source_bytes": 180,
+      "source_sha256": "5594c6eeeb1efa830b7614c582b6a5e1eea425598f5f3d1ff14549cf253c7b7d"
+    },
+    "tools.log": {
+      "bytes": 260,
+      "sha256": "2d03bf090be78838b971dcb0ba11b58246ec1f0dcbb15040b680dbe03bd790a6",
+      "source_bytes": 260,
+      "source_sha256": "2d03bf090be78838b971dcb0ba11b58246ec1f0dcbb15040b680dbe03bd790a6"
+    },
+    "web.log": {
+      "bytes": 262,
+      "sha256": "2586c7e5306795cda7b5f9cb8c185ff7e79aef292192ce0067cd0a0bbfc8fc16",
+      "source_bytes": 263,
+      "source_sha256": "62c3b424933b00fa5646c319af2d3eef704891ea99feb191003e4c700030f12e"
+    }
+  },
+  "limits": [
+    "No real paid model benchmark rerun.",
+    "Linux only; no native iOS/Android or frozen runtime package acceptance.",
+    "Windows firewall tests skipped on Linux."
+  ],
+  "archive_text_normalization": "LF line endings, trailing whitespace and empty EOF lines removed; source logs under /tmp are unchanged. Counts and failure identities are unchanged."
+}

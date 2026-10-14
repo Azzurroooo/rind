@@ -1,0 +1,890 @@
+
+> test
+> node scripts/run-tests.mjs
+
+(node:887165) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ one owned clock handles work and waiting, then stops without stale callbacks [90m(11.803316ms)[39m[39m
+[32m✔ non-TTY turns never start a rendering clock [90m(0.510532ms)[39m[39m
+[32m✔ tool elapsed time excludes the idle time before it starts [90m(1.692438ms)[39m[39m
+(node:887186) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ a running conversation offers join, its task report and stopping the task [90m(5.521404ms)[39m[39m
+(node:887195) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ a fixed menu of up to nine picks by number and letter; more than nine shows no numbers at all [90m(2.938111ms)[39m[39m
+[32m✔ a searchable list filters by what is typed, digits included, and keeps headers over their matches [90m(2.523144ms)[39m[39m
+[32m✔ navigation skips headers, one step wraps and a page stops at the end [90m(0.415197ms)[39m[39m
+[32m✔ Esc clears the filter first and closes the second time; the selection survives a filter that still shows it [90m(0.518594ms)[39m[39m
+[32m✔ the dialog shows the filter, the position and the right hints [90m(20.74092ms)[39m[39m
+(node:887211) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:887216) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ rind agents commands work in a fresh home and read relative folders from where they run [90m(1459.867691ms)[39m[39m
+[32m✔ rind agents stop also stops a shared Runtime that only plain conversations started [90m(292.522812ms)[39m[39m
+(node:887225) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ a window covered by Agents stops making its conversation Open [90m(2307.262331ms)[39m[39m
+[32m✔ windows never stack: Esc goes back to the conversation just left, and ctrl+c only leaves [90m(1643.334296ms)[39m[39m
+[32m✔ Esc from Agents returns to this window's own conversation without reopening it [90m(1524.747959ms)[39m[39m
+[32m✔ a window before its first message is listed nowhere; the message creates its conversation [90m(1621.268459ms)[39m[39m
+[32m✔ going back to a window left before its first message starts a new conversation there [90m(1360.724305ms)[39m[39m
+[32m✔ a conversation renamed anywhere is shown by its name everywhere [90m(1384.577897ms)[39m[39m
+[32m✔ Tab completes the shared prefix, then lists choices, and Enter takes the highlighted folder [90m(146.569869ms)[39m[39m
+[32m✔ a field that does not resolve to a folder cannot be left, and Esc first hides suggestions [90m(146.839878ms)[39m[39m
+(node:887242) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ submitting resolves relative paths, derives defaults and checks Git repositories [90m(176.618206ms)[39m[39m
+[32m✔ Escape or a newer edit cancels an Enter that is still waiting for its check [90m(143.141321ms)[39m[39m
+[32m✔ every footer hint is a key that runs exactly that action [90m(9.968911ms)[39m[39m
+[32m✔ keys a row does not offer do nothing [90m(0.971279ms)[39m[39m
+[32m✔ labels say what happens to the selected row [90m(0.629569ms)[39m[39m
+[32m✔ help is built from the same table and never mentions direct reports [90m(0.967753ms)[39m[39m
+[32m✔ fold is offered only where something can fold [90m(0.856715ms)[39m[39m
+(node:887249) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ resuming a plain conversation from another folder opens it in the folder it was saved in [90m(46.167021ms)[39m[39m
+(node:887259) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ a handoff without a decision means return, and only valid decisions are accepted [90m(16.570651ms)[39m[39m
+[32m✔ moving between conversations replaces the window instead of nesting it [90m(1.62567ms)[39m[39m
+[32m✔ a conversation window starts on a clear screen, so the one it replaces leaves nothing behind [90m(26.039567ms)[39m[39m
+[32m✔ a conversation window's decision reaches the window that opened it [90m(202.278827ms)[39m[39m
+[32m✔ Esc goes back to the conversation just left, never further [90m(0.83925ms)[39m[39m
+[32m✔ a conversation window hands Agents navigation back to the window that opened it [90m(2165.134097ms)[39m[39m
+[32m✔ ctrl+c clears typing, then needs a second press to leave every window [90m(1943.929524ms)[39m[39m
+[32m✔ ctrl+c in a conversation window only ever leaves, even while a turn is being interrupted [90m(2025.818236ms)[39m[39m
+[32m✔ without a terminal a single ctrl+c leaves, since no hint could be seen [90m(16310.697336ms)[39m[39m
+[32m✔ a top-level window leaves on the second ctrl+c [90m(1627.238517ms)[39m[39m
+[32m✔ the Agents page follows conversation moves and leaving closes it for its opener [90m(224.870616ms)[39m[39m
+(node:887276) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ a plain window's turn is visible to management while it runs, and its presence after [90m(2857.965103ms)[39m[39m
+[32m✔ the member menu sets a model and an effort for the member's next task [90m(6.095757ms)[39m[39m
+[32m✔ an own model or effort can be cleared back to the default [90m(0.944793ms)[39m[39m
+[32m✔ the Manager's changes wait in the Inbox, apart from what needs the user [90m(7.040061ms)[39m[39m
+[32m✔ a selected conversation says what it runs on and warns when its connection cannot run [90m(3.825879ms)[39m[39m
+[32m✔ a member or folder says what new conversations there start with, always the value in effect [90m(2.375415ms)[39m[39m
+(node:887287) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ team sessions merge titles with live status and drop independent or foreign conversations [90m(5.724357ms)[39m[39m
+[32m✔ organization nests sessions under their member with tree guides [90m(2.859937ms)[39m[39m
+[32m✔ collapsed branches surface the most urgent hidden status and a hidden count [90m(1.858165ms)[39m[39m
+[32m✔ search and status filters keep ancestors and ignore collapse [90m(1.460936ms)[39m[39m
+[32m✔ sessions beyond the inline limit become a single overflow row [90m(0.959978ms)[39m[39m
+[32m✔ tasks are grouped into sections a human acts on first [90m(1.393169ms)[39m[39m
+[32m✔ inbox and sidebar only count team-scoped attention [90m(5.692503ms)[39m[39m
+[32m✔ a running task that asks a question reaches the inbox once [90m(1.087346ms)[39m[39m
+[32m✔ member pages list every team conversation with new conversation first [90m(0.859638ms)[39m[39m
+[32m✔ independent folders take live state from the Runtime, include plain sessions, and fold extra conversations [90m(30.657277ms)[39m[39m
+[32m✔ relative time is compact and never negative [90m(0.334202ms)[39m[39m
+[32m✔ background lists every running conversation, services and one stop action [90m(2.316421ms)[39m[39m
+[32m✔ the inbox shows recent deliveries instead of repeating the team list [90m(1.421538ms)[39m[39m
+[32m✔ a conversation running a job reads Running job everywhere, and delegated work reads Delegated [90m(1.284386ms)[39m[39m
+[32m✔ lists show a conversation's new name before history is read again [90m(0.503486ms)[39m[39m
+[32m✔ folders whose conversations have no recorded activity still sort [90m(4.561242ms)[39m[39m
+(node:887293) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ manager keeps its dedicated workspace and rejects mixed session scopes [90m(5.428706ms)[39m[39m
+(node:887305) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ real CLI empty-prompt entry returns to an editable conversation repeatedly [90m(2226.099723ms)[39m[39m
+[32m✔ team page edits members, nests team conversations and drives tasks from the keyboard [90m(2099.821119ms)[39m[39m
+[32m✔ a new team flows straight into adding its first member, who becomes the leader [90m(1471.380678ms)[39m[39m
+[32m✔ refreshing says so even when nothing changed, and a duplicate team name is refused in the form [90m(1382.632925ms)[39m[39m
+[32m✔ a panel draws title, context, state, callout and facts in that order, one blank line apart [90m(9.853357ms)[39m[39m
+[32m✔ a long value keeps to its lines and a narrow panel puts labels above values [90m(2.503224ms)[39m[39m
+[32m✔ a short panel drops whole facts from the end instead of cutting one [90m(3.932818ms)[39m[39m
+[32m✔ every kind of row draws inside the panel at 28 and 46 columns [90m(14.588495ms)[39m[39m
+(node:887362) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ the Inbox puts Manager approvals first and marks deliveries not reviewed yet [90m(9.89493ms)[39m[39m
+[32m✔ deleted teams appear under Archive, read-only [90m(1.571636ms)[39m[39m
+[32m✔ a report aligns its blocks, says what needs deciding and folds its history [90m(13.858907ms)[39m[39m
+[32m✔ report keys accept a delivery or send it back with feedback [90m(5.399377ms)[39m[39m
+[32m✔ Stop all names jobs that will stop, and a running job is explained in words [90m(12.594976ms)[39m[39m
+[32m✔ a long brief reads in full under Task, folds past six lines, and titles the page with its first line [90m(5.351391ms)[39m[39m
+(node:887375) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:887384) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ a team is deleted from the sidebar by typing its name, and its work stays readable in Archive [90m(2312.987939ms)[39m[39m
+[32m✔ the Manager's request to delete a team waits in the Inbox until the user decides [90m(1397.723721ms)[39m[39m
+(node:887391) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ organization keeps the selection, its status and contextual keys visible at every size [90m(168.679888ms)[39m[39m
+[32m✔ sessions render beneath their member and collapsed branches show the hidden count [90m(52.153091ms)[39m[39m
+[32m✔ tasks show sections and a delivery hint [90m(18.647098ms)[39m[39m
+[32m✔ form keeps one cursor in the active field and wraps CJK input [90m(47.898648ms)[39m[39m
+[32m✔ long choice lists keep the selected item visible and untrusted text cannot emit control sequences [90m(26.560932ms)[39m[39m
+[32m✔ help lists every shortcut group and the footer never cuts a hint in half [90m(36.716914ms)[39m[39m
+[32m✔ offline state and tiny terminals stay bounded [90m(17.364595ms)[39m[39m
+[32m✔ colored rows with long roles keep every line exactly the terminal width [90m(95.059041ms)[39m[39m
+[32m✔ short paths replace only a whole home directory [90m(1.51294ms)[39m[39m
+[32m✔ rows with the return arrow and pictographic titles keep the pane divider in one column [90m(101.249858ms)[39m[39m
+[32m✔ secret login renders a full box with a masked value and caret on it [90m(48.20213ms)[39m[39m
+[32m✔ provider choice renders a full box with the selected provider highlighted [90m(29.16623ms)[39m[39m
+(node:887405) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:887424) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ interactive CLI journey: empty startup, login, send, chat, logout [90m(5434.067206ms)[39m[39m
+[32m✔ one-shot run works against a configured endpoint [90m(1763.8176ms)[39m[39m
+▶ session lifecycle: run, send, empty sessions, compact and resume
+  [32m✔ 1. run without session creates exactly one durable session [90m(1826.226012ms)[39m[39m
+  [32m✔ 2. run resumes a closed session with history [90m(1744.123432ms)[39m[39m
+  [32m✔ 3. a window closed before its first message leaves nothing behind [90m(1883.486254ms)[39m[39m
+  [32m✔ 7a. send rejects a conversation that does not exist [90m(174.105588ms)[39m[39m
+  [32m✔ 8. compact before the first message needs a conversation, without model calls or files [90m(102.141504ms)[39m[39m
+  [32m✔ 5. the first message typed in a window creates its conversation [90m(404.089652ms)[39m[39m
+  [32m✔ 6. send continues a live session with history [90m(565.011976ms)[39m[39m
+  [32m✔ 7b. send rejects a closed session with history without modifying it [90m(193.562531ms)[39m[39m
+  [32m✔ resume-latest skips an empty session opened and closed later [90m(3955.738864ms)[39m[39m
+  [32m✔ run rejects unknown ids and workspace conflicts without touching history [90m(971.006094ms)[39m[39m
+  [32m✔ run opens a closed empty session already persisted by an older version [90m(1798.201205ms)[39m[39m
+  [32m✔ invalid input and unsafe ids do not create sessions or call the model [90m(684.200501ms)[39m[39m
+  [32m✔ corrupt and incomplete sessions are rejected without being recreated [90m(2058.566266ms)[39m[39m
+[32m✔ session lifecycle: run, send, empty sessions, compact and resume [90m(20463.976243ms)[39m[39m
+[32m✔ choice menu defaults to the requested value [90m(2.224042ms)[39m[39m
+[32m✔ choice menu defaults to the first option without a requested value [90m(0.306031ms)[39m[39m
+[32m✔ choice menu moves with arrow and vim keys and wraps around [90m(2.66395ms)[39m[39m
+[32m✔ choice menu ignores unrelated keys [90m(0.31069ms)[39m[39m
+[32m✔ choice menu stores only string options [90m(1.899871ms)[39m[39m
+[32m✔ question menu enters and leaves custom editing without moving the selection [90m(0.79917ms)[39m[39m
+(node:887436) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ manual compact keeps Enter and Tab input editable without premature echo [90m(10.201487ms)[39m[39m
+[32m✔ empty prompt left arrow opens agents management without dispatching text [90m(7.673477ms)[39m[39m
+[32m✔ question arrows leave custom editing and discard its draft [90m(4.217811ms)[39m[39m
+[32m✔ a question answered in another window closes here without answering twice [90m(3.432679ms)[39m[39m
+[32m✔ prompt input restores persisted history and saves natural prompts only [90m(3.320811ms)[39m[39m
+[32m✔ alt+right promotes a queued follow-up to steering [90m(2.21167ms)[39m[39m
+[32m✔ the Runtime closes a sign-in prompt it no longer waits for, and only that prompt [90m(1.222163ms)[39m[39m
+(node:887449) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ clearing the transcript drops every block, and the next one starts at the top [90m(9.777982ms)[39m[39m
+(node:887463) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ managed history opens separately and leaves the current conversation intact [90m(15.935272ms)[39m[39m
+[32m✔ managed forks open separately with editable input and preserve the source session [90m(1.949661ms)[39m[39m
+[32m✔ runtime controller shares initialization and injects session and turn IDs [90m(0.881256ms)[39m[39m
+[32m✔ goal control does not submit a duplicate prompt [90m(10.237539ms)[39m[39m
+[32m✔ compact response cannot clear an ongoing queued turn or launch duplicate compact [90m(28.327724ms)[39m[39m
+[32m✔ session restore retains Team identity and switching replaces or clears it [90m(1.953789ms)[39m[39m
+[32m✔ initialization supplies Team identity and workspace before the startup banner [90m(5.844571ms)[39m[39m
+[32m✔ session selector requests the full list and updates the active workspace [90m(2.770885ms)[39m[39m
+[32m✔ session restore replays the current session without switching [90m(5.783889ms)[39m[39m
+[32m✔ session restore waits for all monitor pages before returning [90m(13.442112ms)[39m[39m
+[32m✔ session replay restores authoritative waiting state and clears it on switch [90m(1.135146ms)[39m[39m
+[32m✔ session selector refuses to switch during an active turn [90m(0.36575ms)[39m[39m
+[32m✔ session selector keeps the current state when replay fails [90m(0.627504ms)[39m[39m
+[32m✔ session selector ignores an older concurrent switch response [90m(5.26206ms)[39m[39m
+[32m✔ fork selector forks at the current end and switches without prefill [90m(4.911188ms)[39m[39m
+[32m✔ fork selector truncates before the chosen message and prefills its text [90m(1.020769ms)[39m[39m
+[32m✔ fork selector refuses during an active turn [90m(8.469367ms)[39m[39m
+[32m✔ fork selector refuses delegated and empty sessions [90m(0.608623ms)[39m[39m
+[32m✔ fork selector cancel leaves state untouched [90m(0.461295ms)[39m[39m
+(node:887476) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ fork selector reports fork failures without switching [90m(0.589031ms)[39m[39m
+[32m✔ fork selector keeps the fork reachable when switching fails [90m(0.522965ms)[39m[39m
+[32m✔ session restore notifies once with the restored session id [90m(8.019702ms)[39m[39m
+[32m✔ a name chosen before the first message goes with the conversation it creates [90m(1.506093ms)[39m[39m
+[32m✔ commands sent before the first message carry what the window has chosen [90m(10.102683ms)[39m[39m
+[32m✔ model and effort results say when the change applies [90m(0.510357ms)[39m[39m
+[32m✔ switching sessions replaces the conversation on screen; the first restore keeps the startup banner [90m(0.440783ms)[39m[39m
+[32m✔ command controller separates text, goal, and slash commands [90m(17.338344ms)[39m[39m
+[32m✔ command normalization keeps aliases and ignores invalid names [90m(2.688865ms)[39m[39m
+[32m✔ slash result can prefill input and start a follow-up turn [90m(0.887078ms)[39m[39m
+[32m✔ slash result ignores malformed next prompts [90m(0.440636ms)[39m[39m
+[32m✔ exit remains a Surface-local command [90m(3.253984ms)[39m[39m
+[32m✔ bare /fork routes to the fork selector on a terminal [90m(0.972205ms)[39m[39m
+[32m✔ bare /fork without a terminal explains the requirement [90m(0.439318ms)[39m[39m
+[32m✔ local slash results do not call Runtime [90m(0.463333ms)[39m[39m
+[32m✔ local command catalog stays complete before the runtime starts [90m(1.926641ms)[39m[39m
+[32m✔ /tour routes to the tour runner with its page argument [90m(1.468938ms)[39m[39m
+[32m✔ /tour without a terminal explains the requirement [90m(0.552218ms)[39m[39m
+[32m✔ /rename goes to the conversation, with the name taken as typed [90m(2.353522ms)[39m[39m
+(node:887501) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ compact context state resets after automatic compact handoff context [90m(2.129697ms)[39m[39m
+[32m✔ compact context state clears pending reset on turn settlement [90m(3.480368ms)[39m[39m
+(node:887518) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:887536) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ CLI compact accepts rind send, resumes work and accepts the next turn [90m(3033.693735ms)[39m[39m
+[32m✔ composer keeps pending input between activity and session details [90m(8.368207ms)[39m[39m
+[32m✔ composer splits an accent-styled input marker line [90m(0.928724ms)[39m[39m
+[32m✔ composer places an inline menu cursor on the custom answer row [90m(1.190099ms)[39m[39m
+[32m✔ composer keeps the question visible while the custom answer is edited [90m(3.498172ms)[39m[39m
+[32m✔ cursor markers never split a grapheme cluster [90m(0.867734ms)[39m[39m
+[32m✔ composer wraps long ascii input and tracks cursor position [90m(0.786307ms)[39m[39m
+[32m✔ composer wraps wide input without splitting characters [90m(0.923471ms)[39m[39m
+[32m✔ composer aligns emoji continuation rows and cursor cells [90m(0.54953ms)[39m[39m
+[32m✔ composer keeps cursor stable at the terminal boundary [90m(0.595549ms)[39m[39m
+[32m✔ composer places menu after wrapped input rows [90m(0.813799ms)[39m[39m
+[32m✔ composer uses placeholder text without moving the empty input cursor [90m(3.170837ms)[39m[39m
+[32m✔ composer wraps styled placeholders without counting ANSI sequences [90m(0.760131ms)[39m[39m
+[32m✔ composer keeps the cursor outside styled placeholder sequences [90m(0.591405ms)[39m[39m
+[32m✔ composer keeps the custom answer cursor before its styled placeholder [90m(0.694881ms)[39m[39m
+[32m✔ composer preserves a style that follows an SGR reset [90m(0.943255ms)[39m[39m
+[32m✔ composer keeps a cursor before an early-wrapped wide character [90m(1.309871ms)[39m[39m
+[32m✔ composer adds a cursor row when input fills the last column [90m(0.333384ms)[39m[39m
+[32m✔ composer renders explicit newlines and positions the cursor [90m(0.300029ms)[39m[39m
+[32m✔ composer indents empty logical input lines [90m(0.351423ms)[39m[39m
+[32m✔ composer counts wrapped rows before a multiline cursor [90m(0.380763ms)[39m[39m
+(node:887546) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ config needs an explicit folder; there is no global scope [90m(9.798909ms)[39m[39m
+[32m✔ a model id is matched to its connection, and an ambiguous one asks for --connection [90m(8.069975ms)[39m[39m
+[32m✔ the answer says what new conversations start with and where each part comes from [90m(0.863922ms)[39m[39m
+(node:887558) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ input stops reading before it leaves raw mode, so no line read is left pending [90m(4.428685ms)[39m[39m
+[32m✔ input reads again only once it is raw [90m(0.838842ms)[39m[39m
+[32m✔ a stream without a console handle only changes mode [90m(0.491714ms)[39m[39m
+(node:887577) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:887584) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ context board page 1 renders the legend and detail rows in assembly order [90m(18.673725ms)[39m[39m
+[32m✔ context board exposes tool specifications in both legend and detail rows [90m(3.43413ms)[39m[39m
+[31m✖ bar segments and legend markers follow the assembly order [90m(5.300588ms)[39m[39m
+[32m✔ usage board page 2 renders the locked layout [90m(5.843821ms)[39m[39m
+[32m✔ stacked bar and day columns stretch between 60 and 100 columns without misaligned rows [90m(28.294669ms)[39m[39m
+[32m✔ CJK and emoji section labels stay aligned with plain ones [90m(2.275966ms)[39m[39m
+[31m✖ occupancy 33/70/90 percent picks neutral/warn/err theme colors [90m(3.077883ms)[39m[39m
+[32m✔ board render functions contain no hardcoded colors [90m(2.07785ms)[39m[39m
+[32m✔ board keys switch pages and Esc exits with zero residual state [90m(4.078654ms)[39m[39m
+[32m✔ empty sampling state shows the exact guidance copy [90m(2.045963ms)[39m[39m
+[32m✔ non-TTY /context prints both pages as plain frame-less text [90m(3.826269ms)[39m[39m
+[32m✔ /context routes to the board on a TTY and to the report otherwise [90m(5.314189ms)[39m[39m
+[32m✔ /context with a custom range explains the fallback and still opens the board [90m(0.661652ms)[39m[39m
+[31m✖ every theme paints the board only with its own palette [90m(5.380165ms)[39m[39m
+[32m✔ board renders full screen on a real TUI, Tab flips pages, Esc returns to the composer [90m(163.504675ms)[39m[39m
+[32m✔ background waits replace only the pending turn's completion line [90m(5.099155ms)[39m[39m
+[32m✔ image notices use normal output without changing the input buffer [90m(1.671269ms)[39m[39m
+[32m✔ event controller forwards assistant deltas and every announce event to the output layer [90m(0.80655ms)[39m[39m
+[32m✔ event controller emits tool result and resets turn state [90m(0.769786ms)[39m[39m
+[32m✔ event controller delivers queued input and clears pending input on terminal events [90m(0.943403ms)[39m[39m
+[32m✔ event controller ignores legacy goal continuation events [90m(0.593183ms)[39m[39m
+▶ retry status clears when output resumes without requiring assistant text
+  [32m✔ assistant_delta [90m(0.646852ms)[39m[39m
+  [32m✔ assistant_message_completed [90m(0.412708ms)[39m[39m
+  [32m✔ tool_input_started [90m(0.437479ms)[39m[39m
+  [32m✔ tool_input_delta [90m(0.674336ms)[39m[39m
+  [32m✔ tool_requested [90m(0.321714ms)[39m[39m
+  [32m✔ tool_call_started [90m(0.218324ms)[39m[39m
+[32m✔ retry status clears when output resumes without requiring assistant text [90m(7.101384ms)[39m[39m
+[32m✔ background activity does not clear retry status; tool recovery stays working through the next step [90m(1.78373ms)[39m[39m
+[32m✔ image notices deduplicate by session, model, severity and newly seen images [90m(1.031673ms)[39m[39m
+[32m✔ a settings change follows in every window showing the conversation [90m(1.486968ms)[39m[39m
+(node:887617) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ /model asks once whether new conversations in this folder start with the same model [90m(9.567932ms)[39m[39m
+[32m✔ declining keeps the change to this conversation [90m(1.327974ms)[39m[39m
+[32m✔ /effort asks about the effort only [90m(4.94165ms)[39m[39m
+[32m✔ nothing is asked when the folder already has that default, or without a terminal UI [90m(2.130189ms)[39m[39m
+[32m✔ before the first message the choice is kept for the conversation and still offered for the folder [90m(3.065723ms)[39m[39m
+(node:887631) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ input controller starts and closes terminal input through one boundary [90m(2.03367ms)[39m[39m
+[32m✔ input controller pauses, resumes, and submits prompt text [90m(7.401544ms)[39m[39m
+[32m✔ input controller passes the live prompt callback to the input boundary [90m(0.709484ms)[39m[39m
+(node:887635) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ isInputClosed accepts readline close errors [90m(1.826295ms)[39m[39m
+(node:887643) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ sigintAction interrupts active turn first and forces shutdown on repeat [90m(3.114889ms)[39m[39m
+[32m✔ an idle Ctrl+C arms leaving and only a second press leaves [90m(0.532372ms)[39m[39m
+[32m✔ sigintAction forces shutdown while runtime is already closing [90m(0.296385ms)[39m[39m
+[32m✔ the leave latch expires on its own and can be cancelled [90m(2.042764ms)[39m[39m
+(node:887645) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:887686) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ ipcEndpointName is unique per session and rejects unsafe ids [90m(15.93627ms)[39m[39m
+[32m✔ listenIpc delivers input and acknowledges with the session id [90m(32.606396ms)[39m[39m
+[32m✔ sendIpc reports a precise error when the session is not running [90m(2.60276ms)[39m[39m
+[32m✔ second listener for the same session reports the endpoint as unavailable [90m(8.545496ms)[39m[39m
+[32m✔ stale unix socket is removed before listening [90m(7.822692ms)[39m[39m
+[32m✔ dispatchExternal mirrors the typed submit order [90m(4.933495ms)[39m[39m
+[32m✔ parseSendArgs validates prompt and session [90m(1.264855ms)[39m[39m
+(node:887706) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ line editor inserts text at cursor [90m(11.414027ms)[39m[39m
+[32m✔ line editor supports backspace delete home and end [90m(0.74553ms)[39m[39m
+[32m✔ line editor keeps cursor inside bounds [90m(3.010811ms)[39m[39m
+[32m✔ line editor moves across CJK text by grapheme [90m(2.135247ms)[39m[39m
+[32m✔ line editor treats keycap emoji as one cursor cell unit [90m(6.039128ms)[39m[39m
+[32m✔ line editor moves across emoji and CJK text by grapheme [90m(1.212218ms)[39m[39m
+[32m✔ line editor keeps the cursor valid while a grapheme arrives in chunks [90m(0.687542ms)[39m[39m
+[32m✔ line editor supports multiline insertion and submit semantics [90m(0.669035ms)[39m[39m
+[32m✔ line editor restores draft while navigating history [90m(1.905907ms)[39m[39m
+[32m✔ line editor can undo history navigation back to the draft [90m(0.875643ms)[39m[39m
+[32m✔ line editor preserves the preferred column across short lines [90m(6.68353ms)[39m[39m
+[32m✔ line editor preserves terminal cell columns across wide lines [90m(3.560338ms)[39m[39m
+[32m✔ line editor navigates soft-wrapped visual lines [90m(0.860923ms)[39m[39m
+[32m✔ line editor keeps wide-character wrapping aligned with the composer [90m(3.561737ms)[39m[39m
+[32m✔ line editor includes the virtual row after a full-width ending [90m(0.773133ms)[39m[39m
+[32m✔ line editor supports word deletion, undo, and bracketed paste events [90m(0.924885ms)[39m[39m
+[32m✔ line editor accepts persisted history and exposes a snapshot [90m(0.581295ms)[39m[39m
+[32m✔ line editor rejects control characters passed through the key path [90m(0.314521ms)[39m[39m
+[32m✔ turn events and viewers become one compact table, pushed once per burst [90m(7.118188ms)[39m[39m
+[32m✔ the newest viewer and what the current worker hosts [90m(1.255755ms)[39m[39m
+[32m✔ a crashed worker ends every running turn instead of leaving it working forever [90m(0.520443ms)[39m[39m
+[32m✔ a window shows one session at a time, and idle unwatched sessions are forgotten [90m(0.578869ms)[39m[39m
+[32m✔ a window covered by Agents does not count as showing its session until it is back [90m(0.815824ms)[39m[39m
+[32m✔ a discarded conversation leaves the table and every window that pointed at it [90m(0.999204ms)[39m[39m
+[32m✔ background jobs a session waits on are part of its live state [90m(0.921696ms)[39m[39m
+[32m✔ a rename is part of a conversation's live state, pushed once [90m(0.423545ms)[39m[39m
+[32m✔ a conversation's model and effort are part of its live state [90m(1.716847ms)[39m[39m
+[32m✔ a window covered for a long time still holds its session and shows it again [90m(1.113837ms)[39m[39m
+(node:887723) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ local status renders session and provider state [90m(3.881564ms)[39m[39m
+[32m✔ config is no longer a local slash command [90m(2.522423ms)[39m[39m
+[32m✔ local status before the first message shows the pending name [90m(0.49646ms)[39m[39m
+(node:887732) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ model image capability is explicit and missing metadata stays unknown [90m(4.609726ms)[39m[39m
+[32m✔ model menu groups models by provider and defaults to the current model [90m(2.697921ms)[39m[39m
+[32m✔ model menu headers prefer provider display names when provided [90m(0.786926ms)[39m[39m
+[32m✔ model menu handles plain string models without provider ids [90m(0.518609ms)[39m[39m
+[32m✔ model menu includes current model when missing from server list [90m(0.540352ms)[39m[39m
+[32m✔ model menu selection skips provider headers [90m(0.604468ms)[39m[39m
+[32m✔ model menu can page beyond the first visible window [90m(0.496672ms)[39m[39m
+(node:887745) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:887776) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ answering a question in one window closes it in another window on the same conversation [90m(2670.691955ms)[39m[39m
+(node:887778) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ one-shot parser requires run prompt and accepts explicit workspace/session [90m(10.133902ms)[39m[39m
+[32m✔ one-shot execution keeps stdout to the assistant and writes a compact log [90m(17.18144ms)[39m[39m
+[32m✔ prompt slugs remove filesystem-invalid characters [90m(0.506561ms)[39m[39m
+[32m✔ one-shot reports shutdown failure on stderr with a nonzero exit code [90m(13.174284ms)[39m[39m
+[32m✔ one-shot waits across turns and prints the request answer once [90m(9.088304ms)[39m[39m
+[32m✔ system notice colors follow stderr TTY and NO_COLOR [90m(1.117875ms)[39m[39m
+[32m✔ folder inputs resolve home, relative and quoted paths [90m(2.615071ms)[39m[39m
+[32m✔ suggestions list matching folders only, keep the typed prefix and descend with a separator [90m(66.860433ms)[39m[39m
+(node:887786) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ folder inspection reports missing paths, files and Git repositories [90m(14.819804ms)[39m[39m
+[32m✔ a bare drive letter means the drive root on Windows only [90m(0.546997ms)[39m[39m
+[32m✔ prompt history persists newest entries and ignores malformed lines [90m(14.464627ms)[39m[39m
+[32m✔ prompt history tolerates malformed storage [90m(12.63044ms)[39m[39m
+(node:887805) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:887843) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ startupText includes resume preview when provided [90m(13.661754ms)[39m[39m
+[32m✔ startupText clips long resume preview lines [90m(1.463152ms)[39m[39m
+[32m✔ startupText clips resume preview without splitting keycap emoji [90m(1.20435ms)[39m[39m
+[32m✔ startupText clips long cwd in the middle [90m(1.199864ms)[39m[39m
+[32m✔ startupText keeps banner away from terminal edge [90m(0.580761ms)[39m[39m
+[32m✔ prompt and turn status copy match the compact terminal UI [90m(3.124248ms)[39m[39m
+[32m✔ promptText includes only model and working directory above the input [90m(1.62268ms)[39m[39m
+[32m✔ promptText places reasoning effort between model and working directory [90m(0.536731ms)[39m[39m
+[32m✔ promptText colors model and working directory with separate hierarchy [90m(3.635744ms)[39m[39m
+[32m✔ promptText colors the composer marker with the accent color [90m(0.879942ms)[39m[39m
+[32m✔ promptText keeps the activity line separate from the input chrome [90m(3.983896ms)[39m[39m
+[32m✔ promptText keeps pending input inside the live composer [90m(0.714648ms)[39m[39m
+[32m✔ promptText shows compact activity label while compacting [90m(0.414114ms)[39m[39m
+[32m✔ promptText clips long session status [90m(0.669404ms)[39m[39m
+[32m✔ promptText extends the divider to the terminal's right edge [90m(0.48452ms)[39m[39m
+[32m✔ promptText shows compact shortcuts without session metrics [90m(1.756899ms)[39m[39m
+[32m✔ helpText renders compact shortcuts and commands [90m(1.392497ms)[39m[39m
+[32m✔ slashMenuText renders selectable command menu [90m(0.656921ms)[39m[39m
+[32m✔ slashMenuText keeps the selected command visible [90m(0.489799ms)[39m[39m
+[32m✔ choiceDialogFrame renders a full provider box with selection [90m(2.556994ms)[39m[39m
+[32m✔ choiceDialogFrame shows its title and wraps the whole message above the choices [90m(6.397682ms)[39m[39m
+[32m✔ choiceDialogFrame windows long provider lists to keep the selection visible [90m(6.934396ms)[39m[39m
+[32m✔ authSecretFrame masks secrets and places the caret [90m(4.533171ms)[39m[39m
+[32m✔ authSecretFrame shows a placeholder and clips long values [90m(1.144531ms)[39m[39m
+[32m✔ modelMenuText renders provider groups, current model and selection [90m(0.802533ms)[39m[39m
+[32m✔ modelMenuText keeps the selected model visible [90m(0.575847ms)[39m[39m
+[32m✔ modelListErrorText renders current model and fallback command [90m(0.307648ms)[39m[39m
+[32m✔ commandResultText renders a compact success line [90m(0.505763ms)[39m[39m
+[32m✔ slashDisplayText renders command help payloads [90m(0.885278ms)[39m[39m
+[32m✔ slashDisplayText renders the two status sections [90m(0.962363ms)[39m[39m
+[32m✔ slashDisplayText renders sessions and skills payloads [90m(0.971314ms)[39m[39m
+[32m✔ slashDisplayText groups skills by layer with overrides, imports and problems [90m(5.187946ms)[39m[39m
+[32m✔ skill paths collapse the home directory and long descriptions are clipped [90m(0.677873ms)[39m[39m
+[32m✔ slashResultText prefers structured display and falls back to raw text [90m(0.4392ms)[39m[39m
+[32m✔ contextBuiltLine warns only when Rind docs are truncated [90m(0.565775ms)[39m[39m
+[32m✔ toolRequestedLine shows bash command [90m(0.68669ms)[39m[39m
+[32m✔ toolRequestedLine clips long details [90m(0.512944ms)[39m[39m
+[32m✔ toolRequestedLine shows non-shell details as metadata [90m(0.358676ms)[39m[39m
+[32m✔ startupText shows an active goal without changing the empty-goal banner [90m(0.511671ms)[39m[39m
+[32m✔ prompt shows background task count after cwd with monitor hint [90m(0.570838ms)[39m[39m
+[32m✔ themeMenuText renders flavor swatches with current marker [90m(1.098168ms)[39m[39m
+[32m✔ task monitor header directs background work without obsolete delegate tabs [90m(0.279017ms)[39m[39m
+[32m✔ background monitor renders selection and latest output [90m(0.71703ms)[39m[39m
+[32m✔ toolRequestedLine keeps large file content out of the status [90m(0.399976ms)[39m[39m
+[32m✔ toolRequestedLine keeps edit text out of the status [90m(0.315769ms)[39m[39m
+[32m✔ toolRequestedLine does not expose generic command arguments [90m(0.274832ms)[39m[39m
+[32m✔ toolRequestedLine keeps the tool name when arguments are incomplete [90m(0.315939ms)[39m[39m
+[32m✔ toolStartedLine renders fallback running state [90m(0.368031ms)[39m[39m
+[32m✔ toolResultLine renders compact success state [90m(1.516289ms)[39m[39m
+[32m✔ planUpdatedLine renders each plan status with its dedicated icon [90m(0.525747ms)[39m[39m
+[32m✔ planUpdatedLine renders an empty plan and clips long steps [90m(0.352863ms)[39m[39m
+[32m✔ toolResultLine appends inline file change diff for successful file tools [90m(0.538271ms)[39m[39m
+[32m✔ toolResultLine clips long file change lines [90m(0.514762ms)[39m[39m
+[32m✔ toolResultLine truncates long file change blocks [90m(0.736214ms)[39m[39m
+[32m✔ promptText stays within a narrow terminal [90m(1.841784ms)[39m[39m
+[32m✔ toolResultLine ignores file change details for failed tools [90m(0.366186ms)[39m[39m
+[32m✔ toolResultLine includes compact failure detail [90m(0.253397ms)[39m[39m
+[32m✔ turnCompletedLine renders duration and tool summary [90m(0.45286ms)[39m[39m
+[32m✔ status helpers render question and errors [90m(0.697765ms)[39m[39m
+[32m✔ choiceMenuText marks the selected option [90m(1.041176ms)[39m[39m
+[32m✔ questionMenuFrame shows the active option description and custom entry [90m(1.719467ms)[39m[39m
+[32m✔ questionMenuFrame renders custom input in its option row [90m(0.547923ms)[39m[39m
+[32m✔ questionMenuFrame dims the custom placeholder while editing an empty answer [90m(0.956416ms)[39m[39m
+[32m✔ questionMenuFrame cursor follows the editor cursor in the custom answer row [90m(1.601735ms)[39m[39m
+[32m✔ questionMenuFrame maps multiline custom answers onto the flattened row [90m(0.351136ms)[39m[39m
+[32m✔ questionMenuFrame wraps long custom answers onto continuation rows [90m(0.392509ms)[39m[39m
+[32m✔ questionMenuFrame wraps complete labels and descriptions with distinct formatting [90m(0.509207ms)[39m[39m
+[32m✔ choiceMenuText keeps the selected option visible [90m(0.32622ms)[39m[39m
+[32m✔ sessionMenuText renders a selectable session deck [90m(0.399242ms)[39m[39m
+[32m✔ sessionSwitchedText renders target context and model [90m(0.60235ms)[39m[39m
+[32m✔ goal rendering keeps status and objective visible [90m(0.453008ms)[39m[39m
+[32m✔ AssistantMessage restyles history when the theme changes [90m(3.742227ms)[39m[39m
+[32m✔ AssistantRenderer removes markdown markers at message boundary [90m(2.411988ms)[39m[39m
+[32m✔ AssistantRenderer renders headings and lists without raw markdown prefixes [90m(1.276848ms)[39m[39m
+[32m✔ AssistantRenderer renders code fences as compact labels [90m(0.605226ms)[39m[39m
+[32m✔ AssistantRenderer buffers markdown tables until the block ends [90m(3.95435ms)[39m[39m
+[32m✔ AssistantRenderer renders markdown links as readable text [90m(0.613408ms)[39m[39m
+[32m✔ AssistantRenderer prefixes visual continuation lines [90m(0.376879ms)[39m[39m
+[32m✔ AssistantRenderer applies ansi styles when color is enabled [90m(1.130331ms)[39m[39m
+[32m✔ AssistantRenderer keeps markdown structure markers dim [90m(0.540888ms)[39m[39m
+[32m✔ system notices use two-space indentation and theme warning only on the prefix [90m(0.42446ms)[39m[39m
+[32m✔ the unmatched slash note names the way back [90m(0.57044ms)[39m[39m
+[32m✔ a new conversation is greeted with what it runs on and what to try [90m(1.028912ms)[39m[39m
+[32m✔ the welcome offers only what applies [90m(0.415045ms)[39m[39m
+[32m✔ a team member's welcome says who it is in the team [90m(0.368416ms)[39m[39m
+[32m✔ a resumed conversation gets one line instead of a welcome [90m(0.584823ms)[39m[39m
+[32m✔ the welcome stays within narrow terminals [90m(0.465736ms)[39m[39m
+[32m✔ a source checkout runs its own virtual environment when no interpreter is chosen [90m(25.604062ms)[39m[39m
+(node:887857) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ shutdown allows slow cleanup, joins repeated calls, and waits for process exit [90m(153.868069ms)[39m[39m
+[32m✔ shutdown preserves cleanup errors and lets the worker finish exiting [90m(110.547068ms)[39m[39m
+[32m✔ shutdown timeout forces exit and rejects instead of reporting success [90m(114.259187ms)[39m[39m
+[32m✔ compact waits beyond 120 seconds while ordinary commands time out [90m(77.467587ms)[39m[39m
+[32m✔ source runtime launch uses the shared app-server entry [90m(2.318394ms)[39m[39m
+[32m✔ packaged runtime launch does not depend on the source tree [90m(0.292424ms)[39m[39m
+[32m✔ runtime exit rejects an in-flight request and reports a recoverable failure [90m(52.159586ms)[39m[39m
+[32m✔ runtime client stays stopped until explicit start [90m(1.207709ms)[39m[39m
+[32m✔ the Worker never opens a console window of its own [90m(1.972915ms)[39m[39m
+[32m✔ buildRuntimeEnv pins Python stdio to UTF-8 [90m(2.161811ms)[39m[39m
+[32m✔ buildRuntimeEnv preserves packaged runtime environment and accepts RIND_HOME [90m(1.934772ms)[39m[39m
+(node:887874) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ runtime requests use request_id [90m(6.884691ms)[39m[39m
+[32m✔ runtime protocol reads response and event metadata [90m(0.528858ms)[39m[39m
+[32m✔ runtime protocol filters events by session and active turn [90m(0.769707ms)[39m[39m
+[32m✔ runtime protocol validates response, event, and initialization schemas [90m(1.472773ms)[39m[39m
+[32m✔ runtime protocol recognizes the shared golden event fixture [90m(2.784481ms)[39m[39m
+[32m✔ runtime protocol exposes session fork as a session-scoped method [90m(0.429513ms)[39m[39m
+[32m✔ runtime protocol exposes separate steering and follow-up methods [90m(0.516767ms)[39m[39m
+(node:887884) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:887913) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ rind send reaches the newest window showing a session, or a turn that keeps running [90m(2126.000542ms)[39m[39m
+[32m✔ rind send reports how it was delivered and falls back to a private window's endpoint [90m(6.255109ms)[39m[39m
+(node:887931) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ one host isolates workspaces and tools, runs sessions concurrently and survives client detach [90m(2160.354888ms)[39m[39m
+(node:887952) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ space toggles a layer, and only a real change counts [90m(4.87485ms)[39m[39m
+[32m✔ the checklist shows each layer, its folders and how many skills it has [90m(3.981044ms)[39m[39m
+[32m✔ in a conversation the change is applied after the cache cost is accepted [90m(3.939741ms)[39m[39m
+[32m✔ declining leaves the conversation's skills unchanged [90m(2.565913ms)[39m[39m
+[32m✔ before the first message the window keeps the choice and creates the conversation with it [90m(1.066555ms)[39m[39m
+(node:887986) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ goal commands distinguish control actions from objectives [90m(4.314909ms)[39m[39m
+(node:888040) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ slash menu opens only for a slash command prefix [90m(3.62971ms)[39m[39m
+[32m✔ slash menu arrows select commands without changing input text [90m(2.581677ms)[39m[39m
+[32m✔ slash menu keeps selection when input is synced unchanged [90m(0.259619ms)[39m[39m
+[32m✔ slash menu escape dismisses immediately and typing reopens it [90m(0.331428ms)[39m[39m
+[32m✔ slash menu leaves backspace to the editor [90m(0.320551ms)[39m[39m
+[32m✔ slash menu ignores modified keypresses [90m(0.237099ms)[39m[39m
+[32m✔ slash menu keeps all matching commands for renderer windowing [90m(0.293504ms)[39m[39m
+[32m✔ slash menu can select commands beyond the first visible window [90m(0.327616ms)[39m[39m
+[32m✔ slash menu returns later selected commands for submission [90m(0.765035ms)[39m[39m
+[32m✔ a slash word that matches no command says so instead of closing silently [90m(0.923917ms)[39m[39m
+(node:888056) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ task events preserve input and use release/cancel without model polling [90m(20.185189ms)[39m[39m
+[32m✔ task monitor merges background commands and results [90m(1.186821ms)[39m[39m
+[32m✔ task monitor unwraps normalized background data [90m(0.485569ms)[39m[39m
+[32m✔ task monitor ignores malformed events and handles monitor keys [90m(1.013208ms)[39m[39m
+[32m✔ task monitor ignores responses from a cleared session [90m(0.616923ms)[39m[39m
+[32m✔ only handed-off tasks enter Background and completed results remain [90m(13.663913ms)[39m[39m
+[32m✔ reopening a session keeps only tasks seen during the current opening [90m(3.577599ms)[39m[39m
+[32m✔ foreground selection releases only the chosen task [90m(7.539036ms)[39m[39m
+[32m✔ arrow navigation crosses waiting and handed-off background tasks [90m(6.774206ms)[39m[39m
+[32m✔ opening refresh does not reset a task selected with arrows [90m(3.489049ms)[39m[39m
+[32m✔ paged list merges all tasks and reports incomplete pages [90m(13.764931ms)[39m[39m
+[32m✔ selection stays on task ID across reorder and stale preview reads [90m(4.015937ms)[39m[39m
+[32m✔ release waits for Runtime handoff confirmation and follows the same task [90m(3.349255ms)[39m[39m
+[32m✔ terminal events invalidate pending reads and reject late running output [90m(3.304573ms)[39m[39m
+[32m✔ session switch ignores a pending release and foreign events [90m(2.039602ms)[39m[39m
+[32m✔ natural completion leaves no foreground row and automatic yield loads its preview [90m(2.216021ms)[39m[39m
+[32m✔ a stale list cannot resurrect a synchronously completed command [90m(0.893305ms)[39m[39m
+(node:888074) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ both monitor pages obey every height budget and keep their selected row [90m(671.983363ms)[39m[39m
+[32m✔ normal monitor height reserves six output lines before growing the list [90m(7.570742ms)[39m[39m
+[32m✔ foreground action is rendered once and survives small heights [90m(5.064899ms)[39m[39m
+[32m✔ preview reports bounded and expired output and scrolls inside its retained tail [90m(11.361153ms)[39m[39m
+[32m✔ formatting work stays bounded as background history grows [90m(26.641693ms)[39m[39m
+[32m✔ monitor supports NO_COLOR and dims counts and helper separators [90m(5.377735ms)[39m[39m
+(node:888083) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ Team identity appears in the banner and persists in the idle composer [90m(9.940306ms)[39m[39m
+[32m✔ Team header fits narrow widths with long CJK fields and task counts [90m(30.141403ms)[39m[39m
+[32m✔ Team badge follows the theme and keeps its identity with NO_COLOR [90m(2.436437ms)[39m[39m
+(node:888091) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ parses text and control keys [90m(4.169304ms)[39m[39m
+[32m✔ parses legacy and SS3 navigation keys [90m(1.052193ms)[39m[39m
+[32m✔ parses modified navigation and deletion keys [90m(3.736491ms)[39m[39m
+[32m✔ parses common shifted enter sequences [90m(0.458568ms)[39m[39m
+[32m✔ parses kitty ctrl-minus [90m(0.376231ms)[39m[39m
+[32m✔ parses Kitty printable keys, special keys, and ignores releases [90m(0.40717ms)[39m[39m
+[32m✔ stray mouse reports are ignored instead of being treated as text [90m(0.315527ms)[39m[39m
+(node:888131) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ printable ASCII bypasses segmentation; Unicode and controls retain their semantics [90m(7.072099ms)[39m[39m
+[32m✔ text width treats keycap emoji as one grapheme and two cells [90m(0.516786ms)[39m[39m
+[32m✔ clipCells does not split emoji sequences [90m(0.911333ms)[39m[39m
+[32m✔ middleClipCells preserves whole emoji at both ends [90m(0.643283ms)[39m[39m
+[32m✔ wrapTextCells preserves cursor ownership before wide characters [90m(1.025845ms)[39m[39m
+[32m✔ truncateToWidth measures styled text by visible cells and closes open styles [90m(1.737909ms)[39m[39m
+[32m✔ middleClipCells keeps escape sequences whole and closes styles [90m(0.666457ms)[39m[39m
+[32m✔ text-presentation symbols take one cell, as a terminal draws them [90m(98.755971ms)[39m[39m
+(node:888138) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ theme menu lists all flavors and defaults to the current theme [90m(4.465207ms)[39m[39m
+[32m✔ theme menu selection follows the active theme [90m(0.599898ms)[39m[39m
+[32m✔ theme menu wraps around at list edges [90m(3.392486ms)[39m[39m
+(node:888140) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ waiting breath changes only theme brightness and stays static without color [90m(3.370481ms)[39m[39m
+[32m✔ theme defaults to Frappé and validates switches [90m(2.644088ms)[39m[39m
+[32m✔ paint honors the environment and paintRaw always emits truecolor [90m(0.634004ms)[39m[39m
+[32m✔ flavor swatches render in the target flavor regardless of active theme [90m(1.472156ms)[39m[39m
+[32m✔ /theme command lists flavors and applies switches [90m(1.524589ms)[39m[39m
+[32m✔ /theme persists only through the injected persistTheme hook [90m(0.586149ms)[39m[39m
+[32m✔ cli state store merges patches atomically and tolerates corruption [90m(22.981205ms)[39m[39m
+[32m✔ the saved theme applies to every surface, Agents included [90m(1.765366ms)[39m[39m
+(node:888146) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ completed blocks parse once and reuse immutable lines until display changes [90m(11.128146ms)[39m[39m
+[32m✔ finished status, file changes and theme replay invalidate cached output [90m(3.548036ms)[39m[39m
+[32m✔ tool block starts running and mutates in place on finish [90m(1.083736ms)[39m[39m
+[32m✔ collapsed caps hide extra lines; expanding reveals them [90m(4.118686ms)[39m[39m
+[32m✔ progress messages only apply while running [90m(1.011172ms)[39m[39m
+[32m✔ late-arriving tool_requested arguments enrich a bare running block [90m(0.931485ms)[39m[39m
+[32m✔ running elapsed time comes from the owner's frame clock [90m(0.608396ms)[39m[39m
+(node:888190) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ managed task results show process state and list entries [90m(7.221216ms)[39m[39m
+[32m✔ image reads display bounded summaries on narrow terminals [90m(1.775196ms)[39m[39m
+[32m✔ running block shows accent glyph, command and elapsed time [90m(6.080568ms)[39m[39m
+[32m✔ finished bash success shows glyph, duration and output tail [90m(1.15511ms)[39m[39m
+[32m✔ finished bash nonzero exit is surfaced in the title [90m(0.734432ms)[39m[39m
+[32m✔ background running bash keeps a pending presentation [90m(3.408326ms)[39m[39m
+[32m✔ edit_file title carries diff counts and body renders colored diff with footer [90m(3.367994ms)[39m[39m
+[32m✔ write_file falls back to meta diff counts without live file_change [90m(0.962941ms)[39m[39m
+[32m✔ grep collapsed hides listings behind a hint; expanded lists them [90m(1.599941ms)[39m[39m
+[32m✔ bash_output surfaces bg id and waited time from the result payload [90m(1.113077ms)[39m[39m
+[32m✔ argsFromResult recovers key arguments from result payloads [90m(2.350348ms)[39m[39m
+[32m✔ read_file collapsed hides content; expanded shows numbered lines [90m(0.718243ms)[39m[39m
+[32m✔ search_web shows result count and expanded entries [90m(1.436944ms)[39m[39m
+[32m✔ delegate shows status, summary head and published paths [90m(1.292231ms)[39m[39m
+[32m✔ failed tools show error detail line [90m(0.723759ms)[39m[39m
+[32m✔ generic renderer covers unknown tools [90m(0.789181ms)[39m[39m
+[32m✔ wide characters are clipped without breaking layout [90m(0.957818ms)[39m[39m
+[32m✔ truncation note follows the runtime flag, not length heuristics [90m(0.951967ms)[39m[39m
+[32m✔ argument and result parsing tolerate junk [90m(0.689391ms)[39m[39m
+[32m✔ write_file renders canonical path during execution [90m(0.433496ms)[39m[39m
+[32m✔ edit_file renders canonical path during execution [90m(0.299857ms)[39m[39m
+(node:888205) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ management scenes stay serializable and rendering does not mutate their replay data [90m(754.224342ms)[39m[39m
+[32m✔ tour organization uses the live Agents renderer and row projections [90m(8.207351ms)[39m[39m
+[32m✔ managed parent waits for its linked child and resumes in the same session [90m(0.487448ms)[39m[39m
+[32m✔ direct chat only creates the assigned specialist task, not an implicit parent [90m(0.219363ms)[39m[39m
+[32m✔ management overlays retain chat input and clear on close, rewind or reset [90m(1.234586ms)[39m[39m
+[32m✔ the tour shows the real task form, report and scrolled evidence without a chat composer [90m(30.164107ms)[39m[39m
+[32m✔ interactive setup menus and fields match the real Agents actions [90m(2.33723ms)[39m[39m
+[32m✔ setup forms show the focused field and preserve honest navigation and conversation states [90m(84.522057ms)[39m[39m
+(node:888234) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ tour pages are well-formed and uniquely identified [90m(10.474456ms)[39m[39m
+[32m✔ background lesson uses managed shell tasks and no removed delegate monitor [90m(0.814721ms)[39m[39m
+[32m✔ every scene replays deterministically and ends without lost input or a running turn [90m(95.32535ms)[39m[39m
+[32m✔ fork demonstrates user-message boundary and editable prefill [90m(0.592846ms)[39m[39m
+[32m✔ agents lessons cover arbitrary folders, explicit sharing and tracked delivery [90m(3.421706ms)[39m[39m
+(node:888369) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ in-session recovery: stop main tui, run tour, replay main tui [90m(270.64978ms)[39m[39m
+[32m✔ a second in-session tour still accepts input after escape exits the first [90m(218.34988ms)[39m[39m
+(node:888400) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ account lesson selects OAuth, explains callback and does not simulate API-key entry [90m(3.016372ms)[39m[39m
+[32m✔ named endpoint teaches the real ordered fields with readable text and masked key [90m(56.359372ms)[39m[39m
+[32m✔ text login prompts animate, settle and replay just like masked prompts [90m(0.826269ms)[39m[39m
+[32m✔ folder defaults teach valid CLI commands and separate user storage from project files [90m(0.665117ms)[39m[39m
+(node:888405) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ steps auto-advance with animation, pauses and waits [90m(9.577732ms)[39m[39m
+[32m✔ typing animation reveals characters over time [90m(0.875738ms)[39m[39m
+[32m✔ space pauses and resumes the clock [90m(1.515624ms)[39m[39m
+[32m✔ right skips ahead instantly, left rebuilds the previous step exactly [90m(2.912443ms)[39m[39m
+[32m✔ enter finishes animation and opens its explanation without a countdown [90m(0.764873ms)[39m[39m
+[32m✔ speed controls scale the animation delays [90m(1.460979ms)[39m[39m
+[32m✔ spinner only advances while the composer is running [90m(1.169308ms)[39m[39m
+[32m✔ catalog navigation opens pages and quits [90m(2.396163ms)[39m[39m
+[32m✔ deep link starts on the requested page; end navigation walks pages [90m(1.296881ms)[39m[39m
+[32m✔ r replays the page from the top [90m(1.226ms)[39m[39m
+[32m✔ ctrl+c resolves the tour from any view [90m(33.333236ms)[39m[39m
+[32m✔ text keystrokes are ignored [90m(0.638637ms)[39m[39m
+[32m✔ batched text chunks apply each letter and quit [90m(0.568438ms)[39m[39m
+[32m✔ leaving a paused page does not pause the next page [90m(0.435698ms)[39m[39m
+[32m✔ replay works mid-animation; speed stops at its limits [90m(0.524849ms)[39m[39m
+[32m✔ finish cancels every timer and ignores subsequent keys [90m(0.559083ms)[39m[39m
+[32m✔ help freezes playback and restores the prior pause state [90m(0.476179ms)[39m[39m
+[32m✔ the final takeaway is complete without an extra empty end screen [90m(0.615886ms)[39m[39m
+[32m✔ paused right stepping reveals a complete next step and stays paused [90m(0.392916ms)[39m[39m
+[32m✔ batched scroll keys accumulate before the next render [90m(0.38268ms)[39m[39m
+[32m✔ automatic holds expose a live deadline and resume from the remaining time [90m(0.413679ms)[39m[39m
+[32m✔ speed changes scale only the remaining hold, including while paused [90m(0.445847ms)[39m[39m
+[32m✔ explanations have no countdown or automatic advance [90m(0.411033ms)[39m[39m
+[32m✔ help preserves a countdown and rewinding discards the old deadline [90m(0.379313ms)[39m[39m
+[32m✔ resuming a reviewed frame before an explanation pauses directly, including after help [90m(0.46212ms)[39m[39m
+[32m✔ every lesson countdown leads to playback, never an explanation pause [90m(282.353618ms)[39m[39m
+[32m✔ team creation plays the interactive setup before explaining folder registration [90m(3.033011ms)[39m[39m
+[32m✔ automatic playback presents every management screen instead of skipping to the next note [90m(55.651458ms)[39m[39m
+(node:888414) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ catalog groups pages under topics and marks the selection [90m(7.954836ms)[39m[39m
+[32m✔ catalog rows and hints stay inside narrow terminals [90m(2.027608ms)[39m[39m
+[32m✔ catalog columns stay aligned across topics and scrolling; compact summaries follow selection [90m(139.843859ms)[39m[39m
+[32m✔ page frame titles the page and wraps every content line [90m(18.380839ms)[39m[39m
+[32m✔ agents lessons preserve the startup banner and only show a team label for scoped chat [90m(17.403193ms)[39m[39m
+[32m✔ shell typing shows a prompt line with a hardware cursor point [90m(1.004814ms)[39m[39m
+[32m✔ idle composer exposes the placeholder and a cursor; running composer hides it [90m(4.860439ms)[39m[39m
+[32m✔ tool blocks flip from running to their result line [90m(10.393503ms)[39m[39m
+[32m✔ assistant markdown renders through the real message pipeline [90m(5.634693ms)[39m[39m
+[32m✔ caption notes render under the stage; end phase shows the outro [90m(9.386405ms)[39m[39m
+[32m✔ plain runtime outputs stay verbatim while check results get the prefix [90m(3.064011ms)[39m[39m
+[32m✔ pending queue and steering entries appear in the composer [90m(3.055742ms)[39m[39m
+[32m✔ menu steps render through the real menu renderers [90m(2.620434ms)[39m[39m
+[32m✔ goodbye closes the session back to the shell prompt [90m(2.007761ms)[39m[39m
+[32m✔ all lesson steps, contents and help fit supported terminal sizes [90m(2174.818892ms)[39m[39m
+[32m✔ team creation uses forms and returns to the original chat without a shell transcript [90m(2.62489ms)[39m[39m
+[32m✔ wrapped shell cursor remains on the command and scrollback exposes earlier rows [90m(6.563239ms)[39m[39m
+[32m✔ theme preview restores the user's theme and NO_COLOR is respected [90m(2.369596ms)[39m[39m
+[32m✔ explanation, manual pause, automatic hold and playback have distinct visible states [90m(18.457868ms)[39m[39m
+[32m✔ all guidance is outside the closed simulated terminal, even without color [90m(10.923298ms)[39m[39m
+[32m✔ pause uses the pause pictograph and danger color rather than Roman numerals [90m(4.12088ms)[39m[39m
+[32m✔ every lesson opens with a populated introduction card and a start action [90m(50.005984ms)[39m[39m
+[32m✔ introduction layout depends on visible content rather than step position [90m(1.600001ms)[39m[39m
+[32m✔ long introduction cards scroll from the top while keeping the start action visible [90m(4.177068ms)[39m[39m
+[32m✔ catalog, introduction and demo preserve the same full feature name at every supported width [90m(253.833165ms)[39m[39m
+(node:888432) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ injected tour version survives replay without changing page fixtures [90m(6.84329ms)[39m[39m
+[32m✔ shell typing reveals characters, then commits a command block [90m(2.635826ms)[39m[39m
+[32m✔ submit echoes the composer text and starts running; turn-done clears both [90m(0.779448ms)[39m[39m
+[32m✔ submitting a slash command echoes it without starting the turn [90m(1.203961ms)[39m[39m
+[32m✔ queue and steer modes park the text in the composer pending list [90m(1.250473ms)[39m[39m
+[32m✔ tool step animates as running and settles into its outcome [90m(0.653681ms)[39m[39m
+[32m✔ assistant streams text chunks; menu tick moves to target [90m(1.007405ms)[39m[39m
+[32m✔ startup replaces the rind area; exit hides the composer and appends goodbye [90m(0.868486ms)[39m[39m
+[32m✔ note steps replace the caption and the caption persists across steps [90m(1.369447ms)[39m[39m
+[32m✔ rebuildTo reproduces the animated path exactly [90m(3.680325ms)[39m[39m
+[32m✔ rebuildTo with -1 resets to an empty stage [90m(0.525298ms)[39m[39m
+[32m✔ grapheme text reveals without splitting surrogate pairs [90m(0.601758ms)[39m[39m
+(node:888444) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ tour matches live turn events line for line, including every blank line [90m(74.808803ms)[39m[39m
+[32m✔ unfinished table candidates and code fences stay streaming until the step completes [90m(8.821064ms)[39m[39m
+[32m✔ repeated tour snapshots never start live tool tickers [90m(2.360284ms)[39m[39m
+(node:888453) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ tour plays on a real terminal buffer: catalog, page, return, exit [90m(328.322297ms)[39m[39m
+[32m✔ deep links jump straight into a page [90m(137.353738ms)[39m[39m
+[32m✔ escape exits directly from a page [90m(52.950158ms)[39m[39m
+[32m✔ unknown page ids report the catalog on stderr without rendering [90m(4.235262ms)[39m[39m
+[32m✔ pasted example text cannot navigate or quit the tour [90m(86.775943ms)[39m[39m
+[32m✔ pages wrap inside narrow terminals [90m(134.667027ms)[39m[39m
+[32m✔ a completed lesson keeps title, takeaway and navigation on an 80x24 terminal [90m(213.030928ms)[39m[39m
+[32m✔ closing input cleans up a playing tour [90m(1.584304ms)[39m[39m
+[32m✔ terminal clearly distinguishes readiness, an automatic countdown and manual pause [90m(251.803405ms)[39m[39m
+[32m✔ finishing the typed example immediately shows its explanation without AUTO [90m(87.524359ms)[39m[39m
+[32m✔ introduction survives resize and help, and returns on rewind or replay [90m(511.922939ms)[39m[39m
+[32m✔ Agents tour plays task and report screens, resizes and releases terminal input on exit [90m(214.373862ms)[39m[39m
+[32m✔ team creation plays navigation, choices and filled forms in the terminal without management commands [90m(211.601475ms)[39m[39m
+(node:888502) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ status frames do not render or normalize stable transcript history [90m(34.545124ms)[39m[39m
+[32m✔ unfrozen arrays remain compatible and changed layouts compare from the right offset [90m(0.590087ms)[39m[39m
+[32m✔ unchanged streaming Markdown tails are cached until content or width changes [90m(8.053799ms)[39m[39m
+(node:888505) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ terminal backpressure coalesces frames without losing appended history [90m(99.425677ms)[39m[39m
+[32m✔ first render writes lines to the screen [90m(30.126587ms)[39m[39m
+[32m✔ alternate page restores the original terminal without capturing the mouse [90m(30.713305ms)[39m[39m
+[32m✔ appending lines extends the frame without erasing previous rows [90m(56.344781ms)[39m[39m
+[32m✔ updating a line rewrites it in place [90m(54.274694ms)[39m[39m
+[32m✔ shrinking content clears stale tail rows [90m(54.089063ms)[39m[39m
+[32m✔ width change triggers full redraw and replays all content [90m(56.654883ms)[39m[39m
+[32m✔ content taller than the screen scrolls and keeps updating the bottom [90m(321.21709ms)[39m[39m
+[32m✔ cursor marker positions the hardware cursor [90m(28.157534ms)[39m[39m
+[32m✔ hardware cursor hides when no component emits a focus marker [90m(82.068385ms)[39m[39m
+[32m✔ terminal consumes Kitty negotiation responses and restores the protocol on stop [90m(56.208774ms)[39m[39m
+[32m✔ keyboard negotiation completes once, swallows late answers and can be drained [90m(86.523683ms)[39m[39m
+[32m✔ terminal falls back to modifyOtherKeys after a non-Kitty response [90m(54.06318ms)[39m[39m
+[32m✔ cursor repositioning rides inside the frame's synchronized write [90m(54.255624ms)[39m[39m
+[32m✔ unchanged frames with a stationary marker emit no output [90m(54.204263ms)[39m[39m
+[32m✔ a moved marker repositions once without re-showing the cursor [90m(53.679015ms)[39m[39m
+[32m✔ removing the marker hides the cursor in a single sequence [90m(53.262436ms)[39m[39m
+[32m✔ styled lines carry no styles across rows [90m(28.126642ms)[39m[39m
+[32m✔ startup appends below existing terminal content without clearing [90m(54.499185ms)[39m[39m
+[32m✔ replayAll repaints viewport and scrollback with the active theme [90m(82.067363ms)[39m[39m
+[32m✔ wide characters are measured correctly on screen [90m(28.251124ms)[39m[39m
+[32m✔ a TUI stopped while it kept the input still gives the input back when it stops for good [90m(1.242714ms)[39m[39m
+(node:888520) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ buffers split ANSI sequences and emits ordinary characters separately [90m(5.044313ms)[39m[39m
+[32m✔ flushes an incomplete sequence after the disambiguation timeout [90m(3.590418ms)[39m[39m
+[32m✔ emits bracketed paste as one atomic event and resumes parsing after it [90m(0.585302ms)[39m[39m
+[32m✔ holds a bracketed paste split across chunks until the terminator arrives [90m(0.418233ms)[39m[39m
+[32m✔ splitSequences keeps unterminated escapes in the remainder [90m(0.703443ms)[39m[39m
+[32m✔ buffers OSC, DCS, APC, and old mouse sequences until complete [90m(0.56593ms)[39m[39m
+[32m✔ separates Kitty releases and suppresses duplicated raw printable input [90m(0.447501ms)[39m[39m
+[32m✔ splits a raw escape before a following Kitty release sequence [90m(0.446094ms)[39m[39m
+[32m✔ suppresses a duplicated raw printable character across chunks [90m(1.33761ms)[39m[39m
+(node:888529) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ idle background waiting preserves the composer and stops on work, suppression and completion [90m(109.816057ms)[39m[39m
+[32m✔ task events preserve CJK composer text and cursor across completion and resize [90m(85.0453ms)[39m[39m
+[32m✔ streaming assistant text renders above the composer and reflows on resize [90m(84.987675ms)[39m[39m
+[32m✔ log lines appear as transcript blocks with blank separation [90m(29.367597ms)[39m[39m
+[32m✔ question status changes in place after an answer is accepted [90m(56.793374ms)[39m[39m
+[32m✔ error writes land in the transcript without corrupting the frame [90m(56.043784ms)[39m[39m
+[32m✔ composer cursor sits on the input line while typing [90m(29.601213ms)[39m[39m
+[32m✔ monitor pane is capped so the composer stays visible [90m(29.013954ms)[39m[39m
+[32m✔ background monitor preserves preview, Unicode input and caret through resizing and key sequences [90m(368.910302ms)[39m[39m
+[32m✔ tool blocks render rich per-tool output and respond to ctrl+o expansion [90m(82.672784ms)[39m[39m
+[32m✔ setToolsExpanded reveals capped bash output [90m(55.295949ms)[39m[39m
+[32m✔ event controller with implementation-style picked output bag still renders tool blocks [90m(81.26341ms)[39m[39m
+[32m✔ finish-only blocks recover arguments from result payloads [90m(27.974141ms)[39m[39m
+[32m✔ session replay preserves bash command arguments [90m(28.268367ms)[39m[39m
+[32m✔ hardware caret stays on the input line while a turn runs [90m(132.537262ms)[39m[39m
+[32m✔ burst streaming coalesces into stable output [90m(28.226095ms)[39m[39m
+[32m✔ streaming fragments without newlines stay on one line [90m(105.143522ms)[39m[39m
+[32m✔ streaming tables reflow in one assistant message block [90m(81.938499ms)[39m[39m
+[32m✔ list items become bullets once their line completes [90m(28.373919ms)[39m[39m
+[32m✔ image system notices preserve the composer and cursor through repeat events and resize [90m(109.140603ms)[39m[39m
+(node:888554) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ turn controller keeps activity until the runtime emits a terminal event [90m(10.5155ms)[39m[39m
+[32m✔ active turns steer by default and queue follow-ups explicitly [90m(2.062126ms)[39m[39m
+[32m✔ interrupt marks the turn and sends an interrupt request [90m(1.434002ms)[39m[39m
+(node:888571) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ source version follows agent/version.py without a separately maintained CLI version [90m(8.407589ms)[39m[39m
+[32m✔ installed CLI reads generated package metadata without Python source [90m(1.842088ms)[39m[39m
+[32m✔ repository CLI version matches the runtime version source [90m(0.899783ms)[39m[39m
+(node:888585) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✔ until the window reads keys, a lone Esc or Ctrl+C cancels; arrow keys do not [90m(4.009891ms)[39m[39m
+[32m✔ Ctrl+C cancels too, and stopping hands the keyboard to the window untouched [90m(0.59768ms)[39m[39m
+[32m✔ each step is logged with its time, a blocked event loop is noted, and old logs go [90m(1887.102202ms)[39m[39m
+[34mℹ tests 656[39m
+[34mℹ suites 0[39m
+[34mℹ pass 653[39m
+[34mℹ fail 3[39m
+[34mℹ cancelled 0[39m
+[34mℹ skipped 0[39m
+[34mℹ todo 0[39m
+[34mℹ duration_ms 37970.919218[39m
+
+[31m✖ failing tests:[39m
+
+test at test/context-board.test.js:119:1
+[31m✖ bar segments and legend markers follow the assembly order [90m(5.300588ms)[39m[39m
+  AssertionError [ERR_ASSERTION]: accent leads the stacked bar
+  [32m+ actual[39m [31m- expected[39m
+
+  [32m+[39m undefined
+  [31m- [39m'\x1B[38;2;137;180;250m'
+
+      at TestContext.<anonymous> [90m(file:///home/azzurro/code/agent/rind/frontend-cli/[39mtest/context-board.test.js:136:12[90m)[39m
+  [90m    at Test.runInAsyncScope (node:async_hooks:227:14)[39m
+  [90m    at Test.run (node:internal/test_runner/test:1402:25)[39m
+  [90m    at Test.processPendingSubtests (node:internal/test_runner/test:974:18)[39m
+  [90m    at Test.postRun (node:internal/test_runner/test:1542:19)[39m
+  [90m    at Test.run (node:internal/test_runner/test:1467:12)[39m
+  [90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+  [90m    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)[39m {
+    generatedMessage: [33mfalse[39m,
+    code: [32m'ERR_ASSERTION'[39m,
+    actual: [90mundefined[39m,
+    expected: [32m'\x1B[38;2;137;180;250m'[39m,
+    operator: [32m'strictEqual'[39m,
+    diff: [32m'simple'[39m
+  }
+
+test at test/context-board.test.js:203:1
+[31m✖ occupancy 33/70/90 percent picks neutral/warn/err theme colors [90m(3.077883ms)[39m[39m
+  AssertionError [ERR_ASSERTION]: 90% occupancy paints err
+      at TestContext.<anonymous> [90m(file:///home/azzurro/code/agent/rind/frontend-cli/[39mtest/context-board.test.js:221:12[90m)[39m
+  [90m    at Test.runInAsyncScope (node:async_hooks:227:14)[39m
+  [90m    at Test.run (node:internal/test_runner/test:1402:25)[39m
+  [90m    at Test.processPendingSubtests (node:internal/test_runner/test:974:18)[39m
+  [90m    at Test.postRun (node:internal/test_runner/test:1542:19)[39m
+  [90m    at Test.run (node:internal/test_runner/test:1467:12)[39m
+  [90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+  [90m    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)[39m {
+    generatedMessage: [33mfalse[39m,
+    code: [32m'ERR_ASSERTION'[39m,
+    actual: [33mfalse[39m,
+    expected: [33mtrue[39m,
+    operator: [32m'=='[39m,
+    diff: [32m'simple'[39m
+  }
+
+test at test/context-board.test.js:417:1
+[31m✖ every theme paints the board only with its own palette [90m(5.380165ms)[39m[39m
+  AssertionError [ERR_ASSERTION]: latte: board paints with truecolor
+      at TestContext.<anonymous> [90m(file:///home/azzurro/code/agent/rind/frontend-cli/[39mtest/context-board.test.js:432:16[90m)[39m
+  [90m    at Test.runInAsyncScope (node:async_hooks:227:14)[39m
+  [90m    at Test.run (node:internal/test_runner/test:1402:25)[39m
+  [90m    at Test.processPendingSubtests (node:internal/test_runner/test:974:18)[39m
+  [90m    at Test.postRun (node:internal/test_runner/test:1542:19)[39m
+  [90m    at Test.run (node:internal/test_runner/test:1467:12)[39m
+  [90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+  [90m    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)[39m {
+    generatedMessage: [33mfalse[39m,
+    code: [32m'ERR_ASSERTION'[39m,
+    actual: [33mfalse[39m,
+    expected: [33mtrue[39m,
+    operator: [32m'=='[39m,
+    diff: [32m'simple'[39m
+  }

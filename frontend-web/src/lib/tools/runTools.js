@@ -78,8 +78,8 @@ export function formatTaskControl(tool, args, parts) {
 
 export function formatDelegate(tool, args, parts) {
   const { record } = parts;
-  const agent = firstText(args.agent, args.agent_id, args.name, record.agent_id) || "agent";
-  const task = firstText(args.task, args.prompt, args.message, args.description);
+  const agent = firstText(record.assignee, args.to, args.new?.name, args.agent, args.agent_id, args.name, record.agent_id) || "agent";
+  const task = firstText(args.brief, args.message, args.task, args.prompt, args.description);
   const clipped = task.length > DELEGATE_TASK_MAX ? `${task.slice(0, DELEGATE_TASK_MAX - 1)}…` : task;
   const answer = String(record.summary || record.answer || record.result || parts.text || "").trim();
   const status = singleLine(record.status);
@@ -88,7 +88,7 @@ export function formatDelegate(tool, args, parts) {
     verb: "Delegated to",
     target: clipped ? `${agent}: ${clipped}` : agent,
     agent,
-    meta: meta(status && status !== "completed" ? status : ""),
+    meta: [...meta(record.taskId ? "task " + record.taskId : ""), ...meta(status && status !== "completed" ? status : "")],
     withDuration: true,
     body: answer ? { type: "markdown", text: answer, ...CAPS.markdown } : null,
     taskState: taskFinishState(status),

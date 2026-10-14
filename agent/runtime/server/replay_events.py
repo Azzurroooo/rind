@@ -11,6 +11,8 @@ from datetime import datetime
 from collections.abc import Iterator
 from typing import Any
 
+from agent.application.tools.result_normalizer import ToolResultNormalizer
+from agent.domain.tool_result import classify_tool_error, classify_tool_payload, parse_tool_result_payload
 from agent.infrastructure.persistence.message_projector import (
     INTERNAL_MESSAGE_KINDS,
     is_compact_boundary_message,
@@ -52,12 +54,19 @@ def _project_message(message: dict[str, Any], meta: dict[str, Any], record: dict
     role = message.get("role")
     turn_id = str(meta.get("turn_id") or "")
     if role == "user":
-        return [{
+        event = {
             "type": "turn_started",
             "session_id": session_id,
             "turn_id": turn_id,
             "user_message_chars": len(str(message.get("content") or "")),
-        }]
+        }
+        # A delivered result keeps its meaning when it is replayed; the projector
+        # carries the kind under `_rind_meta`.
+        marker = message.get("_rind_meta") if isinstance(message.get("_rind_meta"), dict) else meta
+        if marker.get("kind") == "team_delivery":
+            event["delivery"] = True
+            event["delivery_text"] = str(message.get("content") or "")
+        return [event]
     if role == "assistant":
         events = [
             {
@@ -100,6 +109,19 @@ def _tool_call_field(call: dict[str, Any], name: str) -> Any:
     return call.get(name) or function.get(name)
 
 
+
+def _tool_result_payload(record: dict[str, Any], message: dict[str, Any]) -> Any:
+    payload = record.get("result")
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, str) and payload.strip():
+        return payload
+    for fallback in (record.get("model_content"), message.get("content")):
+        if isinstance(fallback, str) and fallback:
+            return fallback
+    return ""
+
+
 def _tool_call_arguments(call: dict[str, Any]) -> dict[str, Any]:
     raw_args = call.get("raw_args")
     if raw_args is None:
@@ -117,16 +139,27 @@ def _tool_call_arguments(call: dict[str, Any]) -> dict[str, Any]:
 
 def _tool_result_event(message: dict[str, Any], record: dict[str, Any] | None, turn_id: str, session_id: str) -> dict[str, Any]:
     record = record if isinstance(record, dict) else {}
-    model_content = record.get("model_content")
-    if not isinstance(model_content, str) or not model_content:
-        model_content = message.get("content") if isinstance(message.get("content"), str) else ""
+    payload = _tool_result_payload(record, message)
+    tool_name = str(record.get("name") or message.get("tool_name") or "")
+    error_type = str(record.get("error_type") or "")
+    status = classify_tool_error(error_type or "ToolExecutionError") if error_type or record.get("ok") is False else "completed"
+    content = ToolResultNormalizer().project_for_terminal(payload, tool_name=tool_name, status=status, error_type=error_type)
+    for candidate in (payload, content):
+        parsed = parse_tool_result_payload(candidate)
+        classified = classify_tool_payload(parsed) if parsed else None
+        if classified:
+            status, error_type = classified
+            break
     event = {
         "type": "tool_result",
         "session_id": session_id,
         "turn_id": turn_id,
         "tool_call_id": str(message.get("tool_call_id") or ""),
-        "result": model_content,
-        "status": "error" if record.get("error_type") or record.get("ok") is False else "completed",
+        "tool_name": tool_name,
+        "result": content,
+        "status": status,
+        "error_type": error_type,
+        "error_source": "tool",
     }
     try:
         start = datetime.fromisoformat(str(record.get("ts_start") or ""))

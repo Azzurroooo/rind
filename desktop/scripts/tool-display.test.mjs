@@ -121,6 +121,12 @@ test("delegate shows agent and task, status, duration and the summary", () => {
   assert.equal(view.body.text, "Looks good.")
 })
 
+test("delegate uses management fields for the assignee, brief and task ID", () => {
+  const view = toolView(tool("delegate", { to: "agent-id", brief: "Review the diff" }, { result: result({ taskId: "task-id", assignee: "Reviewer", status: "queued" }) }))
+  assert.equal(view.target, "Reviewer: Review the diff")
+  assert.ok(metaText(view).includes("task task-id"))
+})
+
 test("agent_create describes what was created", () => {
   const agent = toolView(tool("agent_create", { agent_id: "qa", description: "Runs checks" }, { result: result({}) }))
   assert.equal(agent.verb, "Created agent")
