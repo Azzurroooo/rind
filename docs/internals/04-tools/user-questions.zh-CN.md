@@ -21,7 +21,7 @@ sequenceDiagram
 
 问题必须是非空字符串；可选选项由 label 和 description 组成，第一项 label 以“ (Recommended)”结尾，其他项不能使用该后缀。用户仍可自由输入，选项只是交互辅助。答案关联 session_id 与 tool_call_id，不能把旧会话的问题误答到新工具调用上。
 
-等待者属于活跃执行，取消会释放它；缺少 responder 时返回 UserQuestionUnsupported，不能假装已经得到确认。rind run 启动 Worker 时传 --no-user-question，Team 执行委派也关闭用户问答，让无人值守调用保持明确的交互边界。
+等待者属于活跃执行，取消会释放它；这样释放的问题记为已取消，而不是空答案。CLI 里按 Esc 放弃问题会中断本轮，与 Codex 的 request_user_input 一致，模型不会替用户拿主意继续做下去。缺少 responder 时返回 UserQuestionUnsupported，不能假装已经得到确认。rind run 启动 Worker 时传 --no-user-question，Team 执行委派也关闭用户问答，让无人值守调用保持明确的交互边界。
 
 ## 等待需要稳定关联，也需要退出路径
 

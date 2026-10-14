@@ -21,7 +21,7 @@ sequenceDiagram
 
 The question must be a non-empty string; optional options are composed of a label and a description, the first item's label ends with " (Recommended)", and no other item may use that suffix. The user can still type freely; the options are only an interaction aid. Answers are tied to session_id and tool_call_id, so a question from an old session must not be answered against a new tool call.
 
-A waiter belongs to active execution, and cancellation releases it; when there is no responder, it returns UserQuestionUnsupported rather than pretending that confirmation was already obtained. rind run starts the Worker with --no-user-question, and Team execution delegation also disables user questions, keeping unattended calls behind a clear interaction boundary.
+A waiter belongs to active execution, and cancellation releases it; a question released that way is recorded as cancelled, not as an empty answer. Dismissing a question in the CLI (Esc) interrupts the turn, as Codex does for request_user_input, so the model never proceeds on a choice the user declined to make. When there is no responder, it returns UserQuestionUnsupported rather than pretending that confirmation was already obtained. rind run starts the Worker with --no-user-question, and Team execution delegation also disables user questions, keeping unattended calls behind a clear interaction boundary.
 
 ## Waiting Needs a Stable Association, and Also a Way Out
 
