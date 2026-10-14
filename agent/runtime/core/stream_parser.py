@@ -37,7 +37,7 @@ class MessageStreamParser:
                     await on_content_async(event.text)
                     text_parts.append(event.text)
             elif event.kind == "reasoning_delta":
-                if event.reasoning:
+                if event.reasoning is not None:
                     reasoning_parts.append(event.reasoning)
             elif event.kind == "tool_start":
                 call = _slot(tool_calls, event.tool_call_id)

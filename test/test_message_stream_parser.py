@@ -112,7 +112,7 @@ def test_message_stream_parser_preserves_empty_reasoning_content() -> None:
         yield ModelStreamEvent("completed", stop_reason="stop")
 
     _content, _calls, _usage, reasoning_content, _finish_reason = asyncio.run(_consume(stream))
-    assert reasoning_content is None
+    assert reasoning_content == ""
 
 
 def test_message_stream_parser_ends_tools_that_never_emit_tool_end() -> None:

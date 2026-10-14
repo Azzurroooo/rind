@@ -143,3 +143,34 @@ async def test_notification_survives_provider_projection_and_compaction(task_she
     compact = await CompactionService().compact_async(session, messages, client, task_references=references)
     assert references[0]["task_id"] in compact["handoff_message"]["content"]
     assert references[0]["event_id"] in compact["handoff_message"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_historical_unclosed_tool_call_does_not_block_later_delivery(task_shell):
+    from agent.infrastructure.llm.images import chat_messages
+
+    tools, processes = task_shell
+    notifications = TaskNotifications(tools.supervisor.journal)
+    session = Session()
+    # Simulate an older interrupted turn with an unclosed tool call id 'orphan_call'
+    session.messages.extend([
+        {"role": "assistant", "content": "", "meta": {"tool_calls": [{"id": "done_call"}, {"id": "orphan_call"}]}},
+        {"role": "tool", "tool_call_id": "done_call", "content": "{}"},
+        {"role": "user", "content": "start background job"},
+        {"role": "assistant", "content": "", "reasoning_content": "thinking", "meta": {"tool_calls": [{"id": "bg_call"}]}},
+        {"role": "tool", "tool_call_id": "bg_call", "content": "{}"},
+        {"role": "assistant", "content": "Started in background."},
+    ])
+    result = await tools.bash("work", yield_time_ms=0, _idempotency_key="bg_call")
+    await notifications.result_committed("default", "bash", "bg_call", result)
+    processes[0].finish(stdout=b"all done\n")
+    await tools.task_control("wait", data(result)["task_id"])
+
+    assert await notifications.deliver(session) == 1
+    assert session.messages[-1]["role"] == "user"
+    assert session.messages[-1]["meta"]["kind"] == "task_notification"
+
+    wire_messages = chat_messages(session.messages, reasoning=True)
+    assistant_msgs = [m for m in wire_messages if m["role"] == "assistant"]
+    assert all("reasoning_content" in m and isinstance(m["reasoning_content"], str) for m in assistant_msgs)
+

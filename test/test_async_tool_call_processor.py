@@ -747,6 +747,50 @@ async def test_ask_user_question_rejects_invalid_structured_options(options, mes
     assert message in events[-1].result
 
 
+@pytest.mark.asyncio
+async def test_cancelled_batch_persists_cancelled_results_for_remaining_calls() -> None:
+    cancel_source = CancellationTokenSource()
+
+    class CancellingOnSecondExecutor:
+        def is_async_tool(self, tool_name: str) -> bool:
+            return True
+
+        async def execute_async(self, tool_name: str, args: dict):
+            if args.get("step") == 2:
+                cancel_source.cancel("Interrupted by user")
+                return ToolExecutionResult(status="cancelled", error_type="Cancelled", error_msg="Interrupted by user")
+            return ToolExecutionResult(status="ok", result_str='{"ok": true, "data": "done"}')
+
+    session = FakeSession()
+    processor = ToolCallProcessor(tool_executor=CancellingOnSecondExecutor())
+    calls = [
+        ParsedToolCall(call_id="call_00", name="bash", raw_args='{"step": 1}'),
+        ParsedToolCall(call_id="call_01", name="bash", raw_args='{"step": 2}'),
+        ParsedToolCall(call_id="call_02", name="bash", raw_args='{"step": 3}'),
+    ]
+
+    events = [
+        event
+        async for event in processor.execute(
+            session=session,
+            tool_calls=calls,
+            cancellation_token=cancel_source.token,
+            turn_id="turn_cancel_batch",
+        )
+    ]
+
+    started_ids = [e.tool_call_id for e in events if isinstance(e, ToolCallStartedEvent)]
+    result_events = [e for e in events if isinstance(e, ToolCallStartedEvent) is False and isinstance(e, ToolResultEvent)]
+    assert started_ids == ["call_00", "call_01"]
+    assert [(e.tool_call_id, e.status) for e in result_events] == [
+        ("call_00", "completed"),
+        ("call_01", "cancelled"),
+        ("call_02", "cancelled"),
+    ]
+    assert [m[1].get("tool_call_id") for m in session.persisted_messages] == ["call_00", "call_01", "call_02"]
+    assert [c[0][0] for c in session.persisted_tool_calls] == ["call_00", "call_01", "call_02"]
+
+
 def main() -> int:
     import asyncio
 

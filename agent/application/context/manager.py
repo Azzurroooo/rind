@@ -332,7 +332,8 @@ class ContextManager:
 
         def strip_heavy_fields(item: dict) -> None:
             item.pop("attachments", None)
-            item.pop("reasoning_content", None)
+            if "reasoning_content" in item:
+                item["reasoning_content"] = ""
             for call in item.get("tool_calls") or []:
                 fn = call.get("function") if isinstance(call, dict) else None
                 if isinstance(fn, dict) and len(str(fn.get("arguments") or "")) > 200:

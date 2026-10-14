@@ -80,9 +80,6 @@ class ToolCallProcessor:
         Async tools (like bash) are awaited directly; sync tools run in a thread.
         """
         for call in tool_calls:
-            if cancellation_token and cancellation_token.is_cancelled:
-                break
-
             started_at = time.perf_counter()
             parsed_args, parse_error = parse_tool_args(call.raw_args)
             ts_start = session.now_iso()
@@ -93,6 +90,12 @@ class ToolCallProcessor:
                 parsed_args = existing.get("args") if isinstance(existing.get("args"), dict) else parsed_args
                 outcome = self._outcome_from_record(existing)
                 reused = True
+            elif cancellation_token and cancellation_token.is_cancelled:
+                outcome = _ToolCallOutcome(
+                    status="cancelled",
+                    error_type="Cancelled",
+                    result=tool_cancelled(call.name, cancellation_token.reason),
+                )
             elif parse_error:
                 outcome = _ToolCallOutcome(
                     status="rejected",

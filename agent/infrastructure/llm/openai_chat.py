@@ -158,7 +158,9 @@ class OpenAIChatCompletionsClient(ChatClient):
     async def _request(self, messages, tools, stream, cancellation_token, *, max_output_tokens=None, reasoning_effort=None):
         if cancellation_token and cancellation_token.is_cancelled:
             raise asyncio.CancelledError(cancellation_token.reason)
-        payload = {"model": self._model, "messages": chat_messages(messages), "stream": stream}
+        effort = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+        reasoning = bool(effort and not self._reasoning_effort_disabled) or "deepseek" in self._model.lower()
+        payload = {"model": self._model, "messages": chat_messages(messages, reasoning=reasoning), "stream": stream}
         if max_output_tokens is not None:
             payload["max_tokens"] = max_output_tokens
         if stream:

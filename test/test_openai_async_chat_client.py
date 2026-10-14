@@ -243,3 +243,24 @@ async def test_openai_async_client_retries_blocked_request_without_reasoning_eff
     assert result.content == "Done"
     assert "reasoning_effort" in calls[0]
     assert "reasoning_effort" not in calls[1]
+
+
+@pytest.mark.asyncio
+async def test_openai_async_client_backfills_reasoning_content_on_assistant_messages():
+    mock_openai = MagicMock()
+    mock_openai.chat.completions.create = AsyncMock(
+        return_value={"choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}]}
+    )
+    client = OpenAIChatCompletionsClient(mock_openai, "deepseek-flash", reasoning_effort="high")
+    messages = [
+        {"role": "user", "content": "test"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "bash", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+    ]
+
+    await client.create(messages)
+
+    sent_messages = mock_openai.chat.completions.create.call_args.kwargs["messages"]
+    assistant = next(m for m in sent_messages if m["role"] == "assistant")
+    assert assistant["reasoning_content"] == ""
+
