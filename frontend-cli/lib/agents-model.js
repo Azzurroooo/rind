@@ -23,11 +23,11 @@ const STATUS = {
 export const STATUS_FILTERS = ["All", ...Object.keys(STATUS)];
 
 // A member's state is described in terms of the person, so a member whose
-// conversation is open in a window reads "1 open" instead of repeating the child status.
+// conversation is open in a window reads "1 Open" instead of repeating the child status.
 const MEMBER_STATE = { "Needs input": "Needs you", Unconfirmed: "Unconfirmed", Working: "Working", "Running job": "Running a job", Delegated: "Delegated", Queued: "Task queued" };
 export function memberState(status, open = 0) {
   if (MEMBER_STATE[status]) return { tone: status, label: MEMBER_STATE[status] };
-  if (open) return { tone: "Open", label: open + " open" };
+  if (open) return { tone: "Open", label: open + " Open" };
   return { tone: "Idle", label: "Idle" };
 }
 export const statusMeta = status => STATUS[status] || STATUS.Idle;

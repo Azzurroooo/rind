@@ -33,8 +33,8 @@ const NAVIGATION = [
 
 // What each status glyph means, for the ? overlay. Only "!" asks for you.
 const STATUS_LEGEND = [
-  ["!", "needs you"], ["●", "working"], ["↻", "running a job; resumes by itself"], ["⋯", "delegated to its members"],
-  ["◦", "queued"], ["?", "unconfirmed: check it stopped"], ["○", "open on a screen"], ["·", "idle"],
+  ["!", "Needs you"], ["●", "Working"], ["↻", "Running a job; resumes by itself"], ["⋯", "Delegated to its members"],
+  ["◦", "Queued"], ["?", "Unconfirmed: check it stopped"], ["○", "Open on a screen"], ["·", "Idle"],
 ];
 
 const act = (name, label) => ({ id: name, label: label || ACTIONS[name].label });

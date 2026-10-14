@@ -87,7 +87,7 @@ export function detailFor(view, row) {
       return {
         title: row.title, context: row.agentId ? "Registered folder" + (row.teams.length ? " · member of " + row.teams.join(", ") : "") : "Folder not in any team",
         callout: model.callout,
-        facts: [model.fact, { label: "Chats", value: row.sessionCount + (row.working ? " · " + row.working + " working" : "") }, { label: "Path", value: paint.path(row.workspace) }],
+        facts: [model.fact, { label: "Chats", value: row.sessionCount + (row.working ? " · " + row.working + " Working" : "") }, { label: "Path", value: paint.path(row.workspace) }],
       };
     }
     case "session": {
@@ -130,6 +130,7 @@ export function detailFor(view, row) {
       const asked = task.blockedOn && !needsUser(task);
       const review = row.fresh ? { text: "● New delivery · open it to accept or send back", tone: "accent" }
         : task.review?.decision === "accepted" ? { text: "✓ Accepted", tone: "success" } : task.review?.decision === "rework" ? { text: "↺ Sent back for rework", tone: "warning" } : undefined;
+      const outcome = single(task.report?.outcome);
       return {
         title: single(task.brief), titleLines: 3,
         context: ["Owner " + row.owner, task.priority && task.priority + " priority"].filter(Boolean).join(" · "),
@@ -138,7 +139,7 @@ export function detailFor(view, row) {
         facts: [
           asked && { label: "Waits on", value: "its members · " + single(task.blockedOn.action) },
           task.status === "queued" && { label: "Queue", value: task.queueReason },
-          { label: "Delivery", value: task.report ? [paint.dim(task.report.outcome), single(task.report.summary)] : paint.dim("No report yet"), lines: 4 },
+          { label: "Delivery", value: task.report ? [paint.dim(outcome ? outcome[0].toUpperCase() + outcome.slice(1) : ""), single(task.report.summary)] : paint.dim("No report yet"), lines: 4 },
         ],
       };
     }
@@ -155,8 +156,8 @@ export function detailFor(view, row) {
         title: row.title, context: "Leader " + (single(leader?.name) || "not chosen yet"),
         callout: s.needs ? { text: "! " + s.needs + (s.needs === 1 ? " task needs you" : " tasks need you") } : undefined,
         facts: [
-          { label: "Members", value: s.members + (s.working ? " · " + s.working + " working" : "") },
-          { label: "Tasks", value: s.queued + " queued · " + s.delivered + " delivered" },
+          { label: "Members", value: s.members + (s.working ? " · " + s.working + " Working" : "") },
+          { label: "Tasks", value: s.queued + " Queued · " + s.delivered + " Delivered" },
           { label: "New in", value: paint.path(team?.createRoot || "") },
         ],
       };

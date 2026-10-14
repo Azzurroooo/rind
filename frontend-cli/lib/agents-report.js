@@ -65,13 +65,15 @@ function fileSize(bytes) {
   return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
+const cap = value => { const s = single(value); return s ? s[0].toUpperCase() + s.slice(1) : ""; };
+
 function delivery({ task, artifacts }, width) {
   const r = task.report;
   if (!r) return [paintBackground(paint.dim("No delivery report yet."), "surface")];
   const files = artifacts.map(file => [paint.bold(paint.code(single(file.name))), file.size ? paint.notice(fileSize(file.size)) : "", paint.path(clean(file.path || ""))].filter(Boolean).join("  "));
   const published = !files.length && r.artifacts?.length ? [paint.dim(`${r.artifacts.length} published file${r.artifacts.length === 1 ? "" : "s"}`)] : [];
   return gap([
-    block("Outcome", [clean(r.outcome)], width, text => paint.bold(paint.success(text)), { labelStyle: text => paint.bold(paint.success(text)), surface: "surface" }),
+    block("Outcome", [cap(r.outcome)], width, text => paint.bold(paint.success(text)), { labelStyle: text => paint.bold(paint.success(text)), surface: "surface" }),
     block("Summary", [clean(r.summary)], width, text => text, { labelStyle: text => paint.bold(paint.accent(text)) }),
     block("Evidence", r.evidence.length ? r.evidence.map(item => paint.success("• ") + single(item)) : [paint.dim("none given")], width, text => text, { labelStyle: text => paint.bold(paint.fence(text)) }),
     block("Files", files.length ? files : published, width, text => text, { labelStyle: text => paint.bold(paint.path(text)) }),
@@ -87,7 +89,7 @@ function history({ task, runs, name }, width, expanded) {
   return gap([
     [paintBackground(paint.accent("▾ History") + paint.dim("   z to hide"), "surface")],
     block("Notes", notes.map(note => paint.dim(stamp(note.createdAt)) + "  " + paint.accent(single(name(note.author))) + ": " + single(note.text)), width, text => text, { labelStyle: paint.fence }),
-    block("Runs", runs.map(run => paint.dim(stamp(run.startedAt)) + "  " + (run.status === "succeeded" ? paint.success(single(run.status)) : paint.warning(single(run.status)))), width, text => text, { labelStyle: paint.fence }),
+    block("Runs", runs.map(run => paint.dim(stamp(run.startedAt)) + "  " + (run.status === "succeeded" ? paint.success(cap(run.status)) : paint.warning(cap(run.status)))), width, text => text, { labelStyle: paint.fence }),
   ]);
 }
 

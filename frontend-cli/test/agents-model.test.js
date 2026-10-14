@@ -234,6 +234,7 @@ test("a conversation running a job reads Running job everywhere, and delegated w
   assert.equal(memberState("Working").label, "Working");
   assert.equal(memberState("Running job").label, "Running a job");
   assert.equal(memberState("Delegated").label, "Delegated");
+  assert.equal(memberState("Idle", 1).label, "1 Open");
   assert.equal(memberState("Idle").label, "Idle");
   assert.equal(taskStatus({ status: "blocked", blockedOn: { responder: "children" } }), "Delegated");
   assert.equal(jobSummary(job.background), "npm test +1");

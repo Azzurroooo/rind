@@ -165,3 +165,21 @@ test("rows with the return arrow and pictographic titles keep the pane divider i
     assert.equal(columns.size, 1, "divider columns at width " + width + ": " + [...columns] + "\n" + lines.join("\n"));
   }
 });
+
+test("Independent workspace row, session row, header and details all render capitalized status labels", async () => {
+  const { independentRows } = await import("../lib/agents-model.js");
+  const now = Date.parse("2026-10-07T12:00:00Z");
+  const rows = independentRows([{
+    workspace: "/work/scratch",
+    name: "scratch",
+    teams: [],
+    sessions: [{ runtimeSessionId: "r-work", title: "Fix parser", status: "Working", updatedAt: "2026-10-07T11:59:00Z" }],
+  }], { now });
+  const view = { ...fixture(), navId: "independent", page: { kind: "independent" }, pageKey: "independent", entries: rows, selectedId: rows[0].id };
+  const screen = text(renderAgents(view, 120, 20));
+  assert.match(screen, /● 7 Working\s+● Connected/);
+  assert.match(screen, /scratch\s+\/work\/scratch\s+● 1 Working/);
+  assert.match(screen, /└─ ● Fix parser\s+Working\s+1m/);
+  assert.match(screen, /1 · 1 Working/);
+});
+

@@ -115,7 +115,7 @@ function treeLine(row, width, nameColumn) {
   let left, right = "";
   if (row.kind === "workspace") {
     const name = (row.expanded === false ? paint.accent("▸ ") : "") + paint.bold(single(row.title));
-    right = row.working ? paint.accent("● " + row.working + " working") : paint.dim(row.sessionCount + (row.sessionCount === 1 ? " conversation" : " conversations"));
+    right = row.working ? paint.accent("● " + row.working + " Working") : row.status && !["Idle", "Open"].includes(row.status) ? toned(row.status, statusMeta(row.status).glyph + " " + row.status) : paint.dim(row.sessionCount + (row.sessionCount === 1 ? " conversation" : " conversations"));
     const gap = Math.max(1, nameColumn - textWidth(name));
     const room = width - textWidth(name) - gap - Math.max(RIGHT, textWidth(right)) - 2;
     const where = !compact && room > 6 ? " ".repeat(gap) + paint.dim((row.teams?.length ? "in " + single(row.teams.join(", ")) + " · " : "") + shortPath(row.workspace, room - (row.teams?.length ? textWidth("in " + row.teams.join(", ") + " · ") : 0))) : "";
@@ -362,7 +362,7 @@ function headerLine(view, width) {
   const working = snapshot.memberships.filter(m => m.status === "Working").length;
   const needs = view.sidebar[0]?.badge || 0;
   // Breadcrumbs win over status: drop to compact chips before truncating the path.
-  const wide = [needs ? paint.warning("! " + needs + " need you") : "", working ? paint.accent("● " + working + " working") : "", paint.success("●") + paint.dim(" connected")];
+  const wide = [needs ? paint.warning("! " + needs + " Need you") : "", working ? paint.accent("● " + working + " Working") : "", paint.success("●") + paint.dim(" Connected")];
   const compact = [needs ? paint.warning("! " + needs) : "", working ? paint.accent("● " + working) : "", paint.success("●")];
   const candidates = view.connection === "connected" ? [wide, compact].map(parts => parts.filter(Boolean).join("  ")) : [paint.warning("○ " + view.connection), paint.warning("○")];
   const status = candidates.find(item => width - textWidth(item) - 1 >= textWidth(left)) || candidates.at(-1);
