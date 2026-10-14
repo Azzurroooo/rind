@@ -39,4 +39,16 @@ export function retain(state: State, now = Date.now()) {
     runs.sort((a, b) => b.lastObservedAt.localeCompare(a.lastObservedAt) || b.startedAt.localeCompare(a.startedAt));
     for (const run of runs.slice(keep)) delete state.runs[run.id];
   }
+
+  const sessionsWithRuns = new Set(Object.values(state.runs).map(run => run.sessionId));
+  for (const [id, session] of Object.entries(state.sessions)) {
+    if (
+      session.origin === "managed" &&
+      !sessionsWithRuns.has(id) &&
+      !(session.delegationId && state.delegations[session.delegationId]) &&
+      !state.deliveries[id]
+    ) {
+      delete state.sessions[id];
+    }
+  }
 }

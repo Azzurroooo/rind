@@ -1037,7 +1037,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       }
     });
   }
-  async function execute(runId: string, input: string) {
+  async function execute(runId: string, input: string, delivery = false) {
     try {
       const state = store.state;
       const startRun = state.runs[runId];
@@ -1045,7 +1045,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       const session = state.sessions[startRun.sessionId];
       const agent = state.agents[session.agentId];
       const instructions = memberInstructions(state, session, work);
-      const handle = await adapters[agent.adapter].start({ agent, session, task: work, input, instructions, externalTools: toolConfig({ kind: "agent", sessionId: session.id }) }, event => {
+      const handle = await adapters[agent.adapter].start({ agent, session, task: work, input, ...(delivery ? { delivery: true } : {}), instructions, externalTools: toolConfig({ kind: "agent", sessionId: session.id }) }, event => {
         void transaction(next => {
           const run = next.runs[runId];
           if (!activeRun(run) || event.sequence <= run.hostSequence) return;
@@ -1106,7 +1106,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         scheduleRequested = false;
         const starts = await transaction(async state => {
           if (stopped) return [];
-          const starts: { runId: string; input: string }[] = [];
+          const starts: { runId: string; input: string; delivery: boolean }[] = [];
           for (const task of Object.values(state.tasks).sort((a, b) => priorityRank(a) - priorityRank(b))) {
             if (task.status !== "queued" || !task.dispatch) continue;
             const team = state.teams[task.teamId];
@@ -1121,7 +1121,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
             state.sessions[session.id] = session;
             const run = newRun(state, session.id, task.id);
             task.status = "running"; delete task.report; delete task.error;
-            starts.push({ runId: run.id, input: task.resume || task.brief });
+            starts.push({ runId: run.id, input: task.resume || task.brief, delivery: Boolean(task.resume && session.runtimeSessionId) });
             delete task.resume;
           }
           for (const d of Object.values(state.delegations)) {
@@ -1140,14 +1140,14 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
             state.sessions[session.id] = session;
             const run = newRun(state, session.id, d.taskId, d.id);
             d.status = "running"; delete d.reply; delete d.error;
-            starts.push({ runId: run.id, input: d.resume || d.brief });
+            starts.push({ runId: run.id, input: d.resume || d.brief, delivery: Boolean(d.resume && session.runtimeSessionId) });
             delete d.resume;
           }
           return starts;
         });
         if (!stopped) {
           for (const start of starts) {
-            const execution = execute(start.runId, start.input);
+            const execution = execute(start.runId, start.input, start.delivery);
             executions.add(execution);
             void execution.finally(() => executions.delete(execution)).catch(() => {});
           }

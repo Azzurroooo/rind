@@ -79,8 +79,8 @@ class FakeExecution:
         self.release.set()
         return True
 
-    async def run_turn(self, session_id: str, *, query=None, transient_system_messages=None, resume=False):
-        self.queries.append({"session_id": session_id, "query": query, "resume": resume})
+    async def run_turn(self, session_id: str, *, query=None, transient_system_messages=None, resume=False, delivery=False):
+        self.queries.append({"session_id": session_id, "query": query, "resume": resume, "delivery": delivery})
         if self.blocking:
             self.started.set()
             await self.release.wait()

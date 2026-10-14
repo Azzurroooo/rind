@@ -88,3 +88,48 @@ test("management restores pending work outside the tail and removes settled repl
   ], { pendingDelegations: [] });
   assert.equal(state.display.pendingDelegations.size, 0);
 });
+
+test("replayed history preserves tool failure status, duration, and terminal diff payload", () => {
+  const state = createCliState();
+  const transcript = createTranscript();
+  const output = createCliOutputController({ state, transcript, terminalUi: { requestRender() {} }, animateTools: false });
+  const askError = JSON.stringify({
+    ok: false,
+    tool: "ask_user_question",
+    error: "ask_user_question requires at least 2 options.",
+    error_type: "InvalidUserQuestion",
+  });
+  const editResult = JSON.stringify({
+    ok: true,
+    tool: "edit_file",
+    data: "File edited: index.html",
+    meta: { files: [{ path: "index.html", added_lines: 1, removed_lines: 1, diff: "@@ -1 +1 @@\n-old\n+new" }] },
+  });
+  const bashResult = JSON.stringify({
+    ok: true,
+    tool: "bash",
+    data: { stdout: "ok\n", stderr: "", exit_code: 0 },
+  });
+  output.renderHistory([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        { id: "c-ask", function: { name: "ask_user_question", arguments: '{"question":"Proceed?"}' } },
+        { id: "c-edit", function: { name: "edit_file", arguments: '{"path":"index.html"}' } },
+        { id: "c-bash", function: { name: "bash", arguments: '{"command":"npm test"}' } },
+      ],
+    },
+    { role: "tool", tool_call_id: "c-ask", content: askError, status: "rejected", error_type: "InvalidUserQuestion", duration_ms: 45 },
+    { role: "tool", tool_call_id: "c-edit", content: editResult, status: "completed", duration_ms: 1200 },
+    { role: "tool", tool_call_id: "c-bash", content: bashResult, status: "completed", duration_ms: 1200 },
+  ]);
+  const rendered = stripAnsi(transcript.render(100).join("\n"));
+  assert.match(rendered, /⊘ ask user question/);
+  assert.match(rendered, /ask_user_question requires at least 2 options/);
+  assert.match(rendered, /◉ edit index\.html \(\+1 -1\)/);
+  assert.match(rendered, /- old/);
+  assert.match(rendered, /\+ new/);
+  assert.match(rendered, /◉ \$ npm test · 1\.20s/);
+});
+

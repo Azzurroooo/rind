@@ -505,7 +505,9 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         finishTool({
           tool_call_id: toolCallId,
           tool_name: tool.name,
-          status: "completed",
+          status: String(message?.status || "completed"),
+          ...(message?.error_type ? { error_type: String(message.error_type) } : {}),
+          ...(Number.isFinite(message?.duration_ms) ? { duration_ms: Number(message.duration_ms) } : {}),
           result: content,
         });
       }

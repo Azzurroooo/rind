@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
+from agent.application.tools.result_normalizer import ToolResultNormalizer
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_HANDOFF_REASONING_CONTENT
 from agent.domain.message_boundary import validate_compact_handoff_boundary
+from agent.domain.tool_result import classify_tool_error, classify_tool_payload, parse_tool_result_payload
 from agent.prompts import refresh_system_prompt
 
 INTERNAL_MESSAGE_KINDS = frozenset({"goal_checkpoint", "task_notification"})
@@ -48,18 +51,8 @@ def project_messages(
             tool_call_id = message.get("tool_call_id")
             if tool_call_id and str(tool_call_id) in emitted_tool_call_ids:
                 continue
-            projected = {
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": _build_tool_content(tool_map.get(str(tool_call_id))),
-            }
-            if "attachments" in message:
-                projected["attachments"] = message["attachments"]
-            if include_ids and message.get("id"):
-                projected["id"] = str(message["id"])
-            record = tool_map.get(str(tool_call_id)) or {}
-            if record.get("attachments"):
-                projected["attachments"] = record["attachments"]
+            record = tool_map.get(str(tool_call_id))
+            projected = _project_tool_message(message, record, include_ids=include_ids)
             built_messages.append(projected)
             if tool_call_id:
                 emitted_tool_call_ids.add(str(tool_call_id))
@@ -266,8 +259,8 @@ def _missing_tool_messages(
     tool_map: dict[str, dict[str, Any]],
     emitted_tool_call_ids: set[str],
     include_ids: bool = False,
-) -> list[dict[str, str]]:
-    missing: list[dict[str, str]] = []
+) -> list[dict[str, Any]]:
+    missing: list[dict[str, Any]] = []
     for tool_call in tool_calls:
         tool_call_id = str(tool_call.get("id") or "")
         if not tool_call_id or tool_call_id in emitted_tool_call_ids:
@@ -279,15 +272,94 @@ def _missing_tool_messages(
             )
             emitted_tool_call_ids.add(tool_call_id)
             continue
-        content = _build_tool_content(tool_record)
-        item = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
-        if tool_record.get("attachments"):
-            item["attachments"] = tool_record["attachments"]
-        if include_ids and tool_record.get("id"):
-            item["id"] = str(tool_record["id"])
+        item = _project_tool_message(
+            {"role": "tool", "tool_call_id": tool_call_id, "id": tool_record.get("id")},
+            tool_record,
+            include_ids=include_ids,
+        )
         missing.append(item)
         emitted_tool_call_ids.add(tool_call_id)
     return missing
+
+
+def _project_tool_message(
+    message: dict[str, Any],
+    tool_record: dict[str, Any] | None,
+    *,
+    include_ids: bool = False,
+) -> dict[str, Any]:
+    tool_call_id = message.get("tool_call_id")
+    if include_ids:
+        replay = project_tool_replay_fields(tool_record, message)
+        projected: dict[str, Any] = {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": replay["result"],
+            "status": replay["status"],
+        }
+        if replay["error_type"]:
+            projected["error_type"] = replay["error_type"]
+        if "duration_ms" in replay:
+            projected["duration_ms"] = replay["duration_ms"]
+    else:
+        projected = {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": _build_tool_content(tool_record),
+        }
+    if "attachments" in message:
+        projected["attachments"] = message["attachments"]
+    if include_ids and message.get("id"):
+        projected["id"] = str(message["id"])
+    record = tool_record or {}
+    if record.get("attachments"):
+        projected["attachments"] = record["attachments"]
+    return projected
+
+
+def project_tool_replay_fields(
+    record: dict[str, Any] | None,
+    message: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    record = record if isinstance(record, dict) else {}
+    message = message if isinstance(message, dict) else {}
+    payload = _tool_result_payload(record, message)
+    tool_name = str(record.get("name") or message.get("tool_name") or "")
+    error_type = str(record.get("error_type") or "")
+    status = classify_tool_error(error_type or "ToolExecutionError") if error_type or record.get("ok") is False else "completed"
+    content = ToolResultNormalizer().project_for_terminal(payload, tool_name=tool_name, status=status, error_type=error_type)
+    for candidate in (payload, content):
+        parsed = parse_tool_result_payload(candidate)
+        classified = classify_tool_payload(parsed) if parsed else None
+        if classified:
+            status, error_type = classified
+            break
+    fields: dict[str, Any] = {
+        "tool_name": tool_name,
+        "result": content,
+        "status": status,
+        "error_type": error_type,
+    }
+    try:
+        start = datetime.fromisoformat(str(record.get("ts_start") or ""))
+        end = datetime.fromisoformat(str(record.get("ts_end") or ""))
+        if end >= start:
+            fields["duration_ms"] = int((end - start).total_seconds() * 1000)
+    except ValueError:
+        pass
+    return fields
+
+
+def _tool_result_payload(record: dict[str, Any], message: dict[str, Any]) -> Any:
+    payload = record.get("result")
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, str) and payload.strip():
+        return payload
+    for fallback in (record.get("model_content"), message.get("content")):
+        if isinstance(fallback, str) and fallback:
+            return fallback
+    return ""
 
 
 def _build_tool_content(tool_record: dict | None) -> str:

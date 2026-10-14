@@ -261,7 +261,7 @@ test("the Agents page follows conversation moves and leaving closes it for its o
   const running = runAgentsPage({ launch, input, output: output.output, initialTeamId: team.id, signal: abort.signal, openChat: async chat => { opened.push(chat.runtimeSessionId || "new"); return steps.shift(); } });
   stopPage = async () => { abort.abort(); await running; };
   const until = async (check, label) => { for (let i = 0; i < 150 && !check(); i++) await new Promise(r => setTimeout(r, 20)); assert.ok(check(), label); };
-  await visible("Leader"); await visible("connected");
+  await visible("Leader"); await visible("Connected");
   input.send("c");
   await until(() => opened.length === 2, "a move from one conversation to another reuses the page's slot");
   assert.deepEqual(opened, ["new", "second"]);

@@ -1787,6 +1787,95 @@ async def test_resume_repairs_count_types_before_appending(temp_session_dir, cou
     assert repaired["tool_call_count"] == 0
 
 
+@pytest.mark.asyncio
+async def test_team_delivery_does_not_inflate_message_count_overwrite_title_or_allow_user_fork(temp_session_dir):
+    from agent.infrastructure.persistence.session_fork import fork_session
+
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="delivery-meta", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "Initial user prompt")
+    await store.persist_message("assistant", "Working on it")
+    await store.persist_message(
+        "user",
+        "Delegated work settled:\n- ui · task t1 · delivered: done",
+        meta={"kind": "team_delivery"},
+    )
+    meta = store.load_session_metadata("delivery-meta", temp_session_dir)
+    assert meta["title"] == "Initial user prompt"
+    assert meta["message_count"] == 3
+
+    replay_msgs = await store.get_messages_slice(include_ids=True)
+    user_msgs = [m for m in replay_msgs if m.get("role") == "user"]
+    assert len(user_msgs) == 2
+    assert user_msgs[1].get("_rind_meta") == {"kind": "team_delivery"}
+
+    with pytest.raises(ValueError, match="Fork point must be a user message"):
+        fork_session(temp_session_dir, store.session_id, before_message_id=user_msgs[1]["id"])
+
+
+@pytest.mark.asyncio
+async def test_replay_projects_terminal_tool_content_and_status_while_llm_context_keeps_model_content(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="tool-replay-split", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "Edit and ask")
+    await store.persist_message(
+        "assistant",
+        "",
+        meta={
+            "tool_calls": [
+                {"id": "c-edit", "type": "function", "function": {"name": "edit_file", "arguments": '{"path":"a.py"}'}},
+                {"id": "c-ask", "type": "function", "function": {"name": "ask_user_question", "arguments": '{"question":"Ship?"}'}},
+            ]
+        },
+    )
+    edit_payload = json.dumps({
+        "ok": True,
+        "tool": "edit_file",
+        "data": "File edited: a.py",
+        "meta": {"files": [{"path": "a.py", "added_lines": 1, "removed_lines": 1, "diff": "@@ -1 +1 @@\n-old\n+new"}]},
+    })
+    ask_payload = json.dumps({
+        "ok": False,
+        "tool": "ask_user_question",
+        "error": "ask_user_question requires at least 2 options.",
+        "error_type": "InvalidUserQuestion",
+    })
+    await store.persist_tool_call(
+        call_id="c-edit",
+        name="edit_file",
+        parsed_args={"path": "a.py"},
+        raw_args='{"path":"a.py"}',
+        ts_start="2026-10-14T06:00:00+00:00",
+        ts_end="2026-10-14T06:00:01.250000+00:00",
+        result_payload=edit_payload,
+        model_content="Updated a.py (1 replacement).",
+    )
+    await store.persist_tool_call(
+        call_id="c-ask",
+        name="ask_user_question",
+        parsed_args={"question": "Ship?"},
+        raw_args='{"question":"Ship?"}',
+        ts_start="2026-10-14T06:00:02+00:00",
+        ts_end="2026-10-14T06:00:02.050000+00:00",
+        result_payload=ask_payload,
+        model_content=ask_payload,
+    )
+
+    llm_messages = await store.get_messages_slice(include_ids=False)
+    llm_tools = {m["tool_call_id"]: m for m in llm_messages if m.get("role") == "tool"}
+    assert llm_tools["c-edit"]["content"] == "Updated a.py (1 replacement)."
+    assert "status" not in llm_tools["c-edit"]
+
+    replay_messages = await store.get_messages_slice(include_ids=True)
+    replay_tools = {m["tool_call_id"]: m for m in replay_messages if m.get("role") == "tool"}
+    assert "@@ -1 +1 @@" in replay_tools["c-edit"]["content"]
+    assert replay_tools["c-edit"]["status"] == "completed"
+    assert replay_tools["c-edit"]["duration_ms"] == 1250
+    assert replay_tools["c-ask"]["status"] == "rejected"
+    assert replay_tools["c-ask"]["error_type"] == "InvalidUserQuestion"
+    assert replay_tools["c-ask"]["duration_ms"] == 50
+
+
 def main() -> int:
     async def _run_all():
         with tempfile.TemporaryDirectory() as tmp:

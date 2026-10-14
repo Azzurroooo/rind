@@ -62,3 +62,19 @@ test("shared conversations take their state from the Runtime: open only while a 
   assert.equal(memberStatus(projectionIndex(state, connected, live("idle", 1)), "a", "t"), "Open");
   assert.equal(memberStatus(projectionIndex(state, connected), "a", "t"), "Idle", "without a Runtime report a shared session is not assumed open");
 });
+
+test("orphaned managed sessions without runs, delegations, or pending deliveries are pruned while direct and active managed sessions stay", () => {
+  const state = emptyState();
+  state.sessions.direct = { id: "direct", agentId: "a", teamId: "t", runtimeSessionId: "r-direct", origin: "direct" };
+  state.sessions.orphan = { id: "orphan", agentId: "a", teamId: "t", runtimeSessionId: "r-orphan", origin: "managed", delegationId: "gone" };
+  state.sessions.withRun = { id: "withRun", agentId: "a", teamId: "t", runtimeSessionId: "r-run", origin: "managed" };
+  state.sessions.withDelegation = { id: "withDelegation", agentId: "a", teamId: "t", runtimeSessionId: "r-del", origin: "managed", delegationId: "d1" };
+  state.delegations.d1 = { id: "d1", teamId: "t", fromAgentId: "lead", assigneeAgentId: "a", originSessionId: "direct", brief: "Work", status: "done" };
+  state.runs.r1 = run("r1", "withRun", 1, { taskId: "task-1" });
+  retain(state);
+  assert.equal(state.sessions.orphan, undefined);
+  assert.ok(state.sessions.direct);
+  assert.ok(state.sessions.withRun);
+  assert.ok(state.sessions.withDelegation);
+});
+

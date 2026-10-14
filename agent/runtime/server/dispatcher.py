@@ -557,6 +557,7 @@ class RuntimeDispatcher:
             raw_query = params.get("query")
         query = str(raw_query or "")
         resume = params.get("resume") is True
+        delivery = params.get("delivery") is True
         if not query.strip() and not resume:
             await self._respond_error(request, "session/prompt requires input.", "InvalidRequest")
             return
@@ -578,7 +579,11 @@ class RuntimeDispatcher:
             self._worker.execution.begin_request(session_id)
         try:
             async for event in self._worker.execution.run_turn(
-                session_id, query=query, transient_system_messages=transient_system_messages, resume=resume,
+                session_id,
+                query=query,
+                transient_system_messages=transient_system_messages,
+                resume=resume,
+                **({"delivery": True} if delivery else {}),
             ):
                 turn_session_id = turn_session_id or str(event.get("session_id") or "")
                 turn_id = turn_id or str(event.get("turn_id") or "")

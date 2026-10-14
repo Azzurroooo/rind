@@ -586,13 +586,16 @@ export function normalizeHistoryMessages(values) {
       if (message.role === "tool") {
         const content = contentText(message.content);
         const payload = parseToolPayload(content);
+        const status = message.status && message.status !== "completed" ? "failed"
+          : payload?.ok === false ? "failed" : "completed";
         return {
           id: message.id || `history-tool-${message.tool_call_id || index}`,
           role: "tool",
           tool_call_id: message.tool_call_id || `history-${index}`,
           name: message.name || message.tool_name || payload?.tool || "tool",
           result: content,
-          status: payload?.ok === false ? "failed" : "completed",
+          status,
+          ...(Number.isFinite(message.duration_ms) ? { duration_ms: Number(message.duration_ms) } : {}),
         };
       }
       return {
@@ -600,6 +603,7 @@ export function normalizeHistoryMessages(values) {
         role: message.role,
         content: contentText(message.content),
         meta: "",
+        ...(message._rind_meta ? { _rind_meta: message._rind_meta } : {}),
         ...(message.ts || message.created_at || message.timestamp ? { time: message.ts || message.created_at || message.timestamp } : {}),
       };
     })

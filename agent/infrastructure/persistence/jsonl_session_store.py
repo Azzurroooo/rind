@@ -87,7 +87,7 @@ def _is_non_conversation_message(message: dict[str, Any]) -> bool:
     metadata = message.get("meta")
     return is_internal_message(message) or (
         isinstance(metadata, dict)
-        and metadata.get("kind") in {"skill_snapshot", "skill_catalog"}
+        and metadata.get("kind") in {"skill_snapshot", "skill_catalog", "team_delivery"}
     )
 
 
@@ -462,9 +462,18 @@ class JsonlSessionStore(SessionStore):
             message_count=message_count,
             tool_call_count=tool_call_count,
         )
+        self._last_preview = self._latest_assistant_preview(messages)
+        self._index_entry = None
         if counts_changed or original_window != normalized_window:
             self._persist_meta_sync(meta.get("updated_at"))
-        self._last_preview = self._latest_assistant_preview(messages)
+        elif self._has_user_message:
+            self._index_entry = session_index_entry(
+                self._session_id,
+                self._session_meta,
+                message_count=self._session_meta["message_count"],
+                tool_call_count=self._session_meta["tool_call_count"],
+                preview=self._last_preview,
+            )
         return messages
 
     @staticmethod
@@ -495,6 +504,7 @@ class JsonlSessionStore(SessionStore):
             "session_paths": self._session_paths,
             "session_meta": self._session_meta,
             "last_preview": self._last_preview,
+            "index_entry": self._index_entry,
             "projected_caches": dict(self._projected_caches),
             "model": self._model,
             "provider": self._provider,
@@ -512,6 +522,7 @@ class JsonlSessionStore(SessionStore):
             self._session_paths = previous["session_paths"]
             self._session_meta = previous["session_meta"]
             self._last_preview = previous["last_preview"]
+            self._index_entry = previous["index_entry"]
             self._projected_caches = previous["projected_caches"]
             self._model = previous["model"]
             self._provider = previous["provider"]
@@ -951,7 +962,7 @@ class JsonlSessionStore(SessionStore):
     def _persist_message_sync(self, role, content, tool_call_id=None, tool_name=None,
                               meta=None, reasoning_content=None, attachments=None):
         is_context_record = isinstance(meta, dict) and meta.get("kind") in (
-            {"skill_snapshot", "skill_catalog"} | INTERNAL_MESSAGE_KINDS
+            {"skill_snapshot", "skill_catalog", "team_delivery"} | INTERNAL_MESSAGE_KINDS
         )
         if not self.is_persisted:
             if role != "user" or not str(content or "").strip() or is_context_record:

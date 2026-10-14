@@ -16,7 +16,7 @@ from agent.infrastructure.persistence.session_index_repository import SessionInd
 from agent.infrastructure.persistence.session_meta import display_title, new_session_id, session_index_entry
 
 FORK_TITLE_SUFFIX = " (fork)"
-CONTEXT_RECORD_KINDS = frozenset({"skill_snapshot", "skill_catalog"}) | INTERNAL_MESSAGE_KINDS
+CONTEXT_RECORD_KINDS = frozenset({"skill_snapshot", "skill_catalog", "team_delivery"}) | INTERNAL_MESSAGE_KINDS
 
 
 def fork_session(session_dir: str | Path | None, source_id: str, *, before_message_id: str | None = None) -> str:

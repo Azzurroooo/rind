@@ -25,10 +25,18 @@ test("a session whose turn ended while its jobs still run is Running job, not Wo
   assert.equal(sessionStatus(projectionIndex(s, new Set(), live()), "s").status, "Working", "no jobs: the active run is Working");
 });
 
-test("a leader whose task waits for its members is Delegated", () => {
+test("a leader whose task waits for its members is Delegated, while a child delegation session does not inherit the leader's taskId", () => {
   const s = state();
+  s.agents.dev = { id: "dev", name: "Dev", canonicalWorkspace: "/w/dev", adapter: "rind" };
+  s.memberships["team/dev"] = { teamId: "team", agentId: "dev", reportsToAgentId: "lead" };
+  s.sessions.child = { id: "child", agentId: "dev", teamId: "team", runtimeSessionId: "r-child", origin: "managed", delegationId: "d1" };
   s.tasks.t = { id: "t", teamId: "team", assigneeAgentId: "lead", createdBy: "user", brief: "Ship", status: "blocked", blockedOn: { responder: "children", action: "Continues when its members deliver." } };
-  assert.equal(memberStatus(projectionIndex(s, new Set(), new Map()), "lead", "team"), "Delegated");
+  s.delegations.d1 = { id: "d1", teamId: "team", fromAgentId: "lead", assigneeAgentId: "dev", originSessionId: "s", taskId: "t", brief: "Subwork", status: "done", returned: false };
+  s.runs.childRun = { id: "childRun", sessionId: "child", taskId: "t", delegationId: "d1", status: "succeeded", startedAt: "2026-10-07T11:00:00Z", lastObservedAt: "2026-10-07T11:01:00Z", hostSequence: 1 };
+  const index = projectionIndex(s, new Set(), new Map());
+  assert.equal(memberStatus(index, "lead", "team"), "Delegated");
+  assert.equal(sessionStatus(index, "child").taskId, undefined, "delegation session does not inherit parent taskId");
+  assert.equal(memberStatus(index, "dev", "team"), "Idle", "settled sub-agent member is Idle, not Delegated");
 });
 
 test("the Manager's overview keeps open work and the latest deliveries, and counts the rest", () => {

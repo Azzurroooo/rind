@@ -90,12 +90,16 @@ test("three levels of delegation wait for grandchildren and deliver back through
   assert.equal(f.starts.length, 3);
   f.starts[2].finish({ content: "Leaf delivery" });
   await eventually(() => f.starts.length === 4);
+  assert.equal(f.starts[0].input.delivery, undefined);
+  assert.equal(f.starts[1].input.delivery, undefined);
   assert.equal(f.starts[3].input.task.id, mid.taskId);
   assert.equal(f.starts[3].input.session.id, f.starts[1].input.session.id, "continuations preserve session identity");
+  assert.equal(f.starts[3].input.delivery, true, "resumed delegation run marks turn as delivery");
   assert.match(f.starts[3].input.input, new RegExp("a1 · task " + leaf.taskId + " · delivered: Leaf delivery"));
   f.starts[3].finish({ content: "Integrated child" });
   await eventually(() => f.starts.length === 5);
   assert.equal(f.starts[4].input.task.id, root.id);
+  assert.equal(f.starts[4].input.delivery, true, "resumed task run marks turn as delivery");
   assert.match(f.starts[4].input.input, /Integrated child/);
   assert.doesNotMatch(f.starts[4].input.input, /Leaf delivery/, "each delegator hears from its own reports");
 });

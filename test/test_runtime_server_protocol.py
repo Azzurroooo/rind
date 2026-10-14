@@ -237,12 +237,18 @@ def test_turn_prompt_preserves_input_text_and_resume_flag():
         await server._dispatch(
             {"kind": "request", "request_id": 24, "method": "session/prompt", "params": {"session_id": "s1", "resume": True}}
         )
+        await server._dispatch(
+            {"kind": "request", "request_id": 25, "method": "session/prompt", "params": {"session_id": "s1", "input": "delivered", "delivery": True}}
+        )
 
     asyncio.run(run())
 
     assert worker.execution.queries[0]["query"] == "  preserve surrounding text  "
+    assert worker.execution.queries[0]["delivery"] is False
     assert worker.execution.queries[1]["resume"] is True
     assert worker.execution.queries[1]["query"] == ""
+    assert worker.execution.queries[2]["query"] == "delivered"
+    assert worker.execution.queries[2]["delivery"] is True
     assert _response(payloads, 24)["result"]["ok"] is True
 
 

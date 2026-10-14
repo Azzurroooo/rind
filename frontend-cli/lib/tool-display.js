@@ -629,7 +629,7 @@ const DELEGATE_RENDERER = {
   },
   finished(context, width, state) {
     const task = delegatedTask(context.event?.result);
-    const target = delegateTarget(context.args, width) || (task?.assignee ? agentArg(task.assignee, width) : task?.wait ? "wait" : dim("…"));
+    const target = (task?.assignee ? agentArg(task.assignee, width) : "") || delegateTarget(context.args, width) || (task?.wait ? "wait" : dim("…"));
     const id = task?.taskId ? dim(` · task ${clipText(task.taskId, Math.max(8, width), 6)}`)
       : task?.wait ? dim(` · ${task.settled.length} settled${task.timedOut ? " · timed out" : task.released ? " · released" : ""}`) : "";
     return titleFor(state, `delegate → ${target}${id}`) + durationPart("delegate", context.event);

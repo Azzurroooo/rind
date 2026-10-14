@@ -28,6 +28,22 @@ export async function openStore(directory: string, rotateEvery = 256) {
     requireValue(entry.seq === state.seq + 1, "CORRUPT_STORE", "Management journal has a gap.");
     apply(state, entry);
   }
+  for (const [id, task] of Object.entries(state.tasks)) {
+    if ("parentTaskId" in (task as unknown as Record<string, unknown>)) {
+      delete state.tasks[id];
+      for (const [runId, run] of Object.entries(state.runs)) if (run.taskId === id) delete state.runs[runId];
+    }
+  }
+  for (const [id, session] of Object.entries(state.sessions)) {
+    if (
+      session.origin === "managed" &&
+      !(session.delegationId && state.delegations[session.delegationId]) &&
+      !state.deliveries[id] &&
+      !Object.values(state.runs).some(r => r.sessionId === id)
+    ) {
+      delete state.sessions[id];
+    }
+  }
   let fatal: unknown;
   return {
     get state() { return state; },
