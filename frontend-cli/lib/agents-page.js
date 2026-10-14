@@ -485,8 +485,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   // Left always climbs: conversation -> its member -> sidebar. It never folds,
   // so leaving a deep tree takes at most two presses.
   function left() {
+    if (view.focus === "sidebar") return;
     const owner = ownerRow(currentRow());
-    if (view.focus === "main" && owner) selectRow(owner.id);
+    if (owner) selectRow(owner.id);
     else back();
   }
   function right() {

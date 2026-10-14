@@ -775,7 +775,7 @@ export function questionMenuFrame(
       lines.push(dim("    ↳ press Tab to type"));
     }
   }
-  lines.push(dim("    ↑↓ select · enter confirm · esc cancel"));
+  lines.push(dim("    ↑↓ select · enter confirm · esc skip"));
   return { text: `${lines.join("\n")}\n`, cursor };
 }
 
@@ -1353,36 +1353,72 @@ function slashSkillsText(display) {
   const problems = (Array.isArray(display.problems) ? display.problems : []).filter((problem) => problem && typeof problem === "object");
   const skillsOf = (source) => (Array.isArray(source.skills) ? source.skills : []).filter((skill) => skill && typeof skill === "object");
   const shown = sources.filter((source) => source.enabled ? skillsOf(source).length : source.importable);
-  const available = shown.flatMap(skillsOf).filter((skill) => skill.status === "active" || skill.status === "hidden").length;
+  const enabled = shown.filter((source) => source.enabled);
+  const disabled = shown.filter((source) => !source.enabled);
+  const available = enabled.flatMap(skillsOf).filter((skill) => skill.status === "active" || skill.status === "hidden").length;
   const lines = [sectionRule("Skills", available ? `${available} available` : "")];
   if (!shown.length) lines.push(dim("  no skills found"));
   const width = slashContentWidth();
-  const nameWidth = Math.min(24, Math.max(12, ...shown.flatMap(skillsOf).map((skill) => visibleLength(clipSingleLine(skill.name, 24)))));
-  for (const source of shown) {
-    const paths = (Array.isArray(source.paths) ? source.paths : []).map(prettySkillLocation).join(" · ");
-    if (!source.enabled) {
-      const count = skillsOf(source).length;
-      lines.push(`  ${dim(`${source.label}  off · ${count} ${count === 1 ? "skill" : "skills"} · /import to enable`)}`);
-      continue;
-    }
-    lines.push(`  ${bold(source.label)}  ${dim(clipSingleLine(paths, Math.max(18, width - visibleLength(source.label) - 4)))}`);
+  const nameWidth = Math.min(24, Math.max(12, ...enabled.flatMap(skillsOf).map((skill) => visibleLength(clipSingleLine(skill.name, 24)))));
+  const addSection = (...rows) => {
+    if (lines.length > 1) lines.push("");
+    lines.push(...rows);
+  };
+  for (const source of enabled) {
+    const paths = middleClip(
+      (Array.isArray(source.paths) ? source.paths : []).map(prettySkillLocation).filter(Boolean).join(" · "),
+      Math.max(18, width - visibleLength(source.label) - 4),
+    );
+    const group = [paths ? `  ${bold(source.label)}  ${promptPath(paths)}` : `  ${bold(source.label)}`];
     for (const skill of skillsOf(source)) {
-      const note = skill.status === "overridden"
-        ? `overridden by ${prettySkillLocation(skill.overridden_by)}`
-        : `${skill.status === "hidden" ? "only via /skill:name · " : ""}${skill.description || ""}`;
-      const name = padRight(clipSingleLine(skill.name, 24), nameWidth);
-      lines.push(`    ${skill.status === "overridden" ? dim(name) : name}  ${dim(clipSingleLine(note, Math.max(18, width - nameWidth - 6)))}`);
+      group.push(skillRowText(skill, nameWidth, Math.max(18, width - nameWidth - 6)));
     }
+    addSection(...group);
+  }
+  if (disabled.length) {
+    const labelWidth = Math.max(nameWidth + 2, ...disabled.map((source) => visibleLength(source.label)));
+    const counts = disabled.map((source) => {
+      const count = skillsOf(source).length;
+      return `off · ${count} ${count === 1 ? "skill" : "skills"}`;
+    });
+    const countWidth = Math.max(...counts.map(visibleLength));
+    addSection(...disabled.map((source, index) => {
+      const label = padRight(source.label, labelWidth);
+      const status = padRight(counts[index], countWidth);
+      return `  ${dim(`${label}  ${status} · `)}${accent("/import")}${dim(" to enable")}`;
+    }));
   }
   if (problems.length) {
-    lines.push(`  ${bold("Problems")}`);
-    for (const problem of problems) {
-      const location = prettySkillLocation(problem.location);
-      lines.push(`    ${dim(location)}  ${dim(clipSingleLine(problem.message, Math.max(18, width - visibleLength(location) - 6)))}`);
-    }
+    addSection(
+      `  ${paint.warning(bold("Problems"))}`,
+      ...problems.map((problem) => {
+        const location = prettySkillLocation(problem.location);
+        const colWidth = Math.max(nameWidth, visibleLength(location));
+        const message = clipSingleLine(problem.message, Math.max(18, width - colWidth - 6));
+        return `    ${promptPath(padRight(location, colWidth))}  ${dim(message)}`;
+      }),
+    );
   }
   return lines.join("\n");
 }
+
+function skillRowText(skill, nameWidth, noteWidth) {
+  const name = padRight(clipSingleLine(skill.name, 24), nameWidth);
+  if (skill.status === "overridden") {
+    const note = middleClip(`overridden by ${prettySkillLocation(skill.overridden_by)}`, noteWidth);
+    return `    ${dim(name)}  ${dim(note)}`;
+  }
+  if (skill.status === "hidden") {
+    const prefix = "only via /skill:name";
+    const clipped = clipSingleLine(skill.description ? `${prefix} · ${skill.description}` : prefix, noteWidth);
+    const note = clipped.startsWith(prefix)
+      ? `${paint.warning(prefix)}${dim(clipped.slice(prefix.length))}`
+      : paint.warning(clipped);
+    return `    ${accent(name)}  ${note}`;
+  }
+  return `    ${accent(name)}  ${dim(clipSingleLine(skill.description, noteWidth))}`;
+}
+
 
 // Paths read best compressed: collapse the home directory to "~" and drop the
 // redundant SKILL.md filename that every entry shares.

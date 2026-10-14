@@ -224,6 +224,27 @@ describe("conversation reducer — question cards as stream entries (§2.3 answe
     expect(state.entries).toHaveLength(1); // kept, not removed
   });
 
+  it("a skipped question tool_result closes the pending question entry while the turn continues", () => {
+    const state = replay([
+      questionEnvelope,
+      event(2, "durable", {
+        type: "tool_result",
+        tool_call_id: "q1",
+        tool_name: "ask_user_question",
+        status: "failed",
+        error_type: "UserQuestionEmptyAnswer",
+        result: JSON.stringify({
+          ok: false,
+          tool: "ask_user_question",
+          error: "User provided an empty answer.",
+          error_type: "UserQuestionEmptyAnswer",
+        }),
+      }),
+    ]);
+    expect(state.question).toBeNull();
+    expect(state.entries.find((item) => item.role === "question")).toMatchObject({ status: "cancelled" });
+  });
+
   it("live_turn snapshots materialize the pending question entry too", () => {
     let state = reduceConversation(emptyConversationState(), { kind: "history", messages: [] });
     state = reduceConversation(state, {

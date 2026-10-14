@@ -155,7 +155,7 @@ export function createCliInputActions({
       }
       const answer = elsewhere ? question.answeredElsewhere : typed;
       if (!elsewhere) await request(runtimeMethods.userQuestionRespond, { tool_call_id: event.tool_call_id, answer });
-      const shown = elsewhere ? answer + " (answered in another window)" : answer;
+      const shown = elsewhere ? (answer || "(no answer)") + " (answered in another window)" : answer;
       if (output.finishQuestion) {
         output.finishQuestion(event, shown);
       } else {
@@ -627,6 +627,7 @@ export function createCliInputActions({
       }
       if (!modified && key.name === "escape") {
         session.questionState.leaveEditing();
+        session.editor.setInput("");
         output.redraw();
         return;
       }
@@ -649,7 +650,7 @@ export function createCliInputActions({
       completeTtyInput(session, session.questionState.selectedOption()?.label || "", false);
       return;
     }
-    if (!modified && key.name === "escape") return getTurnController().interrupt();
+    if (!modified && key.name === "escape") return completeTtyInput(session, "", false);
     if (!modified && session.questionState.handleNavigation(key)) {
       output.redraw();
     }

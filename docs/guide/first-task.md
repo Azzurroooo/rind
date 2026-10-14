@@ -42,7 +42,7 @@ Rich text in assistant replies - tables, code blocks - is laid out directly by t
 
 ## Two kinds of mid-task interaction
 
-- **It may ask you questions**: when a tool needs your call, the input box gives way to an option menu - up/down to select, Enter to confirm, Esc to stop the task without answering. Non-interactive `rind run` does not support such questions and fails outright.
+- **It may ask you questions**: when a tool needs your call, the input box gives way to an option menu - up/down to select, Enter to confirm, Esc to skip without answering. Non-interactive `rind run` does not support such questions and fails outright.
 - **You want to change direction**: you can type and send right now. For the full semantics of steering / queuing / interrupting, see [Steer the work back on track](steer-the-work.md).
 
 ## Finishing and exiting
