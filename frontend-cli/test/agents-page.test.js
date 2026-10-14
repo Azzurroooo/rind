@@ -51,6 +51,8 @@ test("real CLI empty-prompt entry returns to an editable conversation repeatedly
   await visible("← agents");
   for (let i = 0; i < 2; i++) {
     child.stdin.write("\x1b[D"); await visible("New team");
+    child.stdin.write("\x1b[D"); await new Promise(resolve => setTimeout(resolve, 80));
+    assert.match(output.getViewport().join("\n"), /New team/, "Left from the sidebar stays on Agents instead of returning to chat");
     child.stdin.write("\x1b"); await visible("← agents");
   }
   child.stdin.write("retained draft"); await visible("retained draft");
@@ -82,10 +84,12 @@ test("team page edits members, nests team conversations and drives tasks from th
   await visible("20261005_team_history");
   assert.doesNotMatch(h.screen(), /20261005_private_history/, "independent conversations never appear in a team");
 
-  // Left climbs one level at a time and never folds the tree on the way.
+  // Left climbs one level at a time, stops at the sidebar, and never folds the tree on the way.
   key("j"); await visible("enter join");
   key("\x1b[D"); await visible("enter open member");
   key("\x1b[D"); await visible("back to chat");
+  key("\x1b[D"); key("h"); await settle();
+  await visible("back to chat");
   assert.match(h.screen(), /20261005_team_history/, "leaving the tree keeps it expanded");
   key("\r"); await visible("enter open member");
   key("z"); await visible("▸ Lead");
