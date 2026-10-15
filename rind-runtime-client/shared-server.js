@@ -32,7 +32,7 @@ export async function startSharedServer(options) {
       // A conversation was deleted: every list and live table drops it now.
       if (event?.event?.type === "session_deleted") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
     },
-    onRequest(prompt) { return new Promise(resolve => { if (!authOwner) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
+    onRequest(prompt) { return new Promise(resolve => { if (!authOwner || authOwner.socket.destroyed) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
     onStderr: text => process.stderr.write(text),
     // A crashed worker ends every turn it was running; nothing will report their end.
     // The host stops with it: a later client starts a fresh host instead of
@@ -61,7 +61,7 @@ export async function startSharedServer(options) {
   // A request can finish after its window closed; a closed window shows nothing.
   const viewIfOpen = (peer, id, details) => { if (peers.has(peer)) live.view(peer, id, details); };
   const writeRecord = (workerPid = client.child?.pid) => writeFile(paths.record, JSON.stringify({ pid: process.pid, ...(workerPid ? { workerPid } : {}), nonce: recordNonce, startedAt }), { mode: 0o600 });
-  const initialize = () => initialized ||= (async () => { const child = client.start(); await writeRecord(child?.pid).catch(() => {}); return client.request("initialize"); })();
+  const initialize = () => initialized ||= (async () => { const child = client.start(); await writeRecord(child?.pid).catch(() => {}); return client.request("initialize"); })().catch(error => { initialized = undefined; throw error; });
   let readyResolve, readyReject;
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   ready.catch(() => {});

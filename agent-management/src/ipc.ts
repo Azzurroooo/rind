@@ -48,25 +48,35 @@ export async function startServer(options: { home?: string; python?: string; rep
     return toolConfig({ kind: manager ? "manager" : "agent", sessionId: session.id });
   }
   const reconciling = new Map<string, Promise<void>>();
+  const reconcilePending = new Map<string, any>();
   async function reconcile(session: any) {
     if (!runtime || !session.runtimeSessionId || !session.shared) return;
-    if (reconciling.has(session.id)) return reconciling.get(session.id);
+    if (reconciling.has(session.id)) {
+      reconcilePending.set(session.id, session);
+      return reconciling.get(session.id);
+    }
     const work = (async () => {
-      try {
-        const externalTools = await sessionToolsFor(session);
-        const replay = await runtime!.request("session/replay", { session_id: session.runtimeSessionId, end: 0, ...(externalTools ? { external_tools: externalTools } : {}) });
-        await service.request({ kind: "user" }, "reconcileSession", { requestId: "observe-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: replay.hosted === true,
-          active: replay.live_turn?.status === "running" || (replay.background_wait?.count || 0) > 0, needsInput: !!replay.live_turn?.question,
-          outcome: replay.live_turn?.status || replay.turn_state?.status });
-      } catch (error) {
-        const missing = (error as { code?: string })?.code === "SessionNotFound";
-        if (!closing && (!runtime || missing)) {
-          await service.request({ kind: "user" }, "reconcileSession", { requestId: "missing-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false, ...(missing ? { missing: true } : {}) }).catch(() => {});
+      let current = session;
+      while (current && !closing && runtime) {
+        reconcilePending.delete(current.id);
+        try {
+          const externalTools = await sessionToolsFor(current);
+          const replay = await runtime!.request("session/replay", { session_id: current.runtimeSessionId, end: 0, ...(externalTools ? { external_tools: externalTools } : {}) });
+          await service.request({ kind: "user" }, "reconcileSession", { requestId: "observe-" + randomBytes(12).toString("hex"), sessionId: current.id, connected: replay.hosted === true,
+            active: replay.live_turn?.status === "running" || (replay.background_wait?.count || 0) > 0, needsInput: !!replay.live_turn?.question,
+            outcome: replay.live_turn?.status || replay.turn_state?.status });
+        } catch (error) {
+          const missing = (error as { code?: string })?.code === "SessionNotFound";
+          if (!closing && (!runtime || missing)) {
+            await service.request({ kind: "user" }, "reconcileSession", { requestId: "missing-" + randomBytes(12).toString("hex"), sessionId: current.id, connected: false, ...(missing ? { missing: true } : {}) }).catch(() => {});
+          }
         }
-      } finally {
-        reconciling.delete(session.id);
+        current = reconcilePending.get(session.id);
       }
-    })();
+    })().finally(() => {
+      reconcilePending.delete(session.id);
+      reconciling.delete(session.id);
+    });
     reconciling.set(session.id, work);
     return work;
   }
@@ -98,7 +108,15 @@ export async function startServer(options: { home?: string; python?: string; rep
     }).then(async value => {
       if (closing) { value.close(); throw new Error("Agents management is closing."); }
       if (runtime) { value.close(); return runtime; }
-      runtime = value; await value.request("runtime/observe");
+      try {
+        await value.request("runtime/observe");
+      } catch (error) {
+        value.close();
+        throw error;
+      }
+      if (closing) { value.close(); throw new Error("Agents management is closing."); }
+      if (runtime) { value.close(); return runtime; }
+      runtime = value;
       // A host from before the live table does not know runtime/sessions.
       const liveSessions = (await value.request("runtime/sessions").catch(() => ({ sessions: [] }))).sessions || [];
       service.setLive(liveSessions);

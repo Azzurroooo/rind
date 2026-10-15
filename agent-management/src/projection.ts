@@ -20,6 +20,7 @@ export interface ProjectionIndex {
   delegationsByMember: Map<string, Delegation[]>;
   delegationsByOriginSession: Map<string, Delegation[]>;
   delegationsByTask: Map<string, Delegation[]>;
+  delegationsByParent: Map<string, Delegation[]>;
   unknownByMember: Set<string>;
   reservedWorkspaces: Map<string, Run>;
 }
@@ -27,7 +28,7 @@ export interface ProjectionIndex {
 const push = <T>(map: Map<string, T[]>, key: string, value: T) => { const list = map.get(key); if (list) list.push(value); else map.set(key, [value]); };
 
 export function projectionIndex(state: State, connected: Set<string>, live: Map<string, LiveSession> = new Map()): ProjectionIndex {
-  const runsBySession = new Map<string, Run[]>(), sessionsByMember = new Map<string, Session[]>(), tasksByMember = new Map<string, Task[]>(), delegationsByMember = new Map<string, Delegation[]>(), delegationsByOriginSession = new Map<string, Delegation[]>(), delegationsByTask = new Map<string, Delegation[]>(), unknownByMember = new Set<string>(), reservedWorkspaces = new Map<string, Run>();
+  const runsBySession = new Map<string, Run[]>(), sessionsByMember = new Map<string, Session[]>(), tasksByMember = new Map<string, Task[]>(), delegationsByMember = new Map<string, Delegation[]>(), delegationsByOriginSession = new Map<string, Delegation[]>(), delegationsByTask = new Map<string, Delegation[]>(), delegationsByParent = new Map<string, Delegation[]>(), unknownByMember = new Set<string>(), reservedWorkspaces = new Map<string, Run>();
   for (const run of Object.values(state.runs)) {
     push(runsBySession, run.sessionId, run);
     const session = state.sessions[run.sessionId];
@@ -49,8 +50,9 @@ export function projectionIndex(state: State, connected: Set<string>, live: Map<
     push(delegationsByMember, memberKey(d.teamId, d.assigneeAgentId), d);
     if (d.originSessionId && !d.parentDelegationId) push(delegationsByOriginSession, d.originSessionId, d);
     if (d.taskId && !d.parentDelegationId) push(delegationsByTask, d.taskId, d);
+    if (d.parentDelegationId) push(delegationsByParent, d.parentDelegationId, d);
   }
-  return { state, connected, live, runsBySession, sessionsByMember, tasksByMember, delegationsByMember, delegationsByOriginSession, delegationsByTask, unknownByMember, reservedWorkspaces };
+  return { state, connected, live, runsBySession, sessionsByMember, tasksByMember, delegationsByMember, delegationsByOriginSession, delegationsByTask, delegationsByParent, unknownByMember, reservedWorkspaces };
 }
 
 // Open: at least one window shows the conversation. Shared conversations are
@@ -132,7 +134,7 @@ export function sessionStatus(index: ProjectionIndex, sessionId: string) {
   const owned = [
     ...(index.delegationsByOriginSession.get(sessionId) || []),
     ...(ownTaskId ? index.delegationsByTask.get(ownTaskId) || [] : []),
-    ...(ownDelegationId ? Object.values(index.state.delegations).filter(d => d.parentDelegationId === ownDelegationId) : []),
+    ...(ownDelegationId ? index.delegationsByParent.get(ownDelegationId) || [] : []),
   ];
   const pending = [...new Map(owned.filter(d => !d.returned && d.status !== "cancelled").map(d => [d.id, d])).values()]
     .map(d => ({ taskId: d.id, assignee: index.state.agents[d.assigneeAgentId]?.name || d.assigneeAgentId }));

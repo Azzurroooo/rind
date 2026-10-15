@@ -57,6 +57,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       retain(next);
       const previousSeq = store.state.seq;
       await store.commit(next);
+      for (const id of connected) if (!store.state.sessions[id]) connected.delete(id);
       if (store.state.seq !== previousSeq) for (const listener of listeners) listener();
       if (Object.keys(store.state.deliveries).length) void flushDeliveries();
       return result;
@@ -1051,7 +1052,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   async function failRun(runId: string, error: unknown) {
     await transaction(state => {
       const run = state.runs[runId];
-      if (!run) return;
+      if (!run || !activeRun(run)) return;
       run.status = (error as { code?: string })?.code === "EXECUTION_FAILED" ? "failed" : "unknown"; run.lastObservedAt = new Date().toISOString();
       if (run.delegationId) {
         const d = state.delegations[run.delegationId];
@@ -1128,13 +1129,19 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     } catch (error) { await failRun(runId, error); }
     finally { live.delete(runId); cancelling.delete(runId); const s = store.state.runs[runId]?.sessionId; if (s) releaseSessionWait(s); void schedule().catch(reportServiceError); }
   }
+  const hasDispatchableWork = (state: State) =>
+    Object.values(state.tasks).some(t => t.status === "queued" && Boolean(t.dispatch)) ||
+    Object.values(state.delegations).some(d => d.status === "queued" && Boolean(d.dispatch));
+
   async function schedule() {
     if (stopped) return;
     if (scheduling) { scheduleRequested = true; return; }
+    if (!hasDispatchableWork(store.state)) return;
     scheduling = true;
     try {
       do {
         scheduleRequested = false;
+        if (!hasDispatchableWork(store.state)) break;
         const starts = await transaction(async state => {
           if (stopped) return [];
           const starts: { runId: string; input: string; delivery: boolean }[] = [];
@@ -1249,7 +1256,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         }
       });
       await Promise.allSettled([...live.values()].map(h => h.cancel()));
-      await Promise.allSettled([...executions]);
+      let stopTimer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.allSettled([...executions]),
+        new Promise<void>(resolve => { stopTimer = setTimeout(resolve, 5000); stopTimer.unref?.(); }),
+      ]).finally(() => clearTimeout(stopTimer));
       await serial;
     },
   };

@@ -18,11 +18,12 @@ export function sharedRuntimePaths(home = process.env.RIND_HOME) {
 
 export async function connectSharedRuntime(options = {}) {
   // The detached host changes cwd; resolve caller-relative paths before that.
+  const rawPython = options.python || process.env.RIND_PYTHON;
   options = { ...options,
     rindHome: resolveRindHome(options.rindHome || options.home),
     repoRoot: options.repoRoot && path.resolve(options.repoRoot),
     runtimePath: options.runtimePath && path.resolve(options.runtimePath),
-    python: options.python && /[\\/]/.test(options.python) ? path.resolve(options.python) : options.python,
+    python: rawPython && /[\\/]/.test(rawPython) ? path.resolve(rawPython) : rawPython,
   };
   const paths = sharedRuntimePaths(options.rindHome);
   const connect = async () => {
@@ -289,7 +290,7 @@ export function createSharedRuntimeClient(options) {
       // Without --session nothing is created yet: the first message does that.
       initialization ||= client.request("initialize").then(async base => (options.onDeliver && (client.acceptsInput = await client.request("runtime/accept-input").then(() => true, () => false)), { ...base, ...await client.request("session/open", {
         ...scope(), session_id: arg("--session"), resume_latest: args.includes("--resume-latest") || args.includes("-c"),
-      }) }));
+      }) })).catch(error => { initialization = undefined; throw error; });
       return initialization;
     }
     if (method === "session/create") return client.request(method, { ...scope(), ...params });
