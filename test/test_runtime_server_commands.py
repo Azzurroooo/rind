@@ -672,3 +672,17 @@ async def test_status_before_the_first_message_shows_the_window_choices() -> Non
     assert (entries["connection"], entries["model"], entries["reasoningEffort"]) == ("longcat · DeepSeek", "longcat-flash · this conversation", "low · this conversation")
     unnamed = SlashCommandContext(runtime=None, session=session, draft={}, explain_selection=_explain)
     assert _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", unnamed))["name"] == "unset · shown by its first message"
+
+
+@pytest.mark.asyncio
+async def test_unknown_slash_skill_returns_error_without_next_prompt(tmp_path) -> None:
+    from agent.infrastructure.skills import SkillRepository
+
+    session = NamedSession({})
+    session.get_skill_sources = lambda: asyncio.sleep(0, result={})
+    context = _context(session=session)
+    context.skills = SkillRepository(tmp_path, home=tmp_path, rind_home=tmp_path)
+    result = await SlashCommandRouter(build_command_infos()).execute("/skill:zz_unknown_1", context)
+    assert result.text == "Unknown Skill: zz_unknown_1"
+    assert result.next_prompt is None
+

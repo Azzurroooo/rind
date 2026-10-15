@@ -986,8 +986,13 @@ class RuntimeDispatcher:
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
-        provider_id = str(params.get("provider_id") or "").strip()
-        model = str(params.get("model_id") or params.get("model") or "").strip()
+        raw_provider = params.get("provider_id")
+        if raw_provider is not None and not isinstance(raw_provider, str):
+            await self._respond_error(request, "model/set provider_id must be a string.", "InvalidRequest")
+            return
+        provider_id = (raw_provider or "").strip()
+        raw_model = params.get("model_id") if "model_id" in params else params.get("model")
+        model = raw_model.strip() if isinstance(raw_model, str) else ""
         if not model:
             await self._respond_error(request, "model/set requires model.", "InvalidRequest")
             return
@@ -1002,7 +1007,8 @@ class RuntimeDispatcher:
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
-        effort = str(params.get("reasoning_effort") or "").strip().lower()
+        raw_effort = params.get("reasoning_effort")
+        effort = raw_effort.strip().lower() if isinstance(raw_effort, str) else ""
         if not effort:
             await self._respond_error(request, "model/effort requires reasoning_effort.", "InvalidRequest")
             return

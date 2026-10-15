@@ -135,6 +135,19 @@ def test_fetch_closes_every_response(case, http_sessions, monkeypatch):
         assert result["error_type"] == "Cancelled"
 
 
+def test_fetch_preserves_html_title_when_not_in_body(http_sessions, monkeypatch):
+    from types import SimpleNamespace
+
+    response = Response(body=b"<html><head><title>Page Title</title></head><body><article><p>Body paragraph.</p></article></body></html>")
+    monkeypatch.setattr(http_sessions, "_create_session", lambda: SimpleNamespace(
+        get=lambda *args, **kwargs: response, close=lambda: None,
+    ))
+    result = parse_payload(fetch.fetch_web_page("https://example.test", _http_sessions=http_sessions))
+    assert result["ok"] is True
+    assert result["data"].startswith("# Page Title\n\n")
+    assert "Body paragraph." in result["data"]
+
+
 @pytest.mark.parametrize("engine", [search._search_bing, search._search_baidu, search._search_ddg])
 def test_search_closes_failed_response(engine):
     from types import SimpleNamespace

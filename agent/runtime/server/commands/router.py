@@ -6,6 +6,7 @@ import inspect
 import shlex
 from collections.abc import Iterable
 from .contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+from .skill import scan_skills
 
 from agent.application.skill_selection import SkillInvocationParser
 
@@ -33,6 +34,8 @@ class SlashCommandRouter:
         try:
             invocations = self._skill_invocation_parser.parse(raw_input or "")
             if invocations and invocations[0].syntax == "slash":
+                if context.skills is not None and invocations[0].name.lower() not in (await scan_skills(context)).effective():
+                    return SlashCommandResult(f"Unknown Skill: {invocations[0].name}")
                 return SlashCommandResult(next_prompt={"input": raw_input})
             name, rest = self._split(raw_input)
             info = self._commands_by_name.get(name)

@@ -1297,3 +1297,26 @@ def test_replay_and_deliver_restore_external_tools_when_local_host_allowed():
     assert ExecutionCoordinator.owns_session(dummy, "s-starting")
 
 
+def test_model_and_effort_reject_non_string_values():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({
+            "kind": "request",
+            "request_id": "bad-effort",
+            "method": RuntimeMethod.MODEL_EFFORT,
+            "params": {"session_id": "s1", "reasoning_effort": {"modelId": "xhigh"}},
+        })
+        await server._dispatch({
+            "kind": "request",
+            "request_id": "bad-model",
+            "method": RuntimeMethod.MODEL_SET,
+            "params": {"session_id": "s1", "model_id": {"modelId": "gpt-5"}},
+        })
+
+    asyncio.run(run())
+    assert _response(payloads, "bad-effort")["error"]["type"] == "InvalidRequest"
+    assert _response(payloads, "bad-model")["error"]["type"] == "InvalidRequest"
+
+

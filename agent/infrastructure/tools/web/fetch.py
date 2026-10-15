@@ -120,6 +120,10 @@ def fetch_web_page(
 
         # Clean up excessive blank lines
         content = re.sub(r"\n{3,}", "\n\n", content.strip())
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+        title = BeautifulSoup(title_match.group(1), "html.parser").get_text(" ", strip=True) if title_match else ""
+        if title and title not in content:
+            content = f"# {title}\n\n{content}" if content else f"# {title}"
 
         return tool_ok(
             "fetch_web_page",
