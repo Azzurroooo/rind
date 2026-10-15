@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
-import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { managementClient, overviewText, selectRecord } from "./agents-client.js";
 import { createHandoff, HANDOFF_ENV } from "./agents-handoff.js";
 import { applySavedTheme } from "./cli-state-store.js";
 import { terminalKeyboard, TERMINAL_KEYBOARD_ENV } from "./tui/tui.js";
 import { releaseInput, takeInput } from "./tui/console-input.js";
+import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
 
 export const agentsHelp = [
   "Usage: rind agents [list | team | task | open | manager | import] [--json]",
@@ -29,7 +29,7 @@ export const agentsHelp = [
   "Names and unique ID prefixes are accepted. Shared directories require an explicit choice.",
 ].join("\n");
 
-export const managerWorkspace = launch => path.resolve(launch.home || process.env.RIND_HOME || path.join(os.homedir(), ".rind"), "agents-management", "manager");
+export const managerWorkspace = launch => path.join(resolveRindHome(launch?.home), "agents-management", "manager");
 
 // Runs one conversation window and returns where the user went next:
 // { action: "agents" | "leave" | "return" } or { action: "open", chat }.
@@ -179,8 +179,12 @@ async function stopBackground(all, launch, json) {
     let result;
     try { result = await client.request("serviceShutdown", { stopAgents: all }); }
     catch (error) {
-      if (error.code !== "UNKNOWN_METHOD") throw error;
-      result = await stopLegacy(client, all, launch);
+      if (error.code === "UNKNOWN_METHOD") result = await stopLegacy(client, all, launch);
+      else if (all && error.code !== "SERVICE_BUSY") {
+        client.close();
+        await stopRuntimeAlone(all, launch, json);
+        return;
+      } else throw error;
     }
     console.log(json ? JSON.stringify({ stopped: true, ...result }) : all && result.working ? "Stopped " + result.working + (result.working === 1 ? " running agent" : " running agents") + " and the background services." : "Stopped the background services.");
   } catch (error) {
@@ -193,18 +197,33 @@ async function stopBackground(all, launch, json) {
 // Plain conversations start the shared Runtime without the management service;
 // stopping must reach it too, under the same rule: running turns need --all.
 async function stopRuntimeAlone(all, launch, json) {
-  const { connectSharedRuntime } = await import("../../rind-runtime-client/shared-runtime.js");
-  const host = await connectSharedRuntime({ rindHome: launch.home, start: false }).catch(() => null);
-  if (!host) { console.log(json ? JSON.stringify({ stopped: false, running: false }) : "Background services are not running."); return; }
+  const { stopManagementService } = await import("../../agent-management/dist/client.js");
+  const { connectSharedRuntime, stopSharedRuntime } = await import("../../rind-runtime-client/shared-runtime.js");
+  const stoppedService = all ? await stopManagementService({ home: launch?.home }).catch(() => false) : false;
+  const host = await connectSharedRuntime({ rindHome: launch?.home, start: false }).catch(() => null);
+  if (!host) {
+    const stoppedRuntime = all ? await stopSharedRuntime({ rindHome: launch?.home }).catch(() => false) : false;
+    if (stoppedService || stoppedRuntime) { console.log(json ? JSON.stringify({ stopped: true, working: 0 }) : "Stopped the background services."); return; }
+    console.log(json ? JSON.stringify({ stopped: false, running: false }) : "Background services are not running.");
+    return;
+  }
   try {
-    const info = await host.request("runtime/info").catch(() => ({ busy: 0 }));
-    const working = info.busy || 0;
+    const info = await host.request("runtime/info").catch(() => null);
+    if (!info && all) {
+      host.close();
+      await stopSharedRuntime({ rindHome: launch?.home });
+      console.log(json ? JSON.stringify({ stopped: true, working: 0 }) : "Stopped the background services.");
+      return;
+    }
+    const working = info?.busy || 0;
     if (working && !all) {
       process.exitCode = 1;
       console.log(json ? JSON.stringify({ stopped: false, working }) : working + (working === 1 ? " conversation is" : " conversations are") + " still working.\nRun `rind agents stop --all` to stop them too.");
       return;
     }
     await host.request("runtime/shutdown").catch(() => {});
+    host.close();
+    if (all) await stopSharedRuntime({ rindHome: launch?.home });
     console.log(json ? JSON.stringify({ stopped: true, working }) : all && working ? "Stopped " + working + (working === 1 ? " running conversation" : " running conversations") + " and the background services." : "Stopped the background services.");
   } finally { host.close(); }
 }
@@ -216,9 +235,8 @@ async function stopLegacy(client, all, launch) {
   const result = await endLegacyService(client, launch.home, { force: all });
   if (!result.ended && result.working) throw Object.assign(new Error(result.working + (result.working === 1 ? " agent is" : " agents are") + " still working."), { code: "SERVICE_BUSY", details: { working: result.working } });
   if (!result.ended) throw new Error("A background service from an older Rind is running but its process could not be found.");
-  const { connectSharedRuntime } = await import("../../rind-runtime-client/shared-runtime.js");
-  const host = await connectSharedRuntime({ rindHome: launch.home, start: false }).catch(() => null);
-  if (host) { await host.request("runtime/shutdown").catch(() => {}); host.close(); }
+  const { stopSharedRuntime } = await import("../../rind-runtime-client/shared-runtime.js");
+  await stopSharedRuntime({ rindHome: launch.home });
   return { stopping: true, working: result.working };
 }
 

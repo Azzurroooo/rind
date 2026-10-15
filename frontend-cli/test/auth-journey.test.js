@@ -196,6 +196,7 @@ test("interactive CLI journey: empty startup, login, send, chat, logout", async 
     cli.child.kill();
     await cli.exited;
     await fixture.stop().catch(() => {});
+    await removeRindHome(rindHome).catch(() => {});
     await rm(parent, { recursive: true, force: true });
   }
 });

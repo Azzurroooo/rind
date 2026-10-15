@@ -59,6 +59,7 @@ export function createRuntimeClient({
   rindHome = process.env.RIND_HOME,
   runtimePath = process.env.RIND_RUNTIME_PATH || "",
   externalTools = null,
+  env = null,
   onMessage = null,
   onRequest = null,
   onStderr = () => {},
@@ -93,7 +94,7 @@ export function createRuntimeClient({
       // The shared Runtime runs detached without a console; Windows would
       // otherwise open a visible one for the Worker.
       windowsHide: true,
-      env: buildRuntimeEnv(repoRoot, { ...process.env, RIND_EXTERNAL_TOOLS: externalTools ? JSON.stringify(externalTools) : "" }, {
+      env: buildRuntimeEnv(repoRoot, { ...process.env, ...env, RIND_EXTERNAL_TOOLS: externalTools ? JSON.stringify(externalTools) : "" }, {
         sourceRuntime: !runtimePath,
         rindHome,
       }),
