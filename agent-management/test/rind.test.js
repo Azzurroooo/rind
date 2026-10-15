@@ -26,7 +26,9 @@ test("direct session remains observable after detach and management restart, and
     request.resume(); request.on("end", () => { calls++; response = res; resolveResponse(); });
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", apiKey: "fixture", model: "fixture", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
   const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
   let server = await startServer(options);
   const token = (await readFile(server.paths.token, "utf8")).trim();
@@ -85,7 +87,9 @@ test("direct CLI captures activity, rejects ambiguous teams, and the manager has
     });
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture", model: "fixture" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
   const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON || "python" });
   const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
   t.after(async () => { client.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
@@ -158,7 +162,9 @@ test("real Rind reports through the declared tool and the task is delivered", { 
     });
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture-key", model: "fixture" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture-key" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
   const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON || "python" });
   const token = (await readFile(server.paths.token, "utf8")).trim();
   const client = await connectClient({ endpoint: server.paths.endpoint, token });
@@ -221,7 +227,9 @@ test("a leader conversation delegates work and the delivery returns as its own t
     });
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture-key", model: "fixture" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture-key" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
   const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
   const server = await startServer(options);
   const token = (await readFile(server.paths.token, "utf8")).trim();
@@ -340,7 +348,9 @@ test("leader delegates in background, steers running sub-agent mid-turn, collect
   });
 
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture-key", model: "fixture" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture-key" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
   const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
   const server = await startServer(options);
   const token = (await readFile(server.paths.token, "utf8")).trim();

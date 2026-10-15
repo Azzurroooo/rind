@@ -997,7 +997,7 @@ class RuntimeDispatcher:
             await self._respond_error(request, "model/set requires model.", "InvalidRequest")
             return
         store = await self._session_store(session_id)
-        provider_id = provider_id or str(getattr(store, "provider", "openai-compatible") or "openai-compatible")
+        provider_id = provider_id or str(getattr(store, "provider", "openai") or "openai")
         await store.update_selection(provider_id, model)
         applies = await self._settings_changed(session_id, store)
         await self._respond(request, {"provider_id": provider_id, "model_id": model, "model": model, "session": True, "runtime": False, "applies": applies})

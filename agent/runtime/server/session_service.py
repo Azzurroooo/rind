@@ -339,7 +339,7 @@ class SessionService:
             session_dir=self.session_dir,
             session_id=clean,
             model=info["model"],
-            provider=info.get("provider") or "openai-compatible",
+            provider=info.get("provider") or "openai",
             system_prompt=build_system_prompt(environment=get_system_info(root)),
             workspace_root=root,
             reasoning_effort=info.get("reasoning_effort") or "",

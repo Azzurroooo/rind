@@ -554,9 +554,11 @@ export function createCliRuntimeController({
         return;
       }
     }
-    await offerFolderDefault({ provider_id: state.session.info.provider, model_id: state.session.info.model },
-      own => own.provider === state.session.info.provider && own.model === state.session.info.model,
-      `${state.session.info.provider} / ${state.session.info.model}`);
+    await saveDefaultSelection(
+      selected.scope,
+      { provider_id: state.session.info.provider, model_id: state.session.info.model },
+      `${state.session.info.provider} / ${state.session.info.model}`,
+    );
   }
 
   async function runModelCommand(argument = "") {
@@ -577,13 +579,8 @@ export function createCliRuntimeController({
     const model = parts[1];
     state.session.info = { ...state.session.info, model };
     log(() => modelSetResultText({ provider_id: state.session.info.provider, model_id: model }, model));
-    await offerFolderDefault({ provider_id: state.session.info.provider, model_id: model },
-      own => own.provider === state.session.info.provider && own.model === model,
-      `${state.session.info.provider} / ${model}`);
   }
 
-  // After /model or /effort: also make the choice what new conversations in
-  // this folder start with? Not asked when the folder already has it.
   // /import: before the first message the window keeps the choice; afterwards
   // the conversation changes only once breaking its prompt cache is accepted.
   async function runImportSelector() {
@@ -621,22 +618,25 @@ export function createCliRuntimeController({
     }
   }
 
-  async function offerFolderDefault(values, alreadySet, label) {
+  async function saveDefaultSelection(scope, values, label) {
+    if (scope !== "folder" && scope !== "global") return;
+    if (state.runtime.status === "closing") return;
     const folder = state.session.info.workspace_root;
-    if (!askChoice || !folder || state.runtime.status === "closing") return;
+    if (scope === "folder" && !folder) return;
     try {
-      const current = await request(methods.folderDefaultsGet, { workspace_root: folder });
-      if (alreadySet(current?.folder || {})) return;
-      const answer = await askChoice({
-        title: "Folder default",
-        message: "Also the default for new conversations in this folder?",
-        options: ["No · only this conversation", "Yes · new conversations here start with " + label],
+      await request(methods.folderDefaultsSet, {
+        ...(folder ? { workspace_root: folder } : {}),
+        ...(scope === "global" ? { scope: "global" } : {}),
+        ...values,
       });
-      if (!String(answer || "").startsWith("Yes")) return;
-      await request(methods.folderDefaultsSet, { workspace_root: folder, ...values });
-      log(() => commandResultText("Folder default updated.", `new conversations here: ${label} · open ones keep theirs`));
+      if (scope === "global") {
+        log(() => commandResultText("Global default updated.", `settings.json: ${label} · folders with their own default keep theirs`));
+      } else {
+        log(() => commandResultText("Folder default updated.", `new conversations here: ${label} · open ones keep theirs`));
+      }
     } catch (error) {
-      log(`Folder default not changed: ${error instanceof Error ? error.message : String(error)}`);
+      const target = scope === "global" ? "Global default" : "Folder default";
+      log(`${target} not changed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -673,7 +673,9 @@ export function createCliRuntimeController({
       if (!selected || state.runtime.status === "closing") {
         return;
       }
-      await applyReasoningEffort(selected);
+      const chosenEffort = typeof selected === "object" ? selected.effort : selected;
+      const scope = typeof selected === "object" ? selected.scope : "session";
+      await applyReasoningEffort(chosenEffort, scope);
       return;
     }
     if (!levels.includes(requested)) {
@@ -687,7 +689,7 @@ export function createCliRuntimeController({
     return String(state.session.info.reasoning_effort || "").toLowerCase();
   }
 
-  async function applyReasoningEffort(effort) {
+  async function applyReasoningEffort(effort, scope = "session") {
     if (!hasConversation()) {
       state.session.info = { ...state.session.info, reasoning_effort: effort };
       log(() => commandResultText("Reasoning effort updated.", `- session effort: ${effort}`));
@@ -701,7 +703,7 @@ export function createCliRuntimeController({
         return;
       }
     }
-    await offerFolderDefault({ reasoning_effort: effort }, own => own.reasoning_effort === effort, `effort ${effort}`);
+    await saveDefaultSelection(scope, { reasoning_effort: effort }, `effort ${effort}`);
   }
 
   return {

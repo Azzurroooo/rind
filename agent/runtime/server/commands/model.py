@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.infrastructure.settings import DEFAULT_MODEL, load_settings
+from agent.infrastructure.settings import DEFAULT_MODEL, DEFAULT_PROVIDER, load_settings
 from agent.runtime.server.commands.contracts import SlashCommandContext, SlashCommandInfo
 from agent.runtime.server.commands.formatting import display_value
 
@@ -26,7 +26,7 @@ async def handle_model(context: SlashCommandContext, args: list[str]) -> str:
         return "Usage: /model set <model>"
 
     try:
-        provider = str(getattr(context.session, "provider", "") or "openai-compatible")
+        provider = str(getattr(context.session, "provider", "") or DEFAULT_PROVIDER)
         await context.session.update_selection(provider, model)
     except Exception as exc:
         return f"Command failed: {exc}"

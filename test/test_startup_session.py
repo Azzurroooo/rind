@@ -84,7 +84,7 @@ async def test_simultaneous_initialization_creates_nothing(worker, tmp_path):
 @pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled"])
 async def test_first_message_creates_and_saves_the_conversation(worker, tmp_path, monkeypatch, outcome):
     await worker.initialize()
-    info = await worker.create_conversation({"workspace_root": str(tmp_path), "provider_id": "openai-compatible", "model_id": "chosen-model", "reasoning_effort": "high"})
+    info = await worker.create_conversation({"workspace_root": str(tmp_path), "provider_id": "openai", "model_id": "chosen-model", "reasoning_effort": "high"})
     session_id = info["session_id"]
     assert session_id and (info["model"], info["reasoning_effort"]) == ("chosen-model", "high")
     assert not (tmp_path / "sessions").exists(), "created on submit, saved by the message itself"

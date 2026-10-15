@@ -49,7 +49,9 @@ test("deleting a saved conversation removes it and refuses while it runs or is s
     request.on("end", () => held.push(response));
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture", apiKey: "fixture", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
   const launch = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   const server = await startServer(launch);
   const window = createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: launch.repoRoot, cliArgs: ["--cwd", workspace], onMessage() {} });

@@ -17,6 +17,7 @@ from agent.runtime.server.worker import RuntimeWorker
 @pytest.fixture
 def worker(tmp_path, monkeypatch):
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     return RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
 
 
@@ -66,7 +67,7 @@ async def _conversation(worker, tmp_path, request=None, model="model-a"):
         await request("initialize")
     else:
         await worker.initialize()
-    info = await worker.create_conversation({"workspace_root": str(tmp_path), "provider_id": "openai-compatible", "model_id": model, "reasoning_effort": "low"})
+    info = await worker.create_conversation({"workspace_root": str(tmp_path), "provider_id": "openai", "model_id": model, "reasoning_effort": "low"})
     return info["session_id"]
 
 
@@ -84,7 +85,7 @@ async def test_a_change_during_a_turn_applies_from_the_next_turn(worker, tmp_pat
         recorder.gate = asyncio.Event()
         running = asyncio.create_task(_turn(worker, session_id, "first"))
         await recorder.waiting.wait()
-        changed = await request("model/set", session_id=session_id, provider_id="openai-compatible", model_id="model-b")
+        changed = await request("model/set", session_id=session_id, provider_id="openai", model_id="model-b")
         assert changed["applies"] == "next_turn", "a turn is running, so the change waits for the next one"
         recorder.gate.set()
         await running
@@ -109,12 +110,12 @@ async def test_queued_turns_use_the_new_model_without_waiting_for_the_queue_to_d
         second = asyncio.create_task(_turn(worker, session_id, "second"))
         await asyncio.sleep(0)
         await request("model/effort", session_id=session_id, reasoning_effort="high")
-        await request("model/set", session_id=session_id, provider_id="openai-compatible", model_id="model-b")
+        await request("model/set", session_id=session_id, provider_id="openai", model_id="model-b")
         recorder.gate.set()
         await first
         await second
         assert recorder.samplings == ["model-a", "model-b"]
-        assert recorder.created[-1] == ("openai-compatible", "model-b", "high")
+        assert recorder.created[-1] == ("openai", "model-b", "high")
     finally:
         await worker.close()
 
@@ -145,12 +146,12 @@ async def test_an_idle_change_applies_now_and_every_window_hears_it(worker, tmp_
     try:
         session_id = await _conversation(worker, tmp_path, request)
         await request("session/subscribe", session_id=session_id)
-        changed = await request("model/set", session_id=session_id, provider_id="openai-compatible", model_id="model-b")
+        changed = await request("model/set", session_id=session_id, provider_id="openai", model_id="model-b")
         assert changed["applies"] == "now"
         await request("model/effort", session_id=session_id, reasoning_effort="high")
         events = [m["event"] for m in messages if m.get("event", {}).get("type") == "session_settings_changed"]
         assert [(e["model"], e["reasoning_effort"]) for e in events] == [("model-b", "low"), ("model-b", "high")]
-        assert all(e["session_id"] == session_id and e["provider"] == "openai-compatible" for e in events)
+        assert all(e["session_id"] == session_id and e["provider"] == "openai" for e in events)
     finally:
         await worker.close()
 
@@ -162,12 +163,12 @@ async def test_the_session_list_carries_each_conversation_settings(worker, tmp_p
     try:
         session_id = await _conversation(worker, tmp_path, request)
         await _turn(worker, session_id, "first")
-        await request("model/set", session_id=session_id, provider_id="openai-compatible", model_id="model-b")
+        await request("model/set", session_id=session_id, provider_id="openai", model_id="model-b")
         await request("model/effort", session_id=session_id, reasoning_effort="high")
         listed = next(entry for entry in (await request("session/list", workspace_root=str(tmp_path)))["sessions"] if entry["id"] == session_id)
-        assert (listed["provider"], listed["model"], listed["reasoning_effort"]) == ("openai-compatible", "model-b", "high")
+        assert (listed["provider"], listed["model"], listed["reasoning_effort"]) == ("openai", "model-b", "high")
         assert listed["selection_source"] == {"model": "session", "effort": "session"}
-        assert listed["connection_ready"] is False, "openai-compatible has no key here; lists can warn"
+        assert listed["connection_ready"] is False, "openai has no key here; lists can warn"
     finally:
         await worker.close()
 

@@ -1,5 +1,5 @@
-// After /model or /effort the window offers to make the choice the folder's
-// default for new conversations; Ctrl+T never asks.
+// /model and /effort menus support Enter (this conversation only), f (folder
+// default in workspaces.json), and g (global default in settings.json).
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -12,7 +12,7 @@ const MODELS = [
   { provider_id: "deepseek", id: "deepseek-v4-pro", reasoning_efforts: ["low", "high", "max"] },
 ];
 
-function harness({ answer = "No · only this conversation", folder = {}, askChoice = true } = {}) {
+function harness({ modelScope = "session", effortScope = "session" } = {}) {
   const state = createCliState();
   state.session.info = { session_id: "s1", workspace_root: "/work/app", provider: "deepseek", model: "deepseek-flash", reasoning_effort: "low" };
   const requests = [];
@@ -26,16 +26,15 @@ function harness({ answer = "No · only this conversation", folder = {}, askChoi
       if (method === methods.initialize) return { protocol_version: "2", capabilities: [], methods: [], session_id: "s1" };
       if (method === methods.modelList) return { models: MODELS };
       if (method === methods.modelSet) return { provider_id: params.provider_id, model_id: params.model_id, applies: "now" };
-      if (method === methods.folderDefaultsGet) return { folder };
       return {};
     },
   };
   const controller = createCliRuntimeController({
     client, methods, sessionScopedMethods: new Set([methods.modelSet, methods.modelEffortSet]), turnScopedMethods: new Set(),
     requireInitialization: value => value, state, getCommands: () => ({ normalizeCommands: () => [], localCommands: () => [] }), getTaskMonitor: () => null, getCompactContextState: () => ({ clear() {} }),
-    askModelMenu: async () => ({ providerId: "deepseek", modelId: "deepseek-v4-pro" }),
-    askEffortMenu: async () => "high",
-    askChoice: askChoice ? async (question) => { questions.push(question); return answer; } : null,
+    askModelMenu: async () => ({ providerId: "deepseek", modelId: "deepseek-v4-pro", scope: modelScope }),
+    askEffortMenu: async () => (effortScope === "session" ? "high" : { effort: "high", scope: effortScope }),
+    askChoice: async (question) => { questions.push(question); return ""; },
     askSessionMenu: async () => null, askForkPointMenu: async () => null, restoreLiveTurn() {}, clearPendingInputs() {},
     closeAssistant() {}, refreshInputState() {}, updateGoalState() {}, log: value => logs.push(typeof value === "function" ? value() : value),
     writeError() {}, redraw() {},
@@ -44,43 +43,157 @@ function harness({ answer = "No · only this conversation", folder = {}, askChoi
   return { state, controller, questions, logs, sets };
 }
 
-test("/model asks once whether new conversations in this folder start with the same model", async () => {
-  const h = harness({ answer: "Yes · new conversations here start with deepseek / deepseek-v4-pro" });
-  await h.controller.runModelSelector();
-  assert.equal(h.questions.length, 1);
-  assert.equal(h.questions[0].message, "Also the default for new conversations in this folder?");
-  assert.equal(h.questions[0].options.length, 2, "only this conversation, or this folder; never every folder");
-  assert.deepEqual(h.sets(), [{ workspace_root: "/work/app", provider_id: "deepseek", model_id: "deepseek-v4-pro" }]);
-  assert.match(h.logs.join("\n"), /open ones keep theirs/);
-});
-
-test("declining keeps the change to this conversation", async () => {
-  const h = harness();
+test("/model with Enter changes only this conversation and never opens a dialog", async () => {
+  const h = harness({ modelScope: "session" });
   await h.controller.runModelSelector();
   assert.equal(h.state.session.info.model, "deepseek-v4-pro");
+  assert.equal(h.questions.length, 0);
   assert.deepEqual(h.sets(), []);
 });
 
-test("/effort asks about the effort only", async () => {
-  const h = harness({ answer: "Yes · new conversations here start with effort high" });
-  await h.controller.runEffortCommand();
-  assert.deepEqual(h.sets(), [{ workspace_root: "/work/app", reasoning_effort: "high" }]);
+test("/model with f saves the folder default without opening a dialog", async () => {
+  const h = harness({ modelScope: "folder" });
+  await h.controller.runModelSelector();
+  assert.equal(h.questions.length, 0);
+  assert.deepEqual(h.sets(), [{ workspace_root: "/work/app", provider_id: "deepseek", model_id: "deepseek-v4-pro" }]);
+  assert.match(h.logs.join("\n"), /Folder default updated/);
+  assert.match(h.logs.join("\n"), /open ones keep theirs/);
 });
 
-test("nothing is asked when the folder already has that default, or without a terminal UI", async () => {
-  const same = harness({ folder: { provider: "deepseek", model: "deepseek-v4-pro" } });
-  await same.controller.runModelSelector();
-  assert.equal(same.questions.length, 0);
-  const script = harness({ askChoice: false });
-  await script.controller.runEffortCommand("max");
-  assert.equal(script.state.session.info.reasoning_effort, "max");
-  assert.deepEqual(script.sets(), []);
+test("/model with g saves the global default in settings.json", async () => {
+  const h = harness({ modelScope: "global" });
+  await h.controller.runModelSelector();
+  assert.equal(h.questions.length, 0);
+  assert.deepEqual(h.sets(), [{ workspace_root: "/work/app", scope: "global", provider_id: "deepseek", model_id: "deepseek-v4-pro" }]);
+  assert.match(h.logs.join("\n"), /Global default updated/);
+  assert.match(h.logs.join("\n"), /settings\.json: deepseek \/ deepseek-v4-pro/);
 });
 
-test("before the first message the choice is kept for the conversation and still offered for the folder", async () => {
-  const h = harness({ answer: "Yes · new conversations here start with effort high" });
+test("/effort with f or g saves folder or global effort default", async () => {
+  const folder = harness({ effortScope: "folder" });
+  await folder.controller.runEffortCommand();
+  assert.deepEqual(folder.sets(), [{ workspace_root: "/work/app", reasoning_effort: "high" }]);
+
+  const global = harness({ effortScope: "global" });
+  await global.controller.runEffortCommand();
+  assert.deepEqual(global.sets(), [{ workspace_root: "/work/app", scope: "global", reasoning_effort: "high" }]);
+});
+
+test("before the first message, f or g still saves the default while keeping the choice for the window", async () => {
+  const h = harness({ effortScope: "folder" });
   h.state.session.info = { ...h.state.session.info, session_id: "" };
   await h.controller.runEffortCommand();
   assert.equal(h.state.session.info.reasoning_effort, "high");
   assert.deepEqual(h.sets(), [{ workspace_root: "/work/app", reasoning_effort: "high" }]);
+});
+
+test("real TTY CLI: /login custom provider writes providers.json + auth.json, and /model f and g save folder and global defaults", { timeout: 60000 }, async (t) => {
+  const { mkdtemp, mkdir, readFile } = await import("node:fs/promises");
+  const { spawn } = await import("node:child_process");
+  const http = await import("node:http");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { createVirtualOutput } = await import("./helpers/virtual-terminal.js");
+  const { removeRindHome } = await import("./helpers/rind-home.js");
+
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-tty-defaults-"));
+  const workspace = path.join(home, "project");
+  await mkdir(workspace, { recursive: true });
+  const provider = http.createServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ data: [{ id: "gw-alpha" }, { id: "gw-beta" }] }));
+  });
+  await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${provider.address().port}/v1`;
+
+  const script = `
+    Object.defineProperty(process.stdin, 'isTTY', { value: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true });
+    process.stdin.setRawMode = value => { process.stdin.isRaw = value; };
+    process.stdout.columns = 110; process.stdout.rows = 30;
+    const { runFrontendCliApp } = await import(${JSON.stringify(new URL("../lib/frontend-cli-implementation.js", import.meta.url).href)});
+    await runFrontendCliApp(${JSON.stringify(["--cwd", workspace, "--standalone"])});
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: workspace,
+    env: { ...process.env, RIND_HOME: home, RIND_PYTHON: process.env.RIND_PYTHON || "python", NO_COLOR: "1" },
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  const output = createVirtualOutput({ columns: 110, rows: 30 });
+  child.stdout.on("data", value => output.output.write(value));
+  let errors = "";
+  child.stderr.on("data", value => { errors += value; });
+  const exited = new Promise(resolve => child.once("exit", resolve));
+  t.after(async () => {
+    if (child.exitCode === null) child.kill();
+    await exited;
+    await new Promise(resolve => provider.close(resolve));
+    await removeRindHome(home);
+  });
+
+  const screen = async () => (await output.flushAndGetViewport()).join("\n");
+  async function visible(text) {
+    for (let i = 0; i < 600; i++) {
+      const s = await screen();
+      if (s.includes(text)) return s;
+      if (child.exitCode !== null) break;
+      await new Promise(r => setTimeout(r, 25));
+    }
+    assert.fail("Expected " + text + "\n" + await screen() + "\n" + errors);
+  }
+
+  await visible("session new");
+
+  // 1. Add a custom provider via /login
+  child.stdin.write("/login\r");
+  await visible("Sign in with an API key");
+  child.stdin.write("\x1b[B\r"); // select "Sign in with an API key"
+  await visible("Login · Provider");
+  child.stdin.write("\x1b[A"); // wrap up to "+ Add a custom provider"
+  await visible("+ Add a custom provider");
+  child.stdin.write("\r");
+  await visible("Connection name");
+  child.stdin.write("Team Gateway\r");
+  await visible("API protocol for Team Gateway");
+  child.stdin.write("\r"); // select "openai-chat · OpenAI Chat Completions"
+  await visible("Base URL");
+  child.stdin.write(`${baseUrl}\r`);
+  await visible("Model id");
+  child.stdin.write("gw-alpha\r");
+  await visible("Login · Team Gateway");
+  child.stdin.write("gw-secret-key\r");
+  await visible("Logged in to team-gateway");
+
+  const providersJson = JSON.parse(await readFile(path.join(home, "providers.json"), "utf8"));
+  assert.deepEqual(providersJson.providers["team-gateway"], {
+    name: "Team Gateway",
+    api: "openai-chat",
+    baseUrl,
+    models: { "gw-alpha": {} },
+  });
+  const authJson = JSON.parse(await readFile(path.join(home, "auth.json"), "utf8"));
+  assert.equal(authJson["team-gateway"].key, "gw-secret-key");
+
+  // 2. Open /model menu, verify shortcut footer, and press 'f' to set folder default
+  child.stdin.write("/model\r");
+  await visible("f folder default · g global default");
+  child.stdin.write("f");
+  await visible("Folder default updated");
+
+  const workspacesJson = JSON.parse(await readFile(path.join(home, "workspaces.json"), "utf8"));
+  const folderEntry = Object.values(workspacesJson)[0];
+  assert.equal(folderEntry.provider, "team-gateway");
+  assert.equal(folderEntry.model, "gw-alpha");
+
+  // 3. Open /model menu, move down to gw-beta, and press 'g' to set global default
+  child.stdin.write("/model\r");
+  await visible("f folder default · g global default");
+  child.stdin.write("\x1b[B");
+  child.stdin.write("g");
+  await visible("Global default updated");
+
+  const settingsJson = JSON.parse(await readFile(path.join(home, "settings.json"), "utf8"));
+  assert.equal(settingsJson.provider, "team-gateway");
+  assert.equal(settingsJson.model, "gw-beta");
 });

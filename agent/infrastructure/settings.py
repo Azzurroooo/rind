@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 import os
 import platform
 from pathlib import Path
+import tempfile
 from typing import Any
+
+from filelock import FileLock
 
 from agent.infrastructure.paths import resolve_rind_home
 from agent.version import __version__
@@ -57,16 +60,12 @@ def _sanitize_header_segment(value: str) -> str:
     return sanitized or "unknown"
 
 
+DEFAULT_PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-4o-mini"
-DEFAULT_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_PROVIDER = "openai-compatible"
 REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_USER_AGENT = build_default_user_agent()
 _DEFAULT_SETTINGS = (
     ("provider", DEFAULT_PROVIDER),
-    ("api", "openai-chat"),
-    ("baseUrl", DEFAULT_BASE_URL),
-    ("apiKey", ""),
     ("model", DEFAULT_MODEL),
     ("reasoningEffort", ""),
 )
@@ -77,14 +76,10 @@ class AppSettings:
     settings_path: Path
     settings_exists: bool
     model: str
-    api_key: str
-    base_url: str
     reasoning_effort: str
     user_agent: str = DEFAULT_USER_AGENT
     server_token: str = ""
     provider: str = DEFAULT_PROVIDER
-    api: str = "openai-chat"
-    model_context_windows: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
 def default_settings_path() -> Path:
@@ -110,10 +105,39 @@ def ensure_user_settings() -> Path:
 
 
 def load_settings() -> AppSettings:
-    """The user's own settings. A project folder never supplies model, endpoint, key or token."""
+    """The user's global default settings. A project folder never supplies settings."""
     settings_path = default_settings_path()
     data = _read_json_object(settings_path) if settings_path.exists() else {}
     return _build_settings(settings_path, data)
+
+
+def save_settings(
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> AppSettings:
+    """Update global defaults in settings.json atomically."""
+    path = default_settings_path()
+    lock = FileLock(str(path) + ".lock")
+    with lock:
+        data = _read_json_object(path) if path.exists() else dict(_DEFAULT_SETTINGS)
+        if provider is not None:
+            data["provider"] = str(provider).strip() or DEFAULT_PROVIDER
+        if model is not None:
+            data["model"] = str(model).strip() or DEFAULT_MODEL
+        if reasoning_effort is not None:
+            data["reasoningEffort"] = normalize_reasoning_effort(reasoning_effort)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        temporary = Path(temporary_name)
+        try:
+            os.close(fd)
+            temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return _build_settings(path, data)
 
 
 def normalize_reasoning_effort(value: Any) -> str:
@@ -126,32 +150,15 @@ def normalize_reasoning_effort(value: Any) -> str:
 
 
 def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:
-    provider = _string(data, "provider") or DEFAULT_PROVIDER
     return AppSettings(
         settings_path=settings_path,
         settings_exists=settings_path.exists(),
         model=_string(data, "model") or DEFAULT_MODEL,
-        api_key=_string(data, "apiKey"),
-        base_url=_string(data, "baseUrl") or DEFAULT_BASE_URL,
         reasoning_effort=_string(data, "reasoningEffort"),
         user_agent=DEFAULT_USER_AGENT,
         server_token=_string(data, "serverToken"),
-        provider=provider,
-        api=_string(data, "api") or "openai-chat",
-        model_context_windows=_model_context_windows(data.get("modelContextWindows", {})),
+        provider=_string(data, "provider") or DEFAULT_PROVIDER,
     )
-
-
-def _model_context_windows(value: Any) -> dict[str, dict[str, int]]:
-    if not isinstance(value, dict):
-        raise ValueError("modelContextWindows must map connection ids to model token limits.")
-    for connection, models in value.items():
-        if not isinstance(connection, str) or not connection.strip() or not isinstance(models, dict):
-            raise ValueError("modelContextWindows must map connection ids to model token limits.")
-        for model, tokens in models.items():
-            if not isinstance(model, str) or not model.strip() or type(tokens) is not int or tokens <= 0:
-                raise ValueError("modelContextWindows requires model ids and positive integer token limits.")
-    return value
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -169,4 +176,5 @@ def _string(data: dict[str, Any], key: str) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
 

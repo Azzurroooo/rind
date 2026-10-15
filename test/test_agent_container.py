@@ -37,8 +37,6 @@ def test_container_explicitly_shares_production_dependencies() -> None:
         settings_path=cache_dir / "settings.json",
         settings_exists=True,
         model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
         reasoning_effort="high",
         user_agent="test-agent",
     )
@@ -70,8 +68,6 @@ def test_container_budgets_the_selected_model_context_window() -> None:
         settings_path=cache_dir / "settings.json",
         settings_exists=True,
         model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
         reasoning_effort="high",
         user_agent="test-agent",
     )
@@ -92,8 +88,6 @@ def test_container_reuses_worker_safe_resources() -> None:
         settings_path=cache_dir / "settings.json",
         settings_exists=True,
         model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
         reasoning_effort="high",
         user_agent="test-agent",
     )
@@ -125,8 +119,6 @@ def test_container_can_disable_user_question_tool_for_worker_agents() -> None:
         settings_path=cache_dir / "settings.json",
         settings_exists=True,
         model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
         reasoning_effort="high",
         user_agent="test-agent",
     )
@@ -162,8 +154,6 @@ def test_container_rind_doc_provider_injects_workspace_doc(tmp_path, monkeypatch
         settings_path=tmp_path / "settings.json",
         settings_exists=True,
         model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
         reasoning_effort="high",
         user_agent="test-agent",
     )

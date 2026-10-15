@@ -56,10 +56,9 @@ test("CLI compact accepts rind send, resumes work and accepts the next turn", {t
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({
-    provider: "openai-compatible", model: "fake-model", apiKey: "local-test-only",
-    baseUrl: `http://127.0.0.1:${server.address().port}/v1`,
-  }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fake-model" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "local-test-only" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: `http://127.0.0.1:${server.address().port}/v1` } } }));
   const env = {...process.env, RIND_HOME: home, NO_COLOR: "1", PYTHONIOENCODING: "utf-8"};
   const child = spawn(process.execPath, [cliPath], {cwd: workspace, env, stdio: ["pipe", "pipe", "pipe"]});
   let stdout = "", stderr = "";

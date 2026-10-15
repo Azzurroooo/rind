@@ -70,7 +70,7 @@ def test_app_server_bootstraps_default_user_settings(tmp_path, monkeypatch):
     assert asyncio.run(async_main(["--stdio", "--cwd", str(workspace)], server_class=FakeServer)) == 0
 
     settings = json.loads((tmp_path / "rind-home" / "settings.json").read_text(encoding="utf-8"))
-    assert settings["apiKey"] == ""
+    assert settings["provider"] == "openai"
     assert settings["model"] == "gpt-4o-mini"
 
 
@@ -82,9 +82,8 @@ def test_app_server_stdio_subprocess_smoke(tmp_path):
     (rind_home / "settings.json").write_text(
         json.dumps(
             {
+                "provider": "openai",
                 "model": "test-model",
-                "apiKey": "test-key",
-                "baseUrl": "https://example.com/v1",
             }
         ),
         encoding="utf-8",

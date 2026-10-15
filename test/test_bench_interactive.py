@@ -49,7 +49,9 @@ def test_launcher_cleans_owned_processes_and_temporary_home(monkeypatch, tmp_pat
         def __init__(self, command, cwd, env):
             observed["workspace"] = Path(command[-1])
             observed["home"] = Path(env["RIND_HOME"])
-            assert "local-fixture-only" in (observed["home"] / "settings.json").read_text()
+            assert "custom-gw" in (observed["home"] / "providers.json").read_text()
+            assert "local-fixture-only" in (observed["home"] / "auth.json").read_text()
+            assert "custom-gw" in (observed["home"] / "settings.json").read_text()
 
         def poll(self):
             return self.returncode

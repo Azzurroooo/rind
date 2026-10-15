@@ -1057,7 +1057,7 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
     workspace = tmp_path / "workspace"
     (home / ".rind").mkdir(parents=True)
     workspace.mkdir()
-    (home / ".rind" / "settings.json").write_text(json.dumps({"apiKey": "test-key"}), encoding="utf-8")
+    (home / ".rind" / "auth.json").write_text(json.dumps({"openai": {"type": "api_key", "key": "test-key"}}), encoding="utf-8")
 
     env = dict(os.environ)
     env["HOME"] = str(home)

@@ -17,17 +17,26 @@ from agent.infrastructure.llm.provider_service import ProviderServiceImpl
 
 
 def _settings(tmp_path: Path, **overrides) -> AppSettings:
+    import json
+    api_key = overrides.pop("api_key", "")
+    base_url = overrides.pop("base_url", "")
     values = {
         "settings_path": tmp_path / "settings.json",
         "settings_exists": True,
         "model": "deepseek-chat",
-        "api_key": "",
-        "base_url": "",
         "reasoning_effort": "",
         "provider": "deepseek",
     }
     values.update(overrides)
-    return AppSettings(**values)
+    settings = AppSettings(**values)
+    if base_url or settings.provider not in PROVIDERS:
+        entry: dict = {"baseUrl": base_url or "https://custom.example/v1"}
+        if settings.provider not in PROVIDERS:
+            entry["api"] = "openai-chat"
+        (tmp_path / "providers.json").write_text(json.dumps({"providers": {settings.provider: entry}}), encoding="utf-8")
+    if api_key:
+        CredentialStore(tmp_path / "auth.json").set(settings.provider, Credential(type="api_key", key=api_key))
+    return settings
 
 
 def _service(tmp_path: Path, settings: AppSettings, monkeypatch) -> ProviderServiceImpl:
@@ -82,19 +91,19 @@ async def test_image_capability_does_not_inherit_another_endpoint_or_legacy_meta
 @pytest.mark.parametrize("provider,endpoint,model,expected", [
     ("deepseek", "https://api.deepseek.com", "deepseek-flash", True),
     ("deepseek", "https://api.deepseek.com/v1/", "deepseek-v4-pro", False),
-    ("openai-compatible", "https://api.deepseek.com/", "deepseek-flash", True),
-    ("openai-compatible", "https://api.deepseek.com/v1", "deepseek-v4-pro", False),
-    ("openai-compatible", "https://api.openai.com/v1", "gpt-4o-mini", True),
-    ("openai-compatible", "https://api.deepseek.com", "unlisted-model", None),
-    ("openai-compatible", "https://proxy.example/v1", "deepseek-flash", None),
-    ("openai-compatible", "https://api.deepseek.com.proxy.example", "deepseek-flash", None),
-    ("openai-compatible", "https://api.deepseek.com/v2", "deepseek-flash", None),
-    ("openai-compatible", "https://api.deepseek.com?proxy=1", "deepseek-flash", None),
-    ("openai-compatible", "http://api.deepseek.com", "deepseek-flash", None),
+    ("custom-proxy", "https://api.deepseek.com/", "deepseek-flash", True),
+    ("custom-proxy", "https://api.deepseek.com/v1", "deepseek-v4-pro", False),
+    ("custom-proxy", "https://api.openai.com/v1", "gpt-4o-mini", True),
+    ("custom-proxy", "https://api.deepseek.com", "unlisted-model", None),
+    ("custom-proxy", "https://proxy.example/v1", "deepseek-flash", None),
+    ("custom-proxy", "https://api.deepseek.com.proxy.example", "deepseek-flash", None),
+    ("custom-proxy", "https://api.deepseek.com/v2", "deepseek-flash", None),
+    ("custom-proxy", "https://api.deepseek.com?proxy=1", "deepseek-flash", None),
+    ("custom-proxy", "http://api.deepseek.com", "deepseek-flash", None),
     ("openai", "https://api.deepseek.com", "gpt-4o-mini", None),
     ("deepseek", "https://api.deepseek.com", "deepseek-v4-flash", True),
     ("qwen-coding", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "deepseek-v4-flash", False),
-    ("openai-compatible", "https://openrouter.ai/api/v1", "deepseek/deepseek-v4-flash", False),
+    ("custom-proxy", "https://openrouter.ai/api/v1", "deepseek/deepseek-v4-flash", False),
 ])
 async def test_image_catalog_matches_official_endpoint_and_model(tmp_path, monkeypatch, provider, endpoint, model, expected):
     settings = _settings(tmp_path, provider=provider, model=model, api_key="test", base_url=endpoint)
@@ -109,13 +118,13 @@ async def test_image_catalog_matches_official_endpoint_and_model(tmp_path, monke
 @pytest.mark.asyncio
 async def test_compatible_endpoint_cache_false_overrides_official_catalog(tmp_path, monkeypatch):
     endpoint = "https://api.deepseek.com"
-    settings = _settings(tmp_path, provider="openai-compatible", model="deepseek-flash", api_key="test", base_url=endpoint)
+    settings = _settings(tmp_path, provider="custom-proxy", model="deepseek-flash", api_key="test", base_url=endpoint)
     service = _service(tmp_path, settings, monkeypatch)
-    service._write_cache({"openai-compatible": {"base_url": endpoint, "refreshed_at": 1,
+    service._write_cache({"custom-proxy": {"base_url": endpoint, "refreshed_at": 1,
         "models": [{"id": "deepseek-flash", "image_input": False}]}})
-    assert service.resolve_selection(ModelSelection("openai-compatible", "deepseek-flash")).image_input is False
+    assert service.resolve_selection(ModelSelection("custom-proxy", "deepseek-flash")).image_input is False
     assert (await service.list_models()).models[0].image_input is False
-    assert service._read_cache()["openai-compatible"]["refreshed_at"] == 1
+    assert service._read_cache()["custom-proxy"]["refreshed_at"] == 1
 
 
 @pytest.mark.asyncio
@@ -123,11 +132,12 @@ async def test_compatible_endpoint_cache_false_overrides_official_catalog(tmp_pa
 @pytest.mark.parametrize("same_endpoint", [True, False])
 async def test_all_refresh_entries_merge_capabilities_by_endpoint(tmp_path, monkeypatch, trigger, same_endpoint):
     from unittest.mock import AsyncMock, Mock
-    settings = _settings(tmp_path, provider="openrouter", model="new", api_key="test", base_url="https://openrouter.ai/api/v1")
+    endpoint = "https://openrouter.ai/api/v1"
+    settings = _settings(tmp_path, provider="openrouter", model="new", api_key="test", base_url=endpoint)
     service = _service(tmp_path, settings, monkeypatch)
     for provider in service.providers.values():
         monkeypatch.delenv(provider.environment_key or "UNUSED_TEST_KEY", raising=False)
-    service._write_cache({"openrouter": {"base_url": settings.base_url if same_endpoint else "https://old.example/v1", "refreshed_at": 0,
+    service._write_cache({"openrouter": {"base_url": endpoint if same_endpoint else "https://old.example/v1", "refreshed_at": 0,
         "models": [{"id": "old", "image_input": True}, {"id": "keep", "image_input": False}, {"id": "removed", "image_input": True}]}})
     listing = AsyncMock(return_value=SimpleNamespace(data=[
         {"id": "old", "architecture": {"input_modalities": ["text"]}},
@@ -153,7 +163,7 @@ async def test_all_refresh_entries_merge_capabilities_by_endpoint(tmp_path, monk
     assert "name" not in models["new"]
     assert models["keep"].get("image_input") is (False if same_endpoint else None)
     assert "image_input" not in models["unknown"] and "removed" not in models
-    assert entry["refreshed_at"] > 0 and entry["base_url"] == settings.base_url
+    assert entry["refreshed_at"] > 0 and entry["base_url"] == endpoint
 
 
 @pytest.mark.parametrize("provider,item,expected", [
@@ -180,49 +190,46 @@ def test_credential_list_redacts_secret(tmp_path: Path) -> None:
     assert store.get("deepseek").key == "test-secret"
 
 
-def test_provider_service_resolves_legacy_settings_to_compatible_provider(tmp_path: Path, monkeypatch) -> None:
+def test_provider_service_resolves_default_selection_from_settings(tmp_path: Path, monkeypatch) -> None:
     settings_path = tmp_path / "settings.json"
-    settings = AppSettings(settings_path, True, "deepseek-flash", "test-key", "https://api.deepseek.com", "high")
+    settings = AppSettings(settings_path, True, "deepseek-flash", "high", provider="deepseek")
     monkeypatch.setattr("agent.infrastructure.llm.provider_service.load_settings", lambda: settings)
 
     service = ProviderServiceImpl(CredentialStore(tmp_path / "auth.json"))
 
-    assert service.default_selection() == ModelSelection("openai-compatible", "deepseek-flash", "high")
+    assert service.default_selection() == ModelSelection("deepseek", "deepseek-flash", "high")
 
 
-def test_credential_resolution_prefers_settings_then_stored_then_environment(tmp_path: Path, monkeypatch) -> None:
+def test_credential_resolution_prefers_stored_then_environment(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     settings = _settings(tmp_path)
     service = _service(tmp_path, settings, monkeypatch)
 
-    assert service._credential_source(settings, PROVIDERS["deepseek"]) == "none"
-    assert service._resolve_credential(settings, PROVIDERS["deepseek"]) is None
+    assert service._credential_source(PROVIDERS["deepseek"]) == "none"
+    assert service._resolve_credential(PROVIDERS["deepseek"]) is None
 
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
-    assert service._credential_source(settings, PROVIDERS["deepseek"]) == "environment"
-    assert service._resolve_credential(settings, PROVIDERS["deepseek"]).key == "env-key"
+    assert service._credential_source(PROVIDERS["deepseek"]) == "environment"
+    assert service._resolve_credential(PROVIDERS["deepseek"]).key == "env-key"
 
     service.credentials.set("deepseek", Credential(type="api_key", key="stored-key"))
-    assert service._credential_source(settings, PROVIDERS["deepseek"]) == "stored"
-    assert service._resolve_credential(settings, PROVIDERS["deepseek"]).key == "stored-key"
-
-    configured = _settings(tmp_path, api_key="settings-key")
-    assert service._credential_source(configured, PROVIDERS["deepseek"]) == "settings"
-    assert service._resolve_credential(configured, PROVIDERS["deepseek"]).key == "settings-key"
-
-    env_settings = _settings(tmp_path, api_key="$DEEPSEEK_API_KEY")
-    assert service._resolve_credential(env_settings, PROVIDERS["deepseek"]).key == "env-key"
+    assert service._credential_source(PROVIDERS["deepseek"]) == "stored"
+    assert service._resolve_credential(PROVIDERS["deepseek"]).key == "stored-key"
 
 
 def test_model_refresh_endpoint_stays_per_provider(tmp_path: Path, monkeypatch) -> None:
-    settings = _settings(tmp_path, provider="openai-compatible", api_key="local", base_url="http://127.0.0.1:9/v1")
+    import json
+    settings = _settings(tmp_path, provider="custom-proxy", api_key="local", base_url="http://127.0.0.1:9/v1")
     service = _service(tmp_path, settings, monkeypatch)
 
     deepseek = service._provider("deepseek")
-    assert service._endpoint(settings, deepseek) == deepseek.default_base_url
-    assert service._endpoint(settings, service._provider("openai-compatible")) == "http://127.0.0.1:9/v1"
+    assert deepseek.default_base_url == PROVIDERS["deepseek"].default_base_url
+    assert service._provider("custom-proxy").default_base_url == "http://127.0.0.1:9/v1"
 
-    custom = _settings(tmp_path, provider="deepseek", base_url="https://proxy.deepseek.example/v1")
-    assert service._endpoint(custom, deepseek) == "https://proxy.deepseek.example/v1"
+    service.providers_path.write_text(json.dumps({
+        "providers": {"deepseek": {"baseUrl": "https://proxy.deepseek.example/v1"}}
+    }), encoding="utf-8")
+    assert service._provider("deepseek").default_base_url == "https://proxy.deepseek.example/v1"
 
 
 @pytest.mark.asyncio
@@ -231,7 +238,7 @@ async def test_login_saves_key_and_refreshes_only_that_provider(tmp_path: Path, 
     service = _service(tmp_path, settings, monkeypatch)
     refreshed: list[str] = []
 
-    async def _fetch(settings, definition):
+    async def _fetch(definition):
         refreshed.append(definition.id)
         return True
 
@@ -279,7 +286,7 @@ async def test_list_models_uses_cache_fallback_and_reports_refresh_warning(tmp_p
     # Refreshed /models responses carry no effort metadata, so cache entries use the dialect default.
     assert catalog.models[0].reasoning_efforts == default_reasoning_efforts("openai-chat")
 
-    async def _failing_fetch(_settings, _definition):
+    async def _failing_fetch(_definition):
         return False
 
     monkeypatch.setattr(service, "_fetch_models", _failing_fetch)
@@ -298,10 +305,7 @@ async def test_list_models_keeps_other_providers_when_one_refresh_fails(tmp_path
     service.credentials.set("openai", Credential(type="api_key", key="openai-key"))
     service._write_cache({"deepseek": [{"id": "deepseek-cached"}], "openai": [{"id": "gpt-cached"}]})
 
-    async def _fetch(_settings, definition):
-        return definition.id != "openai"
-
-    async def _refetch(_settings, definition):
+    async def _refetch(definition):
         if definition.id == "openai":
             return False
         service._write_cache({"deepseek": [{"id": "deepseek-live"}], "openai": [{"id": "gpt-cached"}]})

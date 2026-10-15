@@ -111,8 +111,12 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
     workspace.mkdir(parents=True, exist_ok=True)
     (tmp_path / "home").mkdir(exist_ok=True)
     (workspace / "note.txt").write_text("hello journey", encoding="utf-8")
+    (tmp_path / "home" / "providers.json").write_text(
+        json.dumps({"providers": {"custom-gw": {"name": "Custom GW", "api": "openai-chat", "baseUrl": fixture.base_url}}}),
+        encoding="utf-8",
+    )
     (tmp_path / "home" / "settings.json").write_text(
-        json.dumps({"provider": "openai-compatible", "baseUrl": fixture.base_url, "model": "fake-model-a"}),
+        json.dumps({"provider": "custom-gw", "model": "fake-model-a"}),
         encoding="utf-8",
     )
 
@@ -122,17 +126,18 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
         initialize = server.response("init")
         server.send("create", "session/create")
         sid = server.response("create")["result"]["session_id"]
-        assert initialize["result"]["provider"] == "openai-compatible"
+        assert initialize["result"]["provider"] == "custom-gw"
         providers = {item["id"]: item for item in initialize["result"]["providers"]}
-        assert providers["openai-compatible"]["configured"] is False
+        assert providers["custom-gw"]["configured"] is False
 
         server.send("auth", "rind/auth/list", {"session_id": sid})
         auth_list = server.response("auth")
-        assert auth_list["result"]["providers"][0]["source"] == "none"
+        custom_status = next(p for p in auth_list["result"]["providers"] if p["id"] == "custom-gw")
+        assert custom_status["source"] == "none"
 
         server.send("login", "rind/auth/login", {
             "session_id": sid,
-            "provider_id": "openai-compatible",
+            "provider_id": "custom-gw",
             "method": "api_key",
         })
         prompt = server.wait_for(
@@ -146,15 +151,15 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
         assert login["result"]["selection"] is None  # session model already usable
 
         stored = json.loads((rind_home / "auth.json").read_text(encoding="utf-8"))
-        assert stored["openai-compatible"]["type"] == "api_key"
-        assert stored["openai-compatible"]["key"] == "e2e-secret-key"
+        assert stored["custom-gw"]["type"] == "api_key"
+        assert stored["custom-gw"]["key"] == "e2e-secret-key"
 
         server.send("models", "model/list", {"session_id": sid})
         models = server.response("models")["result"]
         assert [model["id"] for model in models["models"]] == ["fake-model-a", "fake-model-b"]
         # Refreshed /models entries carry no effort metadata, so the dialect default applies.
         assert models["models"][0]["reasoning_efforts"] == ["low", "medium", "high", "xhigh", "max"]
-        assert models["current"] == {"provider_id": "openai-compatible", "model_id": "fake-model-a"}
+        assert models["current"] == {"provider_id": "custom-gw", "model_id": "fake-model-a"}
         assert models["warning"] is None
 
         server.send("turn", "session/prompt", {
@@ -178,14 +183,14 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
 
         server.send("set", "model/set", {
             "session_id": sid,
-            "provider_id": "openai-compatible",
+            "provider_id": "custom-gw",
             "model_id": "fake-model-b",
         })
         assert server.response("set")["result"]["model_id"] == "fake-model-b"
 
-        server.send("logout", "rind/auth/logout", {"session_id": sid, "provider_id": "openai-compatible"})
+        server.send("logout", "rind/auth/logout", {"session_id": sid, "provider_id": "custom-gw"})
         logout = server.response("logout")["result"]
-        assert logout == {"ok": True, "provider_id": "openai-compatible", "deleted": True, "source": "none"}
+        assert logout == {"ok": True, "provider_id": "custom-gw", "deleted": True, "source": "none"}
 
         transcript = json.dumps(server.lines, ensure_ascii=False)
         assert "e2e-secret-key" not in transcript
@@ -206,8 +211,12 @@ def test_google_login_static_catalog_and_tool_turn_journey(tmp_path: Path):
     workspace.mkdir(parents=True, exist_ok=True)
     (tmp_path / "home").mkdir(exist_ok=True)
     (workspace / "note.txt").write_text("gemini works", encoding="utf-8")
+    (tmp_path / "home" / "providers.json").write_text(
+        json.dumps({"providers": {"google": {"baseUrl": fixture.base_url}}}),
+        encoding="utf-8",
+    )
     (tmp_path / "home" / "settings.json").write_text(
-        json.dumps({"provider": "google", "baseUrl": fixture.base_url, "model": "gemini-3-flash"}),
+        json.dumps({"provider": "google", "model": "gemini-3-flash"}),
         encoding="utf-8",
     )
 
@@ -286,14 +295,18 @@ def test_resume_latest_repairs_interrupted_tool_call_journey(tmp_path: Path, mon
     rind_home = tmp_path / "home"
     rind_home.mkdir()
     (rind_home / "auth.json").write_text(
-        json.dumps({"openai-compatible": {"type": "api_key", "key": "e2e-secret-key"}}),
+        json.dumps({"custom-gw": {"type": "api_key", "key": "e2e-secret-key"}}),
         encoding="utf-8",
     )
     workspace = tmp_path / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / "providers.json").write_text(
+        json.dumps({"providers": {"custom-gw": {"api": "openai-chat", "baseUrl": fixture.base_url}}}),
+        encoding="utf-8",
+    )
     (tmp_path / "home" / "settings.json").write_text(
-        json.dumps({"provider": "openai-compatible", "baseUrl": fixture.base_url, "model": "fake-model-a"}),
+        json.dumps({"provider": "custom-gw", "model": "fake-model-a"}),
         encoding="utf-8",
     )
 
@@ -303,7 +316,7 @@ def test_resume_latest_repairs_interrupted_tool_call_journey(tmp_path: Path, mon
         store = JsonlSessionStore(
             session_id="e2e-orphaned-turn",
             model="fake-model-a",
-            provider="openai-compatible",
+            provider="custom-gw",
             system_prompt="e2e system prompt",
             workspace_root=str(workspace),
         )
@@ -387,8 +400,13 @@ def test_responses_and_anthropic_stream_and_offline_tokens(tmp_path, provider, m
     workspace.mkdir(parents=True, exist_ok=True)
     (tmp_path / "home").mkdir(exist_ok=True)
     (tmp_path / "home" / "settings.json").write_text(json.dumps({
-        "provider": provider, "apiKey": "fixture-key", "model": "fixture",
-        "baseUrl": f"http://127.0.0.1:{http.server_port}/v1",
+        "provider": provider, "model": "fixture",
+    }), encoding="utf-8")
+    (tmp_path / "home" / "auth.json").write_text(json.dumps({
+        provider: {"type": "api_key", "key": "fixture-key"},
+    }), encoding="utf-8")
+    (tmp_path / "home" / "providers.json").write_text(json.dumps({
+        "providers": {provider: {"baseUrl": f"http://127.0.0.1:{http.server_port}/v1"}},
     }), encoding="utf-8")
     monkeypatch.delenv("TIKTOKEN_CACHE_DIR", raising=False)
     monkeypatch.delenv("DATA_GYM_CACHE_DIR", raising=False)
@@ -445,8 +463,13 @@ def test_web_extraction_through_worker_and_http_proxy(tmp_path, monkeypatch):
     workspace.mkdir(parents=True, exist_ok=True)
     (tmp_path / "home").mkdir(exist_ok=True)
     (tmp_path / "home" / "settings.json").write_text(json.dumps({
-        "provider": "openai-compatible", "baseUrl": fixture.base_url,
-        "model": "fixture", "apiKey": "fixture-key",
+        "provider": "custom-gw", "model": "fixture",
+    }), encoding="utf-8")
+    (tmp_path / "home" / "auth.json").write_text(json.dumps({
+        "custom-gw": {"type": "api_key", "key": "fixture-key"},
+    }), encoding="utf-8")
+    (tmp_path / "home" / "providers.json").write_text(json.dumps({
+        "providers": {"custom-gw": {"api": "openai-chat", "baseUrl": fixture.base_url}},
     }), encoding="utf-8")
     monkeypatch.setenv("http_proxy", f"http://127.0.0.1:{proxy.server_port}")
     monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{proxy.server_port}")

@@ -173,7 +173,6 @@ async def test_manual_compact_traces_before_the_first_turn_in_a_worker(monkeypat
         chat_client=OpenAIChatCompletionsClient(sdk, "trace-model"),
         settings=AppSettings(
             settings_path=tmp_path / "settings.json", settings_exists=False,
-            api_key="local-only", base_url="http://127.0.0.1:1/v1",
             model="trace-model", reasoning_effort="",
         ),
         workspace_root=str(tmp_path),

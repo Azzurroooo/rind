@@ -41,16 +41,16 @@ test("model menu groups models by provider and defaults to the current model", (
 test("model menu headers prefer provider display names when provided", () => {
   const state = createModelMenuState(
     [
-      { provider_id: "openai-compatible", id: "custom-model" },
+      { provider_id: "custom-gw", id: "custom-model" },
       { provider_id: "deepseek", id: "deepseek-chat" },
     ],
-    { provider_id: "openai-compatible", model_id: "custom-model" },
-    new Map([["openai-compatible", "OpenAI compatible (chat completions)"]]),
+    { provider_id: "custom-gw", model_id: "custom-model" },
+    new Map([["custom-gw", "Custom Gateway"]]),
   );
 
   assert.deepEqual(
     state.items().map((item) => item.header ? `header:${item.name}` : item.modelId),
-    ["header:OpenAI compatible (chat completions)", "custom-model", "header:deepseek", "deepseek-chat"],
+    ["header:Custom Gateway", "custom-model", "header:deepseek", "deepseek-chat"],
   );
 });
 

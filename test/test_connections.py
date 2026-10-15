@@ -45,24 +45,37 @@ def service(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_named_connection_is_kept_in_the_auth_file_and_offered_like_a_provider(service, tmp_path):
-    answers = Answers("Client A", "https://client-a.example/v1", "client-model", "client-key")
+async def test_a_named_connection_is_saved_to_providers_and_auth_and_offered_like_a_provider(service, tmp_path):
+    answers = Answers(
+        "Client A",
+        "openai-responses · OpenAI Responses",
+        "https://client-a.example/v1",
+        "client-model",
+        "client-key",
+    )
 
     connection_id = await service.login("", "connection", answers)
 
     assert connection_id == "client-a"
-    assert [kind for kind, _ in answers.prompts] == ["text", "text", "text", "secret"], "only the key is masked"
-    saved = json.loads((tmp_path / "auth.json").read_text(encoding="utf-8"))["client-a"]
-    assert saved["connection"] == {"name": "Client A", "base_url": "https://client-a.example/v1", "model": "client-model"}
+    assert [kind for kind, _ in answers.prompts] == ["text", "select", "text", "text", "secret"], "only the key is masked"
+    saved_auth = json.loads((tmp_path / "auth.json").read_text(encoding="utf-8"))["client-a"]
+    assert saved_auth == {"type": "api_key", "key": "client-key"}
+    saved_provider = json.loads((tmp_path / "providers.json").read_text(encoding="utf-8"))["providers"]["client-a"]
+    assert saved_provider == {
+        "name": "Client A",
+        "api": "openai-responses",
+        "baseUrl": "https://client-a.example/v1",
+        "models": {"client-model": {}},
+    }
     listed = {status.id: status for status in service.list_providers()}
     assert listed["client-a"].configured and listed["client-a"].source == "stored"
-    models = [(model.provider_id, model.id) for model in (await service.list_models()).models]
-    assert ("client-a", "client-model") in models
+    models = [(model.provider_id, model.id, model.api) for model in (await service.list_models()).models]
+    assert ("client-a", "client-model", "openai-responses") in models
 
 
 @pytest.mark.asyncio
-async def test_a_client_for_a_named_connection_uses_its_own_endpoint_and_key(service, tmp_path):
-    await service.login("", "connection", Answers("Client A", "https://client-a.example/v1", "m", "client-key"))
+async def test_a_client_for_a_named_connection_uses_its_own_endpoint_protocol_and_key(service, tmp_path):
+    await service.login("", "connection", Answers("Client A", "openai-chat", "https://client-a.example/v1", "m", "client-key"))
 
     client = await service.create_chat_client(_settings(tmp_path), ModelSelection("client-a", "m"))
     try:
@@ -74,33 +87,38 @@ async def test_a_client_for_a_named_connection_uses_its_own_endpoint_and_key(ser
 
 @pytest.mark.asyncio
 async def test_logging_in_again_replaces_the_key_and_keeps_the_endpoint(service, tmp_path):
-    await service.login("", "connection", Answers("Client A", "https://client-a.example/v1", "", "old-key"))
+    await service.login("", "connection", Answers("Client A", "openai-chat", "https://client-a.example/v1", "", "old-key"))
     await service.login("client-a", "api_key", Answers("new-key"))
 
-    saved = json.loads((tmp_path / "auth.json").read_text(encoding="utf-8"))["client-a"]
-    assert saved["key"] == "new-key"
-    assert saved["connection"]["base_url"] == "https://client-a.example/v1"
+    saved_auth = json.loads((tmp_path / "auth.json").read_text(encoding="utf-8"))["client-a"]
+    assert saved_auth["key"] == "new-key"
+    saved_provider = json.loads((tmp_path / "providers.json").read_text(encoding="utf-8"))["providers"]["client-a"]
+    assert saved_provider["baseUrl"] == "https://client-a.example/v1"
 
 
 @pytest.mark.asyncio
-async def test_logging_out_removes_the_connection(service):
-    await service.login("", "connection", Answers("Client A", "https://client-a.example/v1", "", "key"))
+async def test_logging_out_removes_the_stored_credential(service):
+    await service.login("", "connection", Answers("Client A", "openai-chat", "https://client-a.example/v1", "m", "key"))
 
     assert service.logout("client-a") is True
-    assert "client-a" not in {status.id for status in service.list_providers()}
+    listed = {status.id: status for status in service.list_providers()}
+    assert listed["client-a"].configured is False
+    assert (await service.list_models()).models == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("answers, message", [
-    (("deepseek", "https://x.example/v1", "", "k"), "built-in provider"),
-    (("!!!", "https://x.example/v1", "", "k"), "letter or digit"),
-    (("Client", "ftp://x.example", "", "k"), "http(s) URL"),
-    (("Client", "https://x.example/v1", "", ""), "canceled"),
+    (("deepseek",), "built-in provider"),
+    (("!!!",), "letter or digit"),
+    (("Client", ""), "canceled"),
+    (("Client", "openai-chat", "ftp://x.example", "", "k"), "http(s) URL"),
+    (("Client", "openai-chat", "https://x.example/v1", "", ""), "canceled"),
 ])
-async def test_a_connection_needs_its_own_name_a_web_url_and_a_key(service, tmp_path, answers, message):
+async def test_a_connection_needs_its_own_name_protocol_web_url_and_key(service, tmp_path, answers, message):
     with pytest.raises(ValueError, match=re.escape(message)):
         await service.login("", "connection", Answers(*answers))
     assert not (tmp_path / "auth.json").exists()
+    assert not (tmp_path / "providers.json").exists()
 
 
 @pytest.mark.asyncio
@@ -136,9 +154,16 @@ async def test_a_model_change_for_a_queued_turn_also_changes_image_support(tmp_p
 
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
-    (tmp_path / "home" / "settings.json").write_text(json.dumps({"modelContextWindows": {
-        "deepseek": {"deepseek-v4-pro": 1048576, "deepseek-flash": 8192},
-    }}), encoding="utf-8")
+    (tmp_path / "home" / "providers.json").write_text(json.dumps({
+        "providers": {
+            "deepseek": {
+                "models": {
+                    "deepseek-v4-pro": {"contextWindow": 1048576},
+                    "deepseek-flash": {"contextWindow": 8192},
+                }
+            }
+        }
+    }), encoding="utf-8")
     worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
     gate, waiting, seen = asyncio.Event(), asyncio.Event(), []
 
@@ -179,3 +204,4 @@ async def test_a_model_change_for_a_queued_turn_also_changes_image_support(tmp_p
 
 async def _drain(events):
     return [event async for event in events]
+

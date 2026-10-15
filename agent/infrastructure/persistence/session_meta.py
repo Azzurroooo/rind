@@ -128,7 +128,7 @@ def new_session_meta(
     session_type: str | None = None,
     parent_session_id: str | None = None,
     reasoning_effort: str = "",
-    provider: str = "openai-compatible",
+    provider: str = "openai",
     selection_source: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     meta = {

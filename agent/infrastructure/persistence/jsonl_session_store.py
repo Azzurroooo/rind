@@ -109,7 +109,7 @@ class JsonlSessionStore(SessionStore):
         session_type: str | None = None,
         parent_session_id: str | None = None,
         reasoning_effort: str = "",
-        provider: str = "openai-compatible",
+        provider: str = "openai",
         selection_source: dict[str, str] | None = None,
         create_missing: bool = True,
     ):
@@ -118,9 +118,9 @@ class JsonlSessionStore(SessionStore):
         self._resume_latest = resume_latest
         self._create_missing = create_missing
         self._model = model
-        self._provider = str(provider or "openai-compatible").strip()
-        from agent.infrastructure.settings import normalize_reasoning_effort
+        from agent.infrastructure.settings import DEFAULT_PROVIDER, normalize_reasoning_effort
 
+        self._provider = str(provider or DEFAULT_PROVIDER).strip()
         self._reasoning_effort = normalize_reasoning_effort(reasoning_effort)
         self._selection_source = dict(selection_source or {})
         self._system_prompt = system_prompt
@@ -432,10 +432,11 @@ class JsonlSessionStore(SessionStore):
             self._session_meta["goal"] = normalize_goal(self._session_meta.get("goal"))
         configured_model = str(meta.get("model") or "").strip()
         self._model = configured_model or self._model
-        self._provider = str(meta.get("provider") or "openai-compatible").strip()
+        from agent.infrastructure.settings import DEFAULT_PROVIDER, normalize_reasoning_effort
+
+        self._provider = str(meta.get("provider") or DEFAULT_PROVIDER).strip()
         if not meta.get("provider"):
             self._session_meta["provider"] = self._provider
-        from agent.infrastructure.settings import normalize_reasoning_effort
 
         try:
             configured_effort = normalize_reasoning_effort(meta.get("reasoning_effort"))

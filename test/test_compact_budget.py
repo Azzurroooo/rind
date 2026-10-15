@@ -355,7 +355,6 @@ def test_handoff_builder_bounds_rendered_tool_lines():
 def test_custom_connection_resolves_catalog_context_window_from_known_endpoint(tmp_path):
     from agent.infrastructure.llm.catalog import ProviderDefinition
     from agent.infrastructure.llm.provider_service import ProviderServiceImpl
-    from agent.infrastructure.settings import AppSettings
 
     service = ProviderServiceImpl()
     custom = ProviderDefinition(
@@ -365,7 +364,6 @@ def test_custom_connection_resolves_catalog_context_window_from_known_endpoint(t
         default_base_url="https://api.anthropic.com",
         auth_methods=("connection",),
     )
-    settings = AppSettings(tmp_path / "settings.json", False, "claude-opus-4-6", "my-anthropic-proxy", "https://api.anthropic.com", "")
-    resolved = service._resolve_model(settings, custom, "claude-opus-4-6", {"base_url": "https://api.anthropic.com"})
+    resolved = service._resolve_model(custom, {}, "claude-opus-4-6", {"base_url": "https://api.anthropic.com"})
     assert resolved.context_window == 1_000_000
     assert resolved.image_input is True

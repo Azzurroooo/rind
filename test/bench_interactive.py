@@ -47,12 +47,11 @@ def main() -> None:
             temporary = Path(directory)
             workspace = temporary / "workspace"
             workspace.mkdir()
-            settings = temporary / "home" / "settings.json"
-            settings.parent.mkdir()
-            settings.write_text(json.dumps({
-                "provider": "openai-compatible", "model": "fake-model",
-                "apiKey": "local-fixture-only", "baseUrl": server.base_url,
-            }), encoding="utf-8")
+            home_dir = temporary / "home"
+            home_dir.mkdir()
+            (home_dir / "settings.json").write_text(json.dumps({"provider": "custom-gw", "model": "fake-model"}), encoding="utf-8")
+            (home_dir / "auth.json").write_text(json.dumps({"custom-gw": {"type": "api_key", "key": "local-fixture-only"}}), encoding="utf-8")
+            (home_dir / "providers.json").write_text(json.dumps({"providers": {"custom-gw": {"api": "openai-chat", "baseUrl": server.base_url}}}), encoding="utf-8")
             env = {key: value for key, value in os.environ.items()
                    if not key.startswith("RIND_")}
             env.update(RIND_HOME=str(temporary / "home"), PYTHONUTF8="1")

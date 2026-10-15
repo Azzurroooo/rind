@@ -17,10 +17,11 @@ def service(tmp_path, monkeypatch):
     for definition in module.PROVIDERS.values():
         if definition.environment_key:
             monkeypatch.delenv(definition.environment_key, raising=False)
-    settings = AppSettings(tmp_path / "settings.json", True, "deepseek-chat", "key", "", "", provider="deepseek")
+    settings = AppSettings(tmp_path / "settings.json", True, "deepseek-chat", "", "", "", provider="deepseek")
     monkeypatch.setattr(module, "load_settings", lambda: settings)
     monkeypatch.setattr(module.time, "time", lambda: 200000)
     instance = module.ProviderServiceImpl(CredentialStore(tmp_path / "auth.json"))
+    instance.credentials.set("deepseek", Credential(type="api_key", key="key"))
     return instance
 
 
@@ -51,21 +52,27 @@ async def test_each_provider_and_supported_api(service, monkeypatch):
     fetch = AsyncMock(return_value=True)
     monkeypatch.setattr(service, "_fetch_models", fetch)
     await service.refresh_stale_models()
-    assert [call.args[1].id for call in fetch.await_args_list] == ["openai"]
+    assert [call.args[0].id for call in fetch.await_args_list] == ["openai"]
 
 
 @pytest.mark.asyncio
 async def test_missing_environment_reference_and_unsupported_custom_api(service, monkeypatch):
-    settings = module.load_settings()
-    monkeypatch.setattr(module, "load_settings", lambda: AppSettings(
-        settings.settings_path, True, "custom", "$ABSENT_MODEL_TEST_KEY", "https://local.example/v1", "",
-        provider="openai-compatible", api="anthropic-messages",
-    ))
+    import json
+    service.credentials.delete("deepseek")
+    service.providers_path.write_text(json.dumps({
+        "providers": {
+            "custom-anthropic": {
+                "api": "anthropic-messages",
+                "baseUrl": "https://local.example/v1",
+                "envKey": "ABSENT_MODEL_TEST_KEY",
+            }
+        }
+    }), encoding="utf-8")
     monkeypatch.delenv("ABSENT_MODEL_TEST_KEY", raising=False)
     fetch = AsyncMock(return_value=True)
     monkeypatch.setattr(service, "_fetch_models", fetch)
     await service.refresh_stale_models()
-    service.credentials.set("openai-compatible", Credential(type="api_key", key="stored"))
+    service.credentials.set("custom-anthropic", Credential(type="api_key", key="stored"))
     await service.refresh_stale_models()
     fetch.assert_not_called()
 

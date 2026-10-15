@@ -40,10 +40,11 @@ def test_run_waits_for_continuation_created_tasks_and_prints_final_once(tmp_path
         provider.script_tool_call("bash", {"command": command, "yield_time_ms": 0},
                                   then_text=[f"Waiting for task {number}"], call_id=f"call_task_{number}")
     provider.script_text(["FINAL RESULT"])
-    settings = tmp_path / "home" / "settings.json"
-    settings.parent.mkdir()
-    settings.write_text(json.dumps({"provider": "openai-compatible", "model": "fake-model",
-                                    "apiKey": "local-test", "baseUrl": provider.base_url}), encoding="utf-8")
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    (home_dir / "settings.json").write_text(json.dumps({"provider": "custom-gw", "model": "fake-model"}), encoding="utf-8")
+    (home_dir / "auth.json").write_text(json.dumps({"custom-gw": {"type": "api_key", "key": "local-test"}}), encoding="utf-8")
+    (home_dir / "providers.json").write_text(json.dumps({"providers": {"custom-gw": {"api": "openai-chat", "baseUrl": provider.base_url}}}), encoding="utf-8")
     env = {**os.environ, "RIND_HOME": str(tmp_path / "home"), "RIND_PYTHON": sys.executable,
            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     env.pop("RIND_RUNTIME", None)

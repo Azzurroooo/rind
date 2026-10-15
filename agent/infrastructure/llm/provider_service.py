@@ -19,7 +19,6 @@ from pathlib import Path
 import tempfile
 from collections.abc import Awaitable, Callable
 from typing import Any
-from urllib.parse import urlparse
 
 import openai
 
@@ -36,6 +35,14 @@ from agent.infrastructure.credentials import CredentialStore
 import agent.infrastructure.llm.chatgpt_oauth as chatgpt_oauth
 from agent.infrastructure.llm.cancellation import close_resource
 from agent.infrastructure.llm.catalog import PROVIDERS, default_reasoning_efforts, refreshable_models_api
+from agent.infrastructure.providers import (
+    API_TYPES,
+    PROTOCOL_OPTIONS,
+    UserModelConfig,
+    is_valid_http_url,
+    load_providers,
+    save_custom_provider,
+)
 from agent.infrastructure.settings import AppSettings, load_settings
 
 
@@ -68,53 +75,59 @@ class ProviderServiceImpl:
         self.credentials = credential_store or CredentialStore()
         self.providers = dict(providers or PROVIDERS)
         self.cache_path = self.credentials.path.with_name("model-cache.json")
+        self.providers_path = self.credentials.path.with_name("providers.json")
 
     def default_selection(self) -> ModelSelection:
         settings = load_settings()
         return ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
 
     def resolve_selection(self, selection: ModelSelection, *, settings: AppSettings | None = None) -> ModelDefinition:
-        definition = self._provider(selection.provider_id)
-        settings = settings if settings is not None else load_settings()
-        return self._resolve_model(settings, definition, selection.model_id, self._read_cache().get(definition.id))
+        connections, user_models = self._loaded_providers()
+        definition = self._provider_from(connections, selection.provider_id)
+        return self._resolve_model(
+            definition,
+            user_models.get(definition.id, {}),
+            selection.model_id,
+            self._read_cache().get(definition.id),
+        )
 
     def describe_connection(self, provider_id: str) -> dict[str, str] | None:
         """Name, endpoint and key source of a connection; None when it is not configured here."""
-        settings = load_settings()
         try:
             definition = self._provider(provider_id)
         except ProviderError:
             return None
         return {
             "name": definition.name,
-            "endpoint": self._endpoint(settings, definition),
-            "credential": self._credential_source(settings, definition),
+            "endpoint": definition.default_base_url,
+            "credential": self._credential_source(definition),
         }
 
     def list_providers(self) -> list[ProviderStatus]:
         try:
-            settings: AppSettings | None = load_settings()
+            connections = self._connections()
         except (OSError, ValueError):
-            settings = None
+            connections = dict(self.providers)
         result = []
-        for definition in self._connections().values():
-            source = self._credential_source(settings, definition)
+        for definition in connections.values():
+            source = self._credential_source(definition)
             result.append(ProviderStatus(definition.id, definition.name, definition.auth_methods, source != "none", source))
         return result
 
     async def list_models(self, *, refresh: bool = False) -> ModelCatalog:
         settings = load_settings()
+        connections, user_models = self._loaded_providers()
         failures: list[str] = []
-        for definition in self._connections().values():
-            if self._credential_source(settings, definition) == "none":
+        for definition in connections.values():
+            if self._credential_source(definition) == "none":
                 continue
-            if refresh and not await self._fetch_models(settings, definition):
+            if refresh and not await self._fetch_models(definition):
                 failures.append(f"failed to refresh {definition.name} models, showing saved models")
-        models = self._catalog(settings)
+        models = self._catalog(settings, connections, user_models)
         return ModelCatalog(models, "; ".join(failures) or None)
 
     async def login(self, provider_id: str, method: str, interaction) -> str:
-        """Save a key for a connection, or add a named connection; returns its id."""
+        """Save a key for a connection, or add a custom provider; returns its id."""
         if method == "connection":
             return await self._add_connection(interaction)
         definition = self._provider(provider_id)
@@ -128,7 +141,7 @@ class ProviderServiceImpl:
                 raise ValueError("Login canceled.")
             credential = Credential(type="api_key", key=key)
         self.credentials.set(provider_id, credential)
-        await self._fetch_models(load_settings(), definition)
+        await self._fetch_models(definition)
         return provider_id
 
     async def _add_connection(self, interaction) -> str:
@@ -140,39 +153,51 @@ class ProviderServiceImpl:
             raise ValueError("A connection name needs at least one letter or digit.")
         if connection_id in self.providers:
             raise ValueError(f"{connection_id} is a built-in provider; log in to it directly or choose another name.")
-        base_url = (await interaction.prompt("text", "Base URL (OpenAI-compatible, e.g. https://host/v1)")).strip()
-        parsed = urlparse(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        chosen_api = (await interaction.prompt("select", f"API protocol for {name}", options=PROTOCOL_OPTIONS)).strip()
+        if not chosen_api:
+            raise ValueError("Login canceled.")
+        api = chosen_api.split("·", 1)[0].strip()
+        if api not in API_TYPES:
+            raise ValueError(f"Unsupported API protocol: {api}")
+        base_url = (await interaction.prompt("text", "Base URL (e.g. https://host/v1)")).strip()
+        if not is_valid_http_url(base_url):
             raise ValueError("Base URL must be an http(s) URL.")
         model = (await interaction.prompt("text", "Model id (empty: use the endpoint model list)")).strip()
         key = (await interaction.prompt("secret", f"{name} API key")).strip()
         if not key:
             raise ValueError("Login canceled.")
-        self.credentials.set_connection(connection_id, name, base_url, model, Credential(type="api_key", key=key))
-        await self._fetch_models(load_settings(), self._provider(connection_id))
+        save_custom_provider(
+            connection_id,
+            name=name,
+            api=api,
+            base_url=base_url,
+            model=model,
+            path=self.providers_path,
+        )
+        self.credentials.set(connection_id, Credential(type="api_key", key=key))
+        await self._fetch_models(self._provider(connection_id))
         return connection_id
 
     async def refresh_stale_models(self) -> None:
         """Refresh each configured provider once; ordinary reads remain offline."""
         try:
-            settings = load_settings()
             cache = self._read_cache()
             for definition in self._connections().values():
-                if not refreshable_models_api(_effective_api(settings, definition)):
+                if not refreshable_models_api(definition.api):
                     continue
-                if self._resolve_credential(settings, definition) is None:
+                if self._resolve_credential(definition) is None:
                     continue
                 entry = cache.get(definition.id)
-                if isinstance(entry, dict) and entry.get("base_url") == self._endpoint(settings, definition):
+                if isinstance(entry, dict) and entry.get("base_url") == definition.default_base_url:
                     refreshed_at = entry.get("refreshed_at")
                     if (
-                        self._cached_models(entry, settings, definition)
+                        self._cached_models(entry, definition)
                         and type(refreshed_at) in (int, float)
                         and math.isfinite(refreshed_at)
                         and 0 <= time.time() - refreshed_at < MODEL_CACHE_TTL
                     ):
                         continue
-                await self._fetch_models(settings, definition)
+                await self._fetch_models(definition)
         except Exception as exc:
             logger.debug("Background model refresh failed (%s)", type(exc).__name__)
 
@@ -181,76 +206,105 @@ class ProviderServiceImpl:
 
     async def create_chat_client(self, settings: AppSettings, selection: ModelSelection):
         definition = self._provider(selection.provider_id)
-        credential = self._resolve_credential(settings, definition)
+        credential = self._resolve_credential(definition)
         if credential is None:
+            hint = f" or set {definition.environment_key}" if definition.environment_key else ""
             raise ProviderError(
-                f"{definition.name} is not configured. Run /login or set {definition.environment_key}.",
+                f"{definition.name} is not configured. Run /login{hint}.",
                 status="rejected", code="provider_not_configured",
             )
-        endpoint = self._endpoint(settings, definition)
+        endpoint = definition.default_base_url
         key = self._api_key(definition, credential)
-        efforts = next((model.reasoning_efforts for model in definition.fallback_models if model.id == selection.model_id), ())
+        known_model = next((model for model in definition.fallback_models if model.id == selection.model_id), None)
+        api = known_model.api if known_model is not None else definition.api
+        efforts = known_model.reasoning_efforts if known_model is not None else ()
         # LongCat documents a thinking toggle, not OpenAI reasoning_effort.
         # A saved effort from a previous model must not become an unsupported field.
         reasoning_effort = "" if definition.id == "longcat" else selection.reasoning_effort
-        if definition.api == "openai-chat":
+        if api == "openai-chat":
             from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
 
             return OpenAIChatCompletionsClient(
                 build_async_client(key, endpoint, max_retries=14), selection.model_id, reasoning_effort,
                 reasoning_efforts=efforts,
             )
-        if definition.api == "openai-responses":
+        if api == "openai-responses":
             from agent.infrastructure.llm.openai_responses import OpenAIResponsesClient
 
             return OpenAIResponsesClient(
                 build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort,
                 reasoning_efforts=efforts, subscription=credential.type == "oauth",
             )
-        if definition.api == "anthropic-messages":
+        if api == "anthropic-messages":
             from agent.infrastructure.llm.anthropic_messages import AnthropicMessagesClient
 
             return AnthropicMessagesClient(api_key=credential.key, model=selection.model_id, base_url=endpoint)
-        if definition.api == "google-generative-ai":
+        if api == "google-generative-ai":
             from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
 
             return GoogleGenerativeAIClient(api_key=credential.key, model=selection.model_id, base_url=endpoint)
-        raise ProviderError(f"Unsupported provider API: {definition.api}", status="rejected", code="unsupported_api")
+        raise ProviderError(f"Unsupported provider API: {api}", status="rejected", code="unsupported_api")
 
     @staticmethod
     def unavailable_client(selection: ModelSelection, error: ProviderError):
         return _UnavailableChatClient(selection.model_id, error)
 
-    def _catalog(self, settings: AppSettings) -> list[ModelDefinition]:
+    def _catalog(
+        self,
+        settings: AppSettings,
+        connections: dict[str, ProviderDefinition],
+        user_models: dict[str, dict[str, UserModelConfig]],
+    ) -> list[ModelDefinition]:
         cache = self._read_cache()
         result: list[ModelDefinition] = []
-        for definition in self._connections().values():
-            if self._credential_source(settings, definition) == "none":
+        for definition in connections.values():
+            if self._credential_source(definition) == "none":
                 continue
             entry = cache.get(definition.id)
-            items = self._cached_models(entry, settings, definition)
-            models = [self._resolve_model(settings, definition, _item_id(item), entry, cached=item) for item in items]
+            provider_user_models = user_models.get(definition.id, {})
+            items = self._cached_models(entry, definition)
+            models = [self._resolve_model(definition, provider_user_models, _item_id(item), entry, cached=item) for item in items]
             if not models:
-                models = [self._resolve_model(settings, definition, model.id, entry) for model in definition.fallback_models]
+                models = [self._resolve_model(definition, provider_user_models, model.id, entry) for model in definition.fallback_models]
+            else:
+                listed_ids = {model.id for model in models}
+                for model_id in provider_user_models:
+                    if model_id not in listed_ids:
+                        models.append(self._resolve_model(definition, provider_user_models, model_id, entry))
             result.extend(models)
         current = ModelSelection(settings.provider, settings.model)
-        definition = self.providers.get(current.provider_id)
+        definition = connections.get(current.provider_id)
         # The current selection is kept listed only while its connection can run;
         # a model whose provider was logged out is not a choice (opencode hides
         # providers without credentials the same way).
-        if definition is not None and self._credential_source(settings, definition) != "none" and not any(
+        if definition is not None and self._credential_source(definition) != "none" and not any(
             model.provider_id == current.provider_id and model.id == current.model_id for model in result
         ):
-            result.append(self._resolve_model(settings, definition, current.model_id, cache.get(definition.id)))
+            result.append(
+                self._resolve_model(
+                    definition,
+                    user_models.get(definition.id, {}),
+                    current.model_id,
+                    cache.get(definition.id),
+                )
+            )
         return result
 
-    def _resolve_model(self, settings, definition, model_id: str, entry, *, cached=None) -> ModelDefinition:
-        base = _selection_model(settings, definition, ModelSelection(definition.id, model_id))
+    def _resolve_model(
+        self,
+        definition: ProviderDefinition,
+        user_models: dict[str, UserModelConfig],
+        model_id: str,
+        entry,
+        *,
+        cached=None,
+    ) -> ModelDefinition:
+        base = _selection_model(definition, ModelSelection(definition.id, model_id))
         if cached is None:
-            cached = next((item for item in self._cached_models(entry, settings, definition) if _item_id(item) == model_id), {})
+            cached = next((item for item in self._cached_models(entry, definition) if _item_id(item) == model_id), {})
         capability = None
         context_window = None
-        endpoint = self._endpoint(settings, definition)
+        endpoint = definition.default_base_url
         if isinstance(entry, dict) and entry.get("base_url") == endpoint:
             value = cached.get("image_input") if isinstance(cached, dict) else None
             capability = value if type(value) is bool else None
@@ -259,9 +313,10 @@ class ProviderServiceImpl:
             catalog_endpoint = endpoint.rstrip("/")
             if catalog_endpoint == "https://api.deepseek.com":
                 catalog_endpoint += "/v1"
-            candidates = self.providers.values() if not definition.fallback_models else (definition,)
+            builtin = self.providers.get(definition.id)
+            candidates = (builtin,) if builtin is not None and builtin.fallback_models else self.providers.values()
             for candidate in candidates:
-                if catalog_endpoint and catalog_endpoint == candidate.default_base_url.rstrip("/"):
+                if candidate is not None and catalog_endpoint and catalog_endpoint == candidate.default_base_url.rstrip("/"):
                     known = next((model for model in candidate.fallback_models if model.id == model_id), None)
                     if known is not None:
                         if capability is None:
@@ -269,19 +324,24 @@ class ProviderServiceImpl:
                         if context_window is None:
                             context_window = known.context_window
                     break
-        context_window = settings.model_context_windows.get(definition.id, {}).get(model_id, context_window)
+        user_cfg = user_models.get(model_id)
+        if user_cfg is not None:
+            if user_cfg.image_input is not None:
+                capability = user_cfg.image_input
+            if user_cfg.context_window is not None:
+                context_window = user_cfg.context_window
         return replace(base, image_input=capability, context_window=context_window)
 
-    async def _fetch_models(self, settings: AppSettings, definition) -> bool:
-        if not refreshable_models_api(_effective_api(settings, definition)):
+    async def _fetch_models(self, definition) -> bool:
+        if not refreshable_models_api(definition.api):
             return True
-        credential = self._resolve_credential(settings, definition)
+        credential = self._resolve_credential(definition)
         if credential is None:
             return False
 
         client = None
         try:
-            endpoint = self._endpoint(settings, definition)
+            endpoint = definition.default_base_url
             client = build_async_client(self._api_key(definition, credential), endpoint, max_retries=0)
             async with asyncio.timeout(MODEL_LIST_TIMEOUT):
                 response = await client.models.list(timeout=MODEL_LIST_TIMEOUT)
@@ -301,7 +361,7 @@ class ProviderServiceImpl:
                 return False
             cache = self._read_cache()
             previous = cache.get(definition.id)
-            old = {_item_id(item): item for item in self._cached_models(previous, settings, definition)
+            old = {_item_id(item): item for item in self._cached_models(previous, definition)
                    if isinstance(item, dict)} if isinstance(previous, dict) else {}
             for model, raw in zip(models, data):
                 capability = _remote_image_input(raw, definition.id)
@@ -329,10 +389,10 @@ class ProviderServiceImpl:
                 except Exception as exc:
                     logger.debug("Model client cleanup failed (%s)", type(exc).__name__)
 
-    def _cached_models(self, entry: Any, settings: AppSettings, definition) -> list:
+    def _cached_models(self, entry: Any, definition) -> list:
         # Legacy lists have no known endpoint or success time; read them until refreshed.
         if isinstance(entry, dict):
-            if entry.get("base_url") != self._endpoint(settings, definition):
+            if entry.get("base_url") != definition.default_base_url:
                 return []
             entry = entry.get("models")
         return [item for item in entry if _item_id(item)] if isinstance(entry, list) else []
@@ -355,11 +415,18 @@ class ProviderServiceImpl:
 
         return access
 
+    def _loaded_providers(self) -> tuple[dict[str, ProviderDefinition], dict[str, dict[str, UserModelConfig]]]:
+        return load_providers(self.providers_path, self.providers)
+
     def _connections(self) -> dict[str, ProviderDefinition]:
-        return self.providers | {item.id: item for item in self.credentials.connections() if item.id not in self.providers}
+        return self._loaded_providers()[0]
 
     def _provider(self, provider_id: str) -> ProviderDefinition:
-        definition = self._connections().get(provider_id)
+        return self._provider_from(self._connections(), provider_id)
+
+    @staticmethod
+    def _provider_from(connections: dict[str, ProviderDefinition], provider_id: str) -> ProviderDefinition:
+        definition = connections.get(provider_id)
         if definition is None:
             raise ProviderError(
                 f"Connection {provider_id or '(none)'} is not configured. Run /login, or choose another model with /model.",
@@ -367,35 +434,19 @@ class ProviderServiceImpl:
             )
         return definition
 
-    def _credential_source(self, settings: AppSettings | None, definition: ProviderDefinition) -> str:
-        if settings is not None and settings.provider == definition.id and settings.api_key:
-            return "settings"
+    def _credential_source(self, definition: ProviderDefinition) -> str:
         if self.credentials.get(definition.id) is not None:
             return "stored"
         env_name = definition.environment_key
         return "environment" if env_name and os.getenv(env_name, "").strip() else "none"
 
-    def _resolve_credential(self, settings: AppSettings, definition: ProviderDefinition) -> Credential | None:
-        provider_id = definition.id
-        if settings.provider == provider_id and settings.api_key:
-            value = settings.api_key
-            if value.startswith("$"):
-                value = os.getenv(value[1:], "")
-            if value:
-                return Credential(type="api_key", key=value)
-        stored = self.credentials.get(provider_id)
+    def _resolve_credential(self, definition: ProviderDefinition) -> Credential | None:
+        stored = self.credentials.get(definition.id)
         if stored is not None:
             return stored
         env_name = definition.environment_key
         value = os.getenv(env_name, "").strip() if env_name else ""
         return Credential(type="api_key", key=value) if value else None
-
-    @staticmethod
-    def _endpoint(settings: AppSettings, definition) -> str:
-        configured = str(settings.base_url or "").strip()
-        if settings.provider == definition.id and configured:
-            return configured
-        return definition.default_base_url
 
     def _read_cache(self) -> dict[str, Any]:
         if not self.cache_path.exists():
@@ -436,16 +487,11 @@ class _UnavailableChatClient:
         return None
 
 
-def _effective_api(settings: AppSettings, definition) -> str:
-    return settings.api if definition.id == "openai-compatible" else definition.api
-
-
-def _selection_model(settings: AppSettings, definition, selection: ModelSelection) -> ModelDefinition:
+def _selection_model(definition, selection: ModelSelection) -> ModelDefinition:
     for model in definition.fallback_models:
         if model.id == selection.model_id:
             return model
-    api = _effective_api(settings, definition)
-    return ModelDefinition(definition.id, selection.model_id, api, default_reasoning_efforts(api))
+    return ModelDefinition(definition.id, selection.model_id, definition.api, default_reasoning_efforts(definition.api))
 
 
 def _item_id(item: Any) -> str:

@@ -135,7 +135,9 @@ async function cli(t, { handoff, columns = 100, rows = 26, tty = true, baseUrl =
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-lifecycle-"));
   const workspace = path.join(home, "workspace");
   await mkdir(workspace, { recursive: true });
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture-model", apiKey: "fixture", baseUrl }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture-model" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl } } }));
   const script = `
     if (${tty}) {
       Object.defineProperty(process.stdin, 'isTTY', { value: true });

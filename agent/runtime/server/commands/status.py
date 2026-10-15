@@ -44,7 +44,7 @@ SOURCE_LABELS = {
     "main_repository": "main repository default",
     "settings": "settings.json",
 }
-KEY_LABELS = {"settings": "settings.json", "stored": "stored login", "environment": "environment variable", "none": "not set · /login"}
+KEY_LABELS = {"stored": "stored login", "environment": "environment variable", "none": "not set · /login"}
 
 
 async def build_status_display(context: SlashCommandContext) -> dict:

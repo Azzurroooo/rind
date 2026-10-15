@@ -661,7 +661,7 @@ export function modelMenuText(items, selectedIndex = 0) {
     const suffix = item.current ? dim("current") : "";
     lines.push(`    ${marker} ${padRight(modelId, 34)} ${suffix}`.trimEnd());
   }
-  lines.push(dim("    ↑↓ select · enter use · esc cancel"));
+  lines.push(dim("    ↑↓ select · enter use · f folder default · g global default · esc cancel"));
   return `${lines.join("\n")}\n`;
 }
 

@@ -82,7 +82,7 @@ export const BOARD_PAGES = [
 export const PROVIDERS = [
   "zai · Z.ai · not configured",
   "openai · OpenAI · not configured",
-  "+ Add a named endpoint · OpenAI-compatible URL and key",
+  "+ Add a custom provider · API protocol, URL, and key",
 ];
 
 export const SKILL_SOURCES = [

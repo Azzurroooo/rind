@@ -46,11 +46,11 @@ def test_execution_reads_configuration_once_and_refreshes_between_turns(tmp_path
             await worker.release_execution(info["session_id"])
             path = tmp_path / "home" / "settings.json"
             path.parent.mkdir(exist_ok=True)
-            path.write_text(json.dumps({"baseUrl": "https://changed.example/v1"}), encoding="utf-8")
+            path.write_text(json.dumps({"model": "changed-model"}), encoding="utf-8")
             await worker.start_execution(info["session_id"])
             assert len(reads) == 2
-            assert configurations[0].base_url != configurations[1].base_url
-            assert configurations[1].base_url == "https://changed.example/v1"
+            assert configurations[0].model != configurations[1].model
+            assert configurations[1].model == "changed-model"
         finally:
             await worker.close()
 
@@ -380,8 +380,6 @@ def test_replay_does_not_create_active_execution():
                 settings_path=root / "settings.json",
                 settings_exists=True,
                 model="test-model",
-                api_key="test-key",
-                base_url="https://example.com/v1",
                 reasoning_effort="",
             )
             worker = RuntimeWorker(
@@ -423,8 +421,6 @@ def test_worker_replay_includes_active_live_turn_without_creating_execution():
                 settings_path=root / "settings.json",
                 settings_exists=True,
                 model="test-model",
-                api_key="test-key",
-                base_url="https://example.com/v1",
                 reasoning_effort="",
             )
             worker = RuntimeWorker(

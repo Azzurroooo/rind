@@ -162,7 +162,7 @@ def test_a_token_is_refreshed_only_when_it_is_about_to_expire(token_endpoint):
 
 
 def _settings(tmp_path: Path) -> AppSettings:
-    return AppSettings(tmp_path / "settings.json", False, "gpt-5.5", "", "", "", provider="openai")
+    return AppSettings(tmp_path / "settings.json", False, "gpt-5.5", "", provider="openai")
 
 
 @pytest.mark.asyncio

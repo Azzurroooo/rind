@@ -431,11 +431,13 @@ export function createCliInputActions({
 
   function handleModelInput(session, key) {
     const modified = key.ctrl || key.alt || key.shift;
-    if (!modified && (key.name === "enter" || key.name === "return")) {
+    const rawKey = String(key.name || key.text || "").toLowerCase();
+    if (!key.ctrl && !key.alt && (key.name === "enter" || key.name === "return" || rawKey === "f" || rawKey === "g")) {
       const item = session.modelState.selectedModel();
       const model = item?.modelId || "";
+      const scope = rawKey === "f" ? "folder" : rawKey === "g" ? "global" : "session";
       const echo = model ? (session.inputText === "/effort" ? `/effort ${model}` : `/model set ${model}`) : "";
-      completeTtyInput(session, item || "", Boolean(model), "", echo);
+      completeTtyInput(session, item ? { ...item, scope } : "", Boolean(model), "", echo);
       return;
     }
     if (!modified && key.name === "escape") {
@@ -558,7 +560,16 @@ export function createCliInputActions({
   function askEffortMenu(currentEffort, levels = REASONING_EFFORTS.slice()) {
     return new Promise((resolve) => {
       const modelState = createModelMenuState(levels.slice(), currentEffort);
-      const session = { mode: "model", inputText: "/effort", modelState, resolve: (item) => resolve(item?.modelId || String(item || "")) };
+      const session = {
+        mode: "model",
+        inputText: "/effort",
+        modelState,
+        resolve: (item) => resolve(
+          item?.scope && item.scope !== "session"
+            ? { effort: item.modelId, scope: item.scope }
+            : (item?.modelId || String(item || "")),
+        ),
+      };
       state.input.session = session;
       state.input.active = true;
       cancelActiveInput = () => completeTtyInput(session, "", false);

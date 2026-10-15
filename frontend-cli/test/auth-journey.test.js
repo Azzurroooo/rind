@@ -105,8 +105,13 @@ async function makeWorkspace(parent, baseUrl) {
   await mkdir(workspace, { recursive: true });
   await mkdir(path.join(parent, "home"), { recursive: true });
   await writeFile(
+    path.join(parent, "home", "providers.json"),
+    JSON.stringify({ providers: { "custom-gw": { name: "Custom Gateway", api: "openai-chat", baseUrl } } }),
+    "utf8",
+  );
+  await writeFile(
     path.join(parent, "home", "settings.json"),
-    JSON.stringify({ provider: "openai-compatible", baseUrl, model: "fake-model-a" }),
+    JSON.stringify({ provider: "custom-gw", model: "fake-model-a" }),
     "utf8",
   );
   return workspace;
@@ -139,10 +144,10 @@ test("interactive CLI journey: empty startup, login, send, chat, logout", async 
     const providersAt = await cli.waitFor("Provider [openai]", 45000, canceledAt);
     cli.send("");
     await cli.waitFor("Login canceled.", 45000, providersAt);
-    cli.send("/login openai-compatible");
-    await cli.waitFor("OpenAI compatible (chat completions) API key");
+    cli.send("/login custom-gw");
+    await cli.waitFor("Custom Gateway API key");
     cli.send("e2e-cli-secret");
-    await cli.waitFor("Logged in to openai-compatible");
+    await cli.waitFor("Logged in to custom-gw");
     await assert.rejects(stat(path.join(rindHome, "sessions")), { code: "ENOENT" });
 
     // The first message, typed in the window, creates and saves the conversation.
@@ -180,7 +185,7 @@ test("interactive CLI journey: empty startup, login, send, chat, logout", async 
     for (let attempt = 0; attempt < 12 && loggedOutAt < 0; attempt += 1) {
       cli.send("/logout");
       try {
-        loggedOutAt = await cli.waitFor("Logged out of openai-compatible", 4000, replyAt);
+        loggedOutAt = await cli.waitFor("Logged out of custom-gw", 4000, replyAt);
       } catch {
         // line dropped while the prompt loop was busy; retry
       }
@@ -209,8 +214,18 @@ test("one-shot run works against a configured endpoint", async () => {
   const workspace = path.join(parent, "workspace");
   await mkdir(workspace, { recursive: true });
   await writeFile(
+    path.join(rindHome, "providers.json"),
+    JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: `http://127.0.0.1:${fixture.port}/v1` } } }),
+    "utf8",
+  );
+  await writeFile(
+    path.join(rindHome, "auth.json"),
+    JSON.stringify({ "custom-gw": { type: "api_key", key: "one-shot-key" } }),
+    "utf8",
+  );
+  await writeFile(
     path.join(rindHome, "settings.json"),
-    JSON.stringify({ provider: "openai-compatible", baseUrl: `http://127.0.0.1:${fixture.port}/v1`, apiKey: "one-shot-key", model: "fake-model-a" }),
+    JSON.stringify({ provider: "custom-gw", model: "fake-model-a" }),
     "utf8",
   );
 
@@ -249,9 +264,8 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
   const workspace = await makeWorkspace(parent, `http://127.0.0.1:${fixture.port}/v1`);
   // A provider-specific environment key would also enable that remote provider's
   // startup catalog refresh. Scope this fake credential to the local endpoint.
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({
-    provider: "openai-compatible", baseUrl: `http://127.0.0.1:${fixture.port}/v1`,
-    model: "fake-model-a", apiKey: "matrix-key",
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({
+    "custom-gw": { type: "api_key", key: "matrix-key" },
   }));
   const env = { ...process.env, RIND_HOME: home, NO_COLOR: "1" };
   const clients = [];
@@ -386,7 +400,7 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
       await mkdir(base(id));
       await writeFile(path.join(base(id), "meta.json"), JSON.stringify({
         schema_version: "2.0", session_id: id, workspace_root: storedWorkspace,
-        provider: "openai-compatible", model: "fake-model-a", message_count: 1, tool_call_count: 0,
+        provider: "custom-gw", model: "fake-model-a", message_count: 1, tool_call_count: 0,
       }));
       await writeFile(path.join(base(id), "messages.jsonl"), JSON.stringify({ role: "system", content: "legacy system" }) + "\n");
       await writeFile(path.join(base(id), "tool_calls.jsonl"), "");

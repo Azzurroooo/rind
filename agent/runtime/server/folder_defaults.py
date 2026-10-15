@@ -13,7 +13,7 @@ from typing import Any
 
 from agent.domain.models import ModelSelection
 from agent.infrastructure.paths import validate_workspace_root
-from agent.infrastructure.settings import normalize_reasoning_effort
+from agent.infrastructure.settings import load_settings, normalize_reasoning_effort, save_settings
 from agent.infrastructure.workspace_defaults import FolderSelection
 
 GROUPS = ("model", "reasoning_effort")
@@ -61,27 +61,51 @@ def _selection(folder: FolderSelection) -> dict[str, str]:
 
 async def set_defaults(worker, params: dict[str, Any]) -> dict[str, Any]:
     root = validate_workspace_root(str(params.get("workspace_root") or worker.workspace_root))
+    scope = str(params.get("scope") or "folder").strip()
+    if scope not in ("folder", "global"):
+        raise ValueError("scope must be folder or global.")
     provider = str(params.get("provider_id") or "").strip()
     model = str(params.get("model_id") or "").strip()
     effort = normalize_reasoning_effort(params.get("reasoning_effort"))
     if bool(provider) != bool(model):
-        raise ValueError("A folder default model needs both provider_id and model_id.")
+        raise ValueError(f"A {scope} default model needs both provider_id and model_id.")
     if not model and not effort:
         raise ValueError("Set a model (provider_id and model_id), a reasoning_effort, or both.")
     models = (await worker.list_models())["models"]
-    chosen = (provider, model) if model else _resolved_model(await describe(worker, root))
+    if model:
+        chosen = (provider, model)
+    elif scope == "global":
+        current = await asyncio.to_thread(load_settings)
+        chosen = (current.provider, current.model)
+    else:
+        chosen = _resolved_model(await describe(worker, root))
     listed = next((item for item in models if (item["provider_id"], item["id"]) == chosen), None)
     if model and listed is None:
         raise ValueError(f"{provider} / {model} is not available. Log in to {provider} with /login, or choose a listed model.")
     supported = listed.get("reasoning_efforts") if listed else None
     if effort and supported and effort not in supported:
         raise ValueError(f"{chosen[1]} supports reasoning effort {', '.join(supported)}, not {effort}.")
+    if scope == "global":
+        saved = await asyncio.to_thread(
+            save_settings,
+            provider=provider or None,
+            model=model or None,
+            reasoning_effort=effort or None,
+        )
+        return (await describe(worker, root)) | {
+            "scope": "global",
+            "settings": {
+                "provider": saved.provider,
+                "model": saved.model,
+                "reasoning_effort": saved.reasoning_effort,
+            },
+        }
     defaults = worker.repository.workspace_defaults
     if model:
         await asyncio.to_thread(defaults.set_model, root, provider, model)
     if effort:
         await asyncio.to_thread(defaults.set_reasoning_effort, root, effort)
-    return await describe(worker, root)
+    return (await describe(worker, root)) | {"scope": "folder"}
 
 
 async def unset_defaults(worker, params: dict[str, Any]) -> dict[str, Any]:

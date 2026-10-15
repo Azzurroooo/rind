@@ -36,8 +36,6 @@ async def test_build_dependencies_does_not_create_project_sessions(monkeypatch, 
         settings_path=rind_home / "settings.json",
         settings_exists=True,
         model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
         reasoning_effort="",
         user_agent="test-agent",
     )

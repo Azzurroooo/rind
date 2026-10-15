@@ -113,7 +113,9 @@ test("rind run shares the one Runtime and reuses its worker", { timeout: 180000 
   const workspace = path.join(home, "workspace");
   await mkdir(workspace, { recursive: true });
   const fixture = await fixtureProvider();
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture", apiKey: "fixture", baseUrl: fixture.url }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: fixture.url } } }));
   t.after(async () => { await stopServices(home); await removeRindHome(home); await new Promise(resolve => fixture.provider.close(resolve)); });
 
   const first = await runCli(home, workspace, "run", "--prompt", "hello", "--dir", workspace);

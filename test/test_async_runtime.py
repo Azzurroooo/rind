@@ -1481,7 +1481,7 @@ async def test_goal_schema_and_policy_follow_persisted_status(tmp_path, monkeypa
 
     container = build_agent_container(
         chat_client=SimpleNamespace(stream=stream), enable_goal=True,
-        settings=AppSettings(tmp_path / "settings.json", False, "fixture", "local", "http://localhost/v1", ""),
+        settings=AppSettings(tmp_path / "settings.json", False, "fixture", ""),
         workspace_root=str(tmp_path),
     )
     session = container.session_store

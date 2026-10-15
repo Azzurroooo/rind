@@ -160,3 +160,34 @@ async def test_many_folders_resolve_at_once_and_a_change_is_announced(worker, tm
         assert bad["error"]["type"] == "ValueError"
     finally:
         await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_setting_global_default_updates_settings_json(worker, tmp_path):
+    request, _, _ = _server(worker)
+    try:
+        await request("initialize")
+        result = await request(
+            "rind/folder_defaults/set",
+            workspace_root=str(tmp_path),
+            scope="global",
+            provider_id="deepseek",
+            model_id="deepseek-v4-pro",
+            reasoning_effort="high",
+        )
+        assert result["scope"] == "global"
+        assert result["settings"] == {
+            "provider": "deepseek",
+            "model": "deepseek-v4-pro",
+            "reasoning_effort": "high",
+        }
+        assert result["resolved"] == {
+            "provider": "deepseek",
+            "model": "deepseek-v4-pro",
+            "reasoning_effort": "high",
+            "model_source": "settings",
+            "effort_source": "settings",
+        }
+    finally:
+        await worker.close()
+

@@ -431,8 +431,6 @@ async def test_status_does_not_leak_api_key(monkeypatch) -> None:
         settings_path=Path(r"C:\Users\admin\.rind\settings.json"),
         settings_exists=True,
         model="test-model",
-        api_key="secret-value",
-        base_url="https://example.com/v1",
         reasoning_effort="xhigh",
     )
     monkeypatch.setattr("agent.runtime.server.commands.status.load_settings", lambda: settings)
@@ -451,7 +449,7 @@ async def test_model_set_updates_session_selection_without_changing_settings(tmp
     rind_home.mkdir()
     path = rind_home / "settings.json"
     path.write_text(
-        json.dumps({"model": "model_a", "apiKey": "secret-value"}),
+        json.dumps({"provider": "openai", "model": "model_a"}),
         encoding="utf-8",
     )
     monkeypatch.setenv("RIND_HOME", str(rind_home))
@@ -473,9 +471,7 @@ async def test_model_set_updates_session_selection_without_changing_settings(tmp
     assert "default model: model_a (unchanged)" in result.text
     assert "applies from the next turn; a turn that is running keeps its model" in result.text
     assert data["model"] == "model_a"
-    assert data["apiKey"] == "secret-value"
     assert (session.provider, session.model) == ("openai", "model_b")
-    assert "secret-value" not in result.text
 
 
 @pytest.mark.asyncio

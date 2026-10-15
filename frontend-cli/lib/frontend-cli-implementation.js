@@ -62,8 +62,8 @@ import {
   startupText,
 } from "./rendering.js";
 
-// The /login choice that adds a named OpenAI-compatible endpoint with its own key.
-const ADD_CONNECTION = "+ Add a named endpoint · OpenAI-compatible URL and key";
+// The /login choice that adds a custom provider in providers.json with its own key.
+const ADD_CONNECTION = "+ Add a custom provider · API protocol, URL, and key";
 // The ways /login signs in, in the order it offers them.
 const LOGIN_METHODS = { oauth: "Sign in with an account", api_key: "Sign in with an API key" };
 const LOGIN_CANCELED = "Login canceled.";

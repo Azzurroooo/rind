@@ -158,9 +158,8 @@ def model_server(worker_journey):
     """A journey-private model server; the user settings point the worker at it."""
     server = FakeOpenAIServer()
     server.start()
-    settings_path = worker_journey.home / "settings.json"
-    settings_path.write_text(
-        json.dumps({"model": "fake-model", "apiKey": "test-key", "baseUrl": server.base_url}),
+    (worker_journey.home / "providers.json").write_text(
+        json.dumps({"providers": {"openai": {"api": "openai-chat", "baseUrl": server.base_url}}}),
         encoding="utf-8",
     )
     worker_journey.server = server
@@ -182,7 +181,15 @@ def worker_journey(tmp_path_factory):
     home = root / "home"
     (home / ".rind").mkdir(parents=True)
     (home / "settings.json").write_text(
-        json.dumps({"model": "fake-model", "apiKey": "test-key", "baseUrl": "http://127.0.0.1:9/v1"}),
+        json.dumps({"provider": "openai", "model": "fake-model"}),
+        encoding="utf-8",
+    )
+    (home / "auth.json").write_text(
+        json.dumps({"openai": {"type": "api_key", "key": "test-key"}}),
+        encoding="utf-8",
+    )
+    (home / "providers.json").write_text(
+        json.dumps({"providers": {"openai": {"api": "openai-chat", "baseUrl": "http://127.0.0.1:9/v1"}}}),
         encoding="utf-8",
     )
     port = _free_port()

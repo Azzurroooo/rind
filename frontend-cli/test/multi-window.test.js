@@ -63,7 +63,9 @@ test("answering or skipping a question in one window updates another window and 
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-two-windows-"));
   const workspace = path.join(home, "work"); await mkdir(workspace);
   const model = await questionModel();
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fake", apiKey: "test", baseUrl: "http://127.0.0.1:" + model.address().port + "/v1" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fake" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "test" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + model.address().port + "/v1" } } }));
   // One ordered teardown: windows first, then the model (its connections are kept
   // alive by the Runtime), then the home with its Runtime.
   const windows = [];

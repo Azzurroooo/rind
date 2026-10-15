@@ -17,7 +17,9 @@ test("a window covered by Agents stops making its conversation Open", { timeout:
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-visible-"));
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
   const folder = path.join(home, "notes"); await mkdir(folder);
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture", apiKey: "fixture", baseUrl: "http://127.0.0.1:1/v1" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:1/v1" } } }));
   const server = await startServer({ home, repoRoot });
   const window = createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
   const other = createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
@@ -115,7 +117,9 @@ test("a window before its first message is listed nowhere; the message creates i
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-first-message-"));
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
   const folder = path.join(home, "notes"); await mkdir(folder);
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture", apiKey: "fixture", baseUrl: "http://127.0.0.1:1/v1" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:1/v1" } } }));
   const open = () => createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
   const window = open(), probe = open();
   t.after(async () => { await window.shutdown(); await probe.shutdown(); await removeRindHome(home); });
@@ -161,7 +165,9 @@ test("a conversation renamed anywhere is shown by its name everywhere", { timeou
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-rename-"));
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
   const folder = path.join(home, "notes"); await mkdir(folder);
-  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture", apiKey: "fixture", baseUrl: "http://127.0.0.1:1/v1" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:1/v1" } } }));
   const open = () => createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
   const window = open(), probe = open();
   t.after(async () => { await window.shutdown(); await probe.shutdown(); await removeRindHome(home); });

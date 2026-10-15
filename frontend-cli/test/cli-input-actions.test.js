@@ -314,3 +314,34 @@ test("askEffortMenu resolves the selected effort string and echoes /effort <leve
   assert.deepEqual(echoed, ["/effort high"]);
 });
 
+test("askModelMenu and askEffortMenu resolve scope when f or g is pressed", async () => {
+  const state = createCliState();
+  const actions = createCliInputActions({
+    state,
+    request: async () => ({}),
+    output: { terminalUi: {}, writeUserInput() {}, redraw() {}, writeError() {} },
+    getTurnController: () => ({}),
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    pausePrompt() {},
+    resumePrompt() {},
+    handleSigint() {},
+  });
+  const modelSelected = actions.askModelMenu(
+    [{ provider_id: "zai", id: "glm-4.7" }, { provider_id: "zai", id: "glm-4.6" }],
+    "glm-4.7",
+  );
+  await Promise.resolve();
+  actions.handleTerminalInput("\x1b[B");
+  actions.handleTerminalInput("f");
+  const modelItem = await modelSelected;
+  assert.equal(modelItem.modelId, "glm-4.6");
+  assert.equal(modelItem.scope, "folder");
+
+  const effortSelected = actions.askEffortMenu("low", ["low", "medium", "high"]);
+  await Promise.resolve();
+  actions.handleTerminalInput("\x1b[B");
+  actions.handleTerminalInput("g");
+  assert.deepEqual(await effortSelected, { effort: "medium", scope: "global" });
+});
+

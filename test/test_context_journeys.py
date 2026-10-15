@@ -92,7 +92,15 @@ def context_worker(tmp_path_factory):
     home = root / "home"
     (home / ".rind").mkdir(parents=True)
     (home / "settings.json").write_text(
-        json.dumps({"model": "fake-model", "apiKey": "test-key", "baseUrl": "http://127.0.0.1:9/v1"}),
+        json.dumps({"provider": "openai", "model": "fake-model"}),
+        encoding="utf-8",
+    )
+    (home / "auth.json").write_text(
+        json.dumps({"openai": {"type": "api_key", "key": "test-key"}}),
+        encoding="utf-8",
+    )
+    (home / "providers.json").write_text(
+        json.dumps({"providers": {"openai": {"api": "openai-chat", "baseUrl": "http://127.0.0.1:9/v1"}}}),
         encoding="utf-8",
     )
     env = dict(os.environ)
@@ -124,9 +132,8 @@ def context_worker(tmp_path_factory):
 def model_server(context_worker):
     server = FakeOpenAIServer()
     server.start()
-    settings_path = context_worker.home / "settings.json"
-    settings_path.write_text(
-        json.dumps({"model": "fake-model", "apiKey": "test-key", "baseUrl": server.base_url}),
+    (context_worker.home / "providers.json").write_text(
+        json.dumps({"providers": {"openai": {"api": "openai-chat", "baseUrl": server.base_url}}}),
         encoding="utf-8",
     )
     yield server

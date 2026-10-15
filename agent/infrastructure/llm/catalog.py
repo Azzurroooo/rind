@@ -329,10 +329,6 @@ PROVIDERS: dict[str, ProviderDefinition] = {
             ("LongCat-2.0", (), False, 1000000),
         )),
     ),
-    "openai-compatible": ProviderDefinition(
-        "openai-compatible", "OpenAI compatible (chat completions)", "openai-chat", "", environment_key="OPENAI_API_KEY",
-        fallback_models=(),
-    ),
 }
 
 

@@ -24,6 +24,10 @@ def service(tmp_path, monkeypatch):
     return module.ProviderServiceImpl(CredentialStore(tmp_path / 'auth.json')), settings
 
 
+def _write_providers(instance, data: dict) -> None:
+    instance.providers_path.write_text(json.dumps({"providers": data}), encoding="utf-8")
+
+
 @pytest.mark.parametrize('endpoint,cached,expected', [
     ('https://api.longcat.chat/openai/v1', None, 1048576),
     ('https://api.longcat.chat/openai/v1/', None, 1048576),
@@ -35,10 +39,10 @@ def service(tmp_path, monkeypatch):
 ])
 @pytest.mark.asyncio
 async def test_context_metadata_is_validated_and_endpoint_scoped(service, monkeypatch, endpoint, cached, expected):
+    from agent.domain.models import Credential
     instance, settings = service
-    from dataclasses import replace
-    settings = replace(settings, base_url=endpoint, api_key='test')
-    monkeypatch.setattr(module, 'load_settings', lambda: settings)
+    _write_providers(instance, {'longcat': {'baseUrl': endpoint}})
+    instance.credentials.set('longcat', Credential(type='api_key', key='test'))
     instance._write_cache({'longcat': {'base_url': endpoint, 'models': [
         {'id': settings.model, 'context_window': cached}]}})
     monkeypatch.setattr(module, 'build_async_client', lambda *a, **k: pytest.fail('Offline catalog read used network'))
@@ -49,22 +53,18 @@ async def test_context_metadata_is_validated_and_endpoint_scoped(service, monkey
 
 def test_custom_endpoint_does_not_inherit_legacy_or_other_host_context(service, monkeypatch):
     instance, settings = service
-    from dataclasses import replace
-    settings = replace(settings, base_url='https://proxy.example/v1')
-    monkeypatch.setattr(module, 'load_settings', lambda: settings)
+    _write_providers(instance, {'longcat': {'baseUrl': 'https://proxy.example/v1'}})
     model = {'id': settings.model, 'context_window': 65536}
     for cached in ([model], {'base_url': 'https://other.example/v1', 'models': [model]}):
         instance._write_cache({'longcat': cached})
         assert instance.resolve_selection(ModelSelection('longcat', settings.model)).context_window is None
 
 
-def test_compatible_endpoint_inherits_metadata_without_changing_api(service, monkeypatch):
+def test_custom_provider_pointing_at_official_endpoint_inherits_metadata_without_changing_api(service, monkeypatch):
     instance, settings = service
-    from dataclasses import replace
-    settings = replace(settings, provider='openai-compatible', base_url='https://api.longcat.chat/openai/v1')
-    monkeypatch.setattr(module, 'load_settings', lambda: settings)
-    selected = instance.resolve_selection(ModelSelection('openai-compatible', settings.model))
-    assert selected.provider_id == 'openai-compatible'
+    _write_providers(instance, {'custom-gw': {'api': 'openai-chat', 'baseUrl': 'https://api.longcat.chat/openai/v1'}})
+    selected = instance.resolve_selection(ModelSelection('custom-gw', settings.model))
+    assert selected.provider_id == 'custom-gw'
     assert selected.api == 'openai-chat'
     assert selected.image_input is True
     assert selected.context_window == 1048576
@@ -72,17 +72,21 @@ def test_compatible_endpoint_inherits_metadata_without_changing_api(service, mon
 
 @pytest.mark.asyncio
 async def test_user_context_limits_override_metadata_only_for_the_selected_connection_and_model(service, monkeypatch):
-    from dataclasses import replace
+    from agent.domain.models import Credential
     instance, settings = service
-    settings = replace(settings, api_key="local", model_context_windows={"longcat": {settings.model: 8192}})
-    monkeypatch.setattr(module, "load_settings", lambda: settings)
+    instance.credentials.set("longcat", Credential(type="api_key", key="local"))
+    _write_providers(instance, {
+        "longcat": {"models": {settings.model: {"contextWindow": 8192}}},
+        "custom-gw": {
+            "api": "openai-chat",
+            "baseUrl": "https://custom.example/v1",
+            "models": {settings.model: {"contextWindow": 1000000}},
+        },
+    })
     listed = next(model for model in (await instance.list_models()).models if model.id == settings.model)
     assert listed.context_window == instance.resolve_selection(ModelSelection("longcat", settings.model)).context_window == 8192
     assert instance.resolve_selection(ModelSelection("longcat", "other")).context_window is None
-    compatible = replace(settings, provider="openai-compatible", base_url="https://custom.example/v1",
-                         model_context_windows={"openai-compatible": {settings.model: 1000000}})
-    assert instance.resolve_selection(ModelSelection("openai-compatible", settings.model), settings=compatible).context_window == 1000000
-    assert instance.resolve_selection(ModelSelection("longcat", settings.model), settings=compatible).context_window == 1048576
+    assert instance.resolve_selection(ModelSelection("custom-gw", settings.model)).context_window == 1000000
 
 
 @pytest.mark.parametrize('provider,raw,expected', [
@@ -103,12 +107,14 @@ def test_remote_context_only_uses_verified_schema(provider, raw, expected):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('same_endpoint', [True, False])
 async def test_context_refresh_merges_only_same_endpoint(service, monkeypatch, same_endpoint):
-    instance, settings = service
+    from agent.domain.models import Credential
     from dataclasses import replace
-    settings = replace(settings, provider='openrouter', model='new', api_key='test', base_url='https://openrouter.ai/api/v1')
+    instance, settings = service
+    settings = replace(settings, provider='openrouter', model='new')
     monkeypatch.setattr(module, 'load_settings', lambda: settings)
+    instance.credentials.set('openrouter', Credential(type='api_key', key='test'))
     instance._write_cache({'openrouter': {
-        'base_url': settings.base_url if same_endpoint else 'https://other.example/v1',
+        'base_url': 'https://openrouter.ai/api/v1' if same_endpoint else 'https://other.example/v1',
         'models': [{'id': 'updated', 'context_window': 1}, {'id': 'keep', 'context_window': 2048}, {'id': 'removed'}],
     }})
     client = SimpleNamespace(models=SimpleNamespace(list=AsyncMock(return_value=SimpleNamespace(data=[

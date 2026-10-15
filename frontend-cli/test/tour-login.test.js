@@ -23,7 +23,7 @@ test("named endpoint teaches the real ordered fields with readable text and mask
   const page = findTourPage("login.endpoint");
   const fields = page.steps.filter(step => ["auth-input", "auth-secret"].includes(step.menu?.kind));
   assert.deepEqual(fields.map(step => step.menu.title), ["Connection name",
-    "Base URL (OpenAI-compatible, e.g. https://host/v1)",
+    "Base URL (e.g. https://host/v1)",
     "Model id (empty: use the endpoint model list)", "Demo endpoint API key"]);
   for (const [index, step] of page.steps.entries()) {
     if (!fields.includes(step)) continue;

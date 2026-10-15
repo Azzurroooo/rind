@@ -475,7 +475,7 @@ test("modelMenuText renders provider groups, current model and selection", () =>
       "    · model-a                            current",
       "  deepseek",
       "    › model-b",
-      "    ↑↓ select · enter use · esc cancel",
+      "    ↑↓ select · enter use · f folder default · g global default · esc cancel",
       "",
     ].join("\n"),
   );
@@ -500,7 +500,7 @@ test("modelMenuText keeps the selected model visible", () => {
       "    · model-7",
       "    · model-8",
       "    › model-9",
-      "    ↑↓ select · enter use · esc cancel",
+      "    ↑↓ select · enter use · f folder default · g global default · esc cancel",
       "",
     ].join("\n"),
   );
