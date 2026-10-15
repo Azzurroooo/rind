@@ -592,3 +592,42 @@ def test_deleting_a_session_drops_its_tool_configuration(tmp_path, monkeypatch):
             await worker.close()
 
     asyncio.run(run())
+
+
+def test_app_server_rejects_interactive_tty_stdio(tmp_path, monkeypatch, capsys):
+    from agent.runtime.server.app_server import async_main
+    from agent.runtime.server.stdio import StdioRuntimeServer
+
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: True))
+    code = asyncio.run(async_main(["--stdio", "--cwd", str(tmp_path)], server_class=StdioRuntimeServer))
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "cannot be run interactively in a terminal" in captured.err
+
+
+def test_app_server_worker_lock_blocks_duplicate_worker_for_same_rind_home(tmp_path, monkeypatch, capsys):
+    from agent.runtime.server.app_server import async_main
+    from agent.runtime.server.stdio import StdioRuntimeServer
+    from agent.runtime.server.worker_lock import acquire_worker_lock
+
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("RIND_SHARED_HOST_PID", raising=False)
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: False))
+
+    class _DummyWebServer:
+        worker_mode = True
+        network_mode = True
+
+    lock = acquire_worker_lock()
+    try:
+        stdio_code = asyncio.run(async_main(["--stdio", "--cwd", str(tmp_path)], server_class=StdioRuntimeServer))
+        web_code = asyncio.run(async_main(["--web", "--cwd", str(tmp_path)], server_class=_DummyWebServer))
+    finally:
+        lock.release()
+
+    captured = capsys.readouterr()
+    assert stdio_code == 1
+    assert web_code == 1
+    assert captured.err.count("Another Rind runtime worker is already running") == 2
+

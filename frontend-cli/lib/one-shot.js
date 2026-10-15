@@ -2,7 +2,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
-import { createRuntimeClient } from "./runtime-client.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
 import { createOneShotProgress } from "./one-shot-progress.js";
 import { sendHelp } from "./send.js";
@@ -135,7 +134,7 @@ export async function writeRunLog({ workspace, sessionId, turnId, model, prompt,
   }
 }
 
-export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = process.cwd(), stderr = console.error, stdout = console.log, clientFactory = createRuntimeClient }) {
+export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = process.cwd(), stderr = console.error, stdout = console.log, clientFactory = createSharedRuntimeClient }) {
   const options = parseOneShotArgs(args);
   if (!options) return false;
   const runtimeArgs = ["--no-user-question"];
@@ -156,11 +155,11 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   let client;
   let management;
   try {
-    management = clientFactory === createRuntimeClient
-      ? await prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false, shareRuntime: true })
-      : { args: runtimeArgs };
+    management = clientFactory === createSharedRuntimeClient
+      ? await prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false })
+      : { args: runtimeArgs, shared: true };
     progress.begin();
-    client = observeRuntime((management.shared && clientFactory === createRuntimeClient ? createSharedRuntimeClient : clientFactory)({
+    client = observeRuntime(clientFactory({
       python,
       repoRoot,
       runtimePath,
@@ -225,7 +224,6 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     });
     progress.done(finishedAt - startedAt);
     progress.note(`log ${logPath}`);
-    if (requestCompletion && !management.shared) progress.note("Worker exiting; remaining managed services will be stopped.");
     stdout(finalText);
     return true;
   } catch (error) {

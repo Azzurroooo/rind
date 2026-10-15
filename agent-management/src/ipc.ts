@@ -1,5 +1,5 @@
 import net from "node:net";
-import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile, unlink, link } from "node:fs/promises";
 import type { Principal } from "./model.js";
 import { ManagementError, requireValue } from "./model.js";
@@ -12,7 +12,7 @@ import { managementBuildId } from "./build.js";
 import { activeRun } from "./model.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { connectSharedRuntime, stopSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 import { listenOwned, EndpointOccupiedError } from "../../rind-runtime-client/endpoint.js";
 import { managerInstructions, memberInstructions, supervises, toolsFor } from "./tools.js";
 
@@ -24,8 +24,9 @@ function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
-export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string; onShutdown?: () => void }) {
+export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string; serviceNonce?: string; onShutdown?: () => void }) {
   const startedAt = new Date().toISOString();
+  const recordNonce = options.serviceNonce || randomUUID();
   // Fingerprint the code this process loaded, before anything can rebuild it.
   const build = managementBuildId();
   const paths = managementPaths(options.home);
@@ -323,7 +324,14 @@ export async function startServer(options: { home?: string; python?: string; rep
       await Promise.allSettled(conversations.map(sessionId => host.request("session/cancel", { session_id: sessionId })));
       await host.request("runtime/shutdown").catch(() => {});
     }
+    await stopSharedRuntime({ rindHome: options.home }).catch(() => {});
     await close();
+  }
+  function releaseRecord() {
+    return readFile(paths.record, "utf8").then(value => {
+      if (JSON.parse(value).nonce !== recordNonce) return;
+      return unlink(paths.record).catch(() => {});
+    }, () => {}).catch(() => {});
   }
   let store: Awaited<ReturnType<typeof openStore>>;
   const realManager = (async () => { await privateDirectory(paths.manager); const { canonicalDirectory } = await import("./paths.js"); return canonicalDirectory(paths.manager); })();
@@ -334,11 +342,14 @@ export async function startServer(options: { home?: string; python?: string; rep
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (!userToken) {
       // Published whole: a client starting this service reads the file while it is created.
-      userToken = randomBytes(32).toString("hex");
+      const candidate = randomBytes(32).toString("hex");
       const draft = paths.token + "." + randomBytes(6).toString("hex") + ".tmp";
-      await writeFile(draft, userToken, { mode: 0o600, flag: "wx" });
-      try { await link(draft, paths.token); } finally { await unlink(draft).catch(() => {}); }
+      await writeFile(draft, candidate, { mode: 0o600, flag: "wx" });
+      try { await link(draft, paths.token); userToken = candidate; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; userToken = (await readFile(paths.token, "utf8")).trim(); }
+      finally { await unlink(draft).catch(() => {}); }
     }
+    await writeFile(paths.record, JSON.stringify({ pid: process.pid, nonce: recordNonce, startedAt }), { mode: 0o600 });
     store = await openStore(paths.state);
     const rind = createRindAdapter(options);
     const deliver = async (runtimeSessionId: string, text: string) => {
@@ -350,7 +361,7 @@ export async function startServer(options: { home?: string; python?: string; rep
     await service.recover();
     readyResolve!();
     if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) void executionHost().catch(() => {});
-  } catch (error) { readyReject!(error); for (const socket of sockets) socket.destroy(); server.close(); throw error; }
+  } catch (error) { readyReject!(error); for (const socket of sockets) socket.destroy(); server.close(); await releaseRecord(); throw error; }
   let closed: Promise<void> | undefined;
   function close() {
     return closed ||= (async () => {
@@ -367,6 +378,7 @@ export async function startServer(options: { home?: string; python?: string; rep
         runtime?.close();
         for (const socket of sockets) socket.destroy();
         await new Promise<void>(resolve => server.close(() => resolve()));
+        await releaseRecord();
       }
     })();
   }

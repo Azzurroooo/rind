@@ -1,9 +1,8 @@
 import net from "node:net";
-import { privateDirectory } from "./local-files.js";
+import { privateDirectory, resolveRindHome } from "./local-files.js";
 import path from "node:path";
-import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, open } from "node:fs/promises";
+import { readFile, open, unlink } from "node:fs/promises";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -11,8 +10,8 @@ import { runtimeBuildId } from "./build-id.js";
 import { probeEndpoint } from "./endpoint.js";
 import { acquireProcessLock } from "./process-lock.js";
 
-export function sharedRuntimePaths(home = process.env.RIND_HOME || path.join(os.homedir(), ".rind")) {
-  const directory = path.resolve(home, "runtime");
+export function sharedRuntimePaths(home = process.env.RIND_HOME) {
+  const directory = path.join(resolveRindHome(home), "runtime");
   const endpoint = process.platform === "win32" ? "\\\\.\\pipe\\rind-runtime-" + createHash("sha256").update(directory.toLowerCase()).digest("hex").slice(0, 24) : path.join(directory, "runtime.sock");
   return { directory, endpoint, token: path.join(directory, "token"), record: path.join(directory, "host.json") };
 }
@@ -20,12 +19,12 @@ export function sharedRuntimePaths(home = process.env.RIND_HOME || path.join(os.
 export async function connectSharedRuntime(options = {}) {
   // The detached host changes cwd; resolve caller-relative paths before that.
   options = { ...options,
-    rindHome: path.resolve(options.rindHome || options.home || process.env.RIND_HOME || path.join(os.homedir(), ".rind")),
+    rindHome: resolveRindHome(options.rindHome || options.home),
     repoRoot: options.repoRoot && path.resolve(options.repoRoot),
     runtimePath: options.runtimePath && path.resolve(options.runtimePath),
     python: options.python && /[\\/]/.test(options.python) ? path.resolve(options.python) : options.python,
   };
-  const paths = sharedRuntimePaths(options.rindHome || options.home);
+  const paths = sharedRuntimePaths(options.rindHome);
   const connect = async () => {
     const token = (await readFile(paths.token, "utf8")).trim();
     const socket = net.connect(paths.endpoint);
@@ -96,7 +95,7 @@ export async function connectSharedRuntime(options = {}) {
         // down, or one that stopped answering. Wait for the endpoint to free,
         // then end a host that is provably stuck so a fresh one can start.
         connection.close();
-        if (await waitForFreeEndpoint(paths, 5000)) return null;
+        if (await waitForFreeEndpoint(paths, 5000)) { await endStuckHost(paths); return null; }
         if (await endStuckHost(paths, connect) && await waitForFreeEndpoint(paths, 5000)) return null;
         throw new Error("A Runtime is holding " + paths.endpoint + " without answering, and it would not stop. End it from the task manager, then try again.");
       }
@@ -114,7 +113,7 @@ export async function connectSharedRuntime(options = {}) {
   // Returns a usable connection, or null once the endpoint is free.
   async function takeOverStuckEndpoint() {
     for (let i = 0; i < 30; i++) {
-      if (!(await probeEndpoint(paths.endpoint))) return null;
+      if (!(await probeEndpoint(paths.endpoint))) { await endStuckHost(paths); return null; }
       try { return await connect(); } catch {}
       await delay(100);
     }
@@ -169,6 +168,26 @@ function within(work, ms) {
   return Promise.race([work, new Promise(resolve => { timer = setTimeout(() => resolve(null), ms); })]).finally(() => clearTimeout(timer));
 }
 
+async function waitForExit(pid, ms) {
+  const deadline = Date.now() + ms;
+  while (processAlive(pid)) {
+    if (Date.now() >= deadline) return false;
+    await delay(50);
+  }
+  return true;
+}
+
+async function readCommandLine(pid) {
+  try {
+    if (process.platform === "linux") return (await readFile(`/proc/${pid}/cmdline`, "utf8")).split("\0").join(" ");
+    const args = process.platform === "win32"
+      ? ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`]
+      : ["-p", String(pid), "-o", "command="];
+    const executable = process.platform === "win32" ? "powershell.exe" : "ps";
+    return (await promisify(execFile)(executable, args, { timeout: 3000, windowsHide: true })).stdout;
+  } catch { return ""; }
+}
+
 // True once nothing accepts connections on the endpoint; the deadline keeps a
 // host that never leaves from blocking the caller forever.
 async function waitForFreeEndpoint(paths, ms) {
@@ -182,39 +201,65 @@ async function waitForFreeEndpoint(paths, ms) {
 
 // A live endpoint that does not answer cannot be reached through its own
 // protocol. A pid alone is never proof: it may have been reused. The OS command
-// must identify our entry point and the nonce passed to this particular host.
+// must identify our entry point and the nonce passed to this particular host,
+// and any recorded Python worker child is terminated along with it.
 async function endStuckHost(paths, connect) {
   const raw = await readFile(paths.record, "utf8").catch(() => null);
+  if (!raw) return false;
   let record;
   try { record = JSON.parse(raw); } catch { return false; }
-  const pid = record?.pid;
-  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid || !processAlive(pid)
-      || !/^[0-9a-f-]{36}$/.test(record?.nonce || "")) return false;
-  let command;
-  try {
-    if (process.platform === "linux") command = (await readFile(`/proc/${pid}/cmdline`, "utf8")).split("\0").join(" ");
-    else {
-      const args = process.platform === "win32"
-        ? ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`]
-        : ["-p", String(pid), "-o", "command="];
-      const executable = process.platform === "win32" ? "powershell.exe" : "ps";
-      command = (await promisify(execFile)(executable, args, { timeout: 3000, windowsHide: true })).stdout;
-    }
-  } catch { return false; }
+  const pid = record?.pid, workerPid = record?.workerPid;
+  if (!Number.isInteger(pid) || pid <= 0 || !/^[0-9a-f-]{36}$/.test(record?.nonce || "")) return false;
   const entry = fileURLToPath(new URL("./shared-server.js", import.meta.url));
   const normalize = value => process.platform === "win32" ? value.replaceAll("/", "\\").toLowerCase() : value;
-  if (!normalize(command).includes(normalize(entry)) || !command.includes("--rind-host-nonce=" + record.nonce)) return false;
-  // Identity inspection takes time. A host that recovered meanwhile stays up.
-  let connection;
-  try {
-    connection = await connect();
-    if (await within(connection.request("runtime/info").catch(() => null), 500)) return false;
-  } catch { /* It is still unreachable. */ }
-  finally { connection?.close(); }
+  let hostMatched = false;
+  if (pid !== process.pid && processAlive(pid)) {
+    const command = await readCommandLine(pid);
+    hostMatched = normalize(command).includes(normalize(entry)) && command.includes("--rind-host-nonce=" + record.nonce);
+    // Identity inspection takes time. A host that recovered meanwhile stays up.
+    if (hostMatched && connect) {
+      let connection;
+      try {
+        connection = await connect();
+        if (await within(connection.request("runtime/info").catch(() => null), 500)) return false;
+      } catch { /* It is still unreachable. */ }
+      finally { connection?.close(); }
+    }
+  }
+  const workerMatched = Number.isInteger(workerPid) && workerPid > 0 && workerPid !== process.pid && processAlive(workerPid)
+    && (await readCommandLine(workerPid)).includes("app-server");
+  if (!hostMatched && !workerMatched) return false;
   // A later host may have replaced the record while identity was being read.
   if (await readFile(paths.record, "utf8").catch(() => null) !== raw) return false;
-  try { process.kill(pid, "SIGKILL"); } catch { return false; }
+  if (hostMatched) {
+    try { process.kill(pid, "SIGKILL"); } catch {}
+    await waitForExit(pid, 5000);
+  }
+  if (workerMatched) {
+    if (processAlive(workerPid)) { try { process.kill(workerPid, "SIGKILL"); } catch {} }
+    await waitForExit(workerPid, 5000);
+  }
+  if (await readFile(paths.record, "utf8").catch(() => null) === raw) await unlink(paths.record).catch(() => {});
   return true;
+}
+
+export async function stopSharedRuntime(options = {}) {
+  const paths = sharedRuntimePaths(options.rindHome || options.home);
+  let stopped = false;
+  const connection = await connectSharedRuntime({ ...options, start: false }).catch(() => null);
+  if (connection) {
+    try {
+      if (await within(connection.request("runtime/shutdown").catch(() => null), 3000)) stopped = true;
+    } finally {
+      connection.close();
+    }
+    if (stopped) await waitForFreeEndpoint(paths, 5000);
+  }
+  if (await endStuckHost(paths)) {
+    stopped = true;
+    await waitForFreeEndpoint(paths, 5000);
+  }
+  return stopped;
 }
 
 export function createSharedRuntimeClient(options) {
@@ -223,7 +268,7 @@ export function createSharedRuntimeClient(options) {
   const arg = flag => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : undefined; };
   if (args.includes("--trace-llm")) throw new Error("Shared Runtime tracing is host-wide. Set RIND_TRACE_LLM=1 before starting the shared host instead of --trace-llm.");
   const sessionDir = arg("--session-dir");
-  if (sessionDir && path.resolve(sessionDir) !== path.resolve(options.rindHome || options.home || process.env.RIND_HOME || path.join(os.homedir(), ".rind"), "sessions")) throw new Error("Shared Runtime uses RIND_HOME/sessions; omit --session-dir.");
+  if (sessionDir && resolveRindHome(sessionDir) !== path.join(resolveRindHome(options.rindHome || options.home), "sessions")) throw new Error("Shared Runtime uses RIND_HOME/sessions; omit --session-dir.");
   function start() {
     if (!starting) {
       // A failed attempt must not be remembered: the next ensure may reconnect.

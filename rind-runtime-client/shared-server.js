@@ -1,5 +1,5 @@
 import net from "node:net";
-import { privateDirectory } from "./local-files.js";
+import { privateDirectory, resolveRindHome } from "./local-files.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { createRuntimeClient } from "./runtime-client.js";
@@ -12,7 +12,8 @@ import { createLiveSessions } from "./live-sessions.js";
 const hostEntry = Boolean(process.argv[1]?.endsWith("shared-server.js"));
 
 export async function startSharedServer(options) {
-  const paths = sharedRuntimePaths(options.rindHome);
+  const rindHome = resolveRindHome(options.rindHome);
+  const paths = sharedRuntimePaths(rindHome);
   await privateDirectory(paths.directory);
   let token, recordNonce, initialized, authOwner, stopping = false, closing;
   const startedAt = new Date().toISOString();
@@ -20,7 +21,7 @@ export async function startSharedServer(options) {
   const peers = new Set(), auth = new Map(), prompts = new Set();
   const deleting = new Set(), opening = new Map();
   const live = createLiveSessions({ onChange(sessions) { for (const peer of peers) if (peer.observe) peer.send({ event: { kind: "runtime", type: "sessions_changed", sessions } }); } });
-  const client = createRuntimeClient({ ...options, cwd: paths.directory, cliArgs: [],
+  const client = createRuntimeClient({ ...options, rindHome, cwd: paths.directory, cliArgs: [], env: { RIND_SHARED_HOST_PID: String(process.pid) },
     onMessage(event) {
       // Sign-in progress (the URL to open) is for the window signing in.
       if (event?.method === "rind/auth/update") { authOwner?.send({ event }); return; }
@@ -59,7 +60,8 @@ export async function startSharedServer(options) {
   }
   // A request can finish after its window closed; a closed window shows nothing.
   const viewIfOpen = (peer, id, details) => { if (peers.has(peer)) live.view(peer, id, details); };
-  const initialize = () => initialized ||= (async () => { client.start(); return client.request("initialize"); })();
+  const writeRecord = (workerPid = client.child?.pid) => writeFile(paths.record, JSON.stringify({ pid: process.pid, ...(workerPid ? { workerPid } : {}), nonce: recordNonce, startedAt }), { mode: 0o600 });
+  const initialize = () => initialized ||= (async () => { const child = client.start(); await writeRecord(child?.pid).catch(() => {}); return client.request("initialize"); })();
   let readyResolve, readyReject;
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   ready.catch(() => {});
@@ -152,11 +154,15 @@ export async function startSharedServer(options) {
   }
   try {
     try { token = (await readFile(paths.token, "utf8")).trim(); } catch (error) { if (error.code !== "ENOENT") throw error; }
-    if (!token) { token = randomBytes(32).toString("hex"); await writeFile(paths.token, token, { mode: 0o600, flag: "wx" }); }
+    if (!token) {
+      const candidate = randomBytes(32).toString("hex");
+      try { await writeFile(paths.token, candidate, { mode: 0o600, flag: "wx" }); token = candidate; }
+      catch (error) { if (error.code !== "EEXIST") throw error; token = (await readFile(paths.token, "utf8")).trim(); }
+    }
     // Published once this host owns the endpoint: it names the process that
     // answers here, so a host that stops answering can still be ended.
     recordNonce = options.hostNonce || randomUUID();
-    await writeFile(paths.record, JSON.stringify({ pid: process.pid, nonce: recordNonce, startedAt }), { mode: 0o600 });
+    await writeRecord();
     readyResolve();
   } catch (error) {
     readyReject(error);

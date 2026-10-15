@@ -18,16 +18,20 @@ import { connectClient } from "../../agent-management/dist/client.js";
 import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 
-test("resuming a plain conversation from another folder opens it in the folder it was saved in", async t => {
+test("resuming a plain conversation from another folder opens it in the folder it was saved in and never falls back to a private worker", async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-resume-"));
   t.after(() => rm(home, { recursive: true, force: true }));
   await mkdir(path.join(home, "sessions", "20261006_abc"), { recursive: true });
   await writeFile(path.join(home, "sessions", "20261006_abc", "meta.json"), JSON.stringify({ workspace_root: "/work/notes" }));
-  assert.deepEqual(await plainSession(["--session", "20261006_abc"], true, home), { args: ["--cwd", "/work/notes", "--session", "20261006_abc"], shared: true });
-  assert.deepEqual(await plainSession(["--session", "20261006_abc", "--cwd", "/x"], true, home), { args: ["--session", "20261006_abc", "--cwd", "/x"], shared: true }, "an explicit folder is kept");
-  assert.deepEqual(await plainSession(["--session", "../escape"], true, home), { args: ["--session", "../escape"], shared: true });
-  assert.deepEqual(await plainSession(["--session", "20261006_abc"], false, home), { args: ["--session", "20261006_abc"], shared: false }, "scripts keep a private worker");
-  assert.equal((await plainSession(["--trace-llm"], true, home)).shared, false);
+  assert.deepEqual(await plainSession(["--session", "20261006_abc"], home), { args: ["--cwd", "/work/notes", "--session", "20261006_abc"], shared: true });
+  assert.deepEqual(await plainSession(["--session", "20261006_abc", "--cwd", "/x"], home), { args: ["--session", "20261006_abc", "--cwd", "/x"], shared: true }, "an explicit folder is kept");
+  assert.deepEqual(await plainSession(["--session", "../escape"], home), { args: ["--session", "../escape"], shared: true });
+  assert.deepEqual(await prepareManagement(["--session", "20261006_abc"], { home }, { interactive: false }), { args: ["--cwd", "/work/notes", "--session", "20261006_abc"], shared: true }, "non-TTY sessions also share the single runtime");
+  await assert.rejects(plainSession(["--trace-llm"], home), /RIND_TRACE_LLM=1/);
+  await assert.rejects(prepareManagement(["--trace-llm"], { home }, { interactive: false }), /RIND_TRACE_LLM=1/);
+  await assert.rejects(plainSession(["--session-dir", path.join(home, "other-sessions")], home), /RIND_HOME\/sessions/);
+  await assert.rejects(prepareManagement(["--session-dir", path.join(home, "other-sessions")], { home }, { interactive: false }), /RIND_HOME\/sessions/);
+  assert.deepEqual(await plainSession(["--session-dir", path.join(home, "sessions")], home), { args: ["--session-dir", path.join(home, "sessions")], shared: true });
 });
 
 test("running Rind inside the Manager's folder enters the Manager, not a plain session", { timeout: 90000 }, async t => {

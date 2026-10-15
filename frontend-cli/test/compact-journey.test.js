@@ -7,6 +7,7 @@ import path from "node:path";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { removeRindHome } from "./helpers/rind-home.js";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const cliPath = path.join(repo, "frontend-cli/bin/rind.js");
@@ -113,6 +114,7 @@ test("CLI compact accepts rind send, resumes work and accepts the next turn", {t
     }
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
+    await removeRindHome(home).catch(() => {});
     await rm(root, {recursive: true, force: true});
   }
 });

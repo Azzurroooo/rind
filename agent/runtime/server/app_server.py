@@ -71,6 +71,15 @@ def _worker_server_token() -> str:
 
 async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) -> int:
     args = build_parser().parse_args(argv)
+    if not getattr(server_class, "network_mode", False) and sys.stdin is not None and sys.stdin.isatty():
+        _write_startup_error(
+            "Startup error",
+            RuntimeError(
+                "'main.py app-server --stdio' is an internal JSON-RPC worker transport and cannot be run interactively in a terminal. Run 'rind' instead."
+            ),
+            args.debug,
+        )
+        return 1
     if args.trace_llm:
         os.environ["RIND_TRACE_LLM"] = "1"
     try:
@@ -92,10 +101,14 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
         raise ValueError(f"{server_class.__name__} must be a worker-mode runtime server.")
 
     from agent.runtime.server.worker import RuntimeWorker
+    from agent.runtime.server.worker_lock import acquire_worker_lock
 
+    worker_lock = None
     worker = None
     server_started = False
     try:
+        wait_seconds = 5.0 if os.environ.get("RIND_SHARED_HOST_PID", "").strip() else 0.0
+        worker_lock = acquire_worker_lock(args.session_dir, wait_seconds=wait_seconds)
         from agent.infrastructure.tools.external import ExternalTool
         external_tool = ExternalTool.from_json(os.environ.pop("RIND_EXTERNAL_TOOLS", ""))
         worker = RuntimeWorker(
@@ -132,8 +145,12 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
         _write_startup_error("Runtime error", exc, args.debug)
         return 1
     finally:
-        if worker is not None and not server_started:
-            await worker.close()
+        try:
+            if worker is not None and not server_started:
+                await worker.close()
+        finally:
+            if worker_lock is not None:
+                worker_lock.release()
 
 
 def main(argv: list[str] | None = None, *, server_class: type[Any]) -> int:

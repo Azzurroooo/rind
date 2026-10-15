@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm, realpath } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath, symlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { startSharedServer } from "../../rind-runtime-client/shared-server.js";
-import { connectSharedRuntime, createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
+import { connectSharedRuntime, createSharedRuntimeClient, sharedRuntimePaths, stopSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
+import { managementPaths } from "../../agent-management/dist/paths.js";
+import { startServer } from "../../agent-management/dist/ipc.js";
+import { removeRindHome } from "./helpers/rind-home.js";
 
 test("one host isolates workspaces and tools, runs sessions concurrently and survives client detach", { timeout: 25000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-shared-test-"));
@@ -30,7 +35,7 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   const first = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", a], externalTools: tool, onMessage: event => eventsA.push(event) });
   const second = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", b], onMessage: event => eventsB.push(event) });
   const admin = await connectSharedRuntime({ ...options, start: false });
-  t.after(async () => { await first.shutdown(); await second.shutdown(); admin.close(); responses.forEach(r => r.end()); await host.close(); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true }); });
+  t.after(async () => { await first.shutdown(); await second.shutdown(); admin.close(); responses.forEach(r => r.end()); await host.close(); await new Promise(resolve => provider.close(resolve)); await removeRindHome(home); });
   // Each window's first message creates its conversation.
   await first.request("initialize"); await second.request("initialize");
   const infoA = await first.request("session/create", {}), infoB = await second.request("session/create", {});
@@ -73,4 +78,57 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   assert.match(JSON.stringify(await admin.request("session/replay", { session_id: infoA.session_id })), /Finished/);
   assert.ok(eventsB.every(event => event.session_id === infoB.session_id));
   await assert.rejects(admin.request("session/open", { workspace_root: b, session_id: infoA.session_id }), /workspace/i);
+});
+
+test("resolveRindHome, sharedRuntimePaths, and managementPaths canonicalize symlinks, relative paths, and tilde", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rind-canonical-home-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const realHome = path.join(root, "real-home");
+  const linkHome = path.join(root, "link-home");
+  await symlink(realHome, linkHome, "dir");
+  const beforeCreate = resolveRindHome(linkHome);
+  await mkdir(realHome, { recursive: true });
+  const afterCreate = resolveRindHome(linkHome);
+  assert.equal(beforeCreate, afterCreate);
+  assert.equal(resolveRindHome(realHome), afterCreate);
+  assert.equal(resolveRindHome(path.relative(process.cwd(), linkHome) + path.sep), afterCreate);
+  assert.equal(resolveRindHome("~/.rind-test-canonical"), path.join(resolveRindHome(os.homedir()), ".rind-test-canonical"));
+  assert.deepEqual(sharedRuntimePaths(linkHome), sharedRuntimePaths(realHome));
+  assert.deepEqual(managementPaths(linkHome), managementPaths(realHome));
+});
+
+test("second startSharedServer or startServer instance for the same RIND_HOME is rejected immediately", { timeout: 20000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-singleton-"));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot };
+  const host = await startSharedServer(options);
+  const management = await startServer({ home, repoRoot });
+  t.after(async () => {
+    await management.close();
+    await host.close();
+    await removeRindHome(home);
+  });
+  await assert.rejects(startSharedServer(options), /already running/i);
+  await assert.rejects(startServer({ home, repoRoot }), /already running/i);
+});
+
+test("host.json records workerPid and stopSharedRuntime cleans up orphaned worker when shared-server is killed", { timeout: 25000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-orphan-worker-"));
+  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  t.after(async () => { await stopSharedRuntime(options); await removeRindHome(home); });
+  const connection = await connectSharedRuntime(options);
+  await connection.request("initialize");
+  const observed = await connection.request("runtime/observe");
+  connection.close();
+  const paths = sharedRuntimePaths(home);
+  const record = JSON.parse(await readFile(paths.record, "utf8"));
+  assert.equal(record.workerPid, observed.pid);
+  const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  assert.equal(alive(record.pid), true);
+  assert.equal(alive(record.workerPid), true);
+  process.kill(record.pid, "SIGKILL");
+  await stopSharedRuntime(options);
+  assert.equal(alive(record.pid), false);
+  assert.equal(alive(record.workerPid), false);
+  assert.equal(existsSync(paths.record), false);
 });

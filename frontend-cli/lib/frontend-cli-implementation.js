@@ -11,7 +11,7 @@ import { prepareManagement, observeRuntime } from "./agents-session.js";
 
 import { createCompactContextState } from "./compact-context-state.js";
 import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
-import { createRuntimeClient, runHelpVersion } from "./runtime-client.js";
+import { runHelpVersion } from "./runtime-client.js";
 import {
   requireRuntimeInitialization,
   runtimeMethods,
@@ -250,7 +250,7 @@ const {
   setTurnContext,
 } = outputController;
 
-const runtimeClient = observeRuntime((management.shared ? createSharedRuntimeClient : createRuntimeClient)({
+const runtimeClient = observeRuntime(createSharedRuntimeClient({
   python,
   repoRoot,
   runtimePath,
@@ -571,7 +571,7 @@ try {
     process.exitCode = 1;
   }
 } finally {
-  if (!tui && management.shared) await turnController.waitForIdle();
+  if (!tui) await turnController.waitForIdle();
   void shutdownRuntime();
 }
 
@@ -580,9 +580,9 @@ function updateGoalState(goal) {
   refreshInputState();
 }
 
-// A private worker has no shared Runtime to route `rind send`; it listens itself.
+// An older shared Runtime host without `rind send` routing falls back to per-session IPC.
 async function rebindSendEndpoint() {
-  if (management.shared && runtimeClient.child?.acceptsInput) return;
+  if (runtimeClient.child?.acceptsInput) return;
   try {
     await ipcServer?.close();
     ipcServer = null;
@@ -636,12 +636,6 @@ async function enterInSessionTour(pageId) {
 async function enterManagement(chat) {
   if (!tui) { await runAgentsCommand(["list"], managementLaunch); return; }
   if (handoffWindow) {
-    // A shared conversation keeps running after this window closes; one that
-    // runs in this window's own worker would be killed with it.
-    if (!management.shared && (turnStateData.active || displayState.activeCompact)) {
-      logOutput("This conversation runs in this window. Wait for it, or press ctrl+c to stop it, before leaving.");
-      return;
-    }
     const from = { runtimeSessionId: sessionState.info.session_id || "", workspace: sessionState.info.workspace_root || sessionState.info.cwd || "" };
     await writeHandoff(chat ? { action: "open", chat: { ...chat, agent: chat.agent && { id: chat.agent.id, canonicalWorkspace: chat.agent.canonicalWorkspace } } } : { action: "agents", from }, handoffFile);
     await shutdownRuntime();

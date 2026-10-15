@@ -2,10 +2,10 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 
 export function resolveSourcePython(python, repoRoot) {
-  if (python) return python;
+  if (python && python !== "python" && python !== "python3") return python;
   const windows = process.platform === "win32";
   const candidate = path.join(repoRoot, ".venv", windows ? "Scripts" : "bin", windows ? "python.exe" : "python");
-  return existsSync(candidate) ? candidate : windows ? "python" : "python3";
+  return existsSync(candidate) ? candidate : python || (windows ? "python" : "python3");
 }
 
 export function buildRuntimeEnv(repoRoot, baseEnv = process.env, { sourceRuntime = true, rindHome } = {}) {
