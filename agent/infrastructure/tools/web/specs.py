@@ -3,16 +3,18 @@ from __future__ import annotations
 from agent.domain.cancellation import CancellationToken
 from agent.infrastructure.tools.spec import ToolSpec
 
-from .fetch import fetch_web_page
-from .search import search_web
 from .session_pool import WebSessions
 
 
 def build_web_tool_specs(http_sessions: WebSessions) -> tuple[ToolSpec, ...]:
     def search(query: str, max_results: int = 5, _cancellation_token: CancellationToken | None = None) -> str:
+        from .search import search_web
+
         return search_web(query, max_results, _cancellation_token, _http_sessions=http_sessions)
 
     def fetch(url: str, _cancellation_token: CancellationToken | None = None) -> str:
+        from .fetch import fetch_web_page
+
         return fetch_web_page(url, _cancellation_token, _http_sessions=http_sessions)
 
     return (

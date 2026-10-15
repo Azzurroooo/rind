@@ -550,6 +550,7 @@ class TurnRunner:
                 context.stats,
                 turn_id,
                 tool_schemas=await self._tools_for_session(session),
+                estimator=self._context_manager.estimator,
             )
         except asyncio.CancelledError:
             raise

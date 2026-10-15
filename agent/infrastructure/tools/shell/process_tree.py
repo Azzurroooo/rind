@@ -32,9 +32,7 @@ def close_process_tree(job: int | None) -> None:
 
 
 async def wait_parent_exit(process: asyncio.subprocess.Process) -> int:
-    while process.returncode is None:
-        await asyncio.sleep(0.05)
-    return process.returncode
+    return await process.wait()
 
 
 async def terminate_tree(

@@ -25,7 +25,7 @@ class ToolCallRepository:
         model_content_format: str | None = None,
         model_content_policy: dict[str, Any] | None = None,
         attachments: list[dict] | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         if not isinstance(model_content, str) or not model_content:
             raise ValueError("tool record schema v2 requires non-empty model_content")
         parsed = self._parse_tool_result(result)
@@ -59,6 +59,7 @@ class ToolCallRepository:
         if attachments:
             record["attachments"] = attachments
         self._files.append_jsonl(self._path, record)
+        return record
 
     def load_tool_calls(self) -> list[dict[str, Any]]:
         return self._files.read_jsonl(self._path)

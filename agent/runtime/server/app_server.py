@@ -11,9 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.infrastructure.settings import ensure_user_settings, load_settings
-from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.paths import validate_session_id
-
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,6 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _resolve_workspace_root(cwd: str | None, session: str | None, session_dir: str | None) -> str:
     workspace_root = Path(cwd).expanduser().resolve() if cwd else None
     if session:
+        from agent.infrastructure.persistence import JsonlSessionStore
+
         meta = JsonlSessionStore.load_session_metadata(session, session_dir)
         stored_workspace = str(meta.get("workspace_root") or "").strip()
         if not stored_workspace:
