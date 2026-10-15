@@ -40,12 +40,19 @@ export async function startServer(options: { home?: string; python?: string; rep
   let runtime: Awaited<ReturnType<typeof connectSharedRuntime>> | undefined;
   let runtimeConnecting: Promise<any> | undefined;
   let closing = false;
+  async function sessionToolsFor(session: any) {
+    const agent = store.state.agents[session.agentId];
+    if (!agent) return undefined;
+    const manager = agent.canonicalWorkspace === await realManager;
+    return toolConfig({ kind: manager ? "manager" : "agent", sessionId: session.id });
+  }
   async function reconcile(session: any) {
     if (!runtime || !session.runtimeSessionId || !session.shared) return;
     try {
-      const replay = await runtime.request("session/replay", { session_id: session.runtimeSessionId });
+      const externalTools = await sessionToolsFor(session);
+      const replay = await runtime.request("session/replay", { session_id: session.runtimeSessionId, ...(externalTools ? { external_tools: externalTools } : {}) });
       await service.request({ kind: "user" }, "reconcileSession", { requestId: "observe-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: replay.hosted === true,
-        active: replay.live_turn?.status === "running" || replay.tasks?.some((t: any) => ["starting", "running", "cancelling"].includes(t.status)), needsInput: !!replay.live_turn?.question,
+        active: replay.live_turn?.status === "running" || (replay.background_wait?.count || 0) > 0, needsInput: !!replay.live_turn?.question,
         outcome: replay.live_turn?.status || replay.turn_state?.status });
     } catch {
       if (!closing) await service.request({ kind: "user" }, "reconcileSession", { requestId: "missing-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false }).catch(() => {});
@@ -67,7 +74,7 @@ export async function startServer(options: { home?: string; python?: string; rep
         if (message?.kind === "runtime" && message.type === "sessions_changed") { service.setLive(message.sessions || []); return; }
         if (message.event?.type === "folder_defaults_changed") { service.folderDefaultsChanged(); return; }
         if (message.event?.type === "wait_released" || message.event?.type === "turn_cancelled") { service.releaseWait(message.session_id); if (message.event?.type === "wait_released") return; }
-        if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "task_updated"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
+        if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "task_updated", "background_wait_changed"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
         const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === message.session_id);
         if (session) void reconcile(session);
       },
@@ -186,7 +193,7 @@ export async function startServer(options: { home?: string; python?: string; rep
         connectionPrincipal = principal;
         if (grant) {
           const session = store.state.sessions[grant.principal.kind === "user" ? "" : grant.principal.sessionId];
-          requireValue(session && (session.origin === "direct" ? service.isConnected(session.id) : (session.shared && service.isConnected(session.id)) || Object.values(store.state.runs).some(r => r.sessionId === session.id && ["starting", "running"].includes(r.status))), "SESSION_EXPIRED", "The execution host no longer owns this session.");
+          requireValue(session && (session.shared || (session.origin === "direct" ? service.isConnected(session.id) : Object.values(store.state.runs).some(r => r.sessionId === session.id && ["starting", "running"].includes(r.status)))), "SESSION_EXPIRED", "The execution host no longer owns this session.");
           requireValue(typeof message.runtimeSessionId === "string" && message.runtimeSessionId, "UNAUTHORIZED", "Runtime session identity is required.");
           requireValue(!grant.host || ["hostTurnStart", "hostTurnEnd"].includes(message.method), "FORBIDDEN", "Host credentials can only publish lifecycle facts.");
           requireValue(!session.runtimeSessionId || session.runtimeSessionId === message.runtimeSessionId, "UNAUTHORIZED", "Credential does not match the attached conversation.");
@@ -214,10 +221,9 @@ export async function startServer(options: { home?: string; python?: string; rep
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the host can issue session tools.");
           const session = store.state.sessions[message.params.sessionId];
           requireValue(session, "NOT_FOUND", "Session not found.");
-          const manager = store.state.agents[session.agentId].canonicalWorkspace === await realManager;
           // A window waits on this before it reads keys: a Runtime that cannot start says so.
           if (session.shared) await within(executionHost(), RUNTIME_START_MS, "The shared Runtime did not start within " + RUNTIME_START_MS / 1000 + "s. Check `rind agents` › Background › Shared Runtime, then try again.");
-          result = toolConfig({ kind: manager ? "manager" : "agent", sessionId: session.id });
+          result = await sessionToolsFor(session);
         } else if (message.method === "serviceInfo") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can inspect the service.");
           // Report the Runtime host only when it is already connected; asking must not start one.
@@ -335,7 +341,11 @@ export async function startServer(options: { home?: string; python?: string; rep
     }
     store = await openStore(paths.state);
     const rind = createRindAdapter(options);
-    const deliver = async (runtimeSessionId: string, text: string) => { await (await executionHost(false)).request("rind/session/deliver", { session_id: runtimeSessionId, text }); };
+    const deliver = async (runtimeSessionId: string, text: string) => {
+      const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === runtimeSessionId);
+      const externalTools = session ? await sessionToolsFor(session) : undefined;
+      await (await executionHost(false)).request("rind/session/deliver", { session_id: runtimeSessionId, text, ...(externalTools ? { external_tools: externalTools } : {}) });
+    };
     service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig, folderDefaults, deliver });
     await service.recover();
     readyResolve!();

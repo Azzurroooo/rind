@@ -891,6 +891,8 @@ class RuntimeDispatcher:
             if start is not None or end is not None:
                 await self._respond_error(request, "session/replay tail cannot be combined with start or end.", "InvalidRequest")
                 return
+        if self._allow_session_configuration:
+            await self._worker.configure_if_unowned(session_id, params)
         result = await self._worker.replay(session_id, start=start, end=end, tail=tail)
         await self._respond(request, result)
 
@@ -1037,6 +1039,8 @@ class RuntimeDispatcher:
         if not await self._worker.repository.exists(session_id):
             await self._respond_error(request, "Conversation not found.", "SessionNotFound")
             return
+        if self._allow_session_configuration:
+            await self._worker.configure_if_unowned(session_id, params)
         try:
             self._worker.execution.deliver(session_id, text)
         except RuntimeError as exc:

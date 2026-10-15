@@ -37,6 +37,18 @@ test("a leader whose task waits for its members is Delegated, while a child dele
   assert.equal(memberStatus(index, "lead", "team"), "Delegated");
   assert.equal(sessionStatus(index, "child").taskId, undefined, "delegation session does not inherit parent taskId");
   assert.equal(memberStatus(index, "dev", "team"), "Idle", "settled sub-agent member is Idle, not Delegated");
+
+  // A sub-lead delegation waiting on a grandchild delegation projects Delegated and pendingDelegations even after a direct turn.
+  s.agents.leaf = { id: "leaf", name: "Leaf", canonicalWorkspace: "/w/leaf", adapter: "rind" };
+  s.memberships["team/leaf"] = { teamId: "team", agentId: "leaf", reportsToAgentId: "dev" };
+  s.delegations.d1.status = "waiting";
+  s.delegations.d2 = { id: "d2", teamId: "team", fromAgentId: "dev", assigneeAgentId: "leaf", parentDelegationId: "d1", taskId: "t", brief: "Leaf work", status: "running", returned: false };
+  s.runs.directFollowUp = { id: "directFollowUp", sessionId: "child", status: "succeeded", startedAt: "2026-10-07T11:02:00Z", lastObservedAt: "2026-10-07T11:03:00Z", hostSequence: 2 };
+  const cascaded = projectionIndex(s, new Set(), new Map());
+  assert.equal(memberStatus(cascaded, "dev", "team"), "Delegated");
+  const childStatus = sessionStatus(cascaded, "child");
+  assert.equal(childStatus.status, "Delegated");
+  assert.deepEqual(childStatus.pendingDelegations, [{ taskId: "d2", assignee: "Leaf" }]);
 });
 
 test("the Manager's overview keeps open work and the latest deliveries, and counts the rest", () => {

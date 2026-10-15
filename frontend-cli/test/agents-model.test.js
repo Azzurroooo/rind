@@ -346,4 +346,39 @@ test("delegating member and session surface Delegated status, Waits on details, 
   };
   const out = createCliOutputController({ state: cliState, terminalUi: null, transcript: { addChild() {}, changed() {}, clear() {} } });
   assert.match(strip(out.mainPromptText(80)), /Waiting · API · wakes on delivery/);
+
+  // Task detail panel names the delegated member in Waits on, and Running job tasks surface Job on both Member and Task panels.
+  snapshot.tasks.push({ id: "t-delegated", teamId: "team", assigneeAgentId: "lead", createdBy: "user", brief: "Coordinate auth", status: "blocked", blockedOn: { responder: "children", action: "Continues when its members deliver." } });
+  snapshot.sessions.find(s => s.id === "s-lead").taskId = "t-delegated";
+  const delegatedTaskRow = taskRows(snapshot, "team").find(r => r.id === "t:t-delegated");
+  const delegatedTaskDetail = detailLines({ snapshot }, delegatedTaskRow, 60).map(strip).join("\n");
+  assert.match(delegatedTaskDetail, /⋯ Delegated/);
+  assert.match(delegatedTaskDetail, /Waits on\s+API · resumes on delivery/);
+
+  snapshot.tasks.push({ id: "t-job", teamId: "team", assigneeAgentId: "api", createdBy: "user", brief: "Run regression suite", status: "running" });
+  snapshot.memberships.find(m => m.agentId === "api").status = "Running job";
+  snapshot.sessions.push({ id: "s-api", agentId: "api", teamId: "team", runtimeSessionId: "r-api", taskId: "t-job", status: "Running job", lastActivity: "2026-10-06T11:58:00Z" });
+  (snapshot.live ||= []).push({ id: "r-api", workspace: "/w/api", turn: "idle", watchers: 0, background: { count: 1, commands: ["pytest -q"], startedAt: "2026-10-06T11:57:00Z" } });
+  const jobTaskRow = taskRows(snapshot, "team").find(r => r.id === "t:t-job");
+  assert.equal(jobTaskRow.status, "Running job");
+  const jobTaskDetail = detailLines({ snapshot }, jobTaskRow, 60).map(strip).join("\n");
+  assert.match(jobTaskDetail, /↻ Running job/);
+  assert.match(jobTaskDetail, /Job\s+pytest -q · continues by itself/);
+  const apiMemberRow = organizationRows(snapshot, "team", teamSessions(snapshot, "team"), { now: NOW }).find(r => r.id === "m:api");
+  const apiMemberDetail = detailLines({ snapshot }, apiMemberRow, 60).map(strip).join("\n");
+  assert.match(apiMemberDetail, /↻ Running a job/);
+  assert.match(apiMemberDetail, /Job\s+pytest -q · continues by itself/);
+
+  // live-sessions synchronizes background_wait attached to turn_completed and clears it on turn_cancelled.
+  const { createLiveSessions } = await import("../../rind-runtime-client/live-sessions.js");
+  const liveTable = createLiveSessions({ now: () => NOW, schedule: fn => fn() });
+  liveTable.event({ session_id: "r-job", event: { type: "turn_started" } });
+  assert.equal(liveTable.list()[0].turn, "running");
+  liveTable.event({ session_id: "r-job", event: { type: "turn_completed", background_wait: { count: 1, started_at: 1700000000, commands: ["npm test"] } } });
+  assert.equal(liveTable.list()[0].turn, "idle");
+  assert.equal(liveTable.list()[0].background?.count, 1);
+  assert.deepEqual(liveTable.list()[0].background?.commands, ["npm test"]);
+  liveTable.event({ session_id: "r-job", event: { type: "turn_cancelled" } });
+  assert.equal(liveTable.list()[0].background, null);
 });
+

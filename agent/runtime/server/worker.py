@@ -134,6 +134,15 @@ class RuntimeWorker:
         await self.execution.configure_session(session_id, tool, params.get("enable_user_question") is not False)
         return await self.session(session_id)
 
+    async def configure_if_unowned(self, session_id: str, params: dict) -> None:
+        clean = validate_session_id(session_id)
+        if "external_tools" not in params or self.execution.owns_session(clean):
+            return
+        if self.repository.draft_store(clean) is None and not await self.repository.exists(clean):
+            return
+        tool = ExternalTool.from_json(json.dumps(params["external_tools"])) if params.get("external_tools") else None
+        await self.execution.configure_session(clean, tool, params.get("enable_user_question") is not False)
+
     async def start_execution(self, session_id: str) -> AgentContainer:
         return await self.execution.start(session_id)
 

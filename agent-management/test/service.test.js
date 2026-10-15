@@ -410,3 +410,30 @@ test("forgetSession refuses while the conversation is running", async t => {
   await assert.rejects(f.call("forgetSession", { sessionId: session.id }), { code: "SESSION_BUSY" });
   assert.ok(f.store.state.sessions[session.id]);
 });
+
+test("reconcileSession settles completed turns without false Unconfirmed and restores Delegated parent task when child is active", async t => {
+  const f = await fixture(t);
+  const specialist = await f.member("specialist");
+  const direct = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id, runtimeSessionId: "r-direct", shared: true });
+  const directRun = await f.call("hostTurnStart", { sessionId: direct.id, runtimeSessionId: "r-direct" });
+  await f.call("reconcileSession", { sessionId: direct.id, connected: false, active: false, outcome: "completed" });
+  assert.equal(f.store.state.runs[directRun.id].status, "succeeded", "completed turn state settles run instead of marking it unknown");
+
+  // Parent task yielded waiting on child; after recover() and child reconcile(active: true), parent task returns to Delegated.
+  const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Coordinate" });
+  await eventually(() => f.starts.length === 1);
+  await f.call("delegate", { to: specialist.id, brief: "Subwork" }, f.runner(f.starts[0]));
+  f.starts[0].finish({ content: "Waiting on child" });
+  await eventually(() => f.starts.length === 2 && f.store.state.tasks[task.id].status === "blocked");
+  const childSessionId = f.starts[1].input.session.id;
+  await f.service.recover();
+  assert.equal(f.store.state.tasks[task.id].status, "needs_attention");
+  await f.call("reconcileSession", { sessionId: childSessionId, connected: true, active: true, outcome: "running" });
+  assert.equal(f.store.state.tasks[task.id].status, "blocked");
+  assert.equal(f.store.state.tasks[task.id].blockedOn?.responder, "children");
+  const snap = await f.call("snapshot");
+  assert.equal(snap.memberships.find(m => m.agentId === f.leader.id).status, "Delegated");
+  assert.equal(snap.memberships.find(m => m.agentId === specialist.id).status, "Working");
+  f.starts[1].finish({ content: "Done" });
+});
+

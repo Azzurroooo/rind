@@ -45,8 +45,9 @@ export function jobSummary(background) {
 const TASK_STATUS = { running: "Working", queued: "Queued", blocked: "Needs input", needs_attention: "Needs input", done: "Done", cancelled: "Cancelled" };
 export const entryTask = task => !task.parentTaskId && (!task.createdBy || ["user", "manager"].includes(task.createdBy));
 export const needsUser = task => entryTask(task) && (task.status === "needs_attention" || (task.status === "blocked" && task.blockedOn?.responder === "user"));
-export function taskStatus(task) {
+export function taskStatus(task, snapshot) {
   if (task.status === "blocked" && !needsUser(task)) return "Delegated";
+  if (task.status === "running" && snapshot?.sessions?.some(s => s.taskId === task.id && s.status === "Running job")) return "Running job";
   return TASK_STATUS[task.status] || "Idle";
 }
 
@@ -192,14 +193,14 @@ export function taskRows(snapshot, teamId, { query = "", filter = "All" } = {}) 
   for (const section of TASK_SECTIONS) {
     const items = tasks.filter(section.test).filter(task => {
       const owner = byId(snapshot.agents, task.assigneeAgentId)?.name;
-      return matches(query, task.brief, owner, task.blockedOn?.action, task.report?.summary) && statusOk(filter, taskStatus(task));
+      return matches(query, task.brief, owner, task.blockedOn?.action, task.report?.summary) && statusOk(filter, taskStatus(task, snapshot));
     });
     if (section.id === "working" || section.id === "queued") items.sort((a, b) => ({ high: 0, low: 2 }[a.priority] ?? 1) - ({ high: 0, low: 2 }[b.priority] ?? 1));
     if (!items.length) continue;
     rows.push({ id: "section:" + section.id, kind: "section", title: section.title, count: items.length });
     for (const task of items) {
       const owner = single(byId(snapshot.agents, task.assigneeAgentId)?.name) || "Removed member";
-      rows.push({ id: "t:" + task.id, kind: "task", title: single(task.brief), status: taskStatus(task), fresh: unreviewed(task), reworked: task.review?.decision === "rework", owner, priority: task.priority,
+      rows.push({ id: "t:" + task.id, kind: "task", title: single(task.brief), status: taskStatus(task, snapshot), fresh: unreviewed(task), reworked: task.review?.decision === "rework", owner, priority: task.priority,
         note: single(needsUser(task) ? task.blockedOn?.action || task.error : task.status === "queued" ? task.queueReason : task.report?.summary), taskId: task.id, teamId });
     }
   }

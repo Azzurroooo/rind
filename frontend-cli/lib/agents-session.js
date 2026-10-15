@@ -77,7 +77,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
   // Agents page, or by running Rind there — is the same conversation.
   const asManager = options.manager || await sameDirectory(argument(options.args, "--cwd") || argument(options.args, "--dir") || process.cwd(), managerFolder);
   if (!asManager && !options.team && !existsSync(path.join(root, "state", "user-token"))) return plainSession(options.args, shareRuntime, rindHome);
-  let client, session, runtimeSessionId = "", reconnecting, detached = false, disconnected = false;
+  let client, session, runtimeSessionId = "", reconnecting, reattachSession, detached = false, disconnected = false;
   const connectionOptions = { ...launch, onDisconnect: () => {
     if (detached) return;
     disconnected = true;
@@ -94,6 +94,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
         try {
           const replacement = await managementClient({ ...connectionOptions, start: false });
           if (detached) { replacement.close(); return; }
+          if (reattachSession) await reattachSession(replacement).catch(() => {});
           client = replacement;
           disconnected = false;
           return;
@@ -164,6 +165,12 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     session = await client.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: asManager, runtimeSessionId: resumeId, shared: true });
     const externalTools = await client.request("sessionTools", { sessionId: session.id });
     let needsAttachment = false, attaching;
+    reattachSession = async nextClient => {
+      if (needsAttachment) return;
+      const attached = await nextClient.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: asManager, runtimeSessionId: runtimeSessionId || resumeId, shared: true });
+      if (runtimeSessionId && !attached.runtimeSessionId) await nextClient.request("bindSession", { sessionId: attached.id, runtimeSessionId });
+      session = attached;
+    };
     const runtimeArgs = !argument(options.args, "--cwd") && !argument(options.args, "--dir") ? ["--cwd", workspace, ...options.args] : options.args;
     return {
       chatContext: { agent, teamId: team?.id, manager: asManager },

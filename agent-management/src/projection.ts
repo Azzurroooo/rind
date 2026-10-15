@@ -62,8 +62,10 @@ function isOpen(index: ProjectionIndex, session: Session) {
 // session whose delegated work has not returned yet, or a delivery queued
 // to resume this session.
 function waitingOnDelegation(index: ProjectionIndex, sessionId: string, taskId?: string) {
+  const session = index.state.sessions[sessionId];
   const task = taskId ? index.state.tasks[taskId] : undefined;
   if (task?.status === "blocked" && task.blockedOn?.responder === "children") return true;
+  if (session?.delegationId && index.state.delegations[session.delegationId]?.status === "waiting") return true;
   if (index.state.deliveries[sessionId]?.texts.length) return true;
   return (index.delegationsByOriginSession.get(sessionId) || []).some(d => !d.returned && d.status !== "cancelled");
 }
@@ -114,20 +116,21 @@ export function sessionStatus(index: ProjectionIndex, sessionId: string) {
   const runs = index.runsBySession.get(sessionId) || [];
   const active = runs.find(r => activeRun(r));
   const last = active || runs.at(-1);
-  const ownTaskId = !last?.delegationId ? last?.taskId : undefined;
+  const ownDelegationId = last?.delegationId || session?.delegationId;
+  const ownTaskId = !ownDelegationId ? last?.taskId : undefined;
   const live = session && index.live.get(session.runtimeSessionId);
   const status = active?.status === "unknown" && !active.delegationId ? "Unconfirmed"
     : live?.turn === "question" || active?.needsInput ? "Needs input"
     : live?.turn === "running" ? "Working"
     : runningJob(live) ? "Running job"
     : active && active.status !== "unknown" ? "Working"
-    : (last?.delegationId && index.state.delegations[last.delegationId]?.status === "waiting") || waitingOnDelegation(index, sessionId, ownTaskId) ? "Delegated"
+    : (ownDelegationId && index.state.delegations[ownDelegationId]?.status === "waiting") || waitingOnDelegation(index, sessionId, ownTaskId) ? "Delegated"
     : session && isOpen(index, session) ? "Open" : "Idle";
   const lastActivity = [last?.lastObservedAt, live?.updatedAt].filter(Boolean).sort().at(-1);
   const owned = [
     ...(index.delegationsByOriginSession.get(sessionId) || []),
     ...(ownTaskId ? index.delegationsByTask.get(ownTaskId) || [] : []),
-    ...(last?.delegationId ? Object.values(index.state.delegations).filter(d => d.parentDelegationId === last.delegationId) : []),
+    ...(ownDelegationId ? Object.values(index.state.delegations).filter(d => d.parentDelegationId === ownDelegationId) : []),
   ];
   const pending = [...new Map(owned.filter(d => !d.returned && d.status !== "cancelled").map(d => [d.id, d])).values()]
     .map(d => ({ taskId: d.id, assignee: index.state.agents[d.assigneeAgentId]?.name || d.assigneeAgentId }));

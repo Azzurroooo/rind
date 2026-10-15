@@ -37,8 +37,9 @@ function folderRunsOn(resolved, label) {
     callout: ready === false ? notConfigured(provider, "new conversations fail") : undefined,
   };
 }
-function jobText(snapshot, runtimeSessionId) {
-  const background = (snapshot.live || []).find(item => item.id === runtimeSessionId)?.background;
+function jobText(snapshot, runtimeSessionIds) {
+  const ids = new Set([runtimeSessionIds].flat().filter(Boolean));
+  const background = (snapshot.live || []).find(item => ids.has(item.id) && item.background?.count)?.background;
   return background?.count ? jobSummary(background) + paint.dim(" · continues by itself") : "";
 }
 function waitsOnText(snapshot, sessionIds, task) {
@@ -63,7 +64,7 @@ export function detailFor(view, row) {
       const parent = byId(snapshot.agents, membership?.reportsToAgentId);
       const tasks = snapshot.tasks.filter(t => t.teamId === row.teamId && t.assigneeAgentId === row.agentId);
       const current = tasks.find(t => t.status === "running") || tasks.find(needsUser) || tasks.findLast(t => t.status !== "cancelled");
-      const memberSessions = snapshot.sessions.filter(s => s.teamId === row.teamId && s.agentId === row.agentId).map(s => s.id);
+      const memberSessions = snapshot.sessions.filter(s => s.teamId === row.teamId && s.agentId === row.agentId);
       const role = row.leader ? ["Leader", single(membership?.position)].filter(Boolean).join(" · ") : roleOf(snapshot, row.teamId, row.agentId);
       const { tone, label } = memberState(row.ownStatus || row.status, row.open);
       const model = folderRunsOn(view.folderDefaults?.[agent?.canonicalWorkspace], "Runs on");
@@ -73,8 +74,9 @@ export function detailFor(view, row) {
         callout: first(current && needsUser(current) && current.blockedOn && { text: "! Needs your answer · " + single(current.blockedOn.action) }, model.callout),
         facts: [
           model.fact,
-          current && { label: "Task", value: [single(current.brief), paint.dim(taskStatus(current))], lines: 3 },
-          { label: "Waits on", value: waitsOnText(snapshot, memberSessions, current) },
+          current && { label: "Task", value: [single(current.brief), paint.dim(taskStatus(current, snapshot))], lines: 3 },
+          { label: "Waits on", value: waitsOnText(snapshot, memberSessions.map(s => s.id), current) },
+          { label: "Job", value: jobText(snapshot, memberSessions.map(s => s.runtimeSessionId)) },
           { label: "Owns", value: single(membership?.responsibility) },
           { label: "Folder", value: paint.path(agent?.canonicalWorkspace || "") },
           { label: "Team", value: [row.sessionCount ? row.sessionCount + (row.sessionCount === 1 ? " conversation" : " conversations") : "", row.reportCount ? row.reportCount + (row.reportCount === 1 ? " direct report" : " direct reports") : ""].filter(Boolean).join(" · ") },
@@ -154,14 +156,15 @@ export function detailFor(view, row) {
         context: row.archived
           ? "Owner " + row.owner + " · read-only, the team was deleted"
           : ["Owner " + row.owner, task.priority && task.priority + " priority"].filter(Boolean).join(" · "),
-        state: stateLine(row.status || taskStatus(task)),
+        state: stateLine(row.status || taskStatus(task, snapshot)),
         callout: first(
           !row.archived && needsUser(task) && task.blockedOn && { text: "! Needs your answer · " + single(task.blockedOn.action) },
           !row.archived && task.error && { text: "! " + single(task.error), tone: "danger" },
           review,
         ),
         facts: [
-          asked && { label: "Waits on", value: "its members · " + single(task.blockedOn.action) },
+          asked && { label: "Waits on", value: waitsOnText(snapshot, [], task) },
+          { label: "Job", value: jobText(snapshot, snapshot.sessions.filter(s => s.taskId === task.id).map(s => s.runtimeSessionId)) },
           task.status === "queued" && { label: "Queue", value: task.queueReason },
           { label: "Delivery", value: deliveryValue, lines: 8 },
           evidence.length && { label: "Evidence", value: evidence, lines: 4 },

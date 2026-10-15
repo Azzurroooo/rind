@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { startServer } from "../dist/ipc.js";
 import { connectClient } from "../dist/client.js";
 import { managementBuildId } from "../dist/build.js";
+import { openStore } from "../dist/store.js";
 
 test("direct host can reconcile after restart while its model cannot revive an expired session", async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-restart-"));
@@ -140,3 +141,48 @@ test("the Manager keeps every Rind tool and is held to agent_management by its i
   assert.match(config.instructions, /never carry out that action another way/);
   assert.ok(config.instructions.includes(path.resolve(home)), "names the Rind home it must not modify");
 });
+
+test("shared session credentials remain valid across management restart before and after first turn binding", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-shared-"));
+  const options = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  let server = await startServer(options);
+  const clients = [];
+  t.after(async () => { clients.forEach(c => c.close()); await server.close(); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  const token = (await readFile(server.paths.token, "utf8")).trim();
+  const connect = async (credential = token, runtimeSessionId) => {
+    const client = await connectClient({ endpoint: server.paths.endpoint, token: credential, runtimeSessionId }); clients.push(client); return client;
+  };
+  const user = await connect();
+  const workspace = path.join(home, "workspace"), childWorkspace = path.join(home, "child");
+  await mkdir(workspace); await mkdir(childWorkspace);
+  const leader = await user.request("registerAgent", { workspace, name: "Lead" });
+  const member = await user.request("registerAgent", { workspace: childWorkspace, name: "Builder" });
+  const team = await user.request("createTeam", { name: "SharedTeam" });
+  await user.request("addMember", { teamId: team.id, agentId: leader.id });
+  await user.request("addMember", { teamId: team.id, agentId: member.id, reportsToAgentId: leader.id });
+  await user.request("setLeader", { teamId: team.id, agentId: leader.id });
+
+  const session = await user.request("attachSession", { agentId: leader.id, teamId: team.id });
+  const config = await user.request("sessionTools", { sessionId: session.id });
+  user.close();
+  await server.close();
+  const store = await openStore(server.paths.state);
+  const next = structuredClone(store.state);
+  next.sessions[session.id].shared = true;
+  await store.commit(next);
+  server = await startServer(options);
+
+  // Even after management restart while disconnected, hostTurnStart and delegate succeed on the shared session without SESSION_EXPIRED.
+  const host = await connect(config.lifecycle.env.RIND_MANAGEMENT_TOKEN, "shared-runtime-1");
+  const run = await host.request("hostTurnStart", {});
+  assert.equal(run.status, "running");
+  const model = await connect(config.env.RIND_MANAGEMENT_TOKEN, "shared-runtime-1");
+  const waited = await model.request("delegate", { wait: true });
+  assert.equal(waited.output, "No pending delegated work.");
+  await host.request("hostTurnEnd", { outcome: "turn_completed", pending: false });
+  const userAfter = await connect();
+  const snap = await userAfter.request("snapshot");
+  assert.equal(snap.runs.find(r => r.id === run.id).status, "succeeded");
+  assert.equal(snap.sessions.find(s => s.id === session.id).runtimeSessionId, "shared-runtime-1");
+});
+

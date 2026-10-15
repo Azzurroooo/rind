@@ -124,10 +124,10 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
         changed();
         return;
       }
+      const toBackground = wait => wait?.count > 0 ? { count: wait.count, commands: Array.isArray(wait.commands) ? wait.commands.map(String) : [], startedAt: new Date(Number(wait.started_at) * 1000 || now()).toISOString() } : null;
       // The turn ended but jobs it started still run; it resumes when they finish.
       if (id && message?.event?.type === "background_wait_changed") {
-        const wait = message.event.background_wait;
-        const background = wait?.count > 0 ? { count: wait.count, commands: Array.isArray(wait.commands) ? wait.commands.map(String) : [], startedAt: new Date(Number(wait.started_at) * 1000 || now()).toISOString() } : null;
+        const background = toBackground(message.event.background_wait);
         const item = entry(id);
         if (JSON.stringify(item.background) === JSON.stringify(background)) return;
         item.background = background;
@@ -138,10 +138,14 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       const turn = TURN_EVENTS[message?.event?.type] || (message?.event?.type === "tool_result" && message.event.tool_name === "ask_user_question" ? "running" : undefined);
       if (!id || !turn) return;
       const item = entry(id);
-      if (item.turn === turn) return;
+      const hasBackground = (message?.event?.type === "turn_completed" && "background_wait" in message.event) || ["turn_failed", "turn_cancelled"].includes(message?.event?.type);
+      const background = message?.event?.type === "turn_completed" ? toBackground(message.event.background_wait) : null;
+      const backgroundChanged = hasBackground && JSON.stringify(item.background) !== JSON.stringify(background);
+      if (item.turn === turn && !backgroundChanged) return;
       const at = new Date(now()).toISOString();
       if (turn === "running" && item.turn === "idle") item.startedAt = at;
       item.turn = turn;
+      if (hasBackground) item.background = background;
       item.updatedAt = at;
       changed();
     },

@@ -119,7 +119,7 @@ class ExecutionCoordinator:
         return self._session_options.get(session_id, (self._external_tool, self._enable_user_question))[0]
 
     def owns_session(self, session_id: str) -> bool:
-        return session_id in self._session_options or session_id in self._active
+        return session_id in self._session_options or session_id in self._active or session_id in self._starting
 
     def forget_options(self, session_id: str) -> None:
         """Drop an idle session's tool configuration; opening it again sets it anew."""
@@ -540,6 +540,7 @@ class ExecutionCoordinator:
                             scope.answer = str(event_data.get("content") or "")
                         if event_data.get("type") in {"turn_failed", "turn_cancelled"}:
                             self._suppressed.add(clean)
+                            self.refresh_background_wait(clean)
                             await self._task_notifications.continuation_failed(clean,
                                 str(event_data.get("error") or event_data.get("reason") or "Request failed."))
                             if scope:
@@ -555,7 +556,10 @@ class ExecutionCoordinator:
                 finally:
                     if self.external_tool(clean) and terminal_type and not compact:
                         records = await self._task_notifications.store.relevant(clean)
-                        pending = any(record.get("status") not in TERMINAL_STATES for record in records.values())
+                        pending = terminal_type == "turn_completed" and (
+                            await self.background_wait(clean) is not None
+                            or any(pending_notification(record) for record in records.values())
+                        )
                         try:
                             await self.external_tool(clean).notify("after", clean, {"outcome": terminal_type, "pending": pending})
                         except Exception:

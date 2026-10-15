@@ -1246,3 +1246,54 @@ def test_a_prompt_the_flow_stops_waiting_for_is_closed_in_the_window_and_a_late_
     assert closed and closed[-1]["event"] == {"type": "prompt_closed", "request_id": request_id}
     assert not server._auth_waiters
     assert not any(m.get("request_id") == request_id and m.get("kind") == "response" for m in payloads), "the late answer is not treated as a request"
+
+
+def test_replay_and_deliver_restore_external_tools_when_local_host_allowed():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from agent.runtime.server.execution import ExecutionCoordinator
+
+    worker = FakeWorker()
+    worker.configure_if_unowned = AsyncMock()
+    worker.repository.exists = AsyncMock(return_value=True)
+    worker.execution.deliver = lambda sid, text: None
+    server, payloads = make_server(worker)
+    external_tools = {"command": "tool", "tools": [{"name": "delegate", "description": "d", "parameters": {"type": "object"}}]}
+
+    async def run():
+        await server._dispatch({
+            "kind": "request",
+            "request_id": "replay-untrusted",
+            "method": RuntimeMethod.SESSION_REPLAY,
+            "params": {"session_id": "s1", "external_tools": external_tools},
+        })
+        worker.configure_if_unowned.assert_not_called()
+
+        server._allow_session_configuration = True
+        replay_params = {"session_id": "s1", "external_tools": external_tools}
+        await server._dispatch({
+            "kind": "request",
+            "request_id": "replay-trusted",
+            "method": RuntimeMethod.SESSION_REPLAY,
+            "params": replay_params,
+        })
+        worker.configure_if_unowned.assert_awaited_once_with("s1", replay_params)
+
+        deliver_params = {"session_id": "s1", "text": "member delivered", "external_tools": external_tools}
+        await server._dispatch({
+            "kind": "request",
+            "request_id": "deliver-trusted",
+            "method": RuntimeMethod.RIND_SESSION_DELIVER,
+            "params": deliver_params,
+        })
+        assert worker.configure_if_unowned.await_count == 2
+        worker.configure_if_unowned.assert_awaited_with("s1", deliver_params)
+
+    asyncio.run(run())
+
+    dummy = SimpleNamespace(_session_options={}, _active={}, _starting={})
+    assert not ExecutionCoordinator.owns_session(dummy, "s-starting")
+    dummy._starting["s-starting"] = object()
+    assert ExecutionCoordinator.owns_session(dummy, "s-starting")
+
+

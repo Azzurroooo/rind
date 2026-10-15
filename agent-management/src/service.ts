@@ -841,7 +841,6 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         userOnly(actor); const session = ownSession(state, actor, p.sessionId);
         for (const run of Object.values(state.runs)) if (run.sessionId === session.id && activeRun(run)) {
           if (p.active) { run.status = "running"; run.needsInput = !!p.needsInput; }
-          else if (!p.connected) run.status = "unknown";
           else if (!run.taskId && !run.delegationId && ["completed", "failed", "cancelled"].includes(p.outcome)) {
             run.status = p.outcome === "completed" ? "succeeded" : p.outcome;
             const children = sessionDelegations(state, session.id);
@@ -849,13 +848,18 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
               returnDelegations(state, children, text => { (state.deliveries[session.id] ||= { texts: [] }).texts.push(text); });
             }
           }
-          if (run.delegationId && !live.has(run.id)) {
+          else if (!p.connected) run.status = "unknown";
+          if (run.delegationId) {
             const d = state.delegations[run.delegationId];
             const rootTask = d?.taskId ? state.tasks[d.taskId] : undefined;
             if (p.active) {
               if (d?.status === "failed") { d.status = "running"; delete d.error; }
-              if (rootTask?.status === "needs_attention") { rootTask.status = "running"; delete rootTask.error; }
-            } else if (p.connected && !p.active && ["completed", "failed", "cancelled"].includes(p.outcome)) {
+              if (rootTask?.status === "needs_attention") {
+                if (Object.values(state.runs).some(r => r.taskId === rootTask.id && !r.delegationId && activeRun(r))) rootTask.status = "running";
+                else { rootTask.status = "blocked"; rootTask.blockedOn = { responder: "children", action: "Continues when its members deliver." }; }
+                delete rootTask.error;
+              }
+            } else if (!live.has(run.id) && p.connected && !p.active && ["completed", "failed", "cancelled"].includes(p.outcome)) {
               run.status = p.outcome === "completed" ? "succeeded" : p.outcome;
               if (d && d.status !== "cancelled") {
                 d.status = "failed";
@@ -863,12 +867,14 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
                 wakeDelegator(state, d);
               }
             }
-          } else if (run.taskId && !live.has(run.id)) {
+          } else if (run.taskId) {
             const task = state.tasks[run.taskId];
             if (p.active && task.status === "needs_attention") { task.status = "running"; delete task.error; }
-            else if (p.connected && !p.active && ["completed", "failed", "cancelled"].includes(p.outcome)) {
+            else if (!live.has(run.id) && p.connected && !p.active && ["completed", "failed", "cancelled"].includes(p.outcome)) {
               run.status = p.outcome === "completed" ? "succeeded" : p.outcome;
-              if (task.report && p.outcome === "completed") markDelivered(task);
+              if (taskDelegations(state, task.id).some(awaitingDelegation)) {
+                task.status = "blocked"; task.blockedOn = { responder: "children", action: "Continues when its members deliver." }; delete task.report; delete task.error;
+              } else if (task.report && p.outcome === "completed") markDelivered(task);
               else if (task.status !== "blocked") { task.status = "needs_attention"; task.error = "Execution finished while management was disconnected. Inspect the session before retrying."; }
             }
           }
@@ -1011,6 +1017,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     }
     if (method === "reconcileSession") { if (params.connected) connected.add(params.sessionId); else connected.delete(params.sessionId); for (const listener of listeners) listener(); }
     if (method === "attachSession" || method === "reattachSession") connected.add((result as Session).id);
+    if (method === "hostTurnStart" && store.state.sessions[params.sessionId]?.shared) connected.add(params.sessionId);
     if (method === "detachSession" && (!store.state.sessions[params.sessionId]?.shared || !store.state.sessions[params.sessionId]?.runtimeSessionId)) connected.delete(params.sessionId);
     if (["attachSession", "reattachSession", "detachSession"].includes(method)) for (const listener of listeners) listener();
     if (["attachSession", "reattachSession", "reconcileSession", "hostTurnEnd"].includes(method)) void flushDeliveries();
