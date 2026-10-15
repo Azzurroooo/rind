@@ -437,3 +437,32 @@ test("reconcileSession settles completed turns without false Unconfirmed and res
   f.starts[1].finish({ content: "Done" });
 });
 
+test("reconcileSession skips state commits when status is unchanged or no active run exists, and heals stale direct unknown runs", async t => {
+  const f = await fixture(t);
+  const direct = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id, runtimeSessionId: "r-1", shared: true });
+  const seqBeforeIdle = f.store.state.seq;
+  await f.call("reconcileSession", { sessionId: direct.id, connected: true, active: false });
+  assert.equal(f.store.state.seq, seqBeforeIdle, "idle session reconcile short-circuits without committing state");
+  assert.equal(f.service.isConnected(direct.id), true);
+
+  const run = await f.call("hostTurnStart", { sessionId: direct.id, runtimeSessionId: "r-1" });
+  const observedAt = f.store.state.runs[run.id].lastObservedAt;
+  const seqRunning = f.store.state.seq;
+  await f.call("reconcileSession", { sessionId: direct.id, connected: true, active: true, needsInput: false, outcome: "running" });
+  assert.equal(f.store.state.seq, seqRunning, "unchanged running state does not write events.jsonl");
+  assert.equal(f.store.state.runs[run.id].lastObservedAt, observedAt);
+
+  // Stale unknown direct run heals when host reports session is idle and connected, or when same agent starts a new turn.
+  await f.service.recover();
+  assert.equal(f.store.state.runs[run.id].status, "unknown");
+  const nextDirect = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id, runtimeSessionId: "r-2", shared: true });
+  const run2 = await f.call("hostTurnStart", { sessionId: nextDirect.id, runtimeSessionId: "r-2" });
+  assert.equal(f.store.state.runs[run.id].status, "failed", "new turn on same agent clears stale direct unknown run");
+  assert.equal(f.store.state.runs[run2.id].status, "running");
+  await f.service.recover();
+  assert.equal(f.store.state.runs[run2.id].status, "unknown");
+  await f.call("reconcileSession", { sessionId: nextDirect.id, connected: true, active: false });
+  assert.equal(f.store.state.runs[run2.id].status, "failed", "connected idle reconcile settles direct unknown run");
+});
+
+

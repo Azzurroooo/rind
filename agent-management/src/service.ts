@@ -768,7 +768,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           if (existing) {
             requireValue(existing.agentId === agent.id && existing.teamId === p.teamId, "SESSION_SCOPE_CONFLICT", "This conversation belongs to a different team or member.");
             if (p.shared && !existing.shared) {
-              requireValue(!Object.values(state.runs).some(r => r.sessionId === existing.id && activeRun(r)), "SESSION_PRIVATE_HOST", "This session is running in a private Worker. Finish it before moving to the shared Runtime.");
+              requireValue(!Object.values(state.runs).some(r => r.sessionId === existing.id && ["starting", "running"].includes(r.status)), "SESSION_PRIVATE_HOST", "This session is running in a private Worker. Finish it before moving to the shared Runtime.");
+              for (const run of Object.values(state.runs)) if (run.sessionId === existing.id && !run.taskId && !run.delegationId && run.status === "unknown") run.status = "failed";
               existing.shared = true;
             }
             return existing;
@@ -806,6 +807,9 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         requireValue(session.runtimeSessionId === "" || session.runtimeSessionId === p.runtimeSessionId, "SESSION_MISMATCH", "Runtime session does not match its host credential.");
         session.runtimeSessionId = p.runtimeSessionId;
         if (session.teamId) requireMember(state, session.teamId, session.agentId);
+        for (const r of Object.values(state.runs)) {
+          if (r.sessionId !== session.id && !r.taskId && !r.delegationId && r.status === "unknown" && state.sessions[r.sessionId]?.agentId === session.agentId) r.status = "failed";
+        }
         const run = Object.values(state.runs).find(r => r.sessionId === session.id && activeRun(r)) || newRun(state, session.id);
         run.status = "running"; run.needsInput = false; run.lastObservedAt = new Date().toISOString();
         return run;
@@ -840,9 +844,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       case "reconcileSession": {
         userOnly(actor); const session = ownSession(state, actor, p.sessionId);
         for (const run of Object.values(state.runs)) if (run.sessionId === session.id && activeRun(run)) {
+          const prevStatus = run.status, prevNeedsInput = run.needsInput;
           if (p.active) { run.status = "running"; run.needsInput = !!p.needsInput; }
-          else if (!run.taskId && !run.delegationId && ["completed", "failed", "cancelled"].includes(p.outcome)) {
-            run.status = p.outcome === "completed" ? "succeeded" : p.outcome;
+          else if (!run.taskId && !run.delegationId && (["completed", "failed", "cancelled"].includes(p.outcome) || p.connected || p.missing)) {
+            run.status = p.outcome === "completed" ? "succeeded" : p.outcome === "cancelled" ? "cancelled" : "failed";
+            run.needsInput = false;
             const children = sessionDelegations(state, session.id);
             if (!children.some(awaitingDelegation)) {
               returnDelegations(state, children, text => { (state.deliveries[session.id] ||= { texts: [] }).texts.push(text); });
@@ -878,7 +884,9 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
               else if (task.status !== "blocked") { task.status = "needs_attention"; task.error = "Execution finished while management was disconnected. Inspect the session before retrying."; }
             }
           }
-          run.lastObservedAt = new Date().toISOString();
+          if (run.status !== prevStatus || run.needsInput !== prevNeedsInput) {
+            run.lastObservedAt = new Date().toISOString();
+          }
         }
         return session;
       }
@@ -978,6 +986,18 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     requireValue((actor.kind === "agent") === MEMBER_OPERATIONS.has(method), "FORBIDDEN", actor.kind === "agent" ? "Members work through delegate and report." : "delegate and report belong to team members.");
     if (reads.has(method)) return operate(store.state, actor, method, params);
     const requestId = text(params.requestId, "Request ID", 200);
+    if (method === "reconcileSession") {
+      userOnly(actor);
+      const session = ownSession(store.state, actor, params.sessionId);
+      const hasActiveRun = Object.values(store.state.runs).some(r => r.sessionId === session.id && activeRun(r));
+      if (!hasActiveRun) {
+        const wasConnected = connected.has(session.id);
+        if (params.connected) connected.add(session.id); else connected.delete(session.id);
+        if (wasConnected !== connected.has(session.id)) for (const listener of listeners) listener();
+        if (params.connected) void flushDeliveries();
+        return session;
+      }
+    }
     const key = (actor.kind === "user" ? "user" : actor.kind + "/" + actor.sessionId) + "/" + method + "/" + requestId;
     const input = JSON.stringify(params);
     // Host observations restate facts and are safe to repeat, so they keep no receipt.
@@ -1015,7 +1035,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         }
       }
     }
-    if (method === "reconcileSession") { if (params.connected) connected.add(params.sessionId); else connected.delete(params.sessionId); for (const listener of listeners) listener(); }
+    if (method === "reconcileSession") {
+      const wasConnected = connected.has(params.sessionId);
+      if (params.connected) connected.add(params.sessionId); else connected.delete(params.sessionId);
+      if (wasConnected !== connected.has(params.sessionId)) for (const listener of listeners) listener();
+    }
     if (method === "attachSession" || method === "reattachSession") connected.add((result as Session).id);
     if (method === "hostTurnStart" && store.state.sessions[params.sessionId]?.shared) connected.add(params.sessionId);
     if (method === "detachSession" && (!store.state.sessions[params.sessionId]?.shared || !store.state.sessions[params.sessionId]?.runtimeSessionId)) connected.delete(params.sessionId);

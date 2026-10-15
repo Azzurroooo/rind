@@ -33,7 +33,9 @@ export function projectionIndex(state: State, connected: Set<string>, live: Map<
     const session = state.sessions[run.sessionId];
     const workspace = activeRun(run) && state.agents[session?.agentId]?.canonicalWorkspace;
     if (workspace && (!reservedWorkspaces.has(workspace) || run.status === "unknown")) reservedWorkspaces.set(workspace, run);
-    if (run.status === "unknown") {
+    const liveSession = session?.runtimeSessionId ? live.get(session.runtimeSessionId) : undefined;
+    const liveActive = liveSession?.turn === "running" || liveSession?.turn === "question" || runningJob(liveSession);
+    if (run.status === "unknown" && !liveActive) {
       const task = run.taskId ? state.tasks[run.taskId] : undefined;
       const origin = run.delegationId ? state.delegations?.[run.delegationId]?.originSessionId : undefined;
       const teamId = task?.teamId || session?.teamId || (origin ? state.sessions[origin]?.teamId : undefined);
@@ -76,11 +78,11 @@ export function memberStatus(index: ProjectionIndex, agentId: string, teamId: st
   const runs = sessions.flatMap(s => index.runsBySession.get(s.id) || []);
   const lives = sessions.map(s => index.live.get(s.runtimeSessionId));
   const turns = lives.map(live => live?.turn);
-  if (index.unknownByMember.has(key)) return "Unconfirmed";
   if (turns.includes("question") || runs.some(r => r.status === "running" && r.needsInput)) return "Needs input";
   if (turns.includes("running")) return "Working";
   if (lives.some(runningJob)) return "Running job";
   if (runs.some(r => ["starting", "running"].includes(r.status))) return "Working";
+  if (index.unknownByMember.has(key)) return "Unconfirmed";
   const tasks = index.tasksByMember.get(key) || [];
   const delegations = index.delegationsByMember.get(key) || [];
   if (tasks.some(t => t.status === "needs_attention" || (t.status === "blocked" && t.blockedOn?.responder === "user"))) return "Needs input";
@@ -119,10 +121,10 @@ export function sessionStatus(index: ProjectionIndex, sessionId: string) {
   const ownDelegationId = last?.delegationId || session?.delegationId;
   const ownTaskId = !ownDelegationId ? last?.taskId : undefined;
   const live = session && index.live.get(session.runtimeSessionId);
-  const status = active?.status === "unknown" && !active.delegationId ? "Unconfirmed"
-    : live?.turn === "question" || active?.needsInput ? "Needs input"
+  const status = live?.turn === "question" || active?.needsInput ? "Needs input"
     : live?.turn === "running" ? "Working"
     : runningJob(live) ? "Running job"
+    : active?.status === "unknown" && !active.delegationId ? "Unconfirmed"
     : active && active.status !== "unknown" ? "Working"
     : (ownDelegationId && index.state.delegations[ownDelegationId]?.status === "waiting") || waitingOnDelegation(index, sessionId, ownTaskId) ? "Delegated"
     : session && isOpen(index, session) ? "Open" : "Idle";

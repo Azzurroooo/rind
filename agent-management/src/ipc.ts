@@ -47,17 +47,28 @@ export async function startServer(options: { home?: string; python?: string; rep
     const manager = agent.canonicalWorkspace === await realManager;
     return toolConfig({ kind: manager ? "manager" : "agent", sessionId: session.id });
   }
+  const reconciling = new Map<string, Promise<void>>();
   async function reconcile(session: any) {
     if (!runtime || !session.runtimeSessionId || !session.shared) return;
-    try {
-      const externalTools = await sessionToolsFor(session);
-      const replay = await runtime.request("session/replay", { session_id: session.runtimeSessionId, ...(externalTools ? { external_tools: externalTools } : {}) });
-      await service.request({ kind: "user" }, "reconcileSession", { requestId: "observe-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: replay.hosted === true,
-        active: replay.live_turn?.status === "running" || (replay.background_wait?.count || 0) > 0, needsInput: !!replay.live_turn?.question,
-        outcome: replay.live_turn?.status || replay.turn_state?.status });
-    } catch {
-      if (!closing) await service.request({ kind: "user" }, "reconcileSession", { requestId: "missing-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false }).catch(() => {});
-    }
+    if (reconciling.has(session.id)) return reconciling.get(session.id);
+    const work = (async () => {
+      try {
+        const externalTools = await sessionToolsFor(session);
+        const replay = await runtime!.request("session/replay", { session_id: session.runtimeSessionId, end: 0, ...(externalTools ? { external_tools: externalTools } : {}) });
+        await service.request({ kind: "user" }, "reconcileSession", { requestId: "observe-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: replay.hosted === true,
+          active: replay.live_turn?.status === "running" || (replay.background_wait?.count || 0) > 0, needsInput: !!replay.live_turn?.question,
+          outcome: replay.live_turn?.status || replay.turn_state?.status });
+      } catch (error) {
+        const missing = (error as { code?: string })?.code === "SessionNotFound";
+        if (!closing && (!runtime || missing)) {
+          await service.request({ kind: "user" }, "reconcileSession", { requestId: "missing-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false, ...(missing ? { missing: true } : {}) }).catch(() => {});
+        }
+      } finally {
+        reconciling.delete(session.id);
+      }
+    })();
+    reconciling.set(session.id, work);
+    return work;
   }
   // start: false only reattaches to a running host and never spawns one.
   // start: true may spawn a host; start: false only attaches to a running one.
@@ -75,24 +86,26 @@ export async function startServer(options: { home?: string; python?: string; rep
         if (message?.kind === "runtime" && message.type === "sessions_changed") { service.setLive(message.sessions || []); return; }
         if (message.event?.type === "folder_defaults_changed") { service.folderDefaultsChanged(); return; }
         if (message.event?.type === "wait_released" || message.event?.type === "turn_cancelled") { service.releaseWait(message.session_id); if (message.event?.type === "wait_released") return; }
-        if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "task_updated", "background_wait_changed"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
+        if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "background_wait_changed"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
         const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === message.session_id);
         if (session) void reconcile(session);
       },
       onDisconnect() {
         runtime = undefined;
         service.setLive([]);
-        if (closing) return;
-        for (const session of Object.values(store.state.sessions).filter(s => s.shared)) void service.request({ kind: "user" }, "reconcileSession", { requestId: "disconnect-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false }).catch(() => {});
-        void reattach();
+        if (!closing) void reattach();
       },
     }).then(async value => {
       if (closing) { value.close(); throw new Error("Agents management is closing."); }
       if (runtime) { value.close(); return runtime; }
       runtime = value; await value.request("runtime/observe");
       // A host from before the live table does not know runtime/sessions.
-      service.setLive((await value.request("runtime/sessions").catch(() => ({ sessions: [] }))).sessions || []);
-      await Promise.all(Object.values(store.state.sessions).map(reconcile));
+      const liveSessions = (await value.request("runtime/sessions").catch(() => ({ sessions: [] }))).sessions || [];
+      service.setLive(liveSessions);
+      const liveIds = new Set(liveSessions.map((s: any) => s.id));
+      const activeSessionIds = new Set(Object.values(store.state.runs).filter(activeRun).map(r => r.sessionId));
+      const targets = Object.values(store.state.sessions).filter(s => s.shared && s.runtimeSessionId && (liveIds.has(s.runtimeSessionId) || activeSessionIds.has(s.id) || store.state.deliveries[s.id]?.texts.length));
+      await Promise.all(targets.map(reconcile));
       return value;
     });
   }
@@ -117,6 +130,11 @@ export async function startServer(options: { home?: string; python?: string; rep
       await new Promise(resolve => setTimeout(resolve, 250));
       if (closing || runtime) return;
       try { await executionHost(false); return; } catch {}
+    }
+    if (closing || runtime) return;
+    const activeSessionIds = new Set(Object.values(store.state.runs).filter(activeRun).map(r => r.sessionId));
+    for (const session of Object.values(store.state.sessions).filter(s => s.shared && (activeSessionIds.has(s.id) || service.isConnected(s.id)))) {
+      void service.request({ kind: "user" }, "reconcileSession", { requestId: "disconnect-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false }).catch(() => {});
     }
   }
   const bridge = fileURLToPath(new URL("./bridge.js", import.meta.url));
@@ -359,8 +377,8 @@ export async function startServer(options: { home?: string; python?: string; rep
     };
     service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig, folderDefaults, deliver });
     await service.recover();
+    if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) await executionHost(false).catch(() => {});
     readyResolve!();
-    if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) void executionHost().catch(() => {});
   } catch (error) { readyReject!(error); for (const socket of sockets) socket.destroy(); server.close(); await releaseRecord(); throw error; }
   let closed: Promise<void> | undefined;
   function close() {

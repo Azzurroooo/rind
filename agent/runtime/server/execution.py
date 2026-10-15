@@ -107,13 +107,19 @@ class ExecutionCoordinator:
         options = (external_tool, enable_user_question)
         async with self._lock:
             previous = self._session_options.get(clean)
-            if previous == options or (previous and previous[0] == external_tool and clean in self._active):
+            if previous == options:
                 return
-            if previous and previous[0] and external_tool and clean in self._active and replace(previous[0], instructions=external_tool.instructions) == external_tool:
-                return
+            if previous and previous[0] and external_tool:
+                merged = replace(external_tool, instructions=external_tool.instructions or previous[0].instructions)
+                if replace(previous[0], env=merged.env, lifecycle=merged.lifecycle, instructions=merged.instructions) == merged:
+                    self._session_options[clean] = (merged, previous[1] if clean in self._active or clean in self._starting else enable_user_question)
+                    return
             if clean in self._active or clean in self._starting:
                 raise ValueError("Cannot change a running session's execution configuration.")
             self._session_options[clean] = options
+
+    def user_question_enabled(self, session_id: str) -> bool:
+        return self._session_options.get(session_id, (self._external_tool, self._enable_user_question))[1]
 
     def external_tool(self, session_id: str):
         return self._session_options.get(session_id, (self._external_tool, self._enable_user_question))[0]
@@ -169,9 +175,6 @@ class ExecutionCoordinator:
         if self._closed or session_id in self._suppressed or session_id in self._closed_sessions:
             return None
         records = await self._task_notifications.store.relevant(session_id)
-        goal = await self._repository.get_goal(session_id) if self._enable_goal else None
-        if goal and goal.get("status") in {"paused", "blocked", "budget_exhausted"}:
-            return None
         scope = self._scopes.get(session_id)
         tasks = [record for record in records.values()
                  if record.get("notify") == "on_exit" and record.get("status") == "running"
@@ -179,6 +182,9 @@ class ExecutionCoordinator:
                  and record.get("worker_instance_id") == self._shell_tools.supervisor.journal.worker_instance_id
                  and (scope is None or record.get("request_id") == scope.request_id)]
         if not tasks:
+            return None
+        goal = await self._repository.get_goal(session_id) if self._enable_goal else None
+        if goal and goal.get("status") in {"paused", "blocked", "budget_exhausted"}:
             return None
         # What runs, so a status can name it ("Running job · npm test"); oldest first.
         ordered = sorted(tasks, key=lambda record: record["started_at"])

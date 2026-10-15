@@ -268,6 +268,14 @@ class SessionService:
 
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None, tail: int | None = None) -> dict[str, Any]:
         info = await self.info(session_id)
+        if end == 0 and not tail:
+            return {
+                "messages": [],
+                "message_total": int(info.get("message_count") or 0),
+                "turn_state": info.get("turn_state") or {},
+                "session_id": session_id,
+                "model": str(info.get("model") or ""),
+            }
         store = await self._open_store_from_info(
             session_id,
             info,
@@ -350,8 +358,7 @@ class SessionService:
         return store
 
     async def get_goal(self, session_id: str) -> dict[str, str] | None:
-        store = await self.open_store(session_id, persist_system_prompt=False)
-        return await store.get_goal()
+        return (await self.info(session_id)).get("goal")
 
     async def set_goal(self, session_id: str, objective: str) -> dict[str, str]:
         store = await self.open_store(session_id)

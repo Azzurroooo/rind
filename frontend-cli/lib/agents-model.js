@@ -216,7 +216,7 @@ const liveById = (live, id, sessions = []) => {
   const item = live.find(entry => entry.id === id);
   const status = item ? liveStatus(item) : "Idle";
   const registered = sessions.find(entry => entry.runtimeSessionId === id)?.status;
-  return registered && statusMeta(registered).rank < statusMeta(status).rank ? registered : status;
+  return registered && !(registered === "Unconfirmed" && status !== "Idle") && statusMeta(registered).rank < statusMeta(status).rank ? registered : status;
 };
 export function managerRows(history = [], { query = "", now = Date.now(), live = [], sessions = [] } = {}) {
   return [{ id: "new:manager", kind: "new-session", title: "New conversation with Manager", manager: true },
@@ -363,7 +363,7 @@ export function independentSessions(snapshot, groups = [], managerWorkspace = ""
     let found;
     for (const group of byWorkspace.values()) found ||= group.sessions.find(s => s.runtimeSessionId === session.runtimeSessionId);
     if (found) {
-      if (session.status && statusMeta(session.status).rank < statusMeta(found.status).rank) found.status = session.status;
+      if (session.status && !(session.status === "Unconfirmed" && found.status !== "Idle") && statusMeta(session.status).rank < statusMeta(found.status).rank) found.status = session.status;
       found.updatedAt = later(found.updatedAt, session.lastActivity);
       continue;
     }
