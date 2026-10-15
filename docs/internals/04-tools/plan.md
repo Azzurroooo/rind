@@ -14,7 +14,7 @@ flowchart LR
     E --> UI["Surface plan view"]
 ~~~
 
-Each item contains step and status; the statuses are pending, in_progress, completed, and cancelled, with at most one in_progress. Array order is the display and execution priority; an empty list clears the plan. File writes use a temporary file in the same directory and a replacement, and require the session to already be persisted.
+Each item contains step and status; the statuses are pending, in_progress, completed, and cancelled (prompt guidance recommends keeping a single active step in_progress, while runtime validation accepts multiple in_progress steps for parallel progress). Array order is the display and execution priority; an empty list clears the plan. File writes use a temporary file in the same directory and a replacement, and require the session to already be persisted.
 
 During compaction, CompactionService reads a bounded summary of the current plan.json and attaches it to the handoff, so the model does not depend solely on an update_plan call from much earlier in the conversation. A plan describes "what still needs to be done" and should not carry factual research notes.
 

@@ -15,7 +15,6 @@ def normalize_plan(plan: Any) -> list[dict[str, str]]:
         raise ValueError("plan must be an array.")
 
     normalized: list[dict[str, str]] = []
-    in_progress_count = 0
     for index, item in enumerate(plan):
         if not isinstance(item, dict):
             raise ValueError(f"Plan item at index {index} must be an object.")
@@ -31,10 +30,6 @@ def normalize_plan(plan: Any) -> list[dict[str, str]]:
                 f"Plan item at index {index} has invalid status; "
                 f"expected one of {', '.join(PLAN_STEP_STATUSES)}."
             )
-        if status == "in_progress":
-            in_progress_count += 1
-            if in_progress_count > 1:
-                raise ValueError("Plan may contain at most one in_progress item.")
 
         normalized.append({"step": step.strip(), "status": status})
 

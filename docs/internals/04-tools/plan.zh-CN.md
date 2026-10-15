@@ -14,7 +14,7 @@ flowchart LR
     E --> UI["Surface 计划视图"]
 ~~~
 
-每项包含 step 和 status；状态是 pending、in_progress、completed、cancelled，最多一个 in_progress。数组顺序就是显示与执行优先级；空列表清空计划。文件写入使用同目录临时文件和替换，要求会话已经持久化。
+每项包含 step 和 status；状态是 pending、in_progress、completed、cancelled（提示词建议一次保持单个焦点步骤为 in_progress，运行时校验允许多个 in_progress 以支持并行进度）。数组顺序就是显示与执行优先级；空列表清空计划。文件写入使用同目录临时文件和替换，要求会话已经持久化。
 
 压缩时，CompactionService 读取当前 plan.json 的有界摘要并附到 handoff，因此模型不只依赖对话中很早以前的 update_plan 调用。计划描述“还要做什么”，不应承载事实研究笔记。
 

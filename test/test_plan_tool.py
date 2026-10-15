@@ -75,7 +75,10 @@ def test_update_plan_writes_v2_and_replaces_previous_list(update_plan, session_b
     assert json.loads(plan_file.read_text(encoding="utf-8"))["plan"] == second
 
 
-def test_update_plan_allows_cancelled_and_empty_plan(update_plan, session_base) -> None:
+def test_update_plan_allows_cancelled_multiple_in_progress_and_empty_plan(update_plan, session_base) -> None:
+    parallel = [{"step": "one", "status": "in_progress"}, {"step": "two", "status": "in_progress"}]
+    assert payload(update_plan(parallel))["ok"] is True
+    assert json.loads((session_base / "plan.json").read_text(encoding="utf-8"))["plan"] == parallel
     assert payload(update_plan([{"step": "obsolete", "status": "cancelled"}]))["ok"] is True
     assert payload(update_plan([]))["ok"] is True
 
@@ -92,7 +95,6 @@ def test_update_plan_allows_cancelled_and_empty_plan(update_plan, session_base) 
         [{"step": "x", "status": "pending", "extra": "no"}],
         [{"step": "x"}],
         ["x"],
-        [{"step": "one", "status": "in_progress"}, {"step": "two", "status": "in_progress"}],
     ],
 )
 def test_update_plan_rejects_invalid_lists(plan, update_plan) -> None:
