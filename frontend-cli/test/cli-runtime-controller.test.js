@@ -614,3 +614,53 @@ test("switching sessions replaces the conversation on screen; the first restore 
   await harness.controller.restoreSession("session-b", { switchSession: true });
   assert.equal(harness.cleared(), 1);
 });
+
+test("/history in a new-window conversation reports whole conversation shown after first message", async () => {
+  const harness = createHarness();
+  await harness.controller.ensureRuntime();
+  harness.state.session.info = { session_id: "", model: "model-a" };
+  harness.state.display.history = null;
+  await harness.controller.runHistoryLoader();
+  assert.equal(harness.logs.at(-1), "/history needs a conversation. Send your first message to start one.");
+
+  harness.state.session.info = { session_id: "created-1", model: "model-a" };
+  await harness.controller.runHistoryLoader();
+  assert.equal(harness.logs.at(-1), "The whole conversation is shown.");
+});
+
+test("/model set before the first message updates the window model and carries it to session/create", async () => {
+  const harness = createHarness();
+  await harness.controller.ensureRuntime();
+  harness.state.session.info = { session_id: "", provider: "openai", model: "model-a" };
+  await harness.controller.runModelCommand("invalid");
+  assert.equal(harness.logs.at(-1), "Usage: /model or /model set <model>");
+
+  await harness.controller.runModelCommand("set model-b");
+  assert.equal(harness.state.session.info.model, "model-b");
+  assert.match(harness.logs.at(-1), /Session model updated/);
+});
+
+test("command controller reports usage for local commands with extra arguments instead of unknown command", async () => {
+  const { createCommandController } = await import("../lib/command-controller.js");
+  const logs = [];
+  const backendCalls = [];
+  const controller = createCommandController({
+    request: async (method, params) => { backendCalls.push({ method, params }); return {}; },
+    turn: { submit() {} },
+    input: { isTerminal: true, runHistoryLoader: async () => {}, runForkSelector: async () => {} },
+    output: { log: (value) => logs.push(typeof value === "function" ? value() : value) },
+  });
+
+  await controller.handle("/history extra");
+  await controller.handle("/fork extra");
+  await controller.handle("/exit extra");
+  await controller.handle("/login p1 p2");
+  assert.deepEqual(logs, [
+    "Usage: /history",
+    "Usage: /fork",
+    "Usage: /exit",
+    "Usage: /login [provider]",
+  ]);
+  assert.equal(backendCalls.length, 0);
+});
+

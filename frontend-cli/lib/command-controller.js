@@ -25,13 +25,14 @@ export function createCommandController({
     if (!String(text || "").startsWith("/")) {
       return false;
     }
-    if (isBareThemeCommand(text) && input.isTerminal && input.runThemeSelector) {
+    const { name, arg } = parseSlashInput(text);
+    if (name === "theme" && !arg && input.isTerminal && input.runThemeSelector) {
       await input.runThemeSelector();
       return true;
     }
-    if (isTourCommand(text)) {
+    if (name === "tour") {
       if (input.isTerminal && input.runTour) {
-        await input.runTour(tourArgument(text));
+        await input.runTour(arg);
       } else {
         output.log?.("/tour requires an interactive terminal.");
       }
@@ -47,65 +48,81 @@ export function createCommandController({
       await input.runGoalCommand?.(goal);
       return true;
     }
-    if (isLocalCommand(text, "exit") || isLocalCommand(text, "quit")) {
+    if (name === "exit" || name === "quit") {
+      if (arg) {
+        output.log?.(`Usage: /${name}`);
+        return true;
+      }
       output.log?.("Goodbye.");
       await output.shutdown?.();
       output.exit?.();
       return true;
     }
-    const auth = parseAuthCommand(text);
-    if (auth) {
-      await (auth.action === "login" ? input.runLogin : input.runLogout)?.(auth.providerId);
+    if (name === "login" || name === "logout") {
+      if (/\s/.test(arg)) {
+        output.log?.(`Usage: /${name} [provider]`);
+        return true;
+      }
+      await (name === "login" ? input.runLogin : input.runLogout)?.(arg);
       return true;
     }
-    await runSlashCommand(text);
+    await runSlashCommand(text, name, arg);
     return true;
   }
 
-  async function runSlashCommand(text) {
-    if (isRenameCommand(text) && input.runRename) {
-      await applyResult(await input.runRename(renameArgument(text)));
+  async function runSlashCommand(text, name, arg) {
+    if (name === "rename" && input.runRename) {
+      await applyResult(await input.runRename(arg));
       return;
     }
-    if (isBareModelCommand(text) && input.isTerminal && input.runModelSelector) {
-      await input.runModelSelector();
-      return;
+    if (name === "model") {
+      if (!arg && input.isTerminal && input.runModelSelector) {
+        await input.runModelSelector();
+        return;
+      }
+      if (input.runModelCommand) {
+        await input.runModelCommand(arg);
+        return;
+      }
     }
-    if (isBareImportCommand(text) && input.isTerminal && input.runImportSelector) {
+    if (name === "import" && !arg && input.isTerminal && input.runImportSelector) {
       await input.runImportSelector();
       return;
     }
-    if (isEffortCommand(text)) {
-      await input.runEffortCommand?.(effortArgument(text));
+    if (name === "effort") {
+      await input.runEffortCommand?.(arg);
       return;
     }
-    if (isCompactCommand(text) && input.startCompactCommand) {
+    if (name === "compact" && !arg && input.startCompactCommand) {
       input.startCompactCommand?.();
       return;
     }
-    if (isBareSessionsCommand(text) && input.isTerminal) {
+    if (name === "sessions" && !arg && input.isTerminal) {
       await input.runSessionsSelector?.();
       return;
     }
-    if (isBareHistoryCommand(text)) {
-      if (input.isTerminal && input.runHistoryLoader) {
+    if (name === "history") {
+      if (arg) {
+        output.log?.("Usage: /history");
+      } else if (input.isTerminal && input.runHistoryLoader) {
         await input.runHistoryLoader();
       } else {
         output.log?.("/history requires an interactive terminal.");
       }
       return;
     }
-    if (isBareForkCommand(text)) {
-      if (input.isTerminal && input.runForkSelector) {
+    if (name === "fork") {
+      if (arg) {
+        output.log?.("Usage: /fork");
+      } else if (input.isTerminal && input.runForkSelector) {
         await input.runForkSelector();
       } else {
         output.log?.("/fork requires an interactive terminal.");
       }
       return;
     }
-    if (isContextCommand(text)) {
-      const argument = contextArgument(text);
-      if (argument) {
+    if (name === "context") {
+      if (arg) {
         output.log?.("Custom ranges are not supported yet; showing the last 5 days.");
       }
       if (input.isTerminal && input.runContextBoard) {
@@ -168,77 +185,15 @@ export function createCommandController({
   };
 }
 
-function parseAuthCommand(value) {
-  const match = String(value || "").trim().match(/^\/(login|logout)(?:\s+([^\s]+))?$/i);
-  if (!match) return null;
-  return { action: match[1].toLowerCase(), providerId: String(match[2] || "").trim() };
+function parseSlashInput(value) {
+  const match = String(value || "").trim().match(/^\/([^\s]*)(?:\s+([\s\S]*))?$/);
+  return {
+    name: String(match?.[1] || "").toLowerCase(),
+    arg: String(match?.[2] || "").trim(),
+  };
 }
 
 function singleWord(value) {
   const text = String(value || "").trim().toLowerCase();
   return text && !/\s/.test(text) ? text : "";
-}
-
-function isRenameCommand(value) {
-  return /^\/rename(?:\s|$)/i.test(String(value || "").trim());
-}
-
-function renameArgument(value) {
-  return String(value || "").trim().replace(/^\/rename\s*/i, "");
-}
-
-function isBareModelCommand(value) {
-  return String(value || "").trim().toLowerCase() === "/model";
-}
-
-function isBareImportCommand(value) {
-  return String(value || "").trim().toLowerCase() === "/import";
-}
-
-function isEffortCommand(value) {
-  return String(value || "").trim().toLowerCase().startsWith("/effort");
-}
-
-function effortArgument(value) {
-  return String(value || "").trim().replace(/^\/effort\s*/i, "").trim();
-}
-
-function isBareThemeCommand(value) {
-  return String(value || "").trim().toLowerCase() === "/theme";
-}
-
-function isTourCommand(value) {
-  return /^\/tour\b/i.test(String(value || "").trim());
-}
-
-function tourArgument(value) {
-  return String(value || "").trim().replace(/^\/tour\b/i, "").trim();
-}
-
-function isLocalCommand(value, name) {
-  return String(value || "").trim().toLowerCase() === `/${name}`;
-}
-
-function isBareSessionsCommand(value) {
-  return String(value || "").trim().toLowerCase() === "/sessions";
-}
-
-function isBareHistoryCommand(value) {
-  return String(value || "").trim().toLowerCase() === "/history";
-}
-
-function isBareForkCommand(value) {
-  return String(value || "").trim().toLowerCase() === "/fork";
-}
-
-function isContextCommand(value) {
-  return /^\/context\b/i.test(String(value || "").trim());
-}
-
-function contextArgument(value) {
-  return String(value || "").trim().replace(/^\/context\b/i, "").trim();
-}
-
-function isCompactCommand(value) {
-  return String(value || "").trim().toLowerCase() === "/compact";
 }

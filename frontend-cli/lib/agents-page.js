@@ -221,7 +221,10 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   function connect({ start = true } = {}) {
     if (connecting || closed) return connecting;
     connecting = (async () => {
-      const options = { ...launch, onSnapshot: acceptSnapshot, onDisconnect() {
+      const options = { ...launch, onSnapshot(snapshot) {
+        acceptSnapshot(snapshot);
+        if (!view.busy && view.detail?.refresh) void view.detail.refresh().then(redraw, () => {});
+      }, onDisconnect() {
         if (closed) return;
         // After an explicit stop the services stay down until the user asks again.
         if (view.stopped) { view.connection = "stopped · r starts again"; view.service = null; redraw(); return; }
@@ -297,6 +300,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   }
   // A report declares its own keys; the footer is built from the same list.
   function showReport(title, { render, actions, refresh, back }) {
+    if (!view.busy && !view.detail) return;
     const same = view.detail?.title === title;
     view.dialog = null;
     view.detail = { title, render, actions, refresh, back, offset: same ? view.detail.offset : 0, expanded: same && view.detail.expanded,

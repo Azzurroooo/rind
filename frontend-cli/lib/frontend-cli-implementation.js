@@ -39,7 +39,7 @@ import { runSend, sendHelp } from "./send.js";
 import { configHelp, runConfig } from "./config-command.js";
 import { createWindowLog, guardStartup } from "./window-startup.js";
 import { listenIpc } from "./ipc.js";
-import { runTour } from "./tour/run-tour.js";
+import { runTour, unknownTourPageText } from "./tour/run-tour.js";
 import { createTui } from "./tui/tui.js";
 import { createTranscript } from "./tui/transcript.js";
 import { ComposerArea } from "./components/composer-area.js";
@@ -368,6 +368,7 @@ commandController = createCommandController({
     runGoalCommand: runtimeController.runGoalCommand,
     runRename: (argument) => runtimeController.runRename(argument),
     runModelSelector: runtimeController.runModelSelector,
+    runModelCommand: (argument) => runtimeController.runModelCommand(argument),
     runImportSelector: runtimeController.runImportSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
     runLogin: (providerId) => runLogin(providerId),
@@ -531,16 +532,17 @@ try {
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
   windowLog.step("runtime ready");
-  const startupInfo = { ...sessionState.info, resume_preview: "" };
+  const startupInfo = () => ({ ...sessionState.info, resume_preview: "" });
   if (management.label) logOutput(management.label);
   // A new conversation is greeted; one opened again says what it resumes.
-  const opening = (width) => sessionState.info.session_id
+  const resumed = Boolean(sessionState.info.session_id);
+  const opening = (width) => resumed
     ? resumeLineText(sessionState.info, Date.now(), width)
     : welcomeText(sessionState.info, persistedState, width);
   if (tui) {
     outputController.showStartup(startupInfo, opening);
   } else {
-    logOutput([startupText(startupInfo), opening()].filter(Boolean).join("\n\n"));
+    logOutput([startupText(startupInfo()), opening()].filter(Boolean).join("\n\n"));
   }
   // A window opened on an existing conversation shows its history; a new one has none yet.
   if (sessionState.info.session_id) { await runtimeController.restoreSession(); windowLog.step("history restored"); }
@@ -609,6 +611,11 @@ function resetContextUsage() {
 async function enterInSessionTour(pageId) {
   if (turnStateData.active || displayState.activeCompact) {
     logOutput("/tour is available between turns.");
+    return;
+  }
+  const unknown = unknownTourPageText(pageId);
+  if (unknown) {
+    logOutput(unknown);
     return;
   }
   inputController.pause();

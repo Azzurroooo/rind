@@ -28,6 +28,8 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   const toolBlocks = new Map();
   const legacyBegunTools = new Set();
   let questionBlock = null;
+  let startupBlock = null;
+  let startupKey = "";
   let turnContext = "";
   let frameTime = now();
   const runningTools = new Set();
@@ -35,6 +37,14 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   function redraw(force = false) {
     if (!terminalUi || state.runtime.status === "closing") {
       return;
+    }
+    if (startupBlock) {
+      const nextKey = startupSignature(state.session?.info);
+      if (nextKey !== startupKey) {
+        startupKey = nextKey;
+        startupBlock.invalidate();
+        transcript.changed();
+      }
     }
     frameTime = now();
     terminalUi.requestRender(force);
@@ -321,11 +331,13 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     if (!terminalUi) {
       return;
     }
-    const source = { ...info };
-    appendBlock(new DynamicBlock((width) => {
-      const rendered = [startupText(source, width), opening(width)].filter(Boolean).join("\n\n");
+    const readInfo = typeof info === "function" ? info : () => info;
+    startupKey = startupSignature(readInfo());
+    startupBlock = new DynamicBlock((width) => {
+      const rendered = [startupText(readInfo(), width), opening(width)].filter(Boolean).join("\n\n");
       return rendered ? rendered.split("\n") : [];
-    }));
+    });
+    appendBlock(startupBlock);
   }
 
   function beginTool(event) {
@@ -409,6 +421,8 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     toolBlocks.clear();
     runningTools.clear();
     questionBlock = null;
+    startupBlock = null;
+    startupKey = "";
     blockCount = 0;
   }
 
@@ -558,6 +572,10 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   };
 }
 
+
+function startupSignature(info = {}) {
+  return [info?.session_id, info?.provider, info?.model, info?.reasoning_effort, info?.workspace_root || info?.cwd].join("\0");
+}
 
 function messageText(content) {
   if (typeof content === "string") {

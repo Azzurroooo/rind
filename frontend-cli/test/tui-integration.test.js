@@ -196,6 +196,24 @@ test("log lines appear as transcript blocks with blank separation", async () => 
   harness.tui.stop();
 });
 
+test("startup banner updates in place when a new window creates its conversation", async () => {
+  const harness = createHarness({ columns: 60, rows: 14 });
+  harness.state.session.info = { model: "m1", session_id: "", version: "0.0", cwd: "/tmp" };
+  harness.tui.start();
+  harness.output.showStartup(() => ({ ...harness.state.session.info, resume_preview: "" }));
+  await settle(harness.virtual);
+  assert.match(harness.virtual.getViewport().join("\n"), /session new/);
+
+  harness.state.session.info = { ...harness.state.session.info, session_id: "s-created", model: "m2" };
+  harness.output.redraw();
+  await settle(harness.virtual);
+  const updated = harness.virtual.getViewport().join("\n");
+  assert.match(updated, /session s-created/);
+  assert.match(updated, /model m2/);
+  assert.doesNotMatch(updated, /session new/);
+  harness.tui.stop();
+});
+
 test("question status changes in place after an answer is accepted", async () => {
   const harness = createHarness({ columns: 60, rows: 14 });
   harness.tui.start();

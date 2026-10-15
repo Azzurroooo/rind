@@ -320,14 +320,14 @@ export function createCliRuntimeController({
   // The transcript shows the newest part of a long conversation; this loads the
   // previous page and rebuilds the transcript from the wider range.
   async function runHistoryLoader() {
+    if (!hasConversation()) return needsConversation("/history");
     if (state.turn.active || state.display.activeCompact) {
       log("Cannot load earlier messages while a turn is running.");
       return;
     }
     const history = state.display.history;
     if (!history?.start) {
-      if (history) log("The whole conversation is shown.");
-      else needsConversation("/history");
+      log("The whole conversation is shown.");
       return;
     }
     const sessionId = state.session.info.session_id;
@@ -559,6 +559,29 @@ export function createCliRuntimeController({
       `${state.session.info.provider} / ${state.session.info.model}`);
   }
 
+  async function runModelCommand(argument = "") {
+    if (hasConversation()) {
+      const result = await request(methods.commandExecute, { input: argument ? `/model ${argument}` : "/model" });
+      await getCommands().applyResult(result);
+      return;
+    }
+    const parts = String(argument || "").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) {
+      log(`Model: ${state.session.info.model || "unknown"}`);
+      return;
+    }
+    if (parts.length !== 2 || parts[0].toLowerCase() !== "set" || parts[1].length > 128) {
+      log(parts[0]?.toLowerCase() === "set" && parts.length === 2 ? "Usage: /model set <model>" : "Usage: /model or /model set <model>");
+      return;
+    }
+    const model = parts[1];
+    state.session.info = { ...state.session.info, model };
+    log(() => modelSetResultText({ provider_id: state.session.info.provider, model_id: model }, model));
+    await offerFolderDefault({ provider_id: state.session.info.provider, model_id: model },
+      own => own.provider === state.session.info.provider && own.model === model,
+      `${state.session.info.provider} / ${model}`);
+  }
+
   // After /model or /effort: also make the choice what new conversations in
   // this folder start with? Not asked when the folder already has it.
   // /import: before the first message the window keeps the choice; afterwards
@@ -696,6 +719,7 @@ export function createCliRuntimeController({
     printContextReport,
     startCompactCommand,
     runModelSelector,
+    runModelCommand,
     runImportSelector,
     runEffortCommand,
     currentModelEfforts,

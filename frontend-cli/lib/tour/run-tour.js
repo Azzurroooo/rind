@@ -27,6 +27,11 @@ class TourScreen extends Component {
   }
 }
 
+export function unknownTourPageText(pageId) {
+  if (!pageId || findTourPage(pageId)) return "";
+  return `Unknown tour page: ${pageId}\nAvailable pages:\n${tourPages().map((page) => `  ${page.id} — ${page.title}`).join("\n")}`;
+}
+
 // Runs the guided tour on its own TUI instance below the current terminal
 // content. Resolves once the visitor quits; returns false when startPageId
 // does not name a page (nothing is rendered in that case).
@@ -42,8 +47,9 @@ export async function runTour({
   onPageComplete = () => {},
   manageInput = true,
 } = {}) {
-  if (startPageId && !findTourPage(startPageId)) {
-    stderr.write(`Unknown tour page: ${startPageId}\nAvailable pages:\n${tourPages().map((page) => `  ${page.id} — ${page.title}`).join("\n")}\n`);
+  const unknown = unknownTourPageText(startPageId);
+  if (unknown) {
+    stderr.write(`${unknown}\n`);
     return false;
   }
   const stage = createTourStage({ version });

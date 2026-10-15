@@ -291,3 +291,26 @@ test("the Runtime closes a sign-in prompt it no longer waits for, and only that 
   assert.notEqual(state.input.session?.mode, "auth");
   actions.closeAuthPrompt("auth-1");
 });
+
+test("askEffortMenu resolves the selected effort string and echoes /effort <level>", async () => {
+  const state = createCliState();
+  const echoed = [];
+  const actions = createCliInputActions({
+    state,
+    request: async () => ({}),
+    output: { terminalUi: {}, writeUserInput: (text) => echoed.push(text), redraw() {}, writeError() {} },
+    getTurnController: () => ({}),
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    pausePrompt() {},
+    resumePrompt() {},
+    handleSigint() {},
+  });
+  const selected = actions.askEffortMenu("medium", ["low", "medium", "high", "xhigh"]);
+  await Promise.resolve();
+  actions.handleTerminalInput("\x1b[B");
+  actions.handleTerminalInput("\r");
+  assert.equal(await selected, "high");
+  assert.deepEqual(echoed, ["/effort high"]);
+});
+

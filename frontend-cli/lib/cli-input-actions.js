@@ -434,7 +434,8 @@ export function createCliInputActions({
     if (!modified && (key.name === "enter" || key.name === "return")) {
       const item = session.modelState.selectedModel();
       const model = item?.modelId || "";
-      completeTtyInput(session, item || "", Boolean(model), "", model ? `/model set ${model}` : "");
+      const echo = model ? (session.inputText === "/effort" ? `/effort ${model}` : `/model set ${model}`) : "";
+      completeTtyInput(session, item || "", Boolean(model), "", echo);
       return;
     }
     if (!modified && key.name === "escape") {
@@ -557,7 +558,7 @@ export function createCliInputActions({
   function askEffortMenu(currentEffort, levels = REASONING_EFFORTS.slice()) {
     return new Promise((resolve) => {
       const modelState = createModelMenuState(levels.slice(), currentEffort);
-      const session = { mode: "model", inputText: "/effort", modelState, resolve };
+      const session = { mode: "model", inputText: "/effort", modelState, resolve: (item) => resolve(item?.modelId || String(item || "")) };
       state.input.session = session;
       state.input.active = true;
       cancelActiveInput = () => completeTtyInput(session, "", false);
