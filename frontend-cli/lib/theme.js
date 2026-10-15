@@ -146,6 +146,21 @@ function truecolor(hex) {
   return `38;2;${(value >> 16) & 255};${(value >> 8) & 255};${value & 255}`;
 }
 
+const PALETTES = Object.fromEntries(
+  Object.entries(FLAVORS).map(([name, flavor]) => {
+    const fg = {};
+    const bg = {};
+    for (const [key, value] of Object.entries(flavor)) {
+      if (typeof value === "string" && value.startsWith("#")) {
+        const code = truecolor(value);
+        fg[key] = code;
+        bg[key] = `\x1b[${code.replace(/^38/, "48")}m`;
+      }
+    }
+    return [name, { fg, bg, accentRgb: Number.parseInt(flavor.accent.slice(1), 16) }];
+  }),
+);
+
 function wrap(code, text, force) {
   const body = String(text || "");
   if (!body || (!force && !colorEnabled())) {
@@ -164,7 +179,7 @@ function buildPainters(force) {
     bold: (text) => wrap("1", text, force),
   };
   for (const key of ROLE_KEYS) {
-    painters[key] = (text) => wrap(truecolor(FLAVORS[activeName][key]), text, force);
+    painters[key] = (text) => wrap(PALETTES[activeName].fg[key], text, force);
   }
   return painters;
 }
@@ -175,16 +190,14 @@ export const paintRaw = buildPainters(true);
 export function paintBackground(text, role = "surface") {
   const body = String(text ?? "");
   if (!colorEnabled()) return body;
-  const hex = FLAVORS[activeName][role];
-  if (!hex) return body;
-  const code = truecolor(hex).replace(/^38/, "48");
-  const background = `\x1b[${code}m`;
+  const background = PALETTES[activeName].bg[role];
+  if (!background) return body;
   return background + body.replace(/\x1b\[(?:0)?m/g, reset => reset + background) + "\x1b[0m";
 }
 
 export function breathingAccent(text, elapsedMs) {
   const intensity = 0.78 + 0.22 * (1 - Math.cos(2 * Math.PI * elapsedMs / 4200)) / 2;
-  const color = Number.parseInt(FLAVORS[activeName].accent.slice(1), 16);
+  const color = PALETTES[activeName].accentRgb;
   const channels = [16, 8, 0].map((shift) => Math.round(((color >> shift) & 255) * intensity));
   return wrap(`38;2;${channels.join(";")}`, text, false);
 }
@@ -226,9 +239,10 @@ export function themeOptions() {
 const SWATCH_ORDER = ["danger", "code", "warning", "success", "fence", "path", "accent", "notice"];
 
 export function flavorSwatch(name) {
-  const flavor = FLAVORS[String(name || "").trim().toLowerCase()];
-  if (!flavor) {
+  const key = String(name || "").trim().toLowerCase();
+  const palette = PALETTES[key];
+  if (!palette) {
     return "";
   }
-  return SWATCH_ORDER.map((role) => wrap(truecolor(flavor[role]), "█", true)).join("");
+  return SWATCH_ORDER.map((role) => wrap(palette.fg[role], "█", true)).join("");
 }
