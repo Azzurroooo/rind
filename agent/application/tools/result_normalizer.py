@@ -183,7 +183,7 @@ class ToolResultNormalizer:
         if status == "running":
             notes.append(
                 f"Command is still running as task {data.get('task_id')}. Continue it with "
-                f"task_control (action read, task_id {data['task_id']}, cursor {data.get('next_cursor')}), or rely on "
+                f"task_control (action read, task_id {data['task_id']}, cursor {data.get('next_cursor')}), or end your turn and rely on "
                 "notify=on_exit to deliver completion."
             )
         if meta.get("truncated"):
