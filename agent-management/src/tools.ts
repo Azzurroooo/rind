@@ -13,12 +13,12 @@ const MANAGEMENT: ToolDeclaration = {
 
 const DELEGATE: ToolDeclaration = {
   name: "delegate",
-  description: "Coordinate work with your direct reports. Use one form: {to, brief} assigns work to a direct report in the background; {new, brief} adds a direct report (with new.branch for a Git worktree on a new branch of your repository or new.repository, otherwise an empty workspace) and assigns it the work in the background; {task, message, interrupt?} steers a running task in place (or with interrupt: true, stops its current run and restarts with the new instructions) or sends finished work back with more to do; {wait: true, task?, timeoutMs?} waits for delegated work (a specific task or all pending work) to settle and returns its results in this turn; {task, cancel: true} cancels delegated work; {retire} removes a direct report you added once its work is finished and its worktree has no uncommitted changes (its branch is kept). Delegated work starts immediately: you may continue doing other work in parallel, call {wait: true} to collect results in this turn, or end your turn and receive the results automatically when they settle.",
+  description: "Coordinate work with your direct reports. Use one form: {to, brief} assigns work to a direct report (by ID or name) in the background; {new, brief} adds a direct report (with new.branch for a Git worktree on a new branch of your repository or new.repository, otherwise an empty workspace) and assigns it the work in the background; {task, message, interrupt?} steers a running task in place (or with interrupt: true, stops its current run and restarts with the new instructions) or sends finished work back with more to do; {wait: true, task?, timeoutMs?} waits for delegated work (a specific task or all pending work) to settle and returns its results in this turn; {task, cancel: true} cancels delegated work; {retire} removes a direct report you added once its work is finished and its worktree has no uncommitted changes (its branch is kept). Delegated work starts immediately: you may continue doing other work in parallel, call {wait: true} to collect results in this turn, or end your turn and receive the results automatically when they settle.",
   parameters: {
     type: "object",
     properties: {
-      to: { type: "string", description: "Agent ID of a direct report." },
-      brief: { type: "string", description: "What to do and what to deliver." },
+      to: { type: "string", description: "Direct report agent ID or name (for new work with {to, brief}; omit when using {task})." },
+      brief: { type: "string", description: "What to do and what to deliver (for {to, brief} or {new, brief})." },
       new: {
         type: "object", description: "The direct report to add.",
         properties: {
@@ -30,13 +30,13 @@ const DELEGATE: ToolDeclaration = {
         },
         required: ["name"],
       },
-      task: { type: "string", description: "ID of work you delegated." },
-      message: { type: "string", description: "Instructions to steer a running task or continue a finished one." },
+      task: { type: "string", description: "ID of work you delegated (use with {task, message}, {task, cancel: true}, or {wait: true, task}; do not combine with `to`)." },
+      message: { type: "string", description: "Instructions to steer a running task or continue a finished one (with {task, message})." },
       interrupt: { type: "boolean", description: "When true with {task, message}, stop the current run and restart with the new instructions." },
       wait: { type: "boolean", description: "Wait for delegated work (or a specific task) to settle and return results in this turn." },
-      timeoutMs: { type: "number", description: "Maximum wait time in milliseconds for {wait: true} (1000..60000, default 30000)." },
+      timeoutMs: { type: "number", minimum: 1000, maximum: 60000, description: "Maximum wait time in milliseconds for {wait: true} (1000..60000, default 30000)." },
       cancel: { type: "boolean" },
-      retire: { type: "string", description: "Agent ID of a direct report you added." },
+      retire: { type: "string", description: "Agent ID or name of a direct report you added." },
     },
   },
 };
@@ -50,7 +50,7 @@ const REPORT: ToolDeclaration = {
       outcome: { type: "string", description: "One line: what was achieved." },
       summary: { type: "string" },
       evidence: { type: "array", items: { type: "string" }, description: "How the result was checked." },
-      artifacts: { type: "array", items: { type: "string" }, description: "Files in your workspace to hand over." },
+      artifacts: { type: "array", items: { type: "string" }, description: "Files inside your own workspace directory to hand over (omit files outside your workspace)." },
       nextAction: { type: "string", description: "What the user should do next, if anything." },
       blocked: { type: "object", properties: { responder: { type: "string" }, action: { type: "string" } }, required: ["action"] },
     },

@@ -132,8 +132,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       const liveIds = new Set(liveSessions.map((s: any) => s.id));
       const activeSessionIds = new Set(Object.values(store.state.runs).filter(activeRun).map(r => r.sessionId));
       const targets = Object.values(store.state.sessions).filter(s => s.shared && s.runtimeSessionId && (liveIds.has(s.runtimeSessionId) || activeSessionIds.has(s.id) || store.state.deliveries[s.id]?.texts.length));
-      await Promise.all(targets.map(reconcile));
-      if (closing || runtime !== value) { value.close(); throw new Error("Runtime disconnected."); }
+      void Promise.all(targets.map(reconcile));
       return value;
     });
   }
@@ -189,7 +188,7 @@ export async function startServer(options: { home?: string; python?: string; rep
   }
   // A member's model lives with its folder in the Rind runtime, which also checks it can run.
   async function folderDefaults(method: "get" | "set" | "unset" | "resolve" | "models", params: Record<string, unknown> = {}) {
-    const host = await executionHost();
+    const host = await within(executionHost(), RUNTIME_START_MS, "The shared Runtime did not start within " + RUNTIME_START_MS / 1000 + "s.");
     if (method === "models") return (await host.request("model/list", {})).models;
     return host.request("rind/folder_defaults/" + method, params);
   }
@@ -413,7 +412,10 @@ export async function startServer(options: { home?: string; python?: string; rep
     };
     service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig, folderDefaults, deliver });
     await service.recover();
-    if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) await executionHost(false).catch(() => {});
+    if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) {
+      await executionHost(false).catch(() => {});
+      await Promise.allSettled(reconciling.values());
+    }
     readyResolve!();
   } catch (error) { readyReject!(error); for (const socket of sockets) socket.destroy(); server.close(); await releaseRecord(); throw error; }
   let closed: Promise<void> | undefined;
@@ -430,6 +432,7 @@ export async function startServer(options: { home?: string; python?: string; rep
         await realManager.catch(() => {});
         await probing?.catch(() => {});
         await runtimeConnecting?.catch(() => {});
+        await Promise.allSettled(reconciling.values());
         runtime?.close();
         for (const socket of sockets) socket.destroy();
         await new Promise<void>(resolve => server.close(() => resolve()));
