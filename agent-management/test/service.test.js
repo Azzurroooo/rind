@@ -463,6 +463,27 @@ test("reconcileSession skips state commits when status is unchanged or no active
   assert.equal(f.store.state.runs[run2.id].status, "unknown");
   await f.call("reconcileSession", { sessionId: nextDirect.id, connected: true, active: false });
   assert.equal(f.store.state.runs[run2.id].status, "failed", "connected idle reconcile settles direct unknown run");
+
+  // Unknown delegation run settles when host reports connected+idle (even without terminal outcome), clearing Unconfirmed and unblocking startTask.
+  const specialist = await f.member("specialist");
+  const parentTask = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Delegate and recover" });
+  await eventually(() => f.starts.length === 1);
+  const sub = await f.call("delegate", { to: specialist.id, brief: "Subwork" }, f.runner(f.starts[0]));
+  f.starts[0].finish({ content: "Waiting on specialist" });
+  await eventually(() => f.starts.length === 2);
+  const subSessionId = f.starts[1].input.session.id;
+  f.starts[1].fail(new Error("runtime connection lost"));
+  await eventually(() => {
+    const r = Object.values(f.store.state.runs).find(r => r.delegationId === sub.taskId);
+    return r?.status === "unknown";
+  });
+  const subRun = Object.values(f.store.state.runs).find(r => r.delegationId === sub.taskId);
+  await assert.rejects(f.call("startTask", { taskId: parentTask.id }), { code: "RUN_UNCONFIRMED" });
+  await f.call("reconcileSession", { sessionId: subSessionId, connected: true, active: false });
+  assert.equal(f.store.state.runs[subRun.id].status, "failed", "connected idle reconcile settles unknown delegation run");
+  await f.call("startTask", { taskId: parentTask.id });
+  await eventually(() => f.starts.length === 3, "parent task can restart once the crashed delegation is reconciled as failed");
+  f.starts[2].finish({ content: "Handled failure" });
 });
 
 

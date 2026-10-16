@@ -673,6 +673,11 @@ def test_replay_end_zero_skips_store_and_refreshes_running_session_credentials(t
             assert refreshed.instructions == "Team instructions"
             assert worker.execution.user_question_enabled(session_id) is False
 
+            # Same-host tool list changes (e.g. member retiring its last direct report mid-turn) update without ValueError.
+            tool_v3 = {**tool_v2, "tools": []}
+            await worker.configure_if_unowned(session_id, {"external_tools": tool_v3})
+            assert worker.execution.external_tool(session_id).tools == ()
+
             # Metadata-only replay(end=0) must not open JsonlSessionStore or scan shell tasks.
             worker.repository._open_store_from_info = AsyncMock(side_effect=AssertionError("should not open store"))
             worker.shell_tools.maintain_tasks = AsyncMock(side_effect=AssertionError("should not maintain tasks"))

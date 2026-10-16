@@ -67,12 +67,12 @@ export async function startSharedServer(options) {
   ready.catch(() => {});
   const server = net.createServer(socket => {
     socket.setEncoding("utf8"); let buffer = "";
-    const peer = { socket, sessions: new Set(), observe: false, send(message) { if (!socket.destroyed) { if (socket.writableLength > 4 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
+    const peer = { socket, sessions: new Set(), observe: false, send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
     peers.add(peer); socket.on("error", () => {});
     socket.on("close", () => { peers.delete(peer); live.leave(peer); for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); } });
     socket.on("data", chunk => {
       buffer += chunk;
-      if (buffer.length > 8 * 1024 * 1024) { socket.destroy(); return; }
+      if (buffer.length > 32 * 1024 * 1024) { socket.destroy(); return; }
       let end; while ((end = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); void handle(line); }
     });
     async function handle(line) {

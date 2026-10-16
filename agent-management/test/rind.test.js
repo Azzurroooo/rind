@@ -27,7 +27,7 @@ test("direct session remains observable after detach and management restart, and
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", apiKey: "fixture", model: "fixture", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" }));
-  const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
+  const options = { home, repoRoot, python: process.env.RIND_PYTHON };
   let server = await startServer(options);
   const token = (await readFile(server.paths.token, "utf8")).trim();
   const connect = () => connectClient({ endpoint: server.paths.endpoint, token });
@@ -86,7 +86,7 @@ test("direct CLI captures activity, rejects ambiguous teams, and the manager has
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture", model: "fixture" }));
-  const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON || "python" });
+  const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON });
   const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
   t.after(async () => { client.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const agent = await client.request("registerAgent", { workspace });
@@ -159,7 +159,7 @@ test("real Rind reports through the declared tool and the task is delivered", { 
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture-key", model: "fixture" }));
-  const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON || "python" });
+  const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON });
   const token = (await readFile(server.paths.token, "utf8")).trim();
   const client = await connectClient({ endpoint: server.paths.endpoint, token });
   t.after(async () => { client.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
@@ -175,7 +175,7 @@ test("real Rind reports through the declared tool and the task is delivered", { 
   const view = await client.request("snapshot");
   const managed = view.sessions.find(s => s.origin === "managed");
   const { runtimeSessionId } = managed;
-  const window = createSharedRuntimeClient({ home, rindHome: home, repoRoot, python: process.env.RIND_PYTHON || "python", cliArgs: ["--cwd", workspace, "--session", runtimeSessionId], externalTools: await client.request("sessionTools", { sessionId: managed.id }) });
+  const window = createSharedRuntimeClient({ home, rindHome: home, repoRoot, python: process.env.RIND_PYTHON, cliArgs: ["--cwd", workspace, "--session", runtimeSessionId], externalTools: await client.request("sessionTools", { sessionId: managed.id }) });
   try { assert.equal((await window.request("initialize")).session_id, runtimeSessionId); }
   finally { await window.shutdown(); release(); }
   let current;
@@ -222,11 +222,12 @@ test("a leader conversation delegates work and the delivery returns as its own t
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture-key", model: "fixture" }));
-  const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
+  const options = { home, repoRoot, python: process.env.RIND_PYTHON };
   const server = await startServer(options);
   const token = (await readFile(server.paths.token, "utf8")).trim();
   const user = await connectClient({ endpoint: server.paths.endpoint, token });
-  t.after(async () => { user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  let window;
+  t.after(async () => { await window?.shutdown().catch(() => {}); user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const team = await user.request("createTeam", { name: "E2E" });
   const leader = await user.request("registerAgent", { workspace: leaderWorkspace, name: "Lead" });
   const member = await user.request("registerAgent", { workspace: memberWorkspace, name: "Builder" });
@@ -237,13 +238,12 @@ test("a leader conversation delegates work and the delivery returns as its own t
 
   const session = await user.request("attachSession", { agentId: leader.id, teamId: team.id, shared: true });
   const events = [];
-  const window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }), onMessage: message => events.push(message?.event || message) });
-  t.after(() => window.shutdown().catch(() => {}));
+  window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }), onMessage: message => events.push(message?.event || message) });
   const info = await window.request("session/create", {});
-  await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
-  await window.request("session/prompt", { session_id: info.session_id, input: "Delegate the fixture work." });
 
   // The host tool's result keeps its meaning for whoever reads it.
+  await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
+  await window.request("session/prompt", { session_id: info.session_id, input: "Delegate the fixture work." });
   const delegated = JSON.parse(delegateResult);
   assert.equal(delegated.tool, "delegate");
   assert.equal(delegated.data.assignee, "Builder");
@@ -341,11 +341,12 @@ test("leader delegates in background, steers running sub-agent mid-turn, collect
 
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture-key", model: "fixture" }));
-  const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
+  const options = { home, repoRoot, python: process.env.RIND_PYTHON };
   const server = await startServer(options);
   const token = (await readFile(server.paths.token, "utf8")).trim();
   const user = await connectClient({ endpoint: server.paths.endpoint, token });
-  t.after(async () => { resolveSlowMember(); user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  let window;
+  t.after(async () => { resolveSlowMember(); await window?.shutdown().catch(() => {}); user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   const team = await user.request("createTeam", { name: "E2E Steer Wait" });
   const leader = await user.request("registerAgent", { workspace: leaderWorkspace, name: "Lead" });
@@ -356,8 +357,7 @@ test("leader delegates in background, steers running sub-agent mid-turn, collect
   memberAgentId = member.id;
 
   const session = await user.request("attachSession", { agentId: leader.id, teamId: team.id, shared: true });
-  const window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }) });
-  t.after(() => window.shutdown().catch(() => {}));
+  window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }) });
   const info = await window.request("session/create", {});
   await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
 

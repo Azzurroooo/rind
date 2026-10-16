@@ -109,11 +109,10 @@ class ExecutionCoordinator:
             previous = self._session_options.get(clean)
             if previous == options:
                 return
-            if previous and previous[0] and external_tool:
+            if previous and previous[0] and external_tool and (previous[0].command, previous[0].args) == (external_tool.command, external_tool.args):
                 merged = replace(external_tool, instructions=external_tool.instructions or previous[0].instructions)
-                if replace(previous[0], env=merged.env, lifecycle=merged.lifecycle, instructions=merged.instructions) == merged:
-                    self._session_options[clean] = (merged, previous[1] if clean in self._active or clean in self._starting else enable_user_question)
-                    return
+                self._session_options[clean] = (merged, previous[1] if clean in self._active or clean in self._starting else enable_user_question)
+                return
             if clean in self._active or clean in self._starting:
                 raise ValueError("Cannot change a running session's execution configuration.")
             self._session_options[clean] = options
@@ -566,10 +565,15 @@ class ExecutionCoordinator:
                             await self.background_wait(clean) is not None
                             or any(pending_notification(record) for record in records.values())
                         )
-                        try:
-                            await self.external_tool(clean).notify("after", clean, {"outcome": terminal_type, "pending": pending})
-                        except Exception:
-                            self._suppressed.add(clean)
+                        for attempt in range(2):
+                            try:
+                                await self.external_tool(clean).notify("after", clean, {"outcome": terminal_type, "pending": pending})
+                                break
+                            except Exception:
+                                if attempt == 0 and not self._closed and self.external_tool(clean):
+                                    await asyncio.sleep(0.25)
+                                else:
+                                    self._suppressed.add(clean)
                     if execution.current_cancel is cancel_source:
                         execution.current_cancel = None
                     cancel_source.dispose()

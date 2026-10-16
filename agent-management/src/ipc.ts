@@ -47,6 +47,7 @@ export async function startServer(options: { home?: string; python?: string; rep
     const manager = agent.canonicalWorkspace === await realManager;
     return toolConfig({ kind: manager ? "manager" : "agent", sessionId: session.id });
   }
+  const reportError = (error: unknown) => process.stderr.write("[" + new Date().toISOString() + "] agents management: " + String((error as Error)?.stack || error) + "\n");
   const reconciling = new Map<string, Promise<void>>();
   const reconcilePending = new Map<string, any>();
   async function reconcile(session: any) {
@@ -62,13 +63,17 @@ export async function startServer(options: { home?: string; python?: string; rep
         try {
           const externalTools = await sessionToolsFor(current);
           const replay = await runtime!.request("session/replay", { session_id: current.runtimeSessionId, end: 0, ...(externalTools ? { external_tools: externalTools } : {}) });
+          const active = replay.live_turn?.status === "running" || (replay.background_wait?.count || 0) > 0;
+          const rawOutcome = replay.live_turn?.status || replay.turn_state?.status;
+          const outcome = !active && rawOutcome === "running" ? "failed" : rawOutcome;
           await service.request({ kind: "user" }, "reconcileSession", { requestId: "observe-" + randomBytes(12).toString("hex"), sessionId: current.id, connected: replay.hosted === true,
-            active: replay.live_turn?.status === "running" || (replay.background_wait?.count || 0) > 0, needsInput: !!replay.live_turn?.question,
-            outcome: replay.live_turn?.status || replay.turn_state?.status });
+            active, needsInput: !!replay.live_turn?.question, outcome });
         } catch (error) {
           const missing = (error as { code?: string })?.code === "SessionNotFound";
           if (!closing && (!runtime || missing)) {
             await service.request({ kind: "user" }, "reconcileSession", { requestId: "missing-" + randomBytes(12).toString("hex"), sessionId: current.id, connected: false, ...(missing ? { missing: true } : {}) }).catch(() => {});
+          } else if (!closing) {
+            reportError(error);
           }
         }
         current = reconcilePending.get(session.id);
@@ -91,6 +96,7 @@ export async function startServer(options: { home?: string; python?: string; rep
     return runtimeConnecting ||= (probing ? probing.catch(() => undefined).then(value => value || attachHost(true)) : attachHost(true)).finally(() => { runtimeConnecting = undefined; });
   }
   function attachHost(start: boolean): Promise<any> {
+    let attachedClient: any;
     return connectSharedRuntime({ ...options, rindHome: options.home, start,
       onMessage(message: any) {
         if (message?.kind === "runtime" && message.type === "sessions_changed") { service.setLive(message.sessions || []); return; }
@@ -101,11 +107,13 @@ export async function startServer(options: { home?: string; python?: string; rep
         if (session) void reconcile(session);
       },
       onDisconnect() {
+        if (attachedClient && runtime !== attachedClient) return;
         runtime = undefined;
         service.setLive([]);
         if (!closing) void reattach();
       },
     }).then(async value => {
+      attachedClient = value;
       if (closing) { value.close(); throw new Error("Agents management is closing."); }
       if (runtime) { value.close(); return runtime; }
       try {
@@ -119,11 +127,13 @@ export async function startServer(options: { home?: string; python?: string; rep
       runtime = value;
       // A host from before the live table does not know runtime/sessions.
       const liveSessions = (await value.request("runtime/sessions").catch(() => ({ sessions: [] }))).sessions || [];
+      if (closing || runtime !== value) { value.close(); throw new Error("Runtime disconnected."); }
       service.setLive(liveSessions);
       const liveIds = new Set(liveSessions.map((s: any) => s.id));
       const activeSessionIds = new Set(Object.values(store.state.runs).filter(activeRun).map(r => r.sessionId));
       const targets = Object.values(store.state.sessions).filter(s => s.shared && s.runtimeSessionId && (liveIds.has(s.runtimeSessionId) || activeSessionIds.has(s.id) || store.state.deliveries[s.id]?.texts.length));
       await Promise.all(targets.map(reconcile));
+      if (closing || runtime !== value) { value.close(); throw new Error("Runtime disconnected."); }
       return value;
     });
   }
@@ -135,7 +145,16 @@ export async function startServer(options: { home?: string; python?: string; rep
   function watchRuntime(added: boolean) {
     watchers = Math.max(0, watchers + (added ? 1 : -1));
     if (watchers && !probe) {
-      const attempt = () => { if (!runtime && !closing) void executionHost(false).catch(() => {}); };
+      const attempt = () => {
+        if (closing) return;
+        if (!runtime) { void executionHost(false).catch(() => {}); return; }
+        for (const run of Object.values(store.state.runs)) {
+          if (run.status === "unknown") {
+            const session = store.state.sessions[run.sessionId];
+            if (session?.shared && session.runtimeSessionId) void reconcile(session);
+          }
+        }
+      };
       attempt();
       probe = setInterval(attempt, 3000);
       probe.unref?.();
@@ -204,13 +223,13 @@ export async function startServer(options: { home?: string; python?: string; rep
     let connectionPrincipal: Principal | undefined;
     function send(value: object) {
       if (!socket.destroyed) {
-        if (socket.writableLength > 4 * 1024 * 1024) { socket.destroy(); return; }
+        if (socket.writableLength > 32 * 1024 * 1024) { socket.destroy(); return; }
         socket.write(JSON.stringify(value) + "\n");
       }
     }
     socket.on("data", chunk => {
       buffer += chunk;
-      if (buffer.length > 1024 * 1024) { socket.destroy(); return; }
+      if (buffer.length > 32 * 1024 * 1024) { socket.destroy(); return; }
       let end: number;
       while ((end = buffer.indexOf("\n")) !== -1) {
         const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
@@ -337,7 +356,6 @@ export async function startServer(options: { home?: string; python?: string; rep
     if (error instanceof EndpointOccupiedError) throw new ManagementError("ALREADY_RUNNING", "Management service is already running.");
     throw error;
   }
-  const reportError = (error: unknown) => process.stderr.write("agents management: " + String((error as Error)?.stack || error) + "\n");
   // Work that a restart would interrupt: running or starting runs. Unconfirmed
   // runs are already outside this service's control.
   function workload() {
@@ -391,7 +409,7 @@ export async function startServer(options: { home?: string; python?: string; rep
     const deliver = async (runtimeSessionId: string, text: string) => {
       const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === runtimeSessionId);
       const externalTools = session ? await sessionToolsFor(session) : undefined;
-      await (await executionHost(false)).request("rind/session/deliver", { session_id: runtimeSessionId, text, ...(externalTools ? { external_tools: externalTools } : {}) });
+      await (await executionHost()).request("rind/session/deliver", { session_id: runtimeSessionId, text, ...(externalTools ? { external_tools: externalTools } : {}) });
     };
     service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig, folderDefaults, deliver });
     await service.recover();
@@ -410,6 +428,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       } finally {
         // Even failed service cleanup must join an in-flight host connection.
         await realManager.catch(() => {});
+        await probing?.catch(() => {});
         await runtimeConnecting?.catch(() => {});
         runtime?.close();
         for (const socket of sockets) socket.destroy();

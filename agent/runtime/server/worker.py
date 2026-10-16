@@ -136,7 +136,10 @@ class RuntimeWorker:
 
     async def configure_if_unowned(self, session_id: str, params: dict) -> None:
         clean = validate_session_id(session_id)
-        if "external_tools" not in params or (self.execution.owns_session(clean) and not params.get("external_tools")):
+        if "external_tools" not in params or (
+            self.execution.owns_session(clean)
+            and (not params.get("external_tools") or self.execution.external_tool(clean) is None)
+        ):
             return
         if self.repository.draft_store(clean) is None and not await self.repository.exists(clean):
             return
