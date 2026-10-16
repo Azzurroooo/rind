@@ -63,7 +63,7 @@ export async function fixture(t) {
   await call("setLeader", { teamId: team.id, agentId: leader.id });
   // The member running a started task, as its tool calls reach the service.
   const runner = start => ({ kind: "agent", sessionId: start.input.session.id });
-  return { home, paths, store, service, call, team, leader, member, starts, folderCalls, delivered, runner };
+  return { home, paths, store, service, call, team, leader, member, starts, folders, folderCalls, delivered, runner };
 }
 export async function eventually(check) {
   for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); }

@@ -191,9 +191,9 @@ test("real Rind reports through the declared tool and the task is delivered", { 
 
 test("a leader conversation delegates work and the delivery returns as its own turn", { timeout: 90000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-delegation-e2e-"));
-  const leaderWorkspace = path.join(home, "leader"), memberWorkspace = path.join(home, "member");
-  await mkdir(leaderWorkspace); await mkdir(memberWorkspace);
-  let memberAgentId = "", delegateResult = "";
+  const leaderWorkspace = path.join(home, "leader");
+  await mkdir(leaderWorkspace);
+  let delegateResult = "";
   const trouble = [];
   const provider = http.createServer((request, response) => {
     if (request.method === "GET") { response.end(JSON.stringify({ data: [{ id: "fixture" }] })); return; }
@@ -211,7 +211,7 @@ test("a leader conversation delegates work and the delivery returns as its own t
         if (!names.includes("delegate")) trouble.push("the leader conversation cannot delegate: " + names.join(","));
         if (delivered) delta = { content: "Delivery received." };
         else if (toolMessage) { delegateResult = toolMessage.content; delta = { content: "Delegating." }; }
-        else delta = { tool_calls: [{ index: 0, id: "delegate-1", type: "function", function: { name: "delegate", arguments: JSON.stringify({ to: memberAgentId, brief: "Build the fixture" }) } }] };
+        else delta = { tool_calls: [{ index: 0, id: "delegate-1", type: "function", function: { name: "delegate", arguments: JSON.stringify({ new: { name: "Builder" }, brief: "Build the fixture" }) } }] };
       }
       const toolCall = Boolean(delta.tool_calls);
       response.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -229,11 +229,8 @@ test("a leader conversation delegates work and the delivery returns as its own t
   t.after(async () => { user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const team = await user.request("createTeam", { name: "E2E" });
   const leader = await user.request("registerAgent", { workspace: leaderWorkspace, name: "Lead" });
-  const member = await user.request("registerAgent", { workspace: memberWorkspace, name: "Builder" });
   await user.request("addMember", { teamId: team.id, agentId: leader.id });
-  await user.request("addMember", { teamId: team.id, agentId: member.id, reportsToAgentId: leader.id });
   await user.request("setLeader", { teamId: team.id, agentId: leader.id });
-  memberAgentId = member.id;
 
   const session = await user.request("attachSession", { agentId: leader.id, teamId: team.id, shared: true });
   const events = [];
@@ -247,6 +244,7 @@ test("a leader conversation delegates work and the delivery returns as its own t
   const delegated = JSON.parse(delegateResult);
   assert.equal(delegated.tool, "delegate");
   assert.equal(delegated.data.assignee, "Builder");
+  assert.match(delegated.data.workspace, /Builder$/);
   assert.ok(delegated.data.taskId, "the delegate result names its task");
   assert.deepEqual(trouble, []);
 
@@ -302,7 +300,7 @@ test("leader delegates in background, steers running sub-agent mid-turn, collect
         const waitPromptIdx = body.messages.findIndex(m => m.role === "user" && m.content === "Wait for slow member");
         const turnTools = body.messages.slice(waitPromptIdx).filter(m => m.role === "tool");
         if (turnTools.length === 0) {
-          delta = { tool_calls: [{ index: 0, id: "del-slow", type: "function", function: { name: "delegate", arguments: JSON.stringify({ to: memberAgentId, brief: "Slow work" }) } }] };
+          delta = { tool_calls: [{ index: 0, id: "del-slow", type: "function", function: { name: "delegate", arguments: JSON.stringify({ to: "Builder", brief: "Slow work" }) } }] };
         } else if (turnTools.length === 1) {
           slowTaskId = JSON.parse(turnTools[0].content).data.taskId;
           setTimeout(() => resolveWaitStarted(), 250);

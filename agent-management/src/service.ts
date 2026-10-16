@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, stat, copyFile, readFile, readdir } from "node:fs/promises";
+import { mkdir, rm, stat, copyFile, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { activeRun, awaitingDelegation, entryTask, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Delegation, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
@@ -276,7 +276,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   }
   async function report(state: State, actor: Principal, p: Params) {
     const run = Object.values(state.runs).find(r => activeRun(r) && r.sessionId === (actor as { sessionId: string }).sessionId && r.taskId && !r.delegationId);
-    requireValue(run, "NO_TASK", "This conversation is not working on a task; nothing to report.");
+    requireValue(run, "NO_TASK", "This conversation has no active task; reply directly in the conversation instead of calling report.");
     const task = state.tasks[run.taskId!];
     requireValue(task.status === "running", "TASK_NOT_RUNNING", "Report from an active task.");
     if (p.blocked !== undefined) { blockTask(state, actor, task, p.blocked); return { taskId: task.id, status: "blocked", next: "End your turn." }; }
@@ -366,21 +366,33 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       set.add(onRelease);
     });
   }
+  function resolveDirectReport(state: State, teamId: string, me: string, target: string) {
+    if (state.memberships[memberKey(teamId, target)] && supervisor(state, teamId, target) === me) return target;
+    const reports = directReports(state, teamId, me);
+    const exact = reports.filter(r => r.name === target);
+    if (exact.length === 1) return exact[0].id;
+    const lower = target.toLowerCase();
+    const matched = reports.filter(r => r.name.trim().toLowerCase() === lower);
+    return matched.length === 1 ? matched[0].id : undefined;
+  }
   async function delegate(state: State, actor: Principal, p: Params) {
     const session = sessionOf(state, actor)!;
     const teamId = session.teamId, me = session.agentId;
     requireValue(teamId && state.memberships[memberKey(teamId, me)], "FORBIDDEN", "This conversation has no team.");
     if (p.wait === true) return prepareWait(state, actor, session, p);
     const forms = ["to", "new", "task", "retire"].filter(key => p[key] !== undefined);
-    requireValue(forms.length === 1, "INVALID_INPUT", "Use exactly one form: {to, brief}, {new, brief}, {task, message, interrupt?}, {task, cancel: true}, {wait: true, task?, timeoutMs?} or {retire}.");
+    requireValue(forms.length === 1, "INVALID_INPUT",
+      "Use exactly one form: {to, brief}, {new, brief}, {task, message, interrupt?}, {task, cancel: true}, {wait: true, task?, timeoutMs?} or {retire}."
+      + (forms.length === 0 && p.brief !== undefined ? " Direct reports: " + JSON.stringify(directReports(state, teamId, me)) : ""));
     if (p.task !== undefined) return followUp(state, actor, text(p.task, "Task"), p);
     if (p.retire !== undefined) return retire(state, teamId, me, text(p.retire, "retire", 200));
     const brief = text(p.brief, "Brief");
     let to: string;
     if (p.new !== undefined) to = (await addReport(state, actor, teamId, me, p.new)).id;
     else {
-      to = text(p.to, "to", 200);
-      requireValue(state.memberships[memberKey(teamId, to)] && supervisor(state, teamId, to) === me, "NOT_DIRECT_REPORT", "Delegate only to your direct reports: " + JSON.stringify(directReports(state, teamId, me)));
+      const resolved = resolveDirectReport(state, teamId, me, text(p.to, "to", 200));
+      requireValue(resolved, "NOT_DIRECT_REPORT", "Delegate only to your direct reports: " + JSON.stringify(directReports(state, teamId, me)));
+      to = resolved;
     }
     const delegation = newDelegation(state, session, teamId, to, brief);
     return { taskId: delegation.id, assignee: nameOf(state, to), status: "queued", ...(p.new !== undefined ? { agentId: to, workspace: state.agents[to].canonicalWorkspace } : {}), next: DELEGATE_NEXT };
@@ -398,13 +410,18 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       await addWorktree(worktreeOf, target, spec.branch, spec.base);
     } else {
       await mkdir(target);
-      await inheritModel(own, target);
     }
-    const agent = await register(state, { workspace: target, name: spec.name });
-    agent.addedBy = me;
-    if (worktreeOf) agent.worktreeOf = worktreeOf;
-    await addMember(state, actor, { teamId, agentId: agent.id, ...(spec.responsibility ? { responsibility: spec.responsibility } : {}) });
-    return agent;
+    try {
+      if (!worktreeOf) await inheritModel(own, target);
+      const agent = await register(state, { workspace: target, name: spec.name });
+      agent.addedBy = me;
+      if (worktreeOf) agent.worktreeOf = worktreeOf;
+      await addMember(state, actor, { teamId, agentId: agent.id, ...(spec.responsibility ? { responsibility: spec.responsibility } : {}) });
+      return agent;
+    } catch (error) {
+      await (worktreeOf ? removeWorktree(worktreeOf, target) : rm(target, { recursive: true, force: true })).catch(() => {});
+      throw error;
+    }
   }
   // Only what was chosen for the creator's folder is copied; settings.json stays the default for both.
   async function inheritModel(from: string, to: string) {
@@ -412,7 +429,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     const model = resolved && resolved.model_source !== "settings", effort = resolved && resolved.effort_source !== "settings";
     if (model || effort) await folderDefaults("set", { workspace_root: to, provider_id: model ? resolved.provider : "", model_id: model ? resolved.model : "", reasoning_effort: effort ? resolved.reasoning_effort : "" });
   }
-  async function retire(state: State, teamId: string, me: string, agentId: string) {
+  async function retire(state: State, teamId: string, me: string, target: string) {
+    const agentId = state.agents[target] ? target : resolveDirectReport(state, teamId, me, target) || target;
     const agent = state.agents[agentId];
     requireValue(agent?.addedBy === me && state.memberships[memberKey(teamId, agentId)], "FORBIDDEN", "Retire only a direct report you added.");
     const busy = Object.values(state.tasks).some(t => t.teamId === teamId && t.assigneeAgentId === agentId && !["done", "cancelled"].includes(t.status))
@@ -464,7 +482,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       return { taskId: d.id, status: "cancelled" };
     }
     requireValue(d.status !== "cancelled", "TASK_FINISHED", "This task was cancelled.");
-    const message = text(p.message, "Message");
+    requireValue(p.message === undefined || p.brief === undefined || p.message === p.brief, "INVALID_INPUT", "Provide message (not both message and brief) when following up on a task.");
+    const message = text(p.message ?? p.brief, "Message");
     const from = "From " + nameOf(state, me) + ": " + message;
     const run = Object.values(state.runs).find(r => r.delegationId === d.id && activeRun(r));
     if (d.status === "running" && !p.interrupt) {
@@ -990,8 +1009,14 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     if (method === "reconcileSession") {
       userOnly(actor);
       const session = ownSession(store.state, actor, params.sessionId);
-      const hasActiveRun = Object.values(store.state.runs).some(r => r.sessionId === session.id && activeRun(r));
-      if (!hasActiveRun) {
+      const activeRuns = Object.values(store.state.runs).filter(r => r.sessionId === session.id && activeRun(r));
+      const unchangedActive = Boolean(params.active) && activeRuns.every(r => {
+        if (r.status !== "running" || Boolean(r.needsInput) !== Boolean(params.needsInput)) return false;
+        const d = r.delegationId ? store.state.delegations[r.delegationId] : undefined;
+        const task = d?.taskId ? store.state.tasks[d.taskId] : r.taskId ? store.state.tasks[r.taskId] : undefined;
+        return d?.status !== "failed" && task?.status !== "needs_attention";
+      });
+      if (!activeRuns.length || unchangedActive) {
         const wasConnected = connected.has(session.id);
         if (params.connected) connected.add(session.id); else connected.delete(session.id);
         if (wasConnected !== connected.has(session.id)) for (const listener of listeners) listener();
