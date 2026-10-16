@@ -747,8 +747,8 @@ async function runLogout(providerId = "") {
       logOutput(`No stored credential for ${selected}.`);
       return;
     }
-    const suffix = result?.source === "environment"
-      ? " It is still configured through an environment variable."
+    const suffix = result?.source === "settings"
+      ? " It is still configured in settings.json."
       : "";
     logOutput(`Logged out of ${selected}.${suffix}`);
   } catch (error) {

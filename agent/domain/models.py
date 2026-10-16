@@ -32,7 +32,6 @@ class ProviderDefinition:
     api: str
     default_base_url: str
     auth_methods: tuple[str, ...] = ("api_key",)
-    environment_key: str = ""
     fallback_models: tuple[ModelDefinition, ...] = ()
 
 
@@ -42,7 +41,7 @@ class ProviderStatus:
     name: str
     methods: tuple[str, ...]
     configured: bool
-    source: Literal["settings", "stored", "environment", "none"]
+    source: Literal["settings", "stored", "none"]
 
 
 @dataclass(frozen=True, slots=True)

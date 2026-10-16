@@ -16,9 +16,6 @@ from agent.infrastructure.settings import AppSettings
 
 @pytest.fixture
 def service(tmp_path, monkeypatch):
-    for provider in PROVIDERS.values():
-        if provider.environment_key:
-            monkeypatch.delenv(provider.environment_key, raising=False)
     settings = AppSettings(tmp_path / 'settings.json', True, 'LongCat-2.5-Preview', '', '', '', provider='longcat')
     monkeypatch.setattr(module, 'load_settings', lambda: settings)
     return module.ProviderServiceImpl(CredentialStore(tmp_path / 'auth.json')), settings

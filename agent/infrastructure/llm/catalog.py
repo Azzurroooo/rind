@@ -48,7 +48,7 @@ _MINIMAX_MODELS = (
 
 PROVIDERS: dict[str, ProviderDefinition] = {
     "openai": ProviderDefinition(
-        "openai", "OpenAI", "openai-responses", "https://api.openai.com/v1", ("api_key", "oauth"), environment_key="OPENAI_API_KEY",
+        "openai", "OpenAI", "openai-responses", "https://api.openai.com/v1", ("api_key", "oauth"),
         fallback_models=_models("openai", "openai-responses", (
             ("gpt-6-astra", ("low", "medium", "high", "xhigh", "max"), True, 1050000),
             ("gpt-6.1-sol", ("low", "medium", "high", "xhigh", "max"), True, 1050000),
@@ -70,7 +70,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "anthropic": ProviderDefinition(
-        "anthropic", "Anthropic", "anthropic-messages", "https://api.anthropic.com", environment_key="ANTHROPIC_API_KEY",
+        "anthropic", "Anthropic", "anthropic-messages", "https://api.anthropic.com",
         fallback_models=_models("anthropic", "anthropic-messages", (
             ("claude-opus-5-5", (), True, 1000000),
             ("claude-sonnet-5-5", (), True, 1000000),
@@ -84,7 +84,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "google": ProviderDefinition(
-        "google", "Google", "google-generative-ai", "https://generativelanguage.googleapis.com/v1beta", environment_key="GEMINI_API_KEY",
+        "google", "Google", "google-generative-ai", "https://generativelanguage.googleapis.com/v1beta",
         fallback_models=_models("google", "google-generative-ai", (
             ("gemini-3.8-flash", (), True, 1048576),
             ("gemini-3.7-flash", (), True, 1048576),
@@ -99,7 +99,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "deepseek": ProviderDefinition(
-        "deepseek", "DeepSeek", "openai-chat", "https://api.deepseek.com/v1", environment_key="DEEPSEEK_API_KEY",
+        "deepseek", "DeepSeek", "openai-chat", "https://api.deepseek.com/v1",
         fallback_models=_models("deepseek", "openai-chat", (
             ("deepseek-flash", ("low", "high", "max"), True, 1000000),
             ("deepseek-v4-pro", ("low", "high", "max"), False, 1000000),
@@ -108,7 +108,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "groq": ProviderDefinition(
-        "groq", "Groq", "openai-chat", "https://api.groq.com/openai/v1", environment_key="GROQ_API_KEY",
+        "groq", "Groq", "openai-chat", "https://api.groq.com/openai/v1",
         fallback_models=_models("groq", "openai-chat", (
             ("llama-3.3-70b-versatile", (), False, 131072),
             ("openai/gpt-oss-120b", ("low", "medium", "high"), False, 131072),
@@ -118,7 +118,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "mistral": ProviderDefinition(
-        "mistral", "Mistral", "openai-chat", "https://api.mistral.ai/v1", environment_key="MISTRAL_API_KEY",
+        "mistral", "Mistral", "openai-chat", "https://api.mistral.ai/v1",
         fallback_models=_models("mistral", "openai-chat", (
             ("mistral-large-latest", (), True, 262144),
             ("devstral-medium-latest", (), False, 262144),
@@ -130,7 +130,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "zai": ProviderDefinition(
-        "zai", "Z.AI", "openai-chat", "https://api.z.ai/api/paas/v4", environment_key="ZAI_API_KEY",
+        "zai", "Z.AI", "openai-chat", "https://api.z.ai/api/paas/v4",
         fallback_models=_models("zai", "openai-chat", (
             ("glm-5.3", ("low", "high", "max"), False, 1000000),
             ("glm-5.2", ("high", "max"), False, 1000000),
@@ -142,7 +142,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "zai-coding": ProviderDefinition(
-        "zai-coding", "Z.AI Coding", "openai-chat", "https://api.z.ai/api/coding/paas/v4", environment_key="ZAI_CODING_API_KEY",
+        "zai-coding", "Z.AI Coding", "openai-chat", "https://api.z.ai/api/coding/paas/v4",
         fallback_models=_models("zai-coding", "openai-chat", (
             ("glm-5.3", ("low", "high", "max"), False, 1000000),
             ("glm-5.3-flash", ("low", "high", "max"), True, 1000000),
@@ -152,7 +152,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "zhipu": ProviderDefinition(
-        "zhipu", "Zhipu", "openai-chat", "https://open.bigmodel.cn/api/paas/v4", environment_key="ZHIPU_API_KEY",
+        "zhipu", "Zhipu", "openai-chat", "https://open.bigmodel.cn/api/paas/v4",
         fallback_models=_models("zhipu", "openai-chat", (
             ("glm-5.3", ("low", "high", "max"), False, 1000000),
             ("glm-5.2", ("high", "max"), False, 1000000),
@@ -164,7 +164,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "zhipu-coding": ProviderDefinition(
-        "zhipu-coding", "Zhipu Coding", "openai-chat", "https://open.bigmodel.cn/api/coding/paas/v4", environment_key="ZHIPU_CODING_API_KEY",
+        "zhipu-coding", "Zhipu Coding", "openai-chat", "https://open.bigmodel.cn/api/coding/paas/v4",
         fallback_models=_models("zhipu-coding", "openai-chat", (
             ("glm-5.3", ("low", "high", "max"), False, 1000000),
             ("glm-5.3-flash", ("low", "high", "max"), True, 1000000),
@@ -173,7 +173,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "kimi-coding": ProviderDefinition(
-        "kimi-coding", "Kimi For Coding", "anthropic-messages", "https://api.kimi.com/coding", environment_key="KIMI_API_KEY",
+        "kimi-coding", "Kimi For Coding", "anthropic-messages", "https://api.kimi.com/coding",
         fallback_models=_models("kimi-coding", "anthropic-messages", (
             ("kimi-for-coding", (), True, 1048576),
             ("k3", (), True, 1048576),
@@ -182,7 +182,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "moonshot": ProviderDefinition(
-        "moonshot", "Moonshot AI", "openai-chat", "https://api.moonshot.ai/v1", environment_key="MOONSHOT_API_KEY",
+        "moonshot", "Moonshot AI", "openai-chat", "https://api.moonshot.ai/v1",
         fallback_models=_models("moonshot", "openai-chat", (
             ("kimi-k3", ("low", "high", "max"), True, 1048576),
             ("kimi-k2.6", (), True, 262144),
@@ -191,7 +191,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "moonshot-cn": ProviderDefinition(
-        "moonshot-cn", "Moonshot AI CN", "openai-chat", "https://api.moonshot.cn/v1", environment_key="MOONSHOT_CN_API_KEY",
+        "moonshot-cn", "Moonshot AI CN", "openai-chat", "https://api.moonshot.cn/v1",
         fallback_models=_models("moonshot-cn", "openai-chat", (
             ("kimi-k3", ("low", "high", "max"), True, 1048576),
             ("kimi-k2.6", (), True, 262144),
@@ -200,73 +200,73 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "xiaomi": ProviderDefinition(
-        "xiaomi", "Xiaomi MiMo", "openai-chat", "https://api.xiaomimimo.com/v1", environment_key="XIAOMI_API_KEY",
+        "xiaomi", "Xiaomi MiMo", "openai-chat", "https://api.xiaomimimo.com/v1",
         fallback_models=_models("xiaomi", "openai-chat", _XIAOMI_MODELS),
     ),
     "xiaomi-token-plan-cn": ProviderDefinition(
-        "xiaomi-token-plan-cn", "Xiaomi MiMo Token Plan (China)", "openai-chat", "https://token-plan-cn.xiaomimimo.com/v1", environment_key="XIAOMI_TOKEN_PLAN_CN_API_KEY",
+        "xiaomi-token-plan-cn", "Xiaomi MiMo Token Plan (China)", "openai-chat", "https://token-plan-cn.xiaomimimo.com/v1",
         fallback_models=_models("xiaomi-token-plan-cn", "openai-chat", _XIAOMI_MODELS),
     ),
     "xiaomi-token-plan-ams": ProviderDefinition(
-        "xiaomi-token-plan-ams", "Xiaomi MiMo Token Plan (Europe)", "openai-chat", "https://token-plan-ams.xiaomimimo.com/v1", environment_key="XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+        "xiaomi-token-plan-ams", "Xiaomi MiMo Token Plan (Europe)", "openai-chat", "https://token-plan-ams.xiaomimimo.com/v1",
         fallback_models=_models("xiaomi-token-plan-ams", "openai-chat", _XIAOMI_MODELS),
     ),
     "xiaomi-token-plan-sgp": ProviderDefinition(
-        "xiaomi-token-plan-sgp", "Xiaomi MiMo Token Plan (Singapore)", "openai-chat", "https://token-plan-sgp.xiaomimimo.com/v1", environment_key="XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+        "xiaomi-token-plan-sgp", "Xiaomi MiMo Token Plan (Singapore)", "openai-chat", "https://token-plan-sgp.xiaomimimo.com/v1",
         fallback_models=_models("xiaomi-token-plan-sgp", "openai-chat", _XIAOMI_MODELS),
     ),
     "hunyuan": ProviderDefinition(
-        "hunyuan", "Tencent Hunyuan", "openai-chat", "https://api.hunyuan.cloud.tencent.com/v1", environment_key="HUNYUAN_API_KEY",
+        "hunyuan", "Tencent Hunyuan", "openai-chat", "https://api.hunyuan.cloud.tencent.com/v1",
         fallback_models=_models("hunyuan", "openai-chat", (
             ("hunyuan-turbos-latest", (), False, None),
         )),
     ),
     "tencent-coding-plan": ProviderDefinition(
-        "tencent-coding-plan", "Tencent Coding Plan", "openai-chat", "https://api.lkeap.cloud.tencent.com/coding/v3", environment_key="TENCENT_CODING_PLAN_API_KEY",
+        "tencent-coding-plan", "Tencent Coding Plan", "openai-chat", "https://api.lkeap.cloud.tencent.com/coding/v3",
         fallback_models=_models("tencent-coding-plan", "openai-chat", (
             ("tc-code-latest", (), False, 131072),
             ("glm-5", (), False, 202752),
         )),
     ),
     "tencent-tokenhub": ProviderDefinition(
-        "tencent-tokenhub", "Tencent TokenHub (Hunyuan)", "openai-chat", "https://tokenhub.tencentmaas.com/v1", environment_key="TENCENT_TOKENHUB_API_KEY",
+        "tencent-tokenhub", "Tencent TokenHub (Hunyuan)", "openai-chat", "https://tokenhub.tencentmaas.com/v1",
         fallback_models=_models("tencent-tokenhub", "openai-chat", _TENCENT_HY_MODELS),
     ),
     "tencent-token-plan": ProviderDefinition(
-        "tencent-token-plan", "Tencent Token Plan", "openai-chat", "https://api.lkeap.cloud.tencent.com/plan/v3", environment_key="TENCENT_TOKEN_PLAN_API_KEY",
+        "tencent-token-plan", "Tencent Token Plan", "openai-chat", "https://api.lkeap.cloud.tencent.com/plan/v3",
         fallback_models=_models("tencent-token-plan", "openai-chat", _TENCENT_HY_MODELS),
     ),
     "volcengine": ProviderDefinition(
-        "volcengine", "Volcengine Ark (Doubao)", "openai-chat", "https://ark.cn-beijing.volces.com/api/v3", environment_key="ARK_API_KEY",
+        "volcengine", "Volcengine Ark (Doubao)", "openai-chat", "https://ark.cn-beijing.volces.com/api/v3",
         fallback_models=_models("volcengine", "openai-chat", (
             ("doubao-seed-2-1-pro-260628", (), True, 256000),
         )),
     ),
     "volcengine-coding-plan": ProviderDefinition(
-        "volcengine-coding-plan", "Volcengine Ark Coding Plan", "openai-chat", "https://ark.cn-beijing.volces.com/api/coding/v3", environment_key="ARK_CODING_PLAN_API_KEY",
+        "volcengine-coding-plan", "Volcengine Ark Coding Plan", "openai-chat", "https://ark.cn-beijing.volces.com/api/coding/v3",
         fallback_models=_models("volcengine-coding-plan", "openai-chat", (
             ("ark-code-latest", (), None, None),
             ("doubao-seed-2.1-turbo", (), True, 256000),
         )),
     ),
     "minimax": ProviderDefinition(
-        "minimax", "MiniMax (minimax.io)", "anthropic-messages", "https://api.minimax.io/anthropic", environment_key="MINIMAX_API_KEY",
+        "minimax", "MiniMax (minimax.io)", "anthropic-messages", "https://api.minimax.io/anthropic",
         fallback_models=_models("minimax", "anthropic-messages", _MINIMAX_MODELS),
     ),
     "minimax-cn": ProviderDefinition(
-        "minimax-cn", "MiniMax (China)", "anthropic-messages", "https://api.minimax.cn/anthropic", environment_key="MINIMAX_CN_API_KEY",
+        "minimax-cn", "MiniMax (China)", "anthropic-messages", "https://api.minimax.cn/anthropic",
         fallback_models=_models("minimax-cn", "anthropic-messages", _MINIMAX_MODELS),
     ),
     "minimax-coding-plan": ProviderDefinition(
-        "minimax-coding-plan", "MiniMax Token Plan (Global)", "anthropic-messages", "https://api.minimax.io/anthropic", environment_key="MINIMAX_CODING_PLAN_API_KEY",
+        "minimax-coding-plan", "MiniMax Token Plan (Global)", "anthropic-messages", "https://api.minimax.io/anthropic",
         fallback_models=_models("minimax-coding-plan", "anthropic-messages", _MINIMAX_MODELS),
     ),
     "minimax-cn-coding-plan": ProviderDefinition(
-        "minimax-cn-coding-plan", "MiniMax Token Plan (China)", "anthropic-messages", "https://api.minimax.cn/anthropic", environment_key="MINIMAX_CN_CODING_PLAN_API_KEY",
+        "minimax-cn-coding-plan", "MiniMax Token Plan (China)", "anthropic-messages", "https://api.minimax.cn/anthropic",
         fallback_models=_models("minimax-cn-coding-plan", "anthropic-messages", _MINIMAX_MODELS),
     ),
     "qwen": ProviderDefinition(
-        "qwen", "Qwen", "openai-chat", "https://dashscope.aliyuncs.com/compatible-mode/v1", environment_key="DASHSCOPE_API_KEY",
+        "qwen", "Qwen", "openai-chat", "https://dashscope.aliyuncs.com/compatible-mode/v1",
         fallback_models=_models("qwen", "openai-chat", (
             ("qwen3-coder-plus", (), False, 1048576),
             ("qwen-max", (), False, 131072),
@@ -282,7 +282,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "qwen-coding": ProviderDefinition(
-        "qwen-coding", "Qwen Coding", "openai-chat", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", environment_key="QWEN_CODING_API_KEY",
+        "qwen-coding", "Qwen Coding", "openai-chat", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
         fallback_models=_models("qwen-coding", "openai-chat", (
             ("qwen3.8-max", ("low", "medium", "xhigh"), True, 1000000),
             ("qwen3.8-flash", ("low", "medium", "xhigh"), True, 1000000),
@@ -297,7 +297,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "xai": ProviderDefinition(
-        "xai", "xAI", "openai-responses", "https://api.x.ai/v1", environment_key="XAI_API_KEY",
+        "xai", "xAI", "openai-responses", "https://api.x.ai/v1",
         fallback_models=_models("xai", "openai-responses", (
             ("grok-4.7", ("low", "medium", "high", "xhigh"), True, 500000),
             ("grok-4.5", ("low", "medium", "high"), True, 500000),
@@ -309,7 +309,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "openrouter": ProviderDefinition(
-        "openrouter", "OpenRouter", "openai-chat", "https://openrouter.ai/api/v1", environment_key="OPENROUTER_API_KEY",
+        "openrouter", "OpenRouter", "openai-chat", "https://openrouter.ai/api/v1",
         fallback_models=_models("openrouter", "openai-chat", (
             ("openai/gpt-5.5", (), True, 1050000),
             ("anthropic/claude-sonnet-4.6", (), True, 1000000),
@@ -323,14 +323,14 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         )),
     ),
     "longcat": ProviderDefinition(
-        "longcat", "LongCat", "openai-chat", "https://api.longcat.chat/openai/v1", environment_key="LONGCAT_API_KEY",
+        "longcat", "LongCat", "openai-chat", "https://api.longcat.chat/openai/v1",
         fallback_models=_models("longcat", "openai-chat", (
             ("LongCat-2.5-Preview", (), True, 1048576),
             ("LongCat-2.0", (), False, 1000000),
         )),
     ),
     "openai-compatible": ProviderDefinition(
-        "openai-compatible", "OpenAI compatible (chat completions)", "openai-chat", "", environment_key="OPENAI_API_KEY",
+        "openai-compatible", "OpenAI compatible (chat completions)", "openai-chat", "",
         fallback_models=(),
     ),
 }

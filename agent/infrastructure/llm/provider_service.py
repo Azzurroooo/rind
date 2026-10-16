@@ -186,7 +186,7 @@ class ProviderServiceImpl:
         credential = self._resolve_credential(settings, definition)
         if credential is None:
             raise ProviderError(
-                f"{definition.name} is not configured. Run /login or set {definition.environment_key}.",
+                f"{definition.name} is not configured. Run /login.",
                 status="rejected", code="provider_not_configured",
             )
         endpoint = self._endpoint(settings, definition)
@@ -369,28 +369,24 @@ class ProviderServiceImpl:
             )
         return definition
 
+    @staticmethod
+    def _settings_key(settings: AppSettings | None, definition: ProviderDefinition) -> str:
+        if settings is None or settings.provider != definition.id or not settings.api_key:
+            return ""
+        value = settings.api_key
+        return os.getenv(value[1:], "") if value.startswith("$") else value
+
     def _credential_source(self, settings: AppSettings | None, definition: ProviderDefinition) -> str:
-        if settings is not None and settings.provider == definition.id and settings.api_key:
+        if self._settings_key(settings, definition):
             return "settings"
         if self.credentials.get(definition.id) is not None:
             return "stored"
-        env_name = definition.environment_key
-        return "environment" if env_name and os.getenv(env_name, "").strip() else "none"
+        return "none"
 
     def _resolve_credential(self, settings: AppSettings, definition: ProviderDefinition) -> Credential | None:
-        provider_id = definition.id
-        if settings.provider == provider_id and settings.api_key:
-            value = settings.api_key
-            if value.startswith("$"):
-                value = os.getenv(value[1:], "")
-            if value:
-                return Credential(type="api_key", key=value)
-        stored = self.credentials.get(provider_id)
-        if stored is not None:
-            return stored
-        env_name = definition.environment_key
-        value = os.getenv(env_name, "").strip() if env_name else ""
-        return Credential(type="api_key", key=value) if value else None
+        if key := self._settings_key(settings, definition):
+            return Credential(type="api_key", key=key)
+        return self.credentials.get(definition.id)
 
     @staticmethod
     def _endpoint(settings: AppSettings, definition) -> str:

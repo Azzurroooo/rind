@@ -125,8 +125,6 @@ async def test_all_refresh_entries_merge_capabilities_by_endpoint(tmp_path, monk
     from unittest.mock import AsyncMock, Mock
     settings = _settings(tmp_path, provider="openrouter", model="new", api_key="test", base_url="https://openrouter.ai/api/v1")
     service = _service(tmp_path, settings, monkeypatch)
-    for provider in service.providers.values():
-        monkeypatch.delenv(provider.environment_key or "UNUSED_TEST_KEY", raising=False)
     service._write_cache({"openrouter": {"base_url": settings.base_url if same_endpoint else "https://old.example/v1", "refreshed_at": 0,
         "models": [{"id": "old", "image_input": True}, {"id": "keep", "image_input": False}, {"id": "removed", "image_input": True}]}})
     listing = AsyncMock(return_value=SimpleNamespace(data=[
@@ -190,7 +188,7 @@ def test_provider_service_resolves_legacy_settings_to_compatible_provider(tmp_pa
     assert service.default_selection() == ModelSelection("openai-compatible", "deepseek-flash", "high")
 
 
-def test_credential_resolution_prefers_settings_then_stored_then_environment(tmp_path: Path, monkeypatch) -> None:
+def test_credential_resolution_prefers_settings_then_stored_and_ignores_ambient_environment(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(tmp_path)
     service = _service(tmp_path, settings, monkeypatch)
 
@@ -198,8 +196,8 @@ def test_credential_resolution_prefers_settings_then_stored_then_environment(tmp
     assert service._resolve_credential(settings, PROVIDERS["deepseek"]) is None
 
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
-    assert service._credential_source(settings, PROVIDERS["deepseek"]) == "environment"
-    assert service._resolve_credential(settings, PROVIDERS["deepseek"]).key == "env-key"
+    assert service._credential_source(settings, PROVIDERS["deepseek"]) == "none"
+    assert service._resolve_credential(settings, PROVIDERS["deepseek"]) is None
 
     service.credentials.set("deepseek", Credential(type="api_key", key="stored-key"))
     assert service._credential_source(settings, PROVIDERS["deepseek"]) == "stored"
@@ -210,6 +208,7 @@ def test_credential_resolution_prefers_settings_then_stored_then_environment(tmp
     assert service._resolve_credential(configured, PROVIDERS["deepseek"]).key == "settings-key"
 
     env_settings = _settings(tmp_path, api_key="$DEEPSEEK_API_KEY")
+    assert service._credential_source(env_settings, PROVIDERS["deepseek"]) == "settings"
     assert service._resolve_credential(env_settings, PROVIDERS["deepseek"]).key == "env-key"
 
 
@@ -356,7 +355,7 @@ async def test_list_models_hides_unconfigured_providers_and_appends_current(tmp_
 
 @pytest.mark.asyncio
 async def test_list_models_keeps_unconfigured_current_connection_out(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "ambient-env-key")
     settings = _settings(tmp_path, provider="openai", model="gpt-5.5")
     service = _service(tmp_path, settings, monkeypatch)
 
@@ -375,7 +374,6 @@ async def test_create_chat_client_requires_configuration(tmp_path: Path, monkeyp
 
     assert exc.value.code == "provider_not_configured"
     assert "/login" in str(exc.value)
-    assert "DEEPSEEK_API_KEY" in str(exc.value)
 
 
 @pytest.mark.asyncio
@@ -385,7 +383,7 @@ async def test_create_chat_client_rejects_unknown_api(tmp_path: Path, monkeypatc
     service.credentials.set("deepseek", Credential(type="api_key", key="deepseek-key"))
     service.providers["deepseek"] = SimpleNamespace(
         id="deepseek", name="DeepSeek", api="mystery-api", auth_methods=("api_key",),
-        environment_key="DEEPSEEK_API_KEY", fallback_models=(), default_base_url="https://api.deepseek.com/v1",
+        fallback_models=(), default_base_url="https://api.deepseek.com/v1",
     )
 
     with pytest.raises(ProviderError) as exc:
@@ -562,43 +560,40 @@ def test_registry_covers_mainstream_providers() -> None:
     from agent.infrastructure.llm.catalog import PROVIDERS, default_reasoning_efforts, refreshable_models_api
 
     assert PROVIDERS["google"].api == "google-generative-ai"
-    assert PROVIDERS["google"].environment_key == "GEMINI_API_KEY"
     assert {"gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-2.5-pro"} <= {model.id for model in PROVIDERS["google"].fallback_models}
     assert PROVIDERS["xai"].api == "openai-responses"
-    for provider_id, environment_key in (
-        ("groq", "GROQ_API_KEY"),
-        ("mistral", "MISTRAL_API_KEY"),
-        ("zai", "ZAI_API_KEY"),
-        ("zai-coding", "ZAI_CODING_API_KEY"),
-        ("zhipu", "ZHIPU_API_KEY"),
-        ("zhipu-coding", "ZHIPU_CODING_API_KEY"),
-        ("moonshot", "MOONSHOT_API_KEY"),
-        ("moonshot-cn", "MOONSHOT_CN_API_KEY"),
-        ("xiaomi", "XIAOMI_API_KEY"),
-        ("xiaomi-token-plan-cn", "XIAOMI_TOKEN_PLAN_CN_API_KEY"),
-        ("xiaomi-token-plan-ams", "XIAOMI_TOKEN_PLAN_AMS_API_KEY"),
-        ("xiaomi-token-plan-sgp", "XIAOMI_TOKEN_PLAN_SGP_API_KEY"),
-        ("hunyuan", "HUNYUAN_API_KEY"),
-        ("tencent-coding-plan", "TENCENT_CODING_PLAN_API_KEY"),
-        ("tencent-tokenhub", "TENCENT_TOKENHUB_API_KEY"),
-        ("tencent-token-plan", "TENCENT_TOKEN_PLAN_API_KEY"),
-        ("volcengine", "ARK_API_KEY"),
-        ("volcengine-coding-plan", "ARK_CODING_PLAN_API_KEY"),
-        ("qwen", "DASHSCOPE_API_KEY"),
-        ("qwen-coding", "QWEN_CODING_API_KEY"),
+    for provider_id in (
+        "groq",
+        "mistral",
+        "zai",
+        "zai-coding",
+        "zhipu",
+        "zhipu-coding",
+        "moonshot",
+        "moonshot-cn",
+        "xiaomi",
+        "xiaomi-token-plan-cn",
+        "xiaomi-token-plan-ams",
+        "xiaomi-token-plan-sgp",
+        "hunyuan",
+        "tencent-coding-plan",
+        "tencent-tokenhub",
+        "tencent-token-plan",
+        "volcengine",
+        "volcengine-coding-plan",
+        "qwen",
+        "qwen-coding",
     ):
         assert PROVIDERS[provider_id].api == "openai-chat"
-        assert PROVIDERS[provider_id].environment_key == environment_key
         assert PROVIDERS[provider_id].default_base_url.startswith("https://")
         assert PROVIDERS[provider_id].fallback_models
-    for provider_id, environment_key in (
-        ("minimax", "MINIMAX_API_KEY"),
-        ("minimax-cn", "MINIMAX_CN_API_KEY"),
-        ("minimax-coding-plan", "MINIMAX_CODING_PLAN_API_KEY"),
-        ("minimax-cn-coding-plan", "MINIMAX_CN_CODING_PLAN_API_KEY"),
+    for provider_id in (
+        "minimax",
+        "minimax-cn",
+        "minimax-coding-plan",
+        "minimax-cn-coding-plan",
     ):
         assert PROVIDERS[provider_id].api == "anthropic-messages"
-        assert PROVIDERS[provider_id].environment_key == environment_key
         assert PROVIDERS[provider_id].default_base_url.startswith("https://")
         assert PROVIDERS[provider_id].fallback_models
     # Pay-as-you-go and coding-plan subscriptions are separate products
@@ -615,7 +610,6 @@ def test_registry_covers_mainstream_providers() -> None:
     assert PROVIDERS["minimax"].api == "anthropic-messages"
     assert PROVIDERS["minimax-cn"].default_base_url == "https://api.minimax.cn/anthropic"
     assert PROVIDERS["kimi-coding"].api == "anthropic-messages"
-    assert PROVIDERS["kimi-coding"].environment_key == "KIMI_API_KEY"
     assert {"kimi-for-coding", "k3", "k3-256k"} <= {model.id for model in PROVIDERS["kimi-coding"].fallback_models}
     assert refreshable_models_api("openai-chat") and refreshable_models_api("openai-responses")
     assert not refreshable_models_api("google-generative-ai") and not refreshable_models_api("anthropic-messages")
@@ -774,10 +768,10 @@ def test_google_adapter_merges_tool_results_and_omits_ids_for_older_models() -> 
 
 
 @pytest.mark.asyncio
-async def test_provider_service_creates_google_client_from_environment(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "gem")
+async def test_provider_service_creates_google_client_from_stored_credential(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(tmp_path, provider="google", model="gemini-3-flash")
     service = _service(tmp_path, settings, monkeypatch)
+    service.credentials.set("google", Credential(type="api_key", key="gem"))
 
     from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
 
@@ -813,17 +807,15 @@ def test_resolve_selection_uses_configured_model_definition(tmp_path, monkeypatc
 ])
 async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
     import json
-    import httpx
+    import openai
     import anthropic
     from agent.infrastructure.llm.catalog import PROVIDERS
 
     definition = PROVIDERS[provider_id]
     settings = _settings(tmp_path)
     service = _service(tmp_path, settings, monkeypatch)
-    for item in PROVIDERS.values():
-        if item.environment_key:
-            monkeypatch.delenv(item.environment_key, raising=False)
-    transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+    sdk = anthropic if definition.api == "anthropic-messages" else openai
+    transport_http = __import__(sdk.DefaultAsyncHttpxClient.__bases__[0].__module__.split(".")[0])
     captured = []
 
     async def send(_self, request, **kwargs):

@@ -716,7 +716,7 @@ def test_adding_a_named_connection_needs_no_provider_and_answers_with_its_id():
 
 def test_auth_logout_reports_deletion_and_remaining_source():
     worker = FakeWorker()
-    worker.providers = [{"id": "deepseek", "configured": True, "source": "environment"}]
+    worker.providers = [{"id": "deepseek", "configured": True, "source": "settings"}]
     server, payloads = make_server(worker)
 
     async def run():
@@ -729,7 +729,7 @@ def test_auth_logout_reports_deletion_and_remaining_source():
         "ok": True,
         "provider_id": "deepseek",
         "deleted": True,
-        "source": "environment",
+        "source": "settings",
     }
 
 
