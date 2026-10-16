@@ -117,9 +117,32 @@ function sessionRow(session, depth, now) {
 export function organizationRows(snapshot, teamId, sessions, { collapsed = new Set(), query = "", filter = "All", sessionLimit = 3, now = Date.now() } = {}) {
   const team = byId(snapshot.teams, teamId);
   const members = snapshot.memberships.filter(m => m.teamId === teamId);
-  const memberIds = new Set(members.map(m => m.agentId));
+  const memberById = new Map(members.map(m => [m.agentId, m]));
+  const memberIds = new Set(memberById.keys());
+  const agentById = new Map((snapshot.agents || []).map(a => [a.id, a]));
   const parentOf = member => member.agentId === team?.leaderAgentId ? undefined : memberIds.has(member.reportsToAgentId) ? member.reportsToAgentId : team?.leaderAgentId;
-  const reports = id => members.filter(m => m.agentId !== id && parentOf(m) === id);
+  const reportsByParent = new Map();
+  for (const m of members) {
+    const p = parentOf(m);
+    if (p && p !== m.agentId) {
+      let list = reportsByParent.get(p);
+      if (!list) { list = []; reportsByParent.set(p, list); }
+      list.push(m);
+    }
+  }
+  const reports = id => reportsByParent.get(id) || [];
+  const sessionsByAgent = new Map();
+  for (const s of sessions) {
+    let list = sessionsByAgent.get(s.agentId);
+    if (!list) { list = []; sessionsByAgent.set(s.agentId, list); }
+    list.push(s);
+  }
+  const openTaskCountByAgent = new Map();
+  for (const t of snapshot.tasks) {
+    if (t.teamId === teamId && entryTask(t) && !["done", "cancelled"].includes(t.status)) {
+      openTaskCountByAgent.set(t.assigneeAgentId, (openTaskCountByAgent.get(t.assigneeAgentId) || 0) + 1);
+    }
+  }
   const descendants = (id, seen = new Set([id])) => reports(id).filter(m => !seen.has(m.agentId) && seen.add(m.agentId)).reduce((sum, m) => sum + 1 + descendants(m.agentId, seen), 0);
   const narrowed = Boolean(query) || filter !== "All";
   const rows = [], visited = new Set();
@@ -128,25 +151,26 @@ export function organizationRows(snapshot, teamId, sessions, { collapsed = new S
   const branchStatus = (agentId, seen = new Set()) => {
     if (seen.has(agentId)) return undefined;
     seen.add(agentId);
-    return worst(members.find(m => m.agentId === agentId)?.status, ...sessions.filter(s => s.agentId === agentId).map(s => s.status), ...reports(agentId).map(m => branchStatus(m.agentId, seen)));
+    return worst(memberById.get(agentId)?.status, ...(sessionsByAgent.get(agentId) || []).map(s => s.status), ...reports(agentId).map(m => branchStatus(m.agentId, seen)));
   };
 
   // Returns the member's rows, or an empty list when nothing in its branch survives the search.
   function branch(member, depth) {
     if (visited.has(member.agentId)) return [];
     visited.add(member.agentId);
-    const agent = byId(snapshot.agents, member.agentId);
-    const role = roleOf(snapshot, teamId, member.agentId);
+    const agent = agentById.get(member.agentId);
+    const role = member.agentId === team?.leaderAgentId ? "Leader" : single(member.position) || "Member";
     const self = matches(query, agent?.name, role, member.responsibility) && statusOk(filter, member.status);
-    const own = sessions.filter(s => s.agentId === member.agentId).sort(bySessionPriority);
+    const own = [...(sessionsByAgent.get(member.agentId) || [])].sort(bySessionPriority);
     const shownSessions = narrowed ? own.filter(s => (self && !query || matches(query, s.title)) && statusOk(filter, s.status)) : own;
-    const childRows = reports(member.agentId).flatMap(child => branch(child, depth + 1));
+    const directReports = reports(member.agentId);
+    const childRows = directReports.flatMap(child => branch(child, depth + 1));
     if (narrowed && !self && !shownSessions.length && !childRows.length) return [];
     const open = narrowed || !collapsed.has(member.agentId);
     const row = { id: "m:" + member.agentId, kind: "member", depth, title: single(agent?.name) || "Missing member", role: role === "Member" ? "" : role, status: member.status || "Idle", ownStatus: member.status || "Idle",
       agentId: member.agentId, teamId, leader: role === "Leader", sessionCount: own.length,
-      tasks: snapshot.tasks.filter(t => t.teamId === teamId && t.assigneeAgentId === member.agentId && entryTask(t) && !["done", "cancelled"].includes(t.status)).length, open: own.filter(s => s.status !== "Idle").length, reportCount: reports(member.agentId).length,
-      expandable: own.length > 0 || reports(member.agentId).length > 0, expanded: open };
+      tasks: openTaskCountByAgent.get(member.agentId) || 0, open: own.filter(s => s.status !== "Idle").length, reportCount: directReports.length,
+      expandable: own.length > 0 || directReports.length > 0, expanded: open };
     if (!open) return [{ ...row, status: branchStatus(member.agentId) || row.status, hidden: own.length + descendants(member.agentId) }];
     const limit = narrowed ? Infinity : sessionLimit;
     const children = shownSessions.slice(0, limit).map(session => sessionRow(session, depth + 1, now));
@@ -163,13 +187,14 @@ export function organizationRows(snapshot, teamId, sessions, { collapsed = new S
 // Adds ├─ └─ │ guides from depth information; a row is "last" when no later
 // sibling exists before its parent's branch ends.
 function withGuides(rows) {
-  const last = rows.map((row, index) => {
-    for (let next = index + 1; next < rows.length; next++) {
-      if (rows[next].depth < row.depth) return true;
-      if (rows[next].depth === row.depth) return false;
-    }
-    return true;
-  });
+  const last = new Array(rows.length).fill(true);
+  const seenAtDepth = [];
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const d = rows[i].depth;
+    seenAtDepth.length = d + 1;
+    if (seenAtDepth[d]) last[i] = false;
+    seenAtDepth[d] = true;
+  }
   const open = [];
   return rows.map((row, index) => {
     open.length = row.depth;
@@ -216,7 +241,7 @@ const liveById = (live, id, sessions = []) => {
   const item = live.find(entry => entry.id === id);
   const status = item ? liveStatus(item) : "Idle";
   const registered = sessions.find(entry => entry.runtimeSessionId === id)?.status;
-  return registered && statusMeta(registered).rank < statusMeta(status).rank ? registered : status;
+  return registered && !(registered === "Unconfirmed" && status !== "Idle") && statusMeta(registered).rank < statusMeta(status).rank ? registered : status;
 };
 export function managerRows(history = [], { query = "", now = Date.now(), live = [], sessions = [] } = {}) {
   return [{ id: "new:manager", kind: "new-session", title: "New conversation with Manager", manager: true },
@@ -279,7 +304,13 @@ export function inboxRows(snapshot) {
   const rows = items.length ? [{ id: "section:needs", kind: "section", title: "Needs you", count: items.length }, ...items] : [{ id: "clear", kind: "clear", title: "Nothing needs you right now" }];
   // What was delivered lately: every delivery not reviewed yet (marked new),
   // then the latest reviewed ones, newest first.
-  const finished = task => task.deliveredAt || snapshot.runs.filter(run => run.taskId === task.id && !run.delegationId).reduce((max, run) => later(max, run.lastObservedAt), "");
+  const latestRunAtByTask = new Map();
+  for (const run of snapshot.runs) {
+    if (run.taskId && !run.delegationId && run.lastObservedAt) {
+      latestRunAtByTask.set(run.taskId, later(latestRunAtByTask.get(run.taskId), run.lastObservedAt));
+    }
+  }
+  const finished = task => task.deliveredAt || latestRunAtByTask.get(task.id) || "";
   const done = snapshot.tasks.filter(task => entryTask(task) && task.status === "done").map(task => ({ task, at: finished(task) })).sort((a, b) => b.at.localeCompare(a.at));
   const fresh = done.filter(({ task }) => unreviewed(task));
   const delivered = [...fresh.slice(0, FRESH_LIMIT), ...done.filter(({ task }) => !unreviewed(task)).slice(0, Math.max(8, FRESH_LIMIT - fresh.length))];
@@ -337,41 +368,51 @@ export const workspaceKey = (value, platform = process.platform) => {
 // whose page has been opened passes its full list, which replaces the bounded
 // overview window before live state is merged in.
 export function independentSessions(snapshot, groups = [], managerWorkspace = "", folderSessions = {}) {
+  const byRuntimeSessionId = new Map();
   const byWorkspace = new Map(groups.map(group => {
     const page = folderSessions[workspaceKey(group.workspace)];
-    return [workspaceKey(group.workspace), { ...group, hasMore: page?.hasMore, sessions: (page?.sessions || group.sessions).map(s => ({ ...s, status: "Idle" })) }];
+    const sessions = (page?.sessions || group.sessions).map(s => {
+      const entry = { ...s, status: "Idle" };
+      if (entry.runtimeSessionId) byRuntimeSessionId.set(entry.runtimeSessionId, entry);
+      return entry;
+    });
+    return [workspaceKey(group.workspace), { ...group, hasMore: page?.hasMore, sessions }];
   }));
   const scoped = new Set(snapshot.sessions.filter(s => s.teamId && s.runtimeSessionId).map(s => s.runtimeSessionId));
   const manager = workspaceKey(managerWorkspace);
+  const agentByWorkspace = new Map((snapshot.agents || []).map(a => [workspaceKey(a.canonicalWorkspace), a]));
+  const agentById = new Map((snapshot.agents || []).map(a => [a.id, a]));
   for (const item of snapshot.live || []) {
     if (scoped.has(item.id)) continue;
     const key = workspaceKey(item.workspace);
-    let found;
-    for (const group of byWorkspace.values()) found ||= group.sessions.find(s => s.runtimeSessionId === item.id);
+    const found = byRuntimeSessionId.get(item.id);
     if (found) { found.status = liveStatus(item); found.updatedAt = later(found.updatedAt, item.updatedAt); if (single(item.title)) found.title = single(item.title); continue; }
     // A conversation that started after the last history refresh.
     if (!item.workspace || key === manager) continue;
-    const agent = snapshot.agents.find(a => workspaceKey(a.canonicalWorkspace) === key);
+    const agent = agentByWorkspace.get(key);
     const group = byWorkspace.get(key) || { workspace: agent?.canonicalWorkspace || item.workspace, ...(agent ? { agentId: agent.id } : {}), name: single(agent?.name) || item.workspace.split(/[\\/]/).filter(Boolean).at(-1) || item.workspace, teams: [], sessions: [] };
-    group.sessions.push({ runtimeSessionId: item.id, title: single(item.title) || "New conversation", updatedAt: item.updatedAt, status: liveStatus(item) });
+    const entry = { runtimeSessionId: item.id, title: single(item.title) || "New conversation", updatedAt: item.updatedAt, status: liveStatus(item) };
+    group.sessions.push(entry);
+    byRuntimeSessionId.set(item.id, entry);
     byWorkspace.set(key, group);
   }
   // Conversations management registered outside any team, in case history
   // has not caught up (or could not be read).
   for (const session of snapshot.sessions) {
     if (session.teamId || !session.runtimeSessionId) continue;
-    let found;
-    for (const group of byWorkspace.values()) found ||= group.sessions.find(s => s.runtimeSessionId === session.runtimeSessionId);
+    const found = byRuntimeSessionId.get(session.runtimeSessionId);
     if (found) {
-      if (session.status && statusMeta(session.status).rank < statusMeta(found.status).rank) found.status = session.status;
+      if (session.status && !(session.status === "Unconfirmed" && found.status !== "Idle") && statusMeta(session.status).rank < statusMeta(found.status).rank) found.status = session.status;
       found.updatedAt = later(found.updatedAt, session.lastActivity);
       continue;
     }
-    const agent = byId(snapshot.agents, session.agentId);
+    const agent = agentById.get(session.agentId);
     if (!agent || workspaceKey(agent.canonicalWorkspace) === manager) continue;
     const key = workspaceKey(agent.canonicalWorkspace);
     const group = byWorkspace.get(key) || { workspace: agent.canonicalWorkspace, agentId: agent.id, name: single(agent.name), teams: [], sessions: [] };
-    group.sessions.push({ runtimeSessionId: session.runtimeSessionId, title: session.runtimeSessionId, updatedAt: session.lastActivity, status: session.status || "Idle" });
+    const entry = { runtimeSessionId: session.runtimeSessionId, title: session.runtimeSessionId, updatedAt: session.lastActivity, status: session.status || "Idle" };
+    group.sessions.push(entry);
+    byRuntimeSessionId.set(session.runtimeSessionId, entry);
     byWorkspace.set(key, group);
   }
   return [...byWorkspace.values()];

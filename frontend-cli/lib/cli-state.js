@@ -37,6 +37,7 @@ export function createCliState() {
       assistantHeaderShown: false,
       outputStarted: false,
       toolDetailsExpanded: false,
+      leaveArmed: false,
       processExitTimer: null,
     },
   };

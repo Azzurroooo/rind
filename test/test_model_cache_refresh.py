@@ -14,9 +14,6 @@ from agent.runtime.server.worker import RuntimeWorker
 @pytest.fixture
 def service(tmp_path, monkeypatch):
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
-    for definition in module.PROVIDERS.values():
-        if definition.environment_key:
-            monkeypatch.delenv(definition.environment_key, raising=False)
     settings = AppSettings(tmp_path / "settings.json", True, "deepseek-chat", "", "", "", provider="deepseek")
     monkeypatch.setattr(module, "load_settings", lambda: settings)
     monkeypatch.setattr(module.time, "time", lambda: 200000)

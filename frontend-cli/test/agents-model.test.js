@@ -382,3 +382,24 @@ test("delegating member and session surface Delegated status, Waits on details, 
   assert.equal(liveTable.list()[0].background, null);
 });
 
+test("live active status is not overridden by stale Unconfirmed session status in managerRows and independentSessions", async () => {
+  const { managerRows } = await import("../lib/agents-model.js");
+  const rows = managerRows(
+    [{ runtimeSessionId: "r-mgr", title: "Manager chat", updatedAt: "2026-10-06T11:58:00Z" }],
+    {
+      now: NOW,
+      live: [{ id: "r-mgr", workspace: "/rind/manager", turn: "running", watchers: 1, updatedAt: "2026-10-06T11:59:00Z" }],
+      sessions: [{ id: "s-mgr", runtimeSessionId: "r-mgr", status: "Unconfirmed" }],
+    },
+  );
+  assert.equal(rows.find(r => r.sessionId === "r-mgr").status, "Working");
+
+  const { snapshot } = fixture();
+  snapshot.sessions.push({ id: "s-ind", agentId: "lead", runtimeSessionId: "r-ind", status: "Unconfirmed", lastActivity: "2026-10-06T11:58:00Z" });
+  snapshot.live = [{ id: "r-ind", workspace: "/w/lead", turn: "running", watchers: 0, updatedAt: "2026-10-06T11:59:00Z" }];
+  const groups = [{ workspace: "/w/lead", agentId: "lead", name: "Lead", teams: ["Product"], sessions: [{ runtimeSessionId: "r-ind", title: "Quick fix", updatedAt: "2026-10-06T11:50:00Z" }] }];
+  const merged = independentSessions(snapshot, groups, "/rind/manager");
+  assert.equal(merged.find(g => g.agentId === "lead").sessions.find(s => s.runtimeSessionId === "r-ind").status, "Working");
+});
+
+

@@ -31,13 +31,14 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
   }
   const groups = await Promise.all(agentIds.map(async agentId => {
     const registered = Object.values(state.sessions).filter(s => s.agentId === agentId && s.runtimeSessionId);
+    const registeredByRuntimeId = new Map(registered.map(s => [s.runtimeSessionId, s]));
     const scoped = scope.teamId ? registered.filter(s => s.teamId === scope.teamId) : registered;
     const seen = new Set<string>();
     const entries: HistoryEntry[] = [];
     for (const raw of await list(state.agents[agentId].canonicalWorkspace)) {
       const runtimeSessionId = string(raw.id) || string(raw.session_id);
       if (!runtimeSessionId || seen.has(runtimeSessionId)) continue;
-      const owner = registered.find(s => s.runtimeSessionId === runtimeSessionId);
+      const owner = registeredByRuntimeId.get(runtimeSessionId);
       if (scope.teamId && owner?.teamId !== scope.teamId) continue;
       seen.add(runtimeSessionId);
       // History reports what to show: the name, otherwise the first message.

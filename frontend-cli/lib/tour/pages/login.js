@@ -72,7 +72,7 @@ export const loginPages = [
       }),
       note([
         "Try /login, then /status. Login credentials use ~/.rind/auth.json (or RIND_HOME/auth.json).",
-        "/logout removes stored credentials; settings or environment credentials may still apply.",
+        "/logout removes stored credentials; settings.json credentials may still apply.",
       ]),
     ],
   },

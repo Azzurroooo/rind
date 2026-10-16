@@ -54,6 +54,10 @@ class ContextManager:
         self._rind_doc_provider = rind_doc_provider
         self._goal_policy_provider = goal_policy_provider
 
+    @property
+    def estimator(self) -> ContextEstimator:
+        return self._estimator
+
     async def build_messages_async(
         self,
         session,
@@ -64,8 +68,7 @@ class ContextManager:
         include_ids: bool = False,
     ) -> ContextBuildResult:
         try:
-            persisted = await session.get_messages_slice(include_internal=True, include_ids=include_ids)
-            persisted_messages = [dict(message) for message in persisted]
+            persisted_messages = await session.get_messages_slice(include_internal=True, include_ids=include_ids)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -109,14 +112,13 @@ class ContextManager:
         # Score the tagged list, not the stripped projection: the composition
         # snapshot re-estimates these exact payloads, keeping section sums
         # equal to stats["estimated_input_tokens"] with zero drift.
-        token_cache = {} if allow_rescue else None
-        final_estimate = self._estimator.estimate_messages(messages, token_cache=token_cache)
+        final_estimate = self._estimator.estimate_messages(messages)
 
         dropped_count = 0
         while allow_rescue and final_estimate.over_hard_limit and len(final_messages) > 1:
             previous_tokens = final_estimate.estimated_input_tokens
             messages, final_messages = self.rescue_context(messages, final_messages)
-            final_estimate = self._estimator.estimate_messages(messages, token_cache=token_cache)
+            final_estimate = self._estimator.estimate_messages(messages)
             dropped_count += 1
             if dropped_count > 50 or final_estimate.estimated_input_tokens >= previous_tokens:
                 break

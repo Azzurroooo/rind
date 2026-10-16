@@ -170,7 +170,6 @@ def _completion(response):
         elif kind == "thinking":
             reasoning.append(str(_get(block, "thinking") or ""))
         elif kind == "tool_use":
-            import json
             calls.append(ParsedToolCall(str(_get(block, "id") or ""), str(_get(block, "name") or ""), json.dumps(_get(block, "input") or {})))
     reason = {"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(str(_get(response, "stop_reason") or ""), "error")
     return ModelCompletion("".join(content), tuple(calls), "".join(reasoning) or None, _usage(_get(response, "usage")), reason)

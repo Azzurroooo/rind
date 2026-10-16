@@ -38,6 +38,7 @@ class TaskJournal:
         self.worker_instance_id = uuid.uuid4().hex
         self._lease: FileLock | None = None
         self._lock = threading.RLock()
+        self._file_locks: dict[str, FileLock] = {}
         self._sessions: OrderedDict[str, _SessionIndex] = OrderedDict()
         self._tasks: OrderedDict[tuple[str, str], tuple[int, dict]] = OrderedDict()
 
@@ -224,13 +225,15 @@ class TaskJournal:
         path = directory / "tasks.jsonl"
         if action in {"all", "relevant", "get", "maintain"} and not path.exists():
             return {} if action in {"all", "relevant"} else None
-        directory.mkdir(parents=True, exist_ok=True)
-        with self._lock, FileLock(str(path) + ".lock"):
+        if not directory.is_dir():
+            directory.mkdir(parents=True, exist_ok=True)
+        with self._lock, self._file_locks.setdefault(str(path) + ".lock", FileLock(str(path) + ".lock")):
             self._ensure_lease()
             index = self._sessions.get(session_id)
             if index is None:
                 if len(self._sessions) >= self.SESSION_CACHE_LIMIT:
                     old, _ = self._sessions.popitem(last=False)
+                    self._file_locks.pop(str(resolve_session_base(self.root, old) / "tasks.jsonl") + ".lock", None)
                     for key in [k for k in self._tasks if k[0] == old]:
                         self._tasks.pop(key)
                 index = _SessionIndex()

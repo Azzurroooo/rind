@@ -72,3 +72,20 @@ test("the Manager's overview keeps open work and the latest deliveries, and coun
   assert.equal(overview.omittedTasks, 3);
   assert.deepEqual(overview.runs, [{ id: "r1", agentId: "a", status: "running", taskId: "q" }]);
 });
+
+test("live active turns and background jobs take precedence over stale unknown runs", () => {
+  const s = state();
+  s.runs.run = run("unknown");
+  const running = projectionIndex(s, new Set(), live({ turn: "running" }));
+  assert.equal(sessionStatus(running, "s").status, "Working");
+  assert.equal(memberStatus(running, "lead", "team"), "Working");
+
+  const job = projectionIndex(s, new Set(), live({ turn: "idle", background: { count: 1, commands: ["pytest"], startedAt: "2026-10-07T11:59:00Z" } }));
+  assert.equal(sessionStatus(job, "s").status, "Running job");
+  assert.equal(memberStatus(job, "lead", "team"), "Running job");
+
+  const idle = projectionIndex(s, new Set(), live({ turn: "idle" }));
+  assert.equal(sessionStatus(idle, "s").status, "Unconfirmed");
+  assert.equal(memberStatus(idle, "lead", "team"), "Unconfirmed");
+});
+

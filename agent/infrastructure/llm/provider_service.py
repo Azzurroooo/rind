@@ -18,9 +18,10 @@ from dataclasses import replace
 from pathlib import Path
 import tempfile
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import openai
+if TYPE_CHECKING:
+    import openai
 
 from agent.domain.errors import ProviderError
 from agent.domain.models import (
@@ -60,6 +61,7 @@ ApiKey = str | Callable[[], Awaitable[str]]
 
 
 def build_async_client(api_key: ApiKey, base_url: str, *, max_retries: int = 2) -> openai.AsyncOpenAI:
+    import openai
     from agent.infrastructure.settings import DEFAULT_USER_AGENT
 
     return openai.AsyncOpenAI(

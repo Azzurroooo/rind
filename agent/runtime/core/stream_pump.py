@@ -37,6 +37,18 @@ class ModelStreamResult:
     finish_reason: str | None = None
 
 
+def _estimate_event_bytes(event: RuntimeEvent) -> int:
+    if isinstance(event, AssistantDeltaEvent):
+        return len(event.text.encode("utf-8")) + 128
+    if isinstance(event, ToolInputDeltaEvent):
+        return len(event.delta.encode("utf-8")) + 160
+    if isinstance(event, (ToolInputStartedEvent, ToolInputEndedEvent)):
+        return len(event.tool_name.encode("utf-8")) + len(event.tool_call_id.encode("utf-8")) + 128
+    if isinstance(event, TokenStatsUpdatedEvent):
+        return 256
+    return len(json.dumps(event.to_dict(), ensure_ascii=False).encode("utf-8"))
+
+
 async def pump_model_stream_events(
     *,
     stream_response: AsyncIterator[Any],
@@ -56,7 +68,7 @@ async def pump_model_stream_events(
 
     async def emit(event: RuntimeEvent) -> None:
         nonlocal queued_bytes
-        size = len(json.dumps(event.to_dict(), ensure_ascii=False).encode("utf-8"))
+        size = _estimate_event_bytes(event)
         if size > 1024 * 1024:
             raise ValueError("Model stream event exceeds the 1 MiB queue budget.")
         while len(event_queue) >= 256 or queued_bytes + size > 1024 * 1024:

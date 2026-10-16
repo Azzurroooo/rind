@@ -136,12 +136,20 @@ class RuntimeWorker:
 
     async def configure_if_unowned(self, session_id: str, params: dict) -> None:
         clean = validate_session_id(session_id)
-        if "external_tools" not in params or self.execution.owns_session(clean):
+        if "external_tools" not in params or (
+            self.execution.owns_session(clean)
+            and (not params.get("external_tools") or self.execution.external_tool(clean) is None)
+        ):
             return
-        if self.repository.draft_store(clean) is None and not await self.repository.exists(clean):
+        if not self.execution.owns_session(clean) and self.repository.draft_store(clean) is None and not await self.repository.exists(clean):
             return
         tool = ExternalTool.from_json(json.dumps(params["external_tools"])) if params.get("external_tools") else None
-        await self.execution.configure_session(clean, tool, params.get("enable_user_question") is not False)
+        enable_question = (
+            params.get("enable_user_question") is not False
+            if "enable_user_question" in params
+            else self.execution.user_question_enabled(clean)
+        )
+        await self.execution.configure_session(clean, tool, enable_question)
 
     async def start_execution(self, session_id: str) -> AgentContainer:
         return await self.execution.start(session_id)
@@ -184,11 +192,13 @@ class RuntimeWorker:
         return self.repository.discard_unsaved(clean)
 
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None, tail: int | None = None) -> dict[str, Any]:
-        await self.shell_tools.maintain_tasks(session_id)
+        metadata_only = end == 0 and not tail
+        if not metadata_only:
+            await self.shell_tools.maintain_tasks(session_id)
         result = await self.repository.replay(session_id, start=start, end=end, tail=tail)
         result["live_turn"] = self.execution.live_turn(session_id)
         result["hosted"] = self.execution.owns_session(session_id)
-        result["tasks"] = (await self.shell_tools.monitor_tasks(session_id))["tasks"]
+        result["tasks"] = [] if metadata_only else (await self.shell_tools.monitor_tasks(session_id))["tasks"]
         result["background_wait"] = await self.execution.background_wait(session_id)
         return result
 

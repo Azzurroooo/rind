@@ -480,20 +480,6 @@ class AgentRuntime:
         else:
             await self._session_store.persist_user_input(content, meta=meta)
 
-    async def _persist_message(self, role: str, content: str, meta: dict | None = None) -> None:
-        try:
-            if meta is None:
-                await self._session_store.persist_message(role, content)
-            else:
-                await self._session_store.persist_message(role, content, meta=meta)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            raise PersistenceError(
-                f"Failed to persist {role} message: {exc}",
-                code=type(exc).__name__,
-            ) from exc
-
     async def _persist_turn_state(self, event: RuntimeEvent, recovery_attempt: int | None = None) -> None:
         try:
             status = "running" if event.type == "turn_started" else event.type.removeprefix("turn_")

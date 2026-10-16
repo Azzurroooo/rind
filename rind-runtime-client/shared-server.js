@@ -10,6 +10,11 @@ import { createLiveSessions } from "./live-sessions.js";
 
 // Only the detached entry point exits on its own; a test imports this module.
 const hostEntry = Boolean(process.argv[1]?.endsWith("shared-server.js"));
+const OBSERVE_EVENTS = new Set([
+  "turn_started", "turn_completed", "turn_failed", "turn_cancelled",
+  "user_question_requested", "user_question_answered", "background_wait_changed",
+  "folder_defaults_changed", "wait_released", "session_discarded", "session_deleted",
+]);
 
 export async function startSharedServer(options) {
   const rindHome = resolveRindHome(options.rindHome);
@@ -26,13 +31,15 @@ export async function startSharedServer(options) {
       // Sign-in progress (the URL to open) is for the window signing in.
       if (event?.method === "rind/auth/update") { authOwner?.send({ event }); return; }
       live.event(event);
-      for (const peer of peers) if (peer.observe || peer.sessions.has(event.session_id)) peer.send({ event });
+      const type = event?.event?.type;
+      const observeEvent = OBSERVE_EVENTS.has(type) || (type === "tool_result" && event.event.tool_name === "ask_user_question");
+      for (const peer of peers) if (peer.sessions.has(event.session_id) || (peer.observe && observeEvent)) peer.send({ event });
       // A first prompt failed before its message saved the conversation: it never existed.
-      if (event?.event?.type === "session_discarded") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
+      if (type === "session_discarded") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
       // A conversation was deleted: every list and live table drops it now.
-      if (event?.event?.type === "session_deleted") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
+      if (type === "session_deleted") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
     },
-    onRequest(prompt) { return new Promise(resolve => { if (!authOwner) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
+    onRequest(prompt) { return new Promise(resolve => { if (!authOwner || authOwner.socket.destroyed) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
     onStderr: text => process.stderr.write(text),
     // A crashed worker ends every turn it was running; nothing will report their end.
     // The host stops with it: a later client starts a fresh host instead of
@@ -61,18 +68,18 @@ export async function startSharedServer(options) {
   // A request can finish after its window closed; a closed window shows nothing.
   const viewIfOpen = (peer, id, details) => { if (peers.has(peer)) live.view(peer, id, details); };
   const writeRecord = (workerPid = client.child?.pid) => writeFile(paths.record, JSON.stringify({ pid: process.pid, ...(workerPid ? { workerPid } : {}), nonce: recordNonce, startedAt }), { mode: 0o600 });
-  const initialize = () => initialized ||= (async () => { const child = client.start(); await writeRecord(child?.pid).catch(() => {}); return client.request("initialize"); })();
+  const initialize = () => initialized ||= (async () => { const child = client.start(); await writeRecord(child?.pid).catch(() => {}); return client.request("initialize"); })().catch(error => { initialized = undefined; throw error; });
   let readyResolve, readyReject;
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   ready.catch(() => {});
   const server = net.createServer(socket => {
     socket.setEncoding("utf8"); let buffer = "";
-    const peer = { socket, sessions: new Set(), observe: false, send(message) { if (!socket.destroyed) { if (socket.writableLength > 4 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
+    const peer = { socket, sessions: new Set(), observe: false, send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
     peers.add(peer); socket.on("error", () => {});
     socket.on("close", () => { peers.delete(peer); live.leave(peer); for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); } });
     socket.on("data", chunk => {
       buffer += chunk;
-      if (buffer.length > 8 * 1024 * 1024) { socket.destroy(); return; }
+      if (buffer.length > 32 * 1024 * 1024) { socket.destroy(); return; }
       let end; while ((end = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); void handle(line); }
     });
     async function handle(line) {

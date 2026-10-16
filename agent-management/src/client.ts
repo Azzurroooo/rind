@@ -109,9 +109,10 @@ export async function connectClient({ endpoint, token, runtimeSessionId, onSnaps
   endpoint: string; token: string; runtimeSessionId?: string;
   onSnapshot?: (snapshot: any) => void; onDisconnect?: () => void;
 }) {
+  const clientError = (code: string, message: string) => Object.assign(new Error(message), { code });
   const socket = net.connect(endpoint);
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => failed(new Error("Management connection timed out.")), 3000);
+    const timer = setTimeout(() => failed(clientError("CONNECTION_TIMED_OUT", "Management connection timed out.")), 3000);
     const failed = (error: Error) => { clearTimeout(timer); socket.destroy(); reject(error); };
     socket.once("connect", () => { clearTimeout(timer); socket.off("error", failed); resolve(); });
     socket.once("error", failed);
@@ -121,7 +122,7 @@ export async function connectClient({ endpoint, token, runtimeSessionId, onSnaps
   let closed = false;
   const pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   socket.on("error", () => {});
-  socket.on("close", () => { for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error("Management connection lost; status is unconfirmed.")); } pending.clear(); if (!closed) onDisconnect?.(); });
+  socket.on("close", () => { for (const p of pending.values()) { clearTimeout(p.timer); p.reject(clientError("CONNECTION_LOST", "Management connection lost; status is unconfirmed.")); } pending.clear(); if (!closed) onDisconnect?.(); });
   socket.on("data", chunk => {
     buffer += chunk;
     if (buffer.length > 32 * 1024 * 1024) { socket.destroy(new Error("Management response too large.")); return; }
@@ -142,8 +143,8 @@ export async function connectClient({ endpoint, token, runtimeSessionId, onSnaps
     request(method: string, params: Record<string, any> = {}): Promise<any> {
       const id = randomUUID();
       return new Promise((resolve, reject) => {
-        if (socket.destroyed) { reject(new Error("Management service is disconnected.")); return; }
-        const timer = setTimeout(() => { pending.delete(id); reject(new Error("Management request timed out. Retry with the same requestId if the outcome is unknown.")); }, 120000);
+        if (socket.destroyed) { reject(clientError("SERVICE_DISCONNECTED", "Management service is disconnected.")); return; }
+        const timer = setTimeout(() => { pending.delete(id); reject(clientError("REQUEST_TIMED_OUT", "Management request timed out; outcome is unconfirmed.")); }, 120000);
         pending.set(id, { resolve, reject, timer });
         socket.write(JSON.stringify({ id, token, runtimeSessionId, method, params: { requestId: id, ...params } }) + "\n");
       });

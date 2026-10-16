@@ -22,6 +22,7 @@ export class AssistantMessage {
     this.tableState = createTableState();
     this.cacheWidth = -1;
     this.cacheItems = [];
+    this.finalizedLines = [];
     this.cacheLines = null;
   }
 
@@ -35,7 +36,7 @@ export class AssistantMessage {
       const line = this.pending.slice(0, newlineIndex);
       this.pending = this.pending.slice(newlineIndex + 1);
       if (this.classifyFinalize(line)) {
-        this.cacheItems.length = 0;
+        this.invalidateActiveTableItem();
       }
     }
     this.cacheLines = null;
@@ -45,15 +46,25 @@ export class AssistantMessage {
     if (this.pending) {
       const line = this.pending;
       this.pending = "";
-      this.classifyFinalize(line);
+      if (this.classifyFinalize(line)) {
+        this.invalidateActiveTableItem();
+      }
     }
     this.flushTableState();
-    this.cacheItems.length = 0;
     this.cacheLines = null;
   }
 
   get isEmpty() {
     return !this.finalized.length && !this.pending && !this.tableState.candidate.length && !this.tableState.rows;
+  }
+
+  invalidateActiveTableItem() {
+    if (this.cacheItems.length === this.finalized.length) {
+      const removed = this.cacheItems.pop();
+      if (removed) {
+        this.finalizedLines.length -= removed.length;
+      }
+    }
   }
 
   classifyFinalize(line) {
@@ -66,14 +77,14 @@ export class AssistantMessage {
         this.classifyNonTable(line);
       }
       this.pushItem({ kind: "table", rows: this.tableState.rows });
-      return true;
+      return false;
     }
     if (result.type === "append") {
       return true;
     }
     if (result.type === "flush") {
       this.classifyNonTable(result.line);
-      return true;
+      return false;
     }
     if (result.type === "flush_candidate") {
       for (const candidate of result.lines) {
@@ -154,20 +165,19 @@ export class AssistantMessage {
     }
     if (this.cacheWidth !== width) {
       this.cacheItems.length = 0;
+      this.finalizedLines.length = 0;
       this.cacheWidth = width;
     }
     while (this.cacheItems.length < this.finalized.length) {
       const item = this.finalized[this.cacheItems.length];
       const logical = typeof item === "string" ? item : this.styleItem(item, width);
-      this.cacheItems.push(this.wrapLogical(logical, width));
+      const wrapped = this.wrapLogical(logical, width);
+      this.cacheItems.push(wrapped);
+      this.finalizedLines.push(...wrapped);
     }
-    const lines = [];
-    for (const item of this.cacheItems) {
-      lines.push(...item);
-    }
-    if (this.pending) {
-      lines.push(...this.wrapLogical(previewPending(this.pending, this.inCodeBlock, this.color), width));
-    }
+    const lines = this.pending
+      ? [...this.finalizedLines, ...this.wrapLogical(previewPending(this.pending, this.inCodeBlock, this.color), width)]
+      : this.finalizedLines.slice();
     this.cacheLines = lines;
     return lines;
   }
@@ -184,6 +194,7 @@ export class AssistantMessage {
   invalidate() {
     this.cacheWidth = -1;
     this.cacheItems.length = 0;
+    this.finalizedLines.length = 0;
     this.cacheLines = null;
   }
 }

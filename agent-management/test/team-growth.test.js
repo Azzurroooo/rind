@@ -72,8 +72,35 @@ test("a member is retired once its work is finished and its worktree is clean; t
   await commit(added.workspace, "feature b");
   const other = await f.member("other");
   await assert.rejects(f.call("delegate", { retire: other.id }, leader), { code: "FORBIDDEN" }, "only members it added");
-  assert.deepEqual(await f.call("delegate", { retire: added.agentId }, leader), { retired: added.agentId, kept: "its branch" });
+  assert.deepEqual(await f.call("delegate", { retire: "feature-b" }, leader), { retired: added.agentId, kept: "its branch" });
   await assert.rejects(stat(added.workspace), { code: "ENOENT" });
   assert.match((await git("git", ["branch", "--list", "feature/b"], { cwd: repo })).stdout, /feature\/b/);
   assert.equal(f.store.state.memberships[f.team.id + "/" + added.agentId], undefined);
 });
+
+test("delegate resolves direct reports by name, accepts brief for task follow-up, and rolls back workspace on init failure", async t => {
+  const f = await fixture(t);
+  const leader = await conversation(f);
+  f.folders.set(f.leader.canonicalWorkspace, { provider_id: "deepseek", model_id: "missing" });
+  await assert.rejects(f.call("delegate", { new: { name: "pro" }, brief: "Draft" }, leader), /missing is not available/);
+  await assert.rejects(stat(path.join(f.home, "pro")), { code: "ENOENT" }, "failed member creation cleans up its directory");
+  f.folders.delete(f.leader.canonicalWorkspace);
+
+  const created = await f.call("delegate", { new: { name: "pro" }, brief: "Initial draft" }, leader);
+  await eventually(() => f.starts.length === 1);
+  f.starts[0].finish({ content: "Draft v1" });
+  await eventually(() => f.store.state.delegations[created.taskId].status === "done");
+
+  await assert.rejects(f.call("delegate", { brief: "No target" }, leader), { code: "INVALID_INPUT", message: new RegExp(`Direct reports:.*"id":"${created.agentId}","name":"pro"`) });
+  await assert.rejects(f.call("delegate", { task: created.taskId, message: "A", brief: "B" }, leader), { code: "INVALID_INPUT" });
+
+  const followed = await f.call("delegate", { task: created.taskId, brief: "Refine draft" }, leader);
+  assert.equal(followed.status, "queued");
+  await eventually(() => f.starts.length === 2);
+  f.starts[1].finish({ content: "Draft v2" });
+  await eventually(() => f.store.state.delegations[created.taskId].status === "done");
+
+  const byName = await f.call("delegate", { to: "PRO", brief: "Second task by name" }, leader);
+  assert.equal(byName.assignee, "pro");
+});
+

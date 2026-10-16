@@ -183,7 +183,7 @@ class ToolResultNormalizer:
         if status == "running":
             notes.append(
                 f"Command is still running as task {data.get('task_id')}. Continue it with "
-                f"task_control (action read, task_id {data['task_id']}, cursor {data.get('next_cursor')}), or rely on "
+                f"task_control (action read, task_id {data['task_id']}, cursor {data.get('next_cursor')}), or end your turn and rely on "
                 "notify=on_exit to deliver completion."
             )
         if meta.get("truncated"):
@@ -277,7 +277,7 @@ class ToolResultNormalizer:
                                "meta": {"path": meta.get("path"), "offset": offset}}, ensure_ascii=False)
         lines = []
         for line in body:
-            if not re.match(rf"\s*{offset + len(lines)} \|", line):
+            if not line.lstrip().startswith(f"{offset + len(lines)} |"):
                 break
             lines.append(line)
         incomplete = offset + len(lines) - 1 < int(matched[1])
@@ -292,6 +292,11 @@ class ToolResultNormalizer:
                 projected["data"] += _READ_PAGE_MARKER
             projected["meta"] = {**meta, "limit": count, "next_offset": next_offset, "truncated": next_offset is not None, "line_truncated": False}
             return json.dumps(projected, ensure_ascii=False, separators=(",", ": "))
+
+        if lines and len(lines) + 1 <= self.max_preview_lines:
+            full = serialize(len(lines))
+            if len(full.encode("utf-8")) <= self.max_preview_bytes:
+                return full
 
         low = 0
         high = len(lines)

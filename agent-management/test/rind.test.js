@@ -29,7 +29,7 @@ test("direct session remains observable after detach and management restart, and
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
-  const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
+  const options = { home, repoRoot, python: process.env.RIND_PYTHON };
   let server = await startServer(options);
   const token = (await readFile(server.paths.token, "utf8")).trim();
   const connect = () => connectClient({ endpoint: server.paths.endpoint, token });
@@ -90,7 +90,7 @@ test("direct CLI captures activity, rejects ambiguous teams, and the manager has
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
-  const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON || "python" });
+  const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON });
   const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
   t.after(async () => { client.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const agent = await client.request("registerAgent", { workspace });
@@ -165,7 +165,7 @@ test("real Rind reports through the declared tool and the task is delivered", { 
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture-key" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
-  const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON || "python" });
+  const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON });
   const token = (await readFile(server.paths.token, "utf8")).trim();
   const client = await connectClient({ endpoint: server.paths.endpoint, token });
   t.after(async () => { client.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
@@ -181,7 +181,7 @@ test("real Rind reports through the declared tool and the task is delivered", { 
   const view = await client.request("snapshot");
   const managed = view.sessions.find(s => s.origin === "managed");
   const { runtimeSessionId } = managed;
-  const window = createSharedRuntimeClient({ home, rindHome: home, repoRoot, python: process.env.RIND_PYTHON || "python", cliArgs: ["--cwd", workspace, "--session", runtimeSessionId], externalTools: await client.request("sessionTools", { sessionId: managed.id }) });
+  const window = createSharedRuntimeClient({ home, rindHome: home, repoRoot, python: process.env.RIND_PYTHON, cliArgs: ["--cwd", workspace, "--session", runtimeSessionId], externalTools: await client.request("sessionTools", { sessionId: managed.id }) });
   try { assert.equal((await window.request("initialize")).session_id, runtimeSessionId); }
   finally { await window.shutdown(); release(); }
   let current;
@@ -197,9 +197,9 @@ test("real Rind reports through the declared tool and the task is delivered", { 
 
 test("a leader conversation delegates work and the delivery returns as its own turn", { timeout: 90000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-delegation-e2e-"));
-  const leaderWorkspace = path.join(home, "leader"), memberWorkspace = path.join(home, "member");
-  await mkdir(leaderWorkspace); await mkdir(memberWorkspace);
-  let memberAgentId = "", delegateResult = "";
+  const leaderWorkspace = path.join(home, "leader");
+  await mkdir(leaderWorkspace);
+  let delegateResult = "";
   const trouble = [];
   const provider = http.createServer((request, response) => {
     if (request.method === "GET") { response.end(JSON.stringify({ data: [{ id: "fixture" }] })); return; }
@@ -217,7 +217,7 @@ test("a leader conversation delegates work and the delivery returns as its own t
         if (!names.includes("delegate")) trouble.push("the leader conversation cannot delegate: " + names.join(","));
         if (delivered) delta = { content: "Delivery received." };
         else if (toolMessage) { delegateResult = toolMessage.content; delta = { content: "Delegating." }; }
-        else delta = { tool_calls: [{ index: 0, id: "delegate-1", type: "function", function: { name: "delegate", arguments: JSON.stringify({ to: memberAgentId, brief: "Build the fixture" }) } }] };
+        else delta = { tool_calls: [{ index: 0, id: "delegate-1", type: "function", function: { name: "delegate", arguments: JSON.stringify({ new: { name: "Builder" }, brief: "Build the fixture" }) } }] };
       }
       const toolCall = Boolean(delta.tool_calls);
       response.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -230,31 +230,29 @@ test("a leader conversation delegates work and the delivery returns as its own t
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture-key" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
-  const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
+  const options = { home, repoRoot, python: process.env.RIND_PYTHON };
   const server = await startServer(options);
   const token = (await readFile(server.paths.token, "utf8")).trim();
   const user = await connectClient({ endpoint: server.paths.endpoint, token });
-  t.after(async () => { user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  let window;
+  t.after(async () => { await window?.shutdown().catch(() => {}); user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const team = await user.request("createTeam", { name: "E2E" });
   const leader = await user.request("registerAgent", { workspace: leaderWorkspace, name: "Lead" });
-  const member = await user.request("registerAgent", { workspace: memberWorkspace, name: "Builder" });
   await user.request("addMember", { teamId: team.id, agentId: leader.id });
-  await user.request("addMember", { teamId: team.id, agentId: member.id, reportsToAgentId: leader.id });
   await user.request("setLeader", { teamId: team.id, agentId: leader.id });
-  memberAgentId = member.id;
 
   const session = await user.request("attachSession", { agentId: leader.id, teamId: team.id, shared: true });
   const events = [];
-  const window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }), onMessage: message => events.push(message?.event || message) });
-  t.after(() => window.shutdown().catch(() => {}));
+  window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }), onMessage: message => events.push(message?.event || message) });
   const info = await window.request("session/create", {});
-  await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
-  await window.request("session/prompt", { session_id: info.session_id, input: "Delegate the fixture work." });
 
   // The host tool's result keeps its meaning for whoever reads it.
+  await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
+  await window.request("session/prompt", { session_id: info.session_id, input: "Delegate the fixture work." });
   const delegated = JSON.parse(delegateResult);
   assert.equal(delegated.tool, "delegate");
   assert.equal(delegated.data.assignee, "Builder");
+  assert.match(delegated.data.workspace, /Builder$/i);
   assert.ok(delegated.data.taskId, "the delegate result names its task");
   assert.deepEqual(trouble, []);
 
@@ -310,7 +308,7 @@ test("leader delegates in background, steers running sub-agent mid-turn, collect
         const waitPromptIdx = body.messages.findIndex(m => m.role === "user" && m.content === "Wait for slow member");
         const turnTools = body.messages.slice(waitPromptIdx).filter(m => m.role === "tool");
         if (turnTools.length === 0) {
-          delta = { tool_calls: [{ index: 0, id: "del-slow", type: "function", function: { name: "delegate", arguments: JSON.stringify({ to: memberAgentId, brief: "Slow work" }) } }] };
+          delta = { tool_calls: [{ index: 0, id: "del-slow", type: "function", function: { name: "delegate", arguments: JSON.stringify({ to: "Builder", brief: "Slow work" }) } }] };
         } else if (turnTools.length === 1) {
           slowTaskId = JSON.parse(turnTools[0].content).data.taskId;
           setTimeout(() => resolveWaitStarted(), 250);
@@ -351,11 +349,12 @@ test("leader delegates in background, steers running sub-agent mid-turn, collect
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture-key" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
-  const options = { home, repoRoot, python: process.env.RIND_PYTHON || "python" };
+  const options = { home, repoRoot, python: process.env.RIND_PYTHON };
   const server = await startServer(options);
   const token = (await readFile(server.paths.token, "utf8")).trim();
   const user = await connectClient({ endpoint: server.paths.endpoint, token });
-  t.after(async () => { resolveSlowMember(); user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  let window;
+  t.after(async () => { resolveSlowMember(); await window?.shutdown().catch(() => {}); user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   const team = await user.request("createTeam", { name: "E2E Steer Wait" });
   const leader = await user.request("registerAgent", { workspace: leaderWorkspace, name: "Lead" });
@@ -366,8 +365,7 @@ test("leader delegates in background, steers running sub-agent mid-turn, collect
   memberAgentId = member.id;
 
   const session = await user.request("attachSession", { agentId: leader.id, teamId: team.id, shared: true });
-  const window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }) });
-  t.after(() => window.shutdown().catch(() => {}));
+  window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }) });
   const info = await window.request("session/create", {});
   await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
 

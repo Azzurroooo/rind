@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, stat, copyFile, readFile, readdir } from "node:fs/promises";
+import { mkdir, rm, stat, copyFile, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { activeRun, awaitingDelegation, entryTask, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Delegation, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
@@ -57,6 +57,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       retain(next);
       const previousSeq = store.state.seq;
       await store.commit(next);
+      for (const id of connected) if (!store.state.sessions[id]) connected.delete(id);
       if (store.state.seq !== previousSeq) for (const listener of listeners) listener();
       if (Object.keys(store.state.deliveries).length) void flushDeliveries();
       return result;
@@ -65,9 +66,10 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     return result;
   }
   // A conversation that delegated work gets its results once its Runtime hosts it.
-  let flushing = false, flushAgain = false;
+  let flushing = false, flushAgain = false, flushTimer: ReturnType<typeof setTimeout> | undefined;
   async function flushDeliveries() {
     if (flushing) { flushAgain = true; return; }
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined; }
     flushing = true;
     try {
       do {
@@ -75,13 +77,24 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         for (const [sessionId, { texts }] of Object.entries(store.state.deliveries)) {
           if (stopped) return;
           const session = store.state.sessions[sessionId];
-          if (session && !(session.runtimeSessionId && connected.has(sessionId))) continue;
+          if (session && !(session.runtimeSessionId && (session.shared || connected.has(sessionId)))) continue;
           // Another run owns the folder: the turn would be refused, so the delivery waits for that run to end.
           if (session && Object.values(store.state.runs).some(r => activeRun(r) && r.sessionId !== sessionId && store.state.sessions[r.sessionId]?.agentId === session.agentId)) continue;
-          try { if (session) await deliver(session.runtimeSessionId, texts.join("\n\n")); }
-          catch (error) {
+          try {
+            if (session) {
+              await deliver(session.runtimeSessionId, texts.join("\n\n"));
+              connected.add(sessionId);
+            }
+          } catch (error) {
             // A conversation that is gone will never take it; anything else is retried on the next change.
-            if (!["SessionNotFound", "SessionClosed"].includes((error as { code?: string }).code || "")) { reportServiceError(error); continue; }
+            if (!["SessionNotFound", "SessionClosed"].includes((error as { code?: string }).code || "")) {
+              reportServiceError(error);
+              if (!stopped && !flushTimer) {
+                flushTimer = setTimeout(() => { flushTimer = undefined; void flushDeliveries(); }, 2000);
+                flushTimer.unref?.();
+              }
+              continue;
+            }
           }
           await transaction(state => {
             const left = state.deliveries[sessionId]?.texts.slice(texts.length) || [];
@@ -275,7 +288,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   }
   async function report(state: State, actor: Principal, p: Params) {
     const run = Object.values(state.runs).find(r => activeRun(r) && r.sessionId === (actor as { sessionId: string }).sessionId && r.taskId && !r.delegationId);
-    requireValue(run, "NO_TASK", "This conversation is not working on a task; nothing to report.");
+    requireValue(run, "NO_TASK", "This conversation has no active task; reply directly in the conversation instead of calling report.");
     const task = state.tasks[run.taskId!];
     requireValue(task.status === "running", "TASK_NOT_RUNNING", "Report from an active task.");
     if (p.blocked !== undefined) { blockTask(state, actor, task, p.blocked); return { taskId: task.id, status: "blocked", next: "End your turn." }; }
@@ -365,21 +378,33 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       set.add(onRelease);
     });
   }
-  async function delegate(state: State, actor: Principal, p: Params) {
+  function resolveDirectReport(state: State, teamId: string, me: string, target: string) {
+    if (state.memberships[memberKey(teamId, target)] && supervisor(state, teamId, target) === me) return target;
+    const reports = directReports(state, teamId, me);
+    const exact = reports.filter(r => r.name === target);
+    if (exact.length === 1) return exact[0].id;
+    const lower = target.toLowerCase();
+    const matched = reports.filter(r => r.name.trim().toLowerCase() === lower);
+    return matched.length === 1 ? matched[0].id : undefined;
+  }
+  async function delegate(state: State, actor: Principal, p: Params, prefetched?: any) {
     const session = sessionOf(state, actor)!;
     const teamId = session.teamId, me = session.agentId;
     requireValue(teamId && state.memberships[memberKey(teamId, me)], "FORBIDDEN", "This conversation has no team.");
     if (p.wait === true) return prepareWait(state, actor, session, p);
     const forms = ["to", "new", "task", "retire"].filter(key => p[key] !== undefined);
-    requireValue(forms.length === 1, "INVALID_INPUT", "Use exactly one form: {to, brief}, {new, brief}, {task, message, interrupt?}, {task, cancel: true}, {wait: true, task?, timeoutMs?} or {retire}.");
-    if (p.task !== undefined) return followUp(state, actor, text(p.task, "Task"), p);
+    requireValue(forms.length === 1, "INVALID_INPUT",
+      "Use exactly one form: {to, brief}, {new, brief}, {task, message, interrupt?}, {task, cancel: true}, {wait: true, task?, timeoutMs?} or {retire}."
+      + (forms.length === 0 && p.brief !== undefined ? " Direct reports: " + JSON.stringify(directReports(state, teamId, me)) : ""));
+    if (p.task !== undefined) return followUp(state, actor, text(p.task, "Task"), p, prefetched);
     if (p.retire !== undefined) return retire(state, teamId, me, text(p.retire, "retire", 200));
     const brief = text(p.brief, "Brief");
     let to: string;
     if (p.new !== undefined) to = (await addReport(state, actor, teamId, me, p.new)).id;
     else {
-      to = text(p.to, "to", 200);
-      requireValue(state.memberships[memberKey(teamId, to)] && supervisor(state, teamId, to) === me, "NOT_DIRECT_REPORT", "Delegate only to your direct reports: " + JSON.stringify(directReports(state, teamId, me)));
+      const resolved = resolveDirectReport(state, teamId, me, text(p.to, "to", 200));
+      requireValue(resolved, "NOT_DIRECT_REPORT", "Delegate only to your direct reports: " + JSON.stringify(directReports(state, teamId, me)));
+      to = resolved;
     }
     const delegation = newDelegation(state, session, teamId, to, brief);
     return { taskId: delegation.id, assignee: nameOf(state, to), status: "queued", ...(p.new !== undefined ? { agentId: to, workspace: state.agents[to].canonicalWorkspace } : {}), next: DELEGATE_NEXT };
@@ -397,13 +422,18 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       await addWorktree(worktreeOf, target, spec.branch, spec.base);
     } else {
       await mkdir(target);
-      await inheritModel(own, target);
     }
-    const agent = await register(state, { workspace: target, name: spec.name });
-    agent.addedBy = me;
-    if (worktreeOf) agent.worktreeOf = worktreeOf;
-    await addMember(state, actor, { teamId, agentId: agent.id, ...(spec.responsibility ? { responsibility: spec.responsibility } : {}) });
-    return agent;
+    try {
+      if (!worktreeOf) await inheritModel(own, target);
+      const agent = await register(state, { workspace: target, name: spec.name });
+      agent.addedBy = me;
+      if (worktreeOf) agent.worktreeOf = worktreeOf;
+      await addMember(state, actor, { teamId, agentId: agent.id, ...(spec.responsibility ? { responsibility: spec.responsibility } : {}) });
+      return agent;
+    } catch (error) {
+      await (worktreeOf ? removeWorktree(worktreeOf, target) : rm(target, { recursive: true, force: true })).catch(() => {});
+      throw error;
+    }
   }
   // Only what was chosen for the creator's folder is copied; settings.json stays the default for both.
   async function inheritModel(from: string, to: string) {
@@ -411,7 +441,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     const model = resolved && resolved.model_source !== "settings", effort = resolved && resolved.effort_source !== "settings";
     if (model || effort) await folderDefaults("set", { workspace_root: to, provider_id: model ? resolved.provider : "", model_id: model ? resolved.model : "", reasoning_effort: effort ? resolved.reasoning_effort : "" });
   }
-  async function retire(state: State, teamId: string, me: string, agentId: string) {
+  async function retire(state: State, teamId: string, me: string, target: string) {
+    const agentId = state.agents[target] ? target : resolveDirectReport(state, teamId, me, target) || target;
     const agent = state.agents[agentId];
     requireValue(agent?.addedBy === me && state.memberships[memberKey(teamId, agentId)], "FORBIDDEN", "Retire only a direct report you added.");
     const busy = Object.values(state.tasks).some(t => t.teamId === teamId && t.assigneeAgentId === agentId && !["done", "cancelled"].includes(t.status))
@@ -445,7 +476,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       d.status = "cancelled"; delete d.dispatch; d.returned = true;
     }
   }
-  async function followUp(state: State, actor: Principal, id: string, p: Params) {
+  async function followUp(state: State, actor: Principal, id: string, p: Params, prefetched?: any) {
     const d = state.delegations[id];
     if (!d && state.tasks[id]) coordinate(state, actor, state.tasks[id].teamId, state.tasks[id].assigneeAgentId);
     requireValue(d, "NOT_FOUND", "Delegated work not found.");
@@ -463,11 +494,12 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       return { taskId: d.id, status: "cancelled" };
     }
     requireValue(d.status !== "cancelled", "TASK_FINISHED", "This task was cancelled.");
-    const message = text(p.message, "Message");
+    requireValue(p.message === undefined || p.brief === undefined || p.message === p.brief, "INVALID_INPUT", "Provide message (not both message and brief) when following up on a task.");
+    const message = text(p.message ?? p.brief, "Message");
     const from = "From " + nameOf(state, me) + ": " + message;
     const run = Object.values(state.runs).find(r => r.delegationId === d.id && activeRun(r));
     if (d.status === "running" && !p.interrupt) {
-      if (run && await live.get(run.id)?.steer?.(from)) {
+      if (run && (prefetched ?? await live.get(run.id)?.steer?.(from))) {
         releaseSessionWait(run.sessionId);
         return { taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: "steered", next: DELEGATE_NEXT };
       }
@@ -556,7 +588,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       artifacts: Object.values(state.artifacts).filter(a => taskIds.has(a.taskId)),
     };
   }
-  async function operate(state: State, actor: Principal, method: string, p: Params): Promise<any> {
+  async function operate(state: State, actor: Principal, method: string, p: Params, prefetched?: any): Promise<any> {
     if (actor.kind !== "user") sessionOf(state, actor);
     switch (method) {
       case "snapshot": return actor.kind === "manager" ? managerOverview(filtered(state, actor), state.agents) : filtered(state, actor);
@@ -679,7 +711,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         return state.teams[id];
       }
       case "assignTask": return newTask(state, actor, p.teamId, p.assigneeAgentId, text(p.brief, "Brief"), p.start !== false);
-      case "delegate": return delegate(state, actor, p);
+      case "delegate": return delegate(state, actor, p, prefetched);
       case "report": return report(state, actor, p);
       case "startTask": {
         const task = taskAccess(state, actor, p.taskId);
@@ -736,7 +768,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           const line = sender + " noted: " + result.text;
           const run = Object.values(state.runs).find(r => r.taskId === task.id && !r.delegationId && activeRun(r));
           const handle = run ? live.get(run.id) : undefined;
-          if (!handle?.steer || !(await handle.steer(line))) resumeWork(task, line);
+          if (!handle?.steer || !(prefetched ?? await handle.steer(line))) resumeWork(task, line);
         } else if (task.status === "blocked" && task.blockedOn?.responder === "children") {
           resumeWork(task, sender + " noted: " + result.text);
         } else if (task.status === "queued") {
@@ -768,7 +800,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           if (existing) {
             requireValue(existing.agentId === agent.id && existing.teamId === p.teamId, "SESSION_SCOPE_CONFLICT", "This conversation belongs to a different team or member.");
             if (p.shared && !existing.shared) {
-              requireValue(!Object.values(state.runs).some(r => r.sessionId === existing.id && activeRun(r)), "SESSION_PRIVATE_HOST", "This session is running in a private Worker. Finish it before moving to the shared Runtime.");
+              requireValue(!Object.values(state.runs).some(r => r.sessionId === existing.id && ["starting", "running"].includes(r.status)), "SESSION_PRIVATE_HOST", "This session is running in a private Worker. Finish it before moving to the shared Runtime.");
+              for (const run of Object.values(state.runs)) if (run.sessionId === existing.id && !run.taskId && !run.delegationId && run.status === "unknown") run.status = "failed";
               existing.shared = true;
             }
             return existing;
@@ -806,6 +839,9 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         requireValue(session.runtimeSessionId === "" || session.runtimeSessionId === p.runtimeSessionId, "SESSION_MISMATCH", "Runtime session does not match its host credential.");
         session.runtimeSessionId = p.runtimeSessionId;
         if (session.teamId) requireMember(state, session.teamId, session.agentId);
+        for (const r of Object.values(state.runs)) {
+          if (r.sessionId !== session.id && !r.taskId && !r.delegationId && r.status === "unknown" && state.sessions[r.sessionId]?.agentId === session.agentId) r.status = "failed";
+        }
         const run = Object.values(state.runs).find(r => r.sessionId === session.id && activeRun(r)) || newRun(state, session.id);
         run.status = "running"; run.needsInput = false; run.lastObservedAt = new Date().toISOString();
         return run;
@@ -839,10 +875,13 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       }
       case "reconcileSession": {
         userOnly(actor); const session = ownSession(state, actor, p.sessionId);
+        const settled = ["completed", "failed", "cancelled"].includes(p.outcome) || ((p.connected || p.missing) && !p.active);
         for (const run of Object.values(state.runs)) if (run.sessionId === session.id && activeRun(run)) {
+          const prevStatus = run.status, prevNeedsInput = run.needsInput;
           if (p.active) { run.status = "running"; run.needsInput = !!p.needsInput; }
-          else if (!run.taskId && !run.delegationId && ["completed", "failed", "cancelled"].includes(p.outcome)) {
-            run.status = p.outcome === "completed" ? "succeeded" : p.outcome;
+          else if (!run.taskId && !run.delegationId && settled) {
+            run.status = p.outcome === "completed" ? "succeeded" : p.outcome === "cancelled" ? "cancelled" : "failed";
+            run.needsInput = false;
             const children = sessionDelegations(state, session.id);
             if (!children.some(awaitingDelegation)) {
               returnDelegations(state, children, text => { (state.deliveries[session.id] ||= { texts: [] }).texts.push(text); });
@@ -859,9 +898,10 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
                 else { rootTask.status = "blocked"; rootTask.blockedOn = { responder: "children", action: "Continues when its members deliver." }; }
                 delete rootTask.error;
               }
-            } else if (!live.has(run.id) && p.connected && !p.active && ["completed", "failed", "cancelled"].includes(p.outcome)) {
-              run.status = p.outcome === "completed" ? "succeeded" : p.outcome;
-              if (d && d.status !== "cancelled") {
+            } else if (!live.has(run.id) && settled) {
+              run.status = p.outcome === "completed" ? "succeeded" : p.outcome === "cancelled" ? "cancelled" : "failed";
+              run.needsInput = false;
+              if (d && !["done", "cancelled"].includes(d.status)) {
                 d.status = "failed";
                 d.error = "Execution finished while management was disconnected.";
                 wakeDelegator(state, d);
@@ -870,15 +910,20 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           } else if (run.taskId) {
             const task = state.tasks[run.taskId];
             if (p.active && task.status === "needs_attention") { task.status = "running"; delete task.error; }
-            else if (!live.has(run.id) && p.connected && !p.active && ["completed", "failed", "cancelled"].includes(p.outcome)) {
-              run.status = p.outcome === "completed" ? "succeeded" : p.outcome;
-              if (taskDelegations(state, task.id).some(awaitingDelegation)) {
-                task.status = "blocked"; task.blockedOn = { responder: "children", action: "Continues when its members deliver." }; delete task.report; delete task.error;
-              } else if (task.report && p.outcome === "completed") markDelivered(task);
-              else if (task.status !== "blocked") { task.status = "needs_attention"; task.error = "Execution finished while management was disconnected. Inspect the session before retrying."; }
+            else if (!live.has(run.id) && settled) {
+              run.status = p.outcome === "completed" ? "succeeded" : p.outcome === "cancelled" ? "cancelled" : "failed";
+              run.needsInput = false;
+              if (task && !["done", "cancelled"].includes(task.status)) {
+                if (taskDelegations(state, task.id).some(awaitingDelegation)) {
+                  task.status = "blocked"; task.blockedOn = { responder: "children", action: "Continues when its members deliver." }; delete task.report; delete task.error;
+                } else if (task.report && p.outcome === "completed") markDelivered(task);
+                else if (task.status !== "blocked") { task.status = "needs_attention"; task.error = "Execution finished while management was disconnected. Inspect the session before retrying."; }
+              }
             }
           }
-          run.lastObservedAt = new Date().toISOString();
+          if (run.status !== prevStatus || run.needsInput !== prevNeedsInput) {
+            run.lastObservedAt = new Date().toISOString();
+          }
         }
         return session;
       }
@@ -903,7 +948,28 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         userOnly(actor); const run = state.runs[p.runId];
         requireValue(run?.status === "unknown", "INVALID_STATE", "Only unknown runs require reconciliation.");
         requireValue(p.confirmStopped === true, "USER_CONFIRMATION_REQUIRED", "Confirm that the old process has stopped before releasing its workspace.");
-        run.status = "failed"; return run;
+        run.status = "failed"; run.needsInput = false; run.lastObservedAt = new Date().toISOString();
+        if (!run.taskId && !run.delegationId) {
+          const children = sessionDelegations(state, run.sessionId);
+          if (!children.some(awaitingDelegation)) {
+            returnDelegations(state, children, text => { (state.deliveries[run.sessionId] ||= { texts: [] }).texts.push(text); });
+          }
+        } else if (run.delegationId) {
+          const d = state.delegations[run.delegationId];
+          if (d && !["done", "cancelled"].includes(d.status)) {
+            d.status = "failed";
+            d.error ||= "Execution stopped after unconfirmed state.";
+            wakeDelegator(state, d);
+          }
+        } else if (run.taskId) {
+          const task = state.tasks[run.taskId];
+          if (task && task.status === "running") {
+            task.status = "needs_attention";
+            task.error ||= "Execution stopped after unconfirmed state.";
+            delete task.dispatch;
+          }
+        }
+        return run;
       }
       case "cancelRun": {
         const run = state.runs[p.runId]; requireValue((run?.taskId || run?.delegationId) && live.has(run.id), "NOT_RUNNING", "Only a live managed task can be cancelled here.");
@@ -947,7 +1013,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         const workspace = memberWorkspace(state, actor, p.teamId, p.agentId);
         requireValue(Boolean(p.provider) === Boolean(p.model), "INVALID_INPUT", "Give provider and model together.");
         requireValue(p.model || p.reasoningEffort, "INVALID_INPUT", "Give provider and model, a reasoningEffort, or both.");
-        const result = await folderDefaults("set", { workspace_root: workspace, provider_id: p.provider || "", model_id: p.model || "", reasoning_effort: p.reasoningEffort || "" });
+        const result = prefetched ?? await folderDefaults("set", { workspace_root: workspace, provider_id: p.provider || "", model_id: p.model || "", reasoning_effort: p.reasoningEffort || "" });
         const parts = [p.model ? "model " + p.provider + " / " + p.model : "", p.reasoningEffort ? "effort " + p.reasoningEffort : ""].filter(Boolean);
         noticeFromManager(state, actor, p.teamId, p.agentId, "Manager set " + state.agents[p.agentId].name + "'s " + parts.join(" and "));
         return result;
@@ -956,7 +1022,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         const workspace = memberWorkspace(state, actor, p.teamId, p.agentId);
         const group = MEMBER_MODEL_PARTS[p.part as keyof typeof MEMBER_MODEL_PARTS];
         requireValue(group, "INVALID_INPUT", "part must be model or reasoningEffort.");
-        const result = await folderDefaults("unset", { workspace_root: workspace, group });
+        const result = prefetched ?? await folderDefaults("unset", { workspace_root: workspace, group });
         noticeFromManager(state, actor, p.teamId, p.agentId, "Manager cleared " + state.agents[p.agentId].name + "'s " + (group === "model" ? "model" : "effort") + "; the default applies");
         return result;
       }
@@ -978,14 +1044,70 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     requireValue((actor.kind === "agent") === MEMBER_OPERATIONS.has(method), "FORBIDDEN", actor.kind === "agent" ? "Members work through delegate and report." : "delegate and report belong to team members.");
     if (reads.has(method)) return operate(store.state, actor, method, params);
     const requestId = text(params.requestId, "Request ID", 200);
+    if (method === "reconcileSession") {
+      userOnly(actor);
+      const session = ownSession(store.state, actor, params.sessionId);
+      const activeRuns = Object.values(store.state.runs).filter(r => r.sessionId === session.id && activeRun(r));
+      const unchangedActive = Boolean(params.active) && activeRuns.every(r => {
+        if (r.status !== "running" || Boolean(r.needsInput) !== Boolean(params.needsInput)) return false;
+        const d = r.delegationId ? store.state.delegations[r.delegationId] : undefined;
+        const task = d?.taskId ? store.state.tasks[d.taskId] : r.taskId ? store.state.tasks[r.taskId] : undefined;
+        return d?.status !== "failed" && task?.status !== "needs_attention";
+      });
+      const unchangedUnknown = !params.connected && !params.active && !params.missing && !params.outcome && activeRuns.every(r => r.status === "unknown");
+      if (!activeRuns.length || unchangedActive || unchangedUnknown) {
+        const wasConnected = connected.has(session.id);
+        if (params.connected) connected.add(session.id); else connected.delete(session.id);
+        if (wasConnected !== connected.has(session.id)) for (const listener of listeners) listener();
+        if (params.connected) void flushDeliveries();
+        return session;
+      }
+    }
     const key = (actor.kind === "user" ? "user" : actor.kind + "/" + actor.sessionId) + "/" + method + "/" + requestId;
     const input = JSON.stringify(params);
     // Host observations restate facts and are safe to repeat, so they keep no receipt.
     const remember = method !== "reconcileSession";
+    let prefetched: any;
+    if (!store.state.receipts[key]) {
+      if (method === "setMemberModel") {
+        if (actor.kind !== "user") sessionOf(store.state, actor);
+        const workspace = memberWorkspace(store.state, actor, params.teamId, params.agentId);
+        requireValue(Boolean(params.provider) === Boolean(params.model), "INVALID_INPUT", "Give provider and model together.");
+        requireValue(params.model || params.reasoningEffort, "INVALID_INPUT", "Give provider and model, a reasoningEffort, or both.");
+        prefetched = await folderDefaults("set", { workspace_root: workspace, provider_id: params.provider || "", model_id: params.model || "", reasoning_effort: params.reasoningEffort || "" });
+      } else if (method === "clearMemberModel") {
+        if (actor.kind !== "user") sessionOf(store.state, actor);
+        const workspace = memberWorkspace(store.state, actor, params.teamId, params.agentId);
+        const group = MEMBER_MODEL_PARTS[params.part as keyof typeof MEMBER_MODEL_PARTS];
+        requireValue(group, "INVALID_INPUT", "part must be model or reasoningEffort.");
+        prefetched = await folderDefaults("unset", { workspace_root: workspace, group });
+      } else if (method === "delegate" && params.task !== undefined && !params.wait && !params.cancel && !params.interrupt) {
+        const session = store.state.sessions[(actor as { sessionId: string }).sessionId];
+        const d = store.state.delegations[typeof params.task === "string" ? params.task.trim() : ""];
+        const rawMsg = params.message === undefined || params.brief === undefined || params.message === params.brief ? (params.message ?? params.brief) : undefined;
+        if (session && d && d.status === "running" && session.teamId === d.teamId && store.state.memberships[memberKey(d.teamId, session.agentId)] && !store.state.teams[d.teamId]?.archive && (d.fromAgentId === session.agentId || manages(store.state, d.teamId, session.agentId, d.assigneeAgentId)) && typeof rawMsg === "string" && rawMsg.trim()) {
+          const run = Object.values(store.state.runs).find(r => r.delegationId === d.id && activeRun(r));
+          const from = "From " + nameOf(store.state, session.agentId) + ": " + text(rawMsg, "Message");
+          if (run && live.get(run.id)?.steer) prefetched = await live.get(run.id)!.steer!(from);
+        }
+      } else if (method === "postTaskNote" && params.answer !== true) {
+        const task = store.state.tasks[params.taskId];
+        if (task && task.status === "running") {
+          const run = Object.values(store.state.runs).find(r => r.taskId === task.id && !r.delegationId && activeRun(r));
+          const handle = run ? live.get(run.id) : undefined;
+          if (handle?.steer && typeof params.text === "string" && params.text.trim()) {
+            if (actor.kind !== "user") sessionOf(store.state, actor);
+            taskAccess(store.state, actor, params.taskId);
+            const line = nameOf(store.state, author(store.state, actor)) + " noted: " + text(params.text, "Note");
+            prefetched = await handle.steer(line);
+          }
+        }
+      }
+    }
     const result = await transaction(async state => {
       const receipt = state.receipts[key];
       if (receipt) { requireValue(receipt.input === input, "REQUEST_ID_REUSED", "A request ID cannot be reused for different input."); return receipt.result; }
-      const result = await operate(state, actor, method, params);
+      const result = await operate(state, actor, method, params, prefetched);
       if (remember && !(result as { [WAIT_PENDING]?: unknown })?.[WAIT_PENDING]) {
         state.receipts[key] = { input, result: structuredClone(result), at: Date.now() };
       }
@@ -1015,7 +1137,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         }
       }
     }
-    if (method === "reconcileSession") { if (params.connected) connected.add(params.sessionId); else connected.delete(params.sessionId); for (const listener of listeners) listener(); }
+    if (method === "reconcileSession") {
+      const wasConnected = connected.has(params.sessionId);
+      if (params.connected) connected.add(params.sessionId); else connected.delete(params.sessionId);
+      if (wasConnected !== connected.has(params.sessionId)) for (const listener of listeners) listener();
+    }
     if (method === "attachSession" || method === "reattachSession") connected.add((result as Session).id);
     if (method === "hostTurnStart" && store.state.sessions[params.sessionId]?.shared) connected.add(params.sessionId);
     if (method === "detachSession" && (!store.state.sessions[params.sessionId]?.shared || !store.state.sessions[params.sessionId]?.runtimeSessionId)) connected.delete(params.sessionId);
@@ -1027,8 +1153,9 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   async function failRun(runId: string, error: unknown) {
     await transaction(state => {
       const run = state.runs[runId];
-      if (!run) return;
-      run.status = (error as { code?: string })?.code === "EXECUTION_FAILED" ? "failed" : "unknown"; run.lastObservedAt = new Date().toISOString();
+      if (!run || !activeRun(run)) return;
+      const started = run.status === "running";
+      run.status = !started || (error as { code?: string })?.code === "EXECUTION_FAILED" ? "failed" : "unknown"; run.lastObservedAt = new Date().toISOString();
       if (run.delegationId) {
         const d = state.delegations[run.delegationId];
         if (d) {
@@ -1104,13 +1231,19 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     } catch (error) { await failRun(runId, error); }
     finally { live.delete(runId); cancelling.delete(runId); const s = store.state.runs[runId]?.sessionId; if (s) releaseSessionWait(s); void schedule().catch(reportServiceError); }
   }
+  const hasDispatchableWork = (state: State) =>
+    Object.values(state.tasks).some(t => t.status === "queued" && Boolean(t.dispatch)) ||
+    Object.values(state.delegations).some(d => d.status === "queued" && Boolean(d.dispatch));
+
   async function schedule() {
     if (stopped) return;
     if (scheduling) { scheduleRequested = true; return; }
+    if (!hasDispatchableWork(store.state)) return;
     scheduling = true;
     try {
       do {
         scheduleRequested = false;
+        if (!hasDispatchableWork(store.state)) break;
         const starts = await transaction(async state => {
           if (stopped) return [];
           const starts: { runId: string; input: string; delivery: boolean }[] = [];
@@ -1215,6 +1348,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     },
     async stop() {
       stopped = true;
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined; }
       for (const sid of [...waiters.keys()]) releaseSessionWait(sid);
       await serial;
       await transaction(state => {
@@ -1225,7 +1359,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         }
       });
       await Promise.allSettled([...live.values()].map(h => h.cancel()));
-      await Promise.allSettled([...executions]);
+      let stopTimer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.allSettled([...executions]),
+        new Promise<void>(resolve => { stopTimer = setTimeout(resolve, 5000); stopTimer.unref?.(); }),
+      ]).finally(() => clearTimeout(stopTimer));
       await serial;
     },
   };
@@ -1233,7 +1371,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
 export function validateReport(p: Params): Report {
   return { outcome: text(p.outcome, "Outcome", 200), summary: text(p.summary, "Summary", 4000), evidence: strings(p.evidence, "Evidence"), artifacts: strings(p.artifacts, "Artifacts"), ...(p.nextAction ? { nextAction: text(p.nextAction, "Next action") } : {}) };
 }
-function reportServiceError(error: unknown) { console.error("Agents management state update failed:", error); }
+function reportServiceError(error: unknown) { console.error(`[${new Date().toISOString()}] Agents management state update failed:`, error); }
 function strings(value: unknown, label: string): string[] {
   requireValue(Array.isArray(value) && value.length <= 100 && value.every(v => typeof v === "string" && v.length <= 4000), "INVALID_INPUT", label + " must be a list of at most 100 strings.");
   return value;

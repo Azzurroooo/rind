@@ -5,7 +5,8 @@ import { promisify } from "node:util";
 import { requireValue, text } from "./model.js";
 import { canonicalDirectory, inside } from "./paths.js";
 
-const git = promisify(execFile);
+const execFileAsync = promisify(execFile);
+const git = (args: string[], cwd: string) => execFileAsync("git", args, { cwd, timeout: 30_000, windowsHide: true });
 
 // A new member's folder: a simple name directly under the team's creation root, never an existing path.
 export async function newWorkspacePath(createRoot: string, name: unknown) {
@@ -23,14 +24,14 @@ export async function addWorktree(repository: string, target: string, branchName
   const branch = text(branchName, "Branch", 200);
   const base = text(baseRef || "HEAD", "Base reference", 200);
   requireValue(!base.startsWith("-") && !branch.startsWith("-"), "INVALID_REF", "Git references cannot start with '-'.");
-  await git("git", ["check-ref-format", "--branch", branch], { cwd: repository });
-  await git("git", ["rev-parse", "--verify", base + "^{commit}"], { cwd: repository });
-  await git("git", ["worktree", "add", "-b", branch, target, base], { cwd: repository });
+  await git(["check-ref-format", "--branch", branch], repository);
+  await git(["rev-parse", "--verify", base + "^{commit}"], repository);
+  await git(["worktree", "add", "-b", branch, target, base], repository);
 }
 
 // Never forced: a worktree with uncommitted changes stays, and so does its branch.
 export async function removeWorktree(repository: string, target: string) {
-  const { stdout } = await git("git", ["status", "--porcelain"], { cwd: target });
+  const { stdout } = await git(["status", "--porcelain"], target);
   requireValue(!stdout.trim(), "WORKTREE_DIRTY", "This worktree has uncommitted changes. Have them committed first, or ask the user to remove it.");
-  await git("git", ["worktree", "remove", target], { cwd: repository });
+  await git(["worktree", "remove", target], repository);
 }

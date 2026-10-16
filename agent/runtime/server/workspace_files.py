@@ -133,8 +133,8 @@ __all__ = [
     "FILE_LIMIT_BYTES",
     "FileMethodError",
     "file_list",
+    "file_read",
+    "file_write",
     "mime_for_suffix",
-    "read_file",
     "resolve_workspace_path",
-    "write_file",
 ]

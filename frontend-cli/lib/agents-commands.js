@@ -163,8 +163,11 @@ export async function runAgentsCommand(args, launch) {
     else if (command === "resolve") result = await client.request("resolveRun", { runId: sub, confirmStopped: rest.includes("--confirm-stopped") });
     else if (command === "artifact") result = await client.request("readArtifact", { artifactId: sub });
     else if (command === "import") {
-      const { importLegacyTeam } = await import("./agents-import.js");
-      result = await importLegacyTeam({ client, root: folder(sub), confirm: rest.includes("--confirm"), share: rest.includes("--share"), launch });
+      const root = folder(sub);
+      const preview = await client.request("previewImport", { root });
+      result = rest.includes("--confirm")
+        ? await client.request("importTeam", { root, confirmation: preview.fingerprint, share: rest.includes("--share") })
+        : preview;
     } else throw new Error(agentsHelp);
     console.log(JSON.stringify(result, null, 2));
   } finally { client.close(); }

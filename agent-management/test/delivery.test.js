@@ -219,3 +219,20 @@ test("a delivery waits while another run owns the delegator's folder, then arriv
   await eventually(() => f.delivered.length === 1);
   assert.match(f.delivered[0].text, /Built/);
 });
+
+test("a shared conversation receives settled deliveries even when no window hosts it (connected: false)", async t => {
+  const f = await fixture(t);
+  const ui = await f.member("ui");
+  const session = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id, runtimeSessionId: "shared-leader", shared: true });
+  const actor = { kind: "agent", sessionId: session.id };
+  const delegated = await f.call("delegate", { to: ui.id, brief: "Build" }, actor);
+  await eventually(() => f.store.state.delegations[delegated.taskId]?.status === "running");
+  // When no window shows the shared conversation, reconcileSession reports connected: false (replay.hosted === false).
+  await f.call("reconcileSession", { sessionId: session.id, connected: false, active: false });
+  assert.equal(f.service.isConnected(session.id), false);
+  await finishDelegation(f, delegated.taskId, "Delivered to shared session");
+  await eventually(() => f.delivered.length === 1);
+  assert.equal(f.delivered[0].runtimeSessionId, "shared-leader");
+  assert.match(f.delivered[0].text, /Delivered to shared session/);
+  assert.equal(f.service.isConnected(session.id), true);
+});

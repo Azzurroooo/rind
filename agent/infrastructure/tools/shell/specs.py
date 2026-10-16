@@ -37,7 +37,7 @@ def build_shell_tool_specs(shell_tools: ShellTools, workspace_root: str | None =
         ToolSpec(name="task_control", handler=shell_tools.task_control,
             description="Control a task owned by this session. list returns up to 50 tasks; read returns immediately; wait observes completion for a bounded interval without killing the task; cancel explicitly terminates its process tree. Reads are repeatable; use next_cursor for sequential output. No interactive stdin.",
             param_descriptions={"action": {"enum": ["list", "read", "wait", "cancel"]},
-                "wait_ms": {"minimum": 1000, "maximum": 60000, "description": "wait only; defaults to 30000."},
+                "wait_ms": {"minimum": 1000, "maximum": 60000, "description": "wait only; defaults to 30000 (1000..60000)."},
                 "max_output_chars": {"minimum": 1, "maximum": 50000},
                 "page_token": "list only; use next_page_token from the previous page.",
                 "cursor": "read/wait only. Omit for a bounded latest preview; start_cursor begins full stored output, next_cursor continues independently."}),

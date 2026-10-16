@@ -19,9 +19,3 @@ class CompactionRepository:
 
     def load_compactions(self) -> list[dict[str, Any]]:
         return self._files.read_jsonl(self._path)
-
-    def get_latest_compaction(self) -> dict[str, Any] | None:
-        records = self.load_compactions()
-        if not records:
-            return None
-        return dict(records[-1])

@@ -9,6 +9,7 @@ from agent.infrastructure.persistence.session_files import SessionFiles
 
 
 USAGE_LEDGER_FILENAME = "usage.jsonl"
+_SESSION_FILES = SessionFiles()
 
 
 def default_usage_ledger_path() -> str:
@@ -17,8 +18,8 @@ def default_usage_ledger_path() -> str:
 
 def append_usage_record(path: str | os.PathLike, record: dict) -> None:
     """Append one record under the shared file lock; concurrent writers never interleave."""
-    SessionFiles().append_jsonl(str(path), dict(record))
+    _SESSION_FILES.append_jsonl(str(path), dict(record))
 
 
 def load_usage_records(path: str | os.PathLike) -> list[dict]:
-    return SessionFiles().read_jsonl(str(path))
+    return _SESSION_FILES.read_jsonl(str(path))

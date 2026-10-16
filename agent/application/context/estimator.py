@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import re
+from collections import OrderedDict
 from dataclasses import asdict, dataclass
 
 from .token_usage import positive_int
@@ -77,10 +78,13 @@ class ContextEstimate:
 class ContextEstimator:
     """Estimate context size using exact tokenization or fallback heuristics."""
 
+    _MAX_CACHE_ENTRIES = 2048
+
     def __init__(self, budget: ContextBudget | None = None):
         self._budget = budget or ContextBudget.default()
         self._tokenizer = self._get_tokenizer()
         self._cjk_pattern = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U000323af]')
+        self._token_cache: OrderedDict[str, int] = OrderedDict()
 
     @property
     def budget(self) -> ContextBudget:
@@ -144,23 +148,27 @@ class ContextEstimator:
             payload = str(message)
 
         chars = len(payload)
-        if token_cache is not None and payload in token_cache:
-            return token_cache[payload] + image_tokens, chars
+        cache = token_cache if token_cache is not None else self._token_cache
+        cached = cache.get(payload)
+        if cached is not None:
+            if cache is self._token_cache:
+                self._token_cache.move_to_end(payload)
+            return cached + image_tokens, chars
 
+        tokens: int | None = None
         if self._tokenizer:
             try:
                 tokens = len(self._tokenizer.encode(payload, disallowed_special=()))
-                if token_cache is not None:
-                    token_cache[payload] = tokens
-                return tokens + image_tokens, chars
             except Exception:
                 logger.debug("Tokenizer failed; using heuristic context estimate.", exc_info=True)
 
-        if self._cjk_pattern.search(payload):
-            tokens = int(math.ceil(chars / 1.5))
-        else:
-            tokens = int(math.ceil(chars / 3.5))
+        if tokens is None:
+            if self._cjk_pattern.search(payload):
+                tokens = int(math.ceil(chars / 1.5))
+            else:
+                tokens = int(math.ceil(chars / 3.5))
 
-        if token_cache is not None:
-            token_cache[payload] = tokens
+        cache[payload] = tokens
+        if cache is self._token_cache and len(self._token_cache) > self._MAX_CACHE_ENTRIES:
+            self._token_cache.popitem(last=False)
         return tokens + image_tokens, chars

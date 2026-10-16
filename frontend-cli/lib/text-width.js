@@ -21,10 +21,24 @@ export function graphemes(value) {
     : Array.from(text);
 }
 
+const WIDTH_CACHE_MAX = 4096;
+const widthCache = new Map();
+
 export function textWidth(value) {
   const text = stripAnsi(value);
   if (PRINTABLE_ASCII_RE.test(text)) return text.length;
-  return graphemes(text).reduce((width, segment) => width + segmentWidth(segment), 0);
+  if (text.length <= 512) {
+    const cached = widthCache.get(text);
+    if (cached !== undefined) return cached;
+  }
+  const width = graphemes(text).reduce((sum, segment) => sum + segmentWidth(segment), 0);
+  if (text.length <= 512) {
+    if (widthCache.size >= WIDTH_CACHE_MAX) {
+      widthCache.delete(widthCache.keys().next().value);
+    }
+    widthCache.set(text, width);
+  }
+  return width;
 }
 
 export function wrapTextCells(value, firstWidth, continuationWidth = firstWidth) {

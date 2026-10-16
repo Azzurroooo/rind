@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable
 
 from agent.domain import ParsedToolCall
 from agent.domain.cancellation import CancellationToken

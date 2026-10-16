@@ -1,7 +1,11 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { setTheme } from "./theme.js";
+
+let cachedPath = "";
+let cachedMtimeMs = -1;
+let cachedState = null;
 
 // CLI-owned runtime preferences, separate from the shared ~/.rind/settings.json
 // that the Python runtime manages (apiKey/model/baseUrl).
@@ -10,10 +14,24 @@ export function cliStatePath(rindHome = process.env.RIND_HOME || path.join(homed
 }
 
 export function loadCliState(rindHome) {
+  const file = cliStatePath(rindHome);
   try {
-    const parsed = JSON.parse(readFileSync(cliStatePath(rindHome), "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    const { mtimeMs } = statSync(file);
+    if (cachedState && cachedPath === file && cachedMtimeMs === mtimeMs) {
+      return { ...cachedState };
+    }
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    const state = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    cachedPath = file;
+    cachedMtimeMs = mtimeMs;
+    cachedState = state;
+    return { ...state };
   } catch {
+    if (cachedPath === file) {
+      cachedPath = "";
+      cachedMtimeMs = -1;
+      cachedState = null;
+    }
     return {};
   }
 }
@@ -26,6 +44,9 @@ export function saveCliState(patch, rindHome) {
     const temp = `${file}.${process.pid}.tmp`;
     writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, "utf8");
     renameSync(temp, file);
+    cachedPath = file;
+    cachedMtimeMs = statSync(file).mtimeMs;
+    cachedState = next;
     return true;
   } catch {
     return false;

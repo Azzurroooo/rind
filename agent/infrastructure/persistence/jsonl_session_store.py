@@ -52,6 +52,7 @@ from agent.infrastructure.paths import (
 )
 from agent.domain import looks_like_tool_payload
 from agent.domain.goal import normalize_goal, normalize_goal_objective, normalize_goal_status
+from agent.infrastructure.settings import normalize_reasoning_effort
 
 
 def _valid_session_id_value(value: object) -> bool:
@@ -138,6 +139,8 @@ class JsonlSessionStore(SessionStore):
         self._index_entry: dict[str, Any] | None = None
         self._last_preview = ""
         self._projected_caches: dict[tuple[bool, bool, bool], tuple[tuple[Any, ...], list[dict[str, Any]]]] = {}
+        self._messages_cache: tuple[tuple[int, int], list[dict[str, Any]]] | None = None
+        self._tool_records_cache: tuple[tuple[int, int], list[dict[str, Any]]] | None = None
         self._files = SessionFiles()
         self._msg_repo = None
         self._tool_repo = None
@@ -437,7 +440,6 @@ class JsonlSessionStore(SessionStore):
         self._provider = str(meta.get("provider") or DEFAULT_PROVIDER).strip()
         if not meta.get("provider"):
             self._session_meta["provider"] = self._provider
-
         try:
             configured_effort = normalize_reasoning_effort(meta.get("reasoning_effort"))
         except ValueError:
@@ -448,12 +450,12 @@ class JsonlSessionStore(SessionStore):
         original_window = self._session_meta.get("auto_compact_window")
         normalized_window = normalize_auto_compact_window(original_window)
         self._session_meta["auto_compact_window"] = normalized_window
-        messages = self._msg_repo.load_messages()
+        messages = self._load_messages_sync()
         message_count = sum(
             1 for message in messages
             if isinstance(message, dict) and not _is_non_conversation_message(message)
         )
-        tool_call_count = len(self._tool_repo.load_tool_calls())
+        tool_call_count = len(self._load_tool_records_sync())
         self._has_user_message = any(
             _is_real_user_message(message) for message in messages
             if isinstance(message, dict) and not _is_non_conversation_message(message)
@@ -507,6 +509,8 @@ class JsonlSessionStore(SessionStore):
             "last_preview": self._last_preview,
             "index_entry": self._index_entry,
             "projected_caches": dict(self._projected_caches),
+            "messages_cache": self._messages_cache,
+            "tool_records_cache": self._tool_records_cache,
             "model": self._model,
             "provider": self._provider,
             "reasoning_effort": self._reasoning_effort,
@@ -525,6 +529,8 @@ class JsonlSessionStore(SessionStore):
             self._last_preview = previous["last_preview"]
             self._index_entry = previous["index_entry"]
             self._projected_caches = previous["projected_caches"]
+            self._messages_cache = previous["messages_cache"]
+            self._tool_records_cache = previous["tool_records_cache"]
             self._model = previous["model"]
             self._provider = previous["provider"]
             self._reasoning_effort = previous["reasoning_effort"]
@@ -647,6 +653,30 @@ class JsonlSessionStore(SessionStore):
 
     def _invalidate_projection_cache(self) -> None:
         self._projected_caches.clear()
+        self._messages_cache = None
+        self._tool_records_cache = None
+
+    def _load_messages_sync(self) -> list[dict[str, Any]]:
+        if not self._msg_repo:
+            return []
+        path = (self._session_paths or {}).get("messages")
+        signature = self._projection_file_signature(path)
+        if self._messages_cache is not None and self._messages_cache[0] == signature:
+            return self._messages_cache[1]
+        messages = self._msg_repo.load_messages()
+        self._messages_cache = (signature, messages)
+        return messages
+
+    def _load_tool_records_sync(self) -> list[dict[str, Any]]:
+        if not self._tool_repo:
+            return []
+        path = (self._session_paths or {}).get("tool_calls")
+        signature = self._projection_file_signature(path)
+        if self._tool_records_cache is not None and self._tool_records_cache[0] == signature:
+            return self._tool_records_cache[1]
+        records = self._tool_repo.load_tool_calls()
+        self._tool_records_cache = (signature, records)
+        return records
 
     def _projection_file_signature(self, path: str | None) -> tuple[int, int]:
         if not path:
@@ -677,10 +707,10 @@ class JsonlSessionStore(SessionStore):
         signature = self._projection_cache_key_sync()
         cached = self._projected_caches.get(key)
         if cached is not None and cached[0] == signature:
-            return copy.deepcopy(cached[1])
+            return cached[1]
 
-        messages = self._msg_repo.load_messages() if self._msg_repo else []
-        tool_records = self._tool_repo.load_tool_calls() if self._tool_repo else []
+        messages = self._load_messages_sync()
+        tool_records = self._load_tool_records_sync()
         compactions = self._compaction_repo.load_compactions() if self._compaction_repo else []
         built_messages = project_messages(
             messages,
@@ -692,7 +722,7 @@ class JsonlSessionStore(SessionStore):
             include_internal=include_internal,
         )
         self._projected_caches[key] = (signature, built_messages)
-        return copy.deepcopy(built_messages)
+        return built_messages
 
     def _auto_compact_window_sync(self) -> dict[str, Any]:
         if not isinstance(self._session_meta, dict):
@@ -760,7 +790,7 @@ class JsonlSessionStore(SessionStore):
     def _discard_if_empty_sync(self) -> None:
         if not self._session_id or not self._session_paths:
             return
-        messages = self._msg_repo.load_messages() if self._msg_repo else []
+        messages = self._load_messages_sync()
         if any(
             _is_real_user_message(message)
             for message in messages
@@ -840,8 +870,6 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(_persist)
 
     async def update_reasoning_effort(self, effort: str, *, source: str = "session") -> None:
-        from agent.infrastructure.settings import normalize_reasoning_effort
-
         clean = normalize_reasoning_effort(effort)
         if not clean:
             raise ValueError("Reasoning effort is required.")
@@ -1013,7 +1041,14 @@ class JsonlSessionStore(SessionStore):
             def _persist():
                 if not self._tool_repo:
                     return
-                self._tool_repo.persist_tool_call(
+                tool_path = (self._session_paths or {}).get("tool_calls")
+                prior_cache = self._tool_records_cache
+                prior_records = (
+                    prior_cache[1]
+                    if prior_cache is not None and prior_cache[0] == self._projection_file_signature(tool_path)
+                    else None
+                )
+                record = self._tool_repo.persist_tool_call(
                     call_id,
                     name,
                     parsed_args,
@@ -1027,6 +1062,8 @@ class JsonlSessionStore(SessionStore):
                     attachments=attachments,
                 )
                 self._invalidate_projection_cache()
+                if prior_records is not None and isinstance(record, dict):
+                    self._tool_records_cache = (self._projection_file_signature(tool_path), [*prior_records, record])
                 self._session_meta["tool_call_count"] += 1
                 self._persist_meta_sync()
 
@@ -1034,14 +1071,14 @@ class JsonlSessionStore(SessionStore):
 
     async def load_messages(self) -> list[dict[str, Any]]:
         def _load():
-            return self._msg_repo.load_messages() if self._msg_repo else []
+            return [dict(m) for m in self._load_messages_sync()]
         return await asyncio.to_thread(_load)
 
     def _latest_compaction_sync(self) -> dict[str, Any] | None:
         if not self._compaction_repo or not self._msg_repo:
             return None
         return latest_compaction(
-            self._msg_repo.load_messages(),
+            self._load_messages_sync(),
             self._compaction_repo.load_compactions(),
         )
 
@@ -1126,13 +1163,13 @@ class JsonlSessionStore(SessionStore):
         def _get():
             if not self._tool_repo:
                 return []
-            records = self._tool_repo.load_tool_calls()
+            records = self._load_tool_records_sync()
             if call_ids:
                 allowed_ids = set(call_ids)
                 records = [record for record in records if record.get("id") in allowed_ids]
             if limit is not None and limit > 0:
                 records = records[-limit:]
-            return records
+            return [dict(record) for record in records]
         return await asyncio.to_thread(_get)
 
     async def persist_sampling_usage(self, usage: dict[str, Any]) -> None:
@@ -1150,8 +1187,7 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(_persist)
 
     async def get_latest_sampling_usage(self) -> dict[str, Any] | None:
-        async with self._write_lock:
-            return self._latest_meta_usage("latest_sampling_usage")
+        return self._latest_meta_usage("latest_sampling_usage")
 
     async def persist_context_breakdown(self, snapshot: dict[str, Any]) -> None:
         """Store the latest context composition snapshot; overwrite = latest, travels with fork."""
@@ -1165,8 +1201,7 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(_persist)
 
     async def get_latest_assistant_sampling_usage(self) -> dict[str, Any] | None:
-        async with self._write_lock:
-            return self._latest_meta_usage("latest_assistant_sampling_usage")
+        return self._latest_meta_usage("latest_assistant_sampling_usage")
 
     def _latest_meta_usage(self, key: str) -> dict[str, Any] | None:
         if not isinstance(self._session_meta, dict):
@@ -1204,14 +1239,12 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(_persist)
 
     async def get_turn_state(self) -> dict[str, Any] | None:
-        async with self._write_lock:
-            state = self._session_meta.get("turn_state") if isinstance(self._session_meta, dict) else None
-            return dict(state) if isinstance(state, dict) else None
+        state = self._session_meta.get("turn_state") if isinstance(self._session_meta, dict) else None
+        return dict(state) if isinstance(state, dict) else None
 
     async def get_goal(self) -> dict[str, str] | None:
-        async with self._write_lock:
-            goal = self._session_meta.get("goal") if isinstance(self._session_meta, dict) else None
-            return dict(goal) if isinstance(goal, dict) else None
+        goal = self._session_meta.get("goal") if isinstance(self._session_meta, dict) else None
+        return dict(goal) if isinstance(goal, dict) else None
 
     async def set_goal(self, objective: str) -> dict[str, str]:
         normalized = normalize_goal_objective(objective)

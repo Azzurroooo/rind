@@ -17,7 +17,7 @@ export function retain(state: State, now = Date.now()) {
   // never one recent enough to still be retried.
   const receipts = Object.keys(state.receipts);
   for (const key of receipts.slice(0, Math.max(0, receipts.length - RECEIPT_LIMIT))) {
-    if (now - (state.receipts[key].at ?? 0) < RECEIPT_MIN_AGE_MS) break;
+    if (now - (state.receipts[key].at ?? 0) < RECEIPT_MIN_AGE_MS) continue;
     delete state.receipts[key];
   }
 

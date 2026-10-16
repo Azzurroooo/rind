@@ -44,11 +44,14 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   assert.equal(await realpath(infoB.workspace_root), await realpath(b));
   const pidA = await first.request("runtime/observe"), pidB = await second.request("runtime/observe");
   assert.equal(pidA.pid, pidB.pid);
-  // Use separate ordinary connections to test event filtering, without observe-all.
+  // Use separate ordinary connections to test event filtering, plus an observer to verify delta suppression.
   await first.shutdown(); await second.shutdown();
+  const observedEvents = [];
+  const observer = await connectSharedRuntime({ ...options, start: false, onMessage: e => observedEvents.push(e) });
+  await observer.request("runtime/observe");
   const one = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", a, "--session", infoA.session_id], externalTools: tool, onMessage: e => eventsA.push(e) });
   const two = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", b, "--session", infoB.session_id], onMessage: e => eventsB.push(e) });
-  t.after(async () => { await one.shutdown(); await two.shutdown(); });
+  t.after(async () => { observer.close(); await one.shutdown(); await two.shutdown(); });
   await one.request("initialize"); await two.request("initialize");
   const turnA = one.request("session/prompt", { session_id: infoA.session_id, input: "A" }).catch(error => error);
   const turnB = two.request("session/prompt", { session_id: infoB.session_id, input: "B" });
@@ -77,6 +80,9 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   assert.equal(resumed.session_id, infoA.session_id);
   assert.match(JSON.stringify(await admin.request("session/replay", { session_id: infoA.session_id })), /Finished/);
   assert.ok(eventsB.every(event => event.session_id === infoB.session_id));
+  assert.ok(eventsB.some(event => event.event?.type === "assistant_delta"), "subscribed session client receives streaming deltas");
+  assert.ok(observedEvents.some(event => event.event?.type === "turn_started") && observedEvents.some(event => event.event?.type === "turn_completed"), "observer receives turn lifecycle events");
+  assert.ok(!observedEvents.some(event => event.event?.type === "assistant_delta"), "observer is not flooded with streaming deltas");
   await assert.rejects(admin.request("session/open", { workspace_root: b, session_id: infoA.session_id }), /workspace/i);
 });
 
@@ -85,7 +91,7 @@ test("resolveRindHome, sharedRuntimePaths, and managementPaths canonicalize syml
   t.after(() => rm(root, { recursive: true, force: true }));
   const realHome = path.join(root, "real-home");
   const linkHome = path.join(root, "link-home");
-  await symlink(realHome, linkHome, "dir");
+  await symlink(realHome, linkHome, process.platform === "win32" ? "junction" : "dir");
   const beforeCreate = resolveRindHome(linkHome);
   await mkdir(realHome, { recursive: true });
   const afterCreate = resolveRindHome(linkHome);

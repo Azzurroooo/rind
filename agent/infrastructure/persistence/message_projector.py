@@ -317,6 +317,9 @@ def _project_tool_message(
     return projected
 
 
+_TOOL_RESULT_NORMALIZER = ToolResultNormalizer()
+
+
 def project_tool_replay_fields(
     record: dict[str, Any] | None,
     message: dict[str, Any] | None = None,
@@ -327,12 +330,16 @@ def project_tool_replay_fields(
     tool_name = str(record.get("name") or message.get("tool_name") or "")
     error_type = str(record.get("error_type") or "")
     status = classify_tool_error(error_type or "ToolExecutionError") if error_type or record.get("ok") is False else "completed"
-    content = ToolResultNormalizer().project_for_terminal(payload, tool_name=tool_name, status=status, error_type=error_type)
+    content = _TOOL_RESULT_NORMALIZER.project_for_terminal(payload, tool_name=tool_name, status=status, error_type=error_type)
     for candidate in (payload, content):
         parsed = parse_tool_result_payload(candidate)
-        classified = classify_tool_payload(parsed) if parsed else None
+        if parsed is None:
+            continue
+        classified = classify_tool_payload(parsed)
         if classified:
             status, error_type = classified
+            break
+        if candidate is payload and not content.startswith(('{"ok": false', '{"ok":false')):
             break
     fields: dict[str, Any] = {
         "tool_name": tool_name,

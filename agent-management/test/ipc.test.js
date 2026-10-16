@@ -122,6 +122,7 @@ test("stopping with stopAgents ends a busy service, and the next client starts a
   const result = await client.request("serviceShutdown", { stopAgents: true });
   assert.deepEqual([result.stopping, result.working], [true, 1]);
   await exited;
+  await assert.rejects(client.request("snapshot"), { code: "SERVICE_DISCONNECTED" });
   await assert.rejects(connectClient({ endpoint: server.paths.endpoint, token: "x" }), "the endpoint is closed after stopping");
 });
 

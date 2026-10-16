@@ -63,8 +63,8 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         ? "Compacting"
         : "Working"),
       frame: state.display.activityFrame,
-      elapsedMs: running ? frameTime - state.display.activityStartedAt
-        : backgroundWait ? frameTime - backgroundWait.started_at * 1000 : 0,
+      elapsedMs: running && state.display.activityStartedAt ? Math.max(0, frameTime - state.display.activityStartedAt)
+        : backgroundWait ? Math.max(0, frameTime - backgroundWait.started_at * 1000) : 0,
       pendingInputs: state.input.pending,
       inputMode: inputSession?.mode || "prompt",
       menuOpen: Boolean(inputSession?.menuState?.matches?.()?.length),
@@ -120,11 +120,11 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     const running = state.turn.active || state.display.activeCompact;
     const waiting = waitingForBackground();
     const delegated = waitingForDelegations();
-    if (terminalUi && (running || waiting || (delegated.length && animateTools && hasColor()))) {
+    if (running || waiting || (delegated.length && animateTools && hasColor())) {
       if (!state.display.activityStartedAt) {
         state.display.activityStartedAt = now();
       }
-      if (state.display.activityTimer) {
+      if (!terminalUi || state.display.activityTimer) {
         return;
       }
       const interval = running ? 300 : hasColor() ? 150 : 1000;

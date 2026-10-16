@@ -182,6 +182,7 @@ windowLog.step("start " + JSON.stringify(cliArgs));
 // shell may still ask which team to use, so it reads its own keys.)
 const startupGuard = handoffWindow ? guardStartup({ onCancel(key) {
   windowLog.step("cancelled with " + key);
+  windowLog.close();
   writeHandoffSync({ action: "agents" }, handoffFile);
   process.exit(0);
 } }) : { stop() {} };
@@ -190,6 +191,7 @@ try { management = await prepareManagement(cliArgs, managementLaunch); cliArgs =
 catch (error) {
   startupGuard.stop();
   windowLog.step("failed: " + error.message);
+  windowLog.close();
   // A window opened from Agents tells its opener why it could not start.
   if (handoffWindow) await writeHandoff({ action: "failed", error: error.message }, handoffFile);
   process.stderr.write(error.message + "\n"); process.exitCode = 2; return;
@@ -752,8 +754,8 @@ async function runLogout(providerId = "") {
       logOutput(`No stored credential for ${selected}.`);
       return;
     }
-    const suffix = result?.source === "environment"
-      ? " It is still configured through an environment variable."
+    const suffix = result?.source === "settings"
+      ? " It is still configured in settings.json."
       : "";
     logOutput(`Logged out of ${selected}.${suffix}`);
   } catch (error) {
@@ -1021,6 +1023,7 @@ function exitFromSignal() {
 
 function forceCloseRuntime() {
   runtimeState.status = "closing";
+  windowLog.close();
   clearActivityTimer();
   taskMonitorController.stop();
   void ipcServer?.close();
@@ -1037,6 +1040,7 @@ async function shutdownRuntime() {
     return;
   }
   runtimeState.status = "closing";
+  windowLog.close();
   clearActivityTimer();
   taskMonitorController.stop();
   void ipcServer?.close();
