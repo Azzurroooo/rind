@@ -660,6 +660,7 @@ def test_replay_end_zero_skips_store_and_refreshes_running_session_credentials(t
 
             # Simulate an active session while management restarts with rotated tokens and empty instructions on a managed session.
             worker.execution._active[session_id] = SimpleNamespace()
+            worker.repository.exists = AsyncMock(side_effect=AssertionError("owned session should not check disk existence"))
             tool_v2 = {
                 **tool_v1,
                 "env": {"RIND_MANAGEMENT_TOKEN": "token-v2"},
@@ -677,6 +678,22 @@ def test_replay_end_zero_skips_store_and_refreshes_running_session_credentials(t
             tool_v3 = {**tool_v2, "tools": []}
             await worker.configure_if_unowned(session_id, {"external_tools": tool_v3})
             assert worker.execution.external_tool(session_id).tools == ()
+
+            # Opening a persisted store and projecting messages reads messages.jsonl once via _messages_cache.
+            from agent.infrastructure.persistence.message_repository import MessageRepository
+            reads = 0
+            original_load = MessageRepository.load_messages
+
+            def counting_load(self_repo):
+                nonlocal reads
+                reads += 1
+                return original_load(self_repo)
+
+            monkeypatch.setattr(MessageRepository, "load_messages", counting_load)
+            reopened = await worker.repository.open_store(session_id, persist_system_prompt=False)
+            sliced = await reopened.get_messages_slice(include_ids=True, compacted=False)
+            assert len(sliced) == 2
+            assert reads == 1
 
             # Metadata-only replay(end=0) must not open JsonlSessionStore or scan shell tasks.
             worker.repository._open_store_from_info = AsyncMock(side_effect=AssertionError("should not open store"))

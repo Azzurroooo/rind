@@ -22,7 +22,6 @@ export function createRindAdapter(options: { home?: string; python?: string; rep
         const runtimeSessionId = info.session_id || info.session?.session_id;
         if (!runtimeSessionId) throw new Error("Rind did not return a runtime session ID.");
         if (opened.session_id) await client.request("rind/folder_defaults/apply", { session_id: runtimeSessionId });
-        await client.request("session/subscribe", { session_id: runtimeSessionId });
         let cancelled = false;
         const completion = client.request("session/prompt", {
           session_id: runtimeSessionId, input: input.input, completion_scope: "request",
@@ -41,7 +40,7 @@ export function createRindAdapter(options: { home?: string; python?: string; rep
           },
           async cancel() { cancelled = true; await client.request("session/cancel", { session_id: runtimeSessionId }); await client.shutdown(); },
         };
-      } catch (error) { await client.shutdown(); throw new ManagementError((error as { code?: string }).code === "EXECUTION_UNCONFIRMED" ? "EXECUTION_UNCONFIRMED" : "EXECUTION_FAILED", String(error)); }
+      } catch (error) { await client.shutdown(); throw new ManagementError("EXECUTION_FAILED", String(error)); }
     },
   };
 }

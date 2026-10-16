@@ -333,9 +333,13 @@ def project_tool_replay_fields(
     content = _TOOL_RESULT_NORMALIZER.project_for_terminal(payload, tool_name=tool_name, status=status, error_type=error_type)
     for candidate in (payload, content):
         parsed = parse_tool_result_payload(candidate)
-        classified = classify_tool_payload(parsed) if parsed else None
+        if parsed is None:
+            continue
+        classified = classify_tool_payload(parsed)
         if classified:
             status, error_type = classified
+            break
+        if candidate is payload and not content.startswith(('{"ok": false', '{"ok":false')):
             break
     fields: dict[str, Any] = {
         "tool_name": tool_name,

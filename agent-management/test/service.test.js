@@ -478,6 +478,9 @@ test("reconcileSession skips state commits when status is unchanged or no active
     return r?.status === "unknown";
   });
   const subRun = Object.values(f.store.state.runs).find(r => r.delegationId === sub.taskId);
+  const seqUnknown = f.store.state.seq;
+  await f.call("reconcileSession", { sessionId: subSessionId, connected: false });
+  assert.equal(f.store.state.seq, seqUnknown, "disconnected reconcile on already-unknown run skips state commit");
   await assert.rejects(f.call("startTask", { taskId: parentTask.id }), { code: "RUN_UNCONFIRMED" });
   await f.call("reconcileSession", { sessionId: subSessionId, connected: true, active: false });
   assert.equal(f.store.state.runs[subRun.id].status, "failed", "connected idle reconcile settles unknown delegation run");
@@ -485,5 +488,64 @@ test("reconcileSession skips state commits when status is unchanged or no active
   await eventually(() => f.starts.length === 3, "parent task can restart once the crashed delegation is reconciled as failed");
   f.starts[2].finish({ content: "Handled failure" });
 });
+
+test("resolveRun settles delegations, returns direct-session deliveries, and marks running tasks needs_attention; resumed start failure is failed not unknown", async t => {
+  const f = await fixture(t);
+  const specialist = await f.member("specialist");
+
+  // 1. Direct session delegates to specialist; after recover(), resolving specialist's unknown run returns the failure delivery and clears Delegated.
+  const direct = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id, runtimeSessionId: "direct-1", shared: true });
+  f.service.setLive([{ id: "direct-1", turn: "idle", watchers: 1 }]);
+  const d1 = await f.call("delegate", { to: specialist.id, brief: "Check logs" }, { kind: "agent", sessionId: direct.id });
+  await eventually(() => f.starts.length === 1);
+  await f.service.recover();
+  const d1Run = Object.values(f.store.state.runs).find(r => r.delegationId === d1.taskId);
+  assert.equal(d1Run.status, "unknown");
+  await f.call("resolveRun", { runId: d1Run.id, confirmStopped: true });
+  assert.equal(f.store.state.delegations[d1.taskId].returned, true, "resolveRun wakes delegator and returns settled delegation");
+  await eventually(() => f.delivered.some(item => item.runtimeSessionId === "direct-1" && item.text.includes(d1.taskId)) && !f.store.state.deliveries[direct.id]);
+  const snapAfterD1 = await f.call("snapshot");
+  assert.equal(snapAfterD1.sessions.find(s => s.id === direct.id).status, "Open", "direct session is no longer stuck in Delegated");
+
+  // 2. Direct session's own run is unknown while child delegation finishes; resolving the direct run flushes the waiting delivery.
+  const directRun = await f.call("hostTurnStart", { sessionId: direct.id, runtimeSessionId: "direct-1" });
+  const d2 = await f.call("delegate", { to: specialist.id, brief: "Second check" }, { kind: "agent", sessionId: direct.id });
+  await eventually(() => f.starts.length === 2);
+  await f.call("reconcileSession", { sessionId: direct.id, connected: false });
+  assert.equal(f.store.state.runs[directRun.id].status, "unknown");
+  f.starts[1].finish({ content: "Second check complete" });
+  await eventually(() => f.store.state.delegations[d2.taskId].status === "done");
+  assert.ok(!f.store.state.delegations[d2.taskId].returned, "held while direct session run is unknown");
+  await f.call("reconcileSession", { sessionId: direct.id, connected: true, active: true, outcome: "running" });
+  await f.call("reconcileSession", { sessionId: direct.id, connected: false });
+  await f.call("resolveRun", { runId: directRun.id, confirmStopped: true });
+  assert.equal(f.store.state.delegations[d2.taskId].returned, true, "resolving direct unknown run returns completed child delegation");
+
+  // 3. Entry task run becomes unknown while task is running; resolveRun transitions task from running to needs_attention.
+  const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Build feature" });
+  await eventually(() => f.starts.length === 3);
+  const taskSessionId = f.starts[2].input.session.id;
+  const taskRun = Object.values(f.store.state.runs).find(r => r.taskId === task.id);
+  f.starts[2].finish({ content: "" });
+  await eventually(() => !f.store.state.runs[taskRun.id] || f.store.state.runs[taskRun.id].status === "succeeded");
+  f.store.state.runs[taskRun.id].status = "unknown";
+  f.store.state.tasks[task.id].status = "running";
+  delete f.store.state.tasks[task.id].error;
+  await f.call("resolveRun", { runId: taskRun.id, confirmStopped: true });
+  assert.equal(f.store.state.runs[taskRun.id].status, "failed");
+  assert.equal(f.store.state.tasks[task.id].status, "needs_attention", "resolveRun transitions stranded running task to needs_attention");
+
+  // 4. Pre-start failure on a resumed run where session.runtimeSessionId is already set: must be 'failed', not 'unknown'.
+  assert.ok(f.store.state.sessions[taskSessionId].runtimeSessionId, "session already has runtimeSessionId from first run");
+  f.failStartOnce(new Error("transient start failure before prompt"));
+  await f.call("startTask", { taskId: task.id });
+  await eventually(() => {
+    const runs = Object.values(f.store.state.runs).filter(r => r.taskId === task.id);
+    return runs.length === 2 && runs.every(r => r.status === "failed");
+  });
+  const secondRun = Object.values(f.store.state.runs).filter(r => r.taskId === task.id && r.id !== taskRun.id)[0];
+  assert.equal(secondRun.status, "failed", "resumed run that fails before starting is marked failed, not unknown");
+});
+
 
 

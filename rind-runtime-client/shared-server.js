@@ -10,6 +10,11 @@ import { createLiveSessions } from "./live-sessions.js";
 
 // Only the detached entry point exits on its own; a test imports this module.
 const hostEntry = Boolean(process.argv[1]?.endsWith("shared-server.js"));
+const OBSERVE_EVENTS = new Set([
+  "turn_started", "turn_completed", "turn_failed", "turn_cancelled",
+  "user_question_requested", "user_question_answered", "background_wait_changed",
+  "folder_defaults_changed", "wait_released", "session_discarded", "session_deleted",
+]);
 
 export async function startSharedServer(options) {
   const rindHome = resolveRindHome(options.rindHome);
@@ -26,11 +31,13 @@ export async function startSharedServer(options) {
       // Sign-in progress (the URL to open) is for the window signing in.
       if (event?.method === "rind/auth/update") { authOwner?.send({ event }); return; }
       live.event(event);
-      for (const peer of peers) if (peer.observe || peer.sessions.has(event.session_id)) peer.send({ event });
+      const type = event?.event?.type;
+      const observeEvent = OBSERVE_EVENTS.has(type) || (type === "tool_result" && event.event.tool_name === "ask_user_question");
+      for (const peer of peers) if (peer.sessions.has(event.session_id) || (peer.observe && observeEvent)) peer.send({ event });
       // A first prompt failed before its message saved the conversation: it never existed.
-      if (event?.event?.type === "session_discarded") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
+      if (type === "session_discarded") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
       // A conversation was deleted: every list and live table drops it now.
-      if (event?.event?.type === "session_deleted") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
+      if (type === "session_deleted") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
     },
     onRequest(prompt) { return new Promise(resolve => { if (!authOwner || authOwner.socket.destroyed) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
     onStderr: text => process.stderr.write(text),

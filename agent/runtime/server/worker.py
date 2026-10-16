@@ -141,7 +141,7 @@ class RuntimeWorker:
             and (not params.get("external_tools") or self.execution.external_tool(clean) is None)
         ):
             return
-        if self.repository.draft_store(clean) is None and not await self.repository.exists(clean):
+        if not self.execution.owns_session(clean) and self.repository.draft_store(clean) is None and not await self.repository.exists(clean):
             return
         tool = ExternalTool.from_json(json.dumps(params["external_tools"])) if params.get("external_tools") else None
         enable_question = (

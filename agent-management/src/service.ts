@@ -948,7 +948,28 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         userOnly(actor); const run = state.runs[p.runId];
         requireValue(run?.status === "unknown", "INVALID_STATE", "Only unknown runs require reconciliation.");
         requireValue(p.confirmStopped === true, "USER_CONFIRMATION_REQUIRED", "Confirm that the old process has stopped before releasing its workspace.");
-        run.status = "failed"; return run;
+        run.status = "failed"; run.needsInput = false; run.lastObservedAt = new Date().toISOString();
+        if (!run.taskId && !run.delegationId) {
+          const children = sessionDelegations(state, run.sessionId);
+          if (!children.some(awaitingDelegation)) {
+            returnDelegations(state, children, text => { (state.deliveries[run.sessionId] ||= { texts: [] }).texts.push(text); });
+          }
+        } else if (run.delegationId) {
+          const d = state.delegations[run.delegationId];
+          if (d && !["done", "cancelled"].includes(d.status)) {
+            d.status = "failed";
+            d.error ||= "Execution stopped after unconfirmed state.";
+            wakeDelegator(state, d);
+          }
+        } else if (run.taskId) {
+          const task = state.tasks[run.taskId];
+          if (task && task.status === "running") {
+            task.status = "needs_attention";
+            task.error ||= "Execution stopped after unconfirmed state.";
+            delete task.dispatch;
+          }
+        }
+        return run;
       }
       case "cancelRun": {
         const run = state.runs[p.runId]; requireValue((run?.taskId || run?.delegationId) && live.has(run.id), "NOT_RUNNING", "Only a live managed task can be cancelled here.");
@@ -1033,7 +1054,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         const task = d?.taskId ? store.state.tasks[d.taskId] : r.taskId ? store.state.tasks[r.taskId] : undefined;
         return d?.status !== "failed" && task?.status !== "needs_attention";
       });
-      if (!activeRuns.length || unchangedActive) {
+      const unchangedUnknown = !params.connected && !params.active && !params.missing && !params.outcome && activeRuns.every(r => r.status === "unknown");
+      if (!activeRuns.length || unchangedActive || unchangedUnknown) {
         const wasConnected = connected.has(session.id);
         if (params.connected) connected.add(session.id); else connected.delete(session.id);
         if (wasConnected !== connected.has(session.id)) for (const listener of listeners) listener();
@@ -1132,7 +1154,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     await transaction(state => {
       const run = state.runs[runId];
       if (!run || !activeRun(run)) return;
-      const started = Boolean(state.sessions[run.sessionId]?.runtimeSessionId);
+      const started = run.status === "running";
       run.status = !started || (error as { code?: string })?.code === "EXECUTION_FAILED" ? "failed" : "unknown"; run.lastObservedAt = new Date().toISOString();
       if (run.delegationId) {
         const d = state.delegations[run.delegationId];

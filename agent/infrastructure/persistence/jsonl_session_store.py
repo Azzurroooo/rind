@@ -137,6 +137,7 @@ class JsonlSessionStore(SessionStore):
         self._index_entry: dict[str, Any] | None = None
         self._last_preview = ""
         self._projected_caches: dict[tuple[bool, bool, bool], tuple[tuple[Any, ...], list[dict[str, Any]]]] = {}
+        self._messages_cache: tuple[tuple[int, int], list[dict[str, Any]]] | None = None
         self._tool_records_cache: tuple[tuple[int, int], list[dict[str, Any]]] | None = None
         self._files = SessionFiles()
         self._msg_repo = None
@@ -445,7 +446,7 @@ class JsonlSessionStore(SessionStore):
         original_window = self._session_meta.get("auto_compact_window")
         normalized_window = normalize_auto_compact_window(original_window)
         self._session_meta["auto_compact_window"] = normalized_window
-        messages = self._msg_repo.load_messages()
+        messages = self._load_messages_sync()
         message_count = sum(
             1 for message in messages
             if isinstance(message, dict) and not _is_non_conversation_message(message)
@@ -504,6 +505,7 @@ class JsonlSessionStore(SessionStore):
             "last_preview": self._last_preview,
             "index_entry": self._index_entry,
             "projected_caches": dict(self._projected_caches),
+            "messages_cache": self._messages_cache,
             "tool_records_cache": self._tool_records_cache,
             "model": self._model,
             "provider": self._provider,
@@ -523,6 +525,7 @@ class JsonlSessionStore(SessionStore):
             self._last_preview = previous["last_preview"]
             self._index_entry = previous["index_entry"]
             self._projected_caches = previous["projected_caches"]
+            self._messages_cache = previous["messages_cache"]
             self._tool_records_cache = previous["tool_records_cache"]
             self._model = previous["model"]
             self._provider = previous["provider"]
@@ -646,7 +649,19 @@ class JsonlSessionStore(SessionStore):
 
     def _invalidate_projection_cache(self) -> None:
         self._projected_caches.clear()
+        self._messages_cache = None
         self._tool_records_cache = None
+
+    def _load_messages_sync(self) -> list[dict[str, Any]]:
+        if not self._msg_repo:
+            return []
+        path = (self._session_paths or {}).get("messages")
+        signature = self._projection_file_signature(path)
+        if self._messages_cache is not None and self._messages_cache[0] == signature:
+            return self._messages_cache[1]
+        messages = self._msg_repo.load_messages()
+        self._messages_cache = (signature, messages)
+        return messages
 
     def _load_tool_records_sync(self) -> list[dict[str, Any]]:
         if not self._tool_repo:
@@ -690,7 +705,7 @@ class JsonlSessionStore(SessionStore):
         if cached is not None and cached[0] == signature:
             return cached[1]
 
-        messages = self._msg_repo.load_messages() if self._msg_repo else []
+        messages = self._load_messages_sync()
         tool_records = self._load_tool_records_sync()
         compactions = self._compaction_repo.load_compactions() if self._compaction_repo else []
         built_messages = project_messages(
@@ -771,7 +786,7 @@ class JsonlSessionStore(SessionStore):
     def _discard_if_empty_sync(self) -> None:
         if not self._session_id or not self._session_paths:
             return
-        messages = self._msg_repo.load_messages() if self._msg_repo else []
+        messages = self._load_messages_sync()
         if any(
             _is_real_user_message(message)
             for message in messages
@@ -1052,14 +1067,14 @@ class JsonlSessionStore(SessionStore):
 
     async def load_messages(self) -> list[dict[str, Any]]:
         def _load():
-            return self._msg_repo.load_messages() if self._msg_repo else []
+            return [dict(m) for m in self._load_messages_sync()]
         return await asyncio.to_thread(_load)
 
     def _latest_compaction_sync(self) -> dict[str, Any] | None:
         if not self._compaction_repo or not self._msg_repo:
             return None
         return latest_compaction(
-            self._msg_repo.load_messages(),
+            self._load_messages_sync(),
             self._compaction_repo.load_compactions(),
         )
 

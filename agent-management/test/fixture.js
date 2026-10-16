@@ -13,14 +13,17 @@ export async function fixture(t) {
   const paths = managementPaths(home);
   const store = await openStore(paths.state, 5);
   const starts = [];
+  let nextStartError = null;
+  const failStartOnce = (error = new Error("start failed")) => { nextStartError = error; };
   const adapter = { async start(input) {
+    if (nextStartError) { const error = nextStartError; nextStartError = null; throw error; }
     let finish, fail;
     const steered = [];
     const completion = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
     const entry = { input, finish, fail, steered, steerResult: true };
     starts.push(entry);
     return {
-      runtimeSessionId: randomUUID(),
+      runtimeSessionId: input.session.runtimeSessionId || randomUUID(),
       completion,
       async cancel() { finish({ content: "" }); },
       async steer(message) {
@@ -63,7 +66,7 @@ export async function fixture(t) {
   await call("setLeader", { teamId: team.id, agentId: leader.id });
   // The member running a started task, as its tool calls reach the service.
   const runner = start => ({ kind: "agent", sessionId: start.input.session.id });
-  return { home, paths, store, service, call, team, leader, member, starts, folders, folderCalls, delivered, runner };
+  return { home, paths, store, service, call, team, leader, member, starts, failStartOnce, folders, folderCalls, delivered, runner };
 }
 export async function eventually(check) {
   for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
