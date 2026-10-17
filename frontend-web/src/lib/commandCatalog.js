@@ -4,7 +4,7 @@
 export const SERVER_CATEGORY = "Server commands";
 
 const HIDDEN_COMMANDS = new Set([
-  "config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "theme", "team", "exit", "quit",
+  "config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "theme", "exit", "quit",
 ]);
 
 export function normalizeCatalog(catalog) {

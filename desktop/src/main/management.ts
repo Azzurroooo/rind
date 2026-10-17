@@ -415,7 +415,7 @@ export async function requestManagement(method: string, params: Record<string, u
   }
 
   const active = await ensureManagementConnected({ start: true })
-  if (method === "readArtifactPreview") {
+  if (method === "readArtifactPreview" || method === "readArtifact") {
     const artifact = await active.request("readArtifact", { artifactId: params.artifactId })
     if (artifact?.path && typeof artifact.path === "string") {
       const preview = await previewArtifactFile(artifact.path)

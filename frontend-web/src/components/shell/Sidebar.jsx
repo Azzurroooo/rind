@@ -1,14 +1,35 @@
 import { useMemo, useState } from "react";
-import { BarChart3, Bell, History, LoaderCircle, Search, Settings, SquarePen, X } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  Bell,
+  ChevronDown,
+  ChevronRight,
+  Crown,
+  History,
+  Inbox,
+  Kanban,
+  LoaderCircle,
+  Network,
+  Plus,
+  Search,
+  Settings,
+  Sparkles,
+  SquarePen,
+  Users,
+  X,
+} from "lucide-react";
 import { ConfirmDialog } from "../overlays/ConfirmDialog.jsx";
 import { ProjectSelector } from "./ProjectSelector.jsx";
 import { SessionRow } from "./SessionRow.jsx";
+import { buildTeamSummary } from "../../lib/agentsModel.js";
 import { interactionTime } from "../../lib/sessionActivity.js";
 import { sessionIdOf } from "../../methods.js";
 
-// Sidebar (spec section 3), after Jan's left panel and LobeHub's topic list:
-// project selector, New session, a title search, recent 32px session
-// rows, "Load more", and a footer with notifications and Settings.
+// Sidebar (spec section 3), after Jan's left panel, LobeHub's topic list, and
+// Paperclip/Orca's native multi-agent workspace navigation:
+// Inbox/Manager/Background, Teams & member tree, project selector, New session,
+// title search, recent 32px session rows, "Load more", and footer.
 export function Sidebar({
   sessions,
   activeId,
@@ -16,6 +37,7 @@ export function Sidebar({
   runningIds,
   hasMore,
   project,
+  agents,
   canFork,
   canExport,
   notificationPermission,
@@ -36,6 +58,9 @@ export function Sidebar({
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState(null); // { id, title, busy, error }
   const [loadingMore, setLoadingMore] = useState(false);
+  const [collapsedTeams, setCollapsedTeams] = useState({});
+  const [newTeamOpen, setNewTeamOpen] = useState(false);
+  const [newTeamName, setNewTeamName] = useState("");
 
   const recent = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -44,6 +69,13 @@ export function Sidebar({
       : sessions;
     return [...list].sort((a, b) => interactionTime(b) - interactionTime(a));
   }, [sessions, search]);
+
+  const teamSummaries = useMemo(() => {
+    if (!agents?.snapshot?.teams?.length) return [];
+    return agents.snapshot.teams
+      .map((t) => buildTeamSummary(agents.snapshot, t.id))
+      .filter(Boolean);
+  }, [agents?.snapshot]);
 
   async function confirmDelete() {
     if (!pending) return;
@@ -56,8 +88,185 @@ export function Sidebar({
     }
   }
 
+  async function handleCreateTeam(event) {
+    event.preventDefault();
+    const name = newTeamName.trim();
+    if (!name || !agents?.onCreateTeam) return;
+    await agents.onCreateTeam(name);
+    setNewTeamName("");
+    setNewTeamOpen(false);
+  }
+
   return (
     <aside ref={panelRef} id="sidebar-panel" className={`sidebar ${panelClassName}`.trim()} tabIndex={-1} style={style} aria-label="Sessions sidebar" {...restPanelAttrs}>
+      {agents && (
+        <div className="sidebar-agents" aria-label="Multi-agent navigation">
+          <div className="sidebar-nav-rail">
+            <button
+              type="button"
+              className={`sidebar-nav-item ${agents.surface?.kind === "inbox" ? "active" : ""}`}
+              onClick={agents.onOpenInbox}
+            >
+              <Inbox size={15} aria-hidden="true" />
+              <span>Inbox</span>
+              {agents.inboxCount > 0 && (
+                <span className="sidebar-nav-badge attention">{agents.inboxCount}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              className={`sidebar-nav-item ${
+                agents.surface?.kind === "chat" && agents.activeSessionContext?.kind === "manager" ? "active" : ""
+              }`}
+              onClick={agents.onOpenManager}
+            >
+              <Sparkles size={15} aria-hidden="true" />
+              <span>Manager</span>
+              <span className="sidebar-nav-hint">Coordinator</span>
+            </button>
+            <button
+              type="button"
+              className={`sidebar-nav-item ${agents.surface?.kind === "background" ? "active" : ""}`}
+              onClick={agents.onOpenBackground}
+            >
+              <Activity size={15} aria-hidden="true" />
+              <span>Background</span>
+              {agents.bgCount > 0 && <span className="sidebar-nav-badge working">{agents.bgCount}</span>}
+            </button>
+          </div>
+
+          <div className="sidebar-teams-section">
+            <div className="sidebar-section-head">
+              <span className="sidebar-section-label">Teams</span>
+              <button
+                type="button"
+                className="icon-button small"
+                aria-label="New team"
+                title="Create a new agent team"
+                onClick={() => setNewTeamOpen((prev) => !prev)}
+              >
+                <Plus size={13} aria-hidden="true" />
+              </button>
+            </div>
+
+            {newTeamOpen && (
+              <form className="sidebar-new-team-form" onSubmit={handleCreateTeam}>
+                <input
+                  type="text"
+                  value={newTeamName}
+                  onChange={(e) => setNewTeamName(e.target.value)}
+                  placeholder="Team name (e.g. core-ui)"
+                  aria-label="New team name"
+                  autoFocus
+                />
+                <button type="submit" className="agent-btn primary xs" disabled={!newTeamName.trim() || agents.busy}>
+                  Create
+                </button>
+              </form>
+            )}
+
+            {teamSummaries.length === 0 ? (
+              <button
+                type="button"
+                className="sidebar-teams-empty"
+                onClick={() => setNewTeamOpen(true)}
+              >
+                <Users size={13} aria-hidden="true" />
+                <span>Create or ask Manager for a team</span>
+              </button>
+            ) : (
+              <div className="sidebar-team-list">
+                {teamSummaries.map((summary) => {
+                  const { team, members, counts } = summary;
+                  const collapsed = Boolean(collapsedTeams[team.id]);
+                  const isTeamSelected =
+                    agents.surface?.kind === "team" && agents.surface?.teamId === team.id;
+                  return (
+                    <div key={team.id} className="sidebar-team-group" data-team-id={team.id}>
+                      <div className={`sidebar-team-row ${isTeamSelected ? "active" : ""}`}>
+                        <button
+                          type="button"
+                          className="sidebar-team-chevron"
+                          aria-label={collapsed ? `Expand ${team.name}` : `Collapse ${team.name}`}
+                          onClick={() =>
+                            setCollapsedTeams((prev) => ({ ...prev, [team.id]: !prev[team.id] }))
+                          }
+                        >
+                          {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                        </button>
+                        <button
+                          type="button"
+                          className="sidebar-team-main"
+                          onClick={() => agents.onOpenTeam?.(team.id, "organization")}
+                        >
+                          <span className="sidebar-team-name">{team.name}</span>
+                          {counts.working > 0 && <span className="agent-status-dot tone-working" title={`${counts.working} working`} />}
+                          {counts.attention > 0 && <span className="agent-status-dot tone-attention" title={`${counts.attention} need input`} />}
+                        </button>
+                        <div className="sidebar-team-pills">
+                          <button
+                            type="button"
+                            className={`sidebar-team-pill ${
+                              isTeamSelected && agents.surface?.tab === "organization" ? "active" : ""
+                            }`}
+                            title="Team organization chart"
+                            onClick={() => agents.onOpenTeam?.(team.id, "organization")}
+                          >
+                            <Network size={11} aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className={`sidebar-team-pill ${
+                              isTeamSelected && agents.surface?.tab === "tasks" ? "active" : ""
+                            }`}
+                            title="Team tasks board"
+                            onClick={() => agents.onOpenTeam?.(team.id, "tasks")}
+                          >
+                            <Kanban size={11} aria-hidden="true" />
+                            {counts.tasksTotal > 0 && <span>{counts.tasksTotal}</span>}
+                          </button>
+                        </div>
+                      </div>
+                      {!collapsed && members.length > 0 && (
+                        <div className="sidebar-member-list" role="group" aria-label={`${team.name} members`}>
+                          {members.map((member) => {
+                            const isMemberChat =
+                              agents.surface?.kind === "chat" &&
+                              agents.activeSessionContext?.kind === "member" &&
+                              agents.activeSessionContext?.agentId === member.agentId;
+                            return (
+                              <button
+                                key={member.agentId}
+                                type="button"
+                                className={`sidebar-member-row ${isMemberChat ? "active" : ""}`}
+                                data-member-id={member.agentId}
+                                onClick={() =>
+                                  agents.onOpenMemberChat?.({
+                                    teamId: team.id,
+                                    agentId: member.agentId,
+                                    runtimeSessionId: member.latestRuntimeSessionId,
+                                  })
+                                }
+                              >
+                                <span className={`agent-status-dot tone-${member.tone}`} />
+                                <span className="sidebar-member-name">{member.name}</span>
+                                {member.isLeader && (
+                                  <Crown size={11} className="sidebar-leader-icon" aria-hidden="true" />
+                                )}
+                                <span className="sidebar-member-role">{member.position}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <div className="sidebar-head">
         <span className="sidebar-section-label">Projects</span>
         <ProjectSelector {...project} />

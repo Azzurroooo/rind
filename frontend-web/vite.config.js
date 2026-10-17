@@ -168,7 +168,36 @@ function rindAgentsDevPlugin() {
               const paths = managementPaths(resolveRindHome(process.env.RIND_HOME));
               const logPath = params.target === "runtime" ? join(dirname(paths.root), "runtime", "runtime.log") : join(paths.state, "service.log");
               result = { path: logPath, lines: await tailFile(logPath) };
-            } else if (method === "readArtifactPreview") {
+            } else if (method === "restartService") {
+              const active = await ensureConnected({ start: true });
+              explicitlyStopped = true;
+              await active.request("serviceShutdown", { restart: true });
+              client?.close();
+              client = null;
+              await new Promise((r) => setTimeout(r, 250));
+              explicitlyStopped = false;
+              await ensureConnected({ start: true });
+              result = currentState();
+            } else if (method === "stopServices") {
+              const stopAgents = Boolean(params.stopAgents);
+              const active = await ensureConnected({ start: false }).catch(() => null);
+              explicitlyStopped = true;
+              if (active) {
+                const shutdownRes = await active.request("serviceShutdown", { stopAgents });
+                client?.close();
+                client = null;
+                connection = "stopped";
+                service = null;
+                if (stopAgents) snapshot = { ...snapshot, runs: [] };
+                broadcast();
+                result = { stopped: true, ...shutdownRes };
+              } else {
+                connection = "stopped";
+                service = null;
+                broadcast();
+                result = { stopped: true, working: 0 };
+              }
+            } else if (method === "readArtifactPreview" || method === "readArtifact") {
               const active = await ensureConnected({ start: true });
               const artifact = await active.request("readArtifact", { artifactId: params.artifactId });
               if (artifact?.path) {
@@ -216,7 +245,10 @@ function rindAgentsDevPlugin() {
             } else {
               const active = await ensureConnected({ start: true });
               result = await active.request(method, params);
-              if (method !== "snapshot" && method !== "subscribe") {
+              if (method === "serviceInfo" && result && typeof result === "object") {
+                service = { ...result, ...(active.stale ? { stale: active.stale } : {}) };
+                broadcast();
+              } else if (method !== "snapshot" && method !== "subscribe") {
                 const snap = await active.request("snapshot").catch(() => null);
                 if (snap && typeof snap === "object") {
                   snapshot = { ...snapshot, ...snap };

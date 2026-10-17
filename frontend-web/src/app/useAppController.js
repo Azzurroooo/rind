@@ -14,6 +14,7 @@ import { createConnectionActions } from "./connectionActions.js";
 import { createSessionActions } from "./sessionActions.js";
 import { createTurnActions } from "./turnActions.js";
 import { createCommandActions } from "./commandActions.js";
+import { useAgentsController } from "./useAgentsController.js";
 
 // Runtime wiring for the shell: state, the one runtime client, and the action
 // factories. Factories are rebuilt every render and reach each other through
@@ -35,12 +36,14 @@ export function useAppController() {
   const session = createSessionActions(ctx);
   const turn = createTurnActions(ctx);
   const command = createCommandActions(ctx);
+  const agents = useAgentsController(ctx);
   call.current = {
     ...helpers,
     ...connection,
     ...session,
     ...turn,
     ...command,
+    onAgentsChanged: (event) => agents.acceptPayload(event),
     toggleSidebar: layout.toggleSidebar,
     drawerOpen: () => Boolean(layout.drawer),
   };
@@ -58,5 +61,5 @@ export function useAppController() {
     layout.openInspector("files");
   }, [layout]);
 
-  return { ctx, actions: call.current, view, request, fileRequest, openFile };
+  return { ctx, actions: call.current, view, agents, request, fileRequest, openFile };
 }

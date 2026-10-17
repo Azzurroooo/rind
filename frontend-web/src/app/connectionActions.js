@@ -88,6 +88,11 @@ export function createConnectionActions(ctx) {
       return;
     }
 
+    if (event.type === "agents_changed") {
+      call().onAgentsChanged?.(event);
+      return;
+    }
+
     call().trackRunning(targetSession, event.type, message.turn_id || event.turn_id);
     if (event.type === "turn_started" || event.type === "queued_input_delivered") call().touchSession(targetSession);
     if (refs.switching.current) { refs.loadingEvents.current.push(message); return; }

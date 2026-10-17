@@ -1,13 +1,28 @@
-import { Command, Download, GitFork, ListChecks, MoreHorizontal, PanelLeft, PanelRight, Sparkles } from "lucide-react";
+import {
+  Command,
+  Crown,
+  Download,
+  GitFork,
+  Kanban,
+  ListChecks,
+  MessageSquare,
+  MoreHorizontal,
+  Network,
+  PanelLeft,
+  PanelRight,
+  Sparkles,
+} from "lucide-react";
 import { Menu } from "../overlays/Menu.jsx";
 import { Tooltip } from "../overlays/Tooltip.jsx";
 
 // Chat header (spec section 2): 44px (48px on narrow screens) with the sidebar
-// toggle, the session title and a status chip on the left, and 28px icon
-// buttons (tasks, inspector toggle, overflow) on the right.
+// toggle, the session title, agent/team context badge, and status chip on the
+// left, and 28px icon buttons on the right.
 export function ChatHeader({
   title,
   status,
+  agentContext,
+  surface,
   sidebarExpanded,
   inspectorExpanded,
   sidebarToggleRef,
@@ -17,7 +32,11 @@ export function ChatHeader({
   onToggleSidebar,
   onToggleInspector,
   onOpenTasks,
+  onOpenTeam,
+  onBackToChat,
 }) {
+  const isChatSurface = !surface || surface.kind === "chat";
+
   return (
     <header className="chat-header">
       <Tooltip label="Toggle sidebar (Ctrl+B)">
@@ -34,6 +53,43 @@ export function ChatHeader({
         </button>
       </Tooltip>
       <h1 className="chat-title" title={title}>{title}</h1>
+      {isChatSurface && agentContext?.kind === "manager" && (
+        <span className="header-agent-pill manager" title="Talking with the Organization Manager">
+          <Sparkles size={12} aria-hidden="true" />
+          <span>Manager · Coordinator</span>
+        </span>
+      )}
+      {isChatSurface && agentContext?.kind === "member" && (
+        <div className="header-agent-breadcrumb">
+          <button
+            type="button"
+            className="header-agent-pill member"
+            title={`View ${agentContext.teamName} organization`}
+            onClick={() => onOpenTeam?.(agentContext.teamId, "organization")}
+          >
+            {agentContext.isLeader ? <Crown size={11} aria-hidden="true" /> : <Network size={11} aria-hidden="true" />}
+            <span>{agentContext.teamName}</span>
+            <span className="header-agent-sep">/</span>
+            <strong>{agentContext.agentName}</strong>
+            <span className="header-agent-role">{agentContext.roleLabel}</span>
+          </button>
+          <button
+            type="button"
+            className="header-agent-pill subtle"
+            title={`Open ${agentContext.teamName} tasks board`}
+            onClick={() => onOpenTeam?.(agentContext.teamId, "tasks")}
+          >
+            <Kanban size={11} aria-hidden="true" />
+            <span>Board</span>
+          </button>
+        </div>
+      )}
+      {!isChatSurface && onBackToChat && (
+        <button type="button" className="header-agent-pill back-chat" onClick={onBackToChat}>
+          <MessageSquare size={12} aria-hidden="true" />
+          <span>Back to Conversation</span>
+        </button>
+      )}
       {status && <span className={`status-chip ${status.tone || ""}`.trim()}>{status.label}</span>}
       <div className="chat-header-actions">
         {showTasks && (
