@@ -31,7 +31,7 @@ import {
 import { asRecord, asRecordText } from "./html.ts"
 import { showToast } from "./overlays.ts"
 import { loadReplay, resetConversationPresentation, runAction } from "./runtime.ts"
-import { restoreProjectDraft } from "./sessions.ts"
+import { loadSessions, restoreProjectDraft } from "./sessions.ts"
 import { render, scheduleRender } from "./shell.ts"
 import { state } from "./state.ts"
 
@@ -264,6 +264,7 @@ export async function openManagedAgentChat(options: {
   state.agentsBusy = true
   state.sidebarMode = "agents"
   state.headerSessionsMenuOpen = false
+  state.notice = ""
   render()
   try {
     const opened = asRecord(
@@ -285,11 +286,12 @@ export async function openManagedAgentChat(options: {
     let runtimeSessionId =
       asRecordText(opened.runtimeSessionId) ||
       asRecordText(mgmtSession.runtimeSessionId) ||
+      asRecordText(mgmtSession.session_id) ||
       String(options.existingRuntimeSessionId || "")
 
-    // If explicitly starting a brand-new conversation (`resumeLatest: false` and no `existingRuntimeSessionId`),
-    // create and bind a fresh runtime session immediately so it appears in the conversation list right away.
-    if (!runtimeSessionId && options.resumeLatest === false && workspaceRoot) {
+    // If no existing runtime session was resolved (either starting a brand-new conversation
+    // or opening an agent that has no conversations yet), create and bind a fresh runtime session immediately.
+    if (!runtimeSessionId && workspaceRoot) {
       const created = asRecord(
         await window.api.agents.createSession({
           managementSessionId,
@@ -307,6 +309,7 @@ export async function openManagedAgentChat(options: {
     }
 
     if (options.manager) {
+      state.managerExpanded = true
       state.agentChatContext = {
         kind: "manager",
         managementSessionId,
@@ -320,6 +323,7 @@ export async function openManagedAgentChat(options: {
       const membership = state.agentsSnapshot.memberships.find(
         (m) => m.teamId === options.teamId && m.agentId === options.agentId,
       )
+      state.collapsedTeams.delete(options.teamId)
       state.expandedSidebarMembers.add(`${options.teamId}:${options.agentId}`)
       state.agentChatContext = {
         kind: "member",
@@ -347,6 +351,7 @@ export async function openManagedAgentChat(options: {
       resetConversationPresentation()
       restoreProjectDraft()
       render()
+      await loadSessions().catch(() => {})
       await loadReplay(runtimeSessionId)
       render()
     } else {

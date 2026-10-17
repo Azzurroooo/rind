@@ -149,7 +149,137 @@ function acceptSnapshot(next: unknown) {
   }
 }
 
+function normalizeWorkspaceKey(target: unknown): string {
+  if (typeof target !== "string" || !target.trim()) return ""
+  const resolved = resolve(target.trim()).replace(/[\\/]+$/, "")
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved
+}
+
+async function readSessionIndexEntries(rindHome: string): Promise<Array<Record<string, unknown>>> {
+  const indexPath = join(rindHome, "session_index.json")
+  try {
+    const raw = JSON.parse(await readFile(indexPath, "utf8"))
+    const map = raw && typeof raw === "object" && raw.sessions && typeof raw.sessions === "object"
+      ? raw.sessions
+      : raw && typeof raw === "object"
+        ? raw
+        : {}
+    return Object.entries(map)
+      .filter(([, value]) => value && typeof value === "object")
+      .map(([id, value]: [string, any]) => ({
+        session_id: String(value.id || value.session_id || id),
+        title: String(value.title || ""),
+        updated_at: String(value.updated_at || value.created_at || ""),
+        workspace_root: String(value.workspace_root || ""),
+        message_count: Number(value.message_count || 0),
+        last_model: String(value.last_model || ""),
+        last_user_message: String(value.last_user_message || ""),
+      }))
+  } catch {
+    return []
+  }
+}
+
+async function listManagedSessionsLocal(params: Record<string, unknown> = {}) {
+  const opts = launchOptions()
+  const { managementPaths } = await loadManagementModule()
+  const managerWorkspace = managementPaths(opts.home).manager
+  const runtimeSessions = await readSessionIndexEntries(opts.home)
+  const snapshot = currentSnapshot
+
+  const byWorkspace = new Map<string, Record<string, unknown>>()
+  const byAgent = new Map<string, Record<string, unknown>>()
+  for (const agent of snapshot.agents) {
+    byWorkspace.set(normalizeWorkspaceKey(agent.canonicalWorkspace), agent)
+    if (typeof agent.id === "string") byAgent.set(agent.id, agent)
+  }
+  const byTeam = new Map<string, Record<string, unknown>>()
+  for (const team of snapshot.teams) {
+    if (typeof team.id === "string") byTeam.set(team.id, team)
+  }
+  const byRuntimeSession = new Map<string, Record<string, unknown>>()
+  const connected = new Set(snapshot.connectedSessions || [])
+  for (const session of snapshot.sessions) {
+    const rId = typeof session.runtimeSessionId === "string" ? session.runtimeSessionId : ""
+    if (!rId) continue
+    const prev = byRuntimeSession.get(rId)
+    if (
+      !prev ||
+      (connected.has(String(session.id)) && !connected.has(String(prev.id))) ||
+      String(session.updatedAt || "") > String(prev.updatedAt || "")
+    ) {
+      byRuntimeSession.set(rId, session)
+    }
+  }
+  const runningBySession = new Set(
+    (snapshot.runs || [])
+      .filter((run) => run.status === "starting" || run.status === "running")
+      .map((run) => String(run.runtimeSessionId || ""))
+      .filter(Boolean),
+  )
+  const liveBySession = new Map<string, Record<string, unknown>>()
+  for (const item of snapshot.live || []) {
+    if (typeof item.id === "string") liveBySession.set(item.id, item)
+  }
+  const managerKey = normalizeWorkspaceKey(managerWorkspace)
+
+  const sessions = runtimeSessions
+    .map((item) => {
+      const runtimeSessionId = String(item.session_id || "")
+      const record = byRuntimeSession.get(runtimeSessionId)
+      const agent =
+        (record && typeof record.agentId === "string" ? byAgent.get(record.agentId) : undefined) ||
+        byWorkspace.get(normalizeWorkspaceKey(item.workspace_root))
+      const isManager = Boolean(
+        managerKey &&
+          normalizeWorkspaceKey(item.workspace_root || agent?.canonicalWorkspace) === managerKey,
+      )
+      if (!agent && !isManager) return null
+      const memberships = agent
+        ? snapshot.memberships.filter((m) => m.agentId === agent.id)
+        : []
+      const membership =
+        (record?.teamId ? memberships.find((m) => m.teamId === record.teamId) : undefined) ||
+        (params.teamId ? memberships.find((m) => m.teamId === params.teamId) : undefined) ||
+        memberships[0]
+      const team = membership ? byTeam.get(String(membership.teamId || "")) : undefined
+      const live = liveBySession.get(runtimeSessionId)
+      const running =
+        (live ? live.turn !== "idle" : false) || runningBySession.has(runtimeSessionId)
+      const attached = Boolean(
+        (live && Number(live.windows || 0) > 0) ||
+          (record && connected.has(String(record.id || ""))),
+      )
+      return {
+        runtimeSessionId,
+        title: String(item.title || item.last_user_message || runtimeSessionId),
+        updatedAt: String(item.updated_at || record?.updatedAt || ""),
+        workspaceRoot: String(item.workspace_root || agent?.canonicalWorkspace || managerWorkspace || ""),
+        agentId: String(agent?.id || ""),
+        agentName: isManager ? "Manager" : String(agent?.displayName || ""),
+        teamId: String(team?.id || record?.teamId || ""),
+        teamName: String(team?.name || ""),
+        roleTitle: isManager ? "Manager" : String(membership?.roleTitle || ""),
+        manager: isManager,
+        attached,
+        running,
+        status: running ? "working" : attached ? "open" : "idle",
+        messageCount: Number(item.message_count || 0),
+        model: String(item.last_model || ""),
+        lastActivity: String(item.last_user_message || ""),
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .filter((item) => (params.manager ? item.manager : true))
+    .filter((item) => (params.agentId ? item.agentId === params.agentId : true))
+    .filter((item) => (params.teamId ? item.teamId === params.teamId : true))
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+
+  return { sessions }
+}
+
 async function ensureSharedObserver() {
+  if (Boolean(process.versions.electron) && !process.env.RIND_RUNTIME_PATH) return
   if (sharedObserver || sharedObserverConnecting || closing) return sharedObserverConnecting
   sharedObserverConnecting = (async () => {
     try {
@@ -270,16 +400,15 @@ export function ensureManagementConnected({ start = true }: { start?: boolean } 
           agentId: attachment.manager ? undefined : attachment.agentId,
           teamId: attachment.teamId || undefined,
           manager: attachment.manager,
-          runtimeSessionId: attachment.runtimeSessionId || undefined,
           shared: false,
         })
-        if (attachment.runtimeSessionId && !reattached.runtimeSessionId) {
+        const tools = await connected.request("sessionTools", { sessionId: reattached.id })
+        if (attachment.runtimeSessionId) {
           await connected.request("bindSession", {
             sessionId: reattached.id,
             runtimeSessionId: attachment.runtimeSessionId,
-          })
+          }).catch(() => {})
         }
-        const tools = await connected.request("sessionTools", { sessionId: reattached.id })
         attachmentsByManagementId.delete(attachment.managementSessionId)
         attachment.managementSessionId = reattached.id
         attachment.externalTools = tools
@@ -351,11 +480,43 @@ export async function requestManagement(method: string, params: Record<string, u
     const logPath = isRuntime ? join(dirname(paths.root), "runtime", "runtime.log") : join(paths.state, "service.log")
     return { path: logPath, lines: await tailFile(logPath) }
   }
+  if (method === "listSessions") {
+    if (!client && !explicitlyStopped) {
+      await ensureManagementConnected({ start: true }).catch(() => {})
+    }
+    return listManagedSessionsLocal(params)
+  }
   if (method === "openSession") {
     return openAgentSession(params)
   }
   if (method === "createSession") {
     return createAgentSession(params)
+  }
+  if (method === "deleteSession") {
+    const active = await ensureManagementConnected({ start: true })
+    let runtimeSessionId = typeof params.runtimeSessionId === "string" ? params.runtimeSessionId.trim() : ""
+    const sessionId = typeof params.sessionId === "string" ? params.sessionId.trim() : ""
+    if (!runtimeSessionId && sessionId) {
+      const record = currentSnapshot.sessions.find((s) => s.id === sessionId)
+      if (record && typeof record.runtimeSessionId === "string") {
+        runtimeSessionId = record.runtimeSessionId.trim()
+      }
+    }
+    if (!runtimeSessionId) throw new Error("runtimeSessionId or sessionId is required.")
+    const attachment = attachmentsByRuntimeId.get(runtimeSessionId)
+    if (attachment) {
+      attachmentsByRuntimeId.delete(runtimeSessionId)
+      attachmentsByManagementId.delete(attachment.managementSessionId)
+      await active.request("detachSession", { sessionId: attachment.managementSessionId }).catch(() => {})
+    }
+    await ensureRuntimeForWorkspace()
+    await requestRuntime(runtimeMethods.sessionDelete, { session_id: runtimeSessionId })
+    await active.request("forgetSession", {
+      ...(sessionId ? { sessionId } : {}),
+      runtimeSessionId,
+    }).catch(() => {})
+    acceptSnapshot(await active.request("snapshot"))
+    return { deleted: true, runtimeSessionId }
   }
   if (method === "renameSession") {
     const sessionId = typeof params.sessionId === "string" ? params.sessionId.trim() : ""
@@ -444,7 +605,9 @@ async function ensureRuntimeForWorkspace(workspaceRoot?: string) {
   if (!snap || snap.status === "stopped" || snap.status === "error") {
     startRuntime(fallbackWorkspace)
   }
-  await initializeRuntime()
+  if (getRuntimeSnapshot()?.status !== "ready") {
+    await initializeRuntime()
+  }
 }
 
 export async function openAgentSession(params: {
@@ -487,21 +650,22 @@ export async function openAgentSession(params: {
 
   const active = await ensureManagementConnected({ start: true })
   if (!runtimeSessionId && params.resumeLatest === true) {
-    const history = manager
-      ? await active.request("listSessions", { manager: true }).catch(() => ({ sessions: [] }))
-      : await active
-          .request("listSessions", {
+    const history = await listManagedSessionsLocal(
+      manager
+        ? { manager: true }
+        : {
             ...(teamId ? { teamId } : {}),
             ...(agentId ? { agentId } : {}),
-          })
-          .catch(() => ({ sessions: [] }))
+          },
+    ).catch(() => ({ sessions: [] }))
     runtimeSessionId = String(history?.sessions?.[0]?.runtimeSessionId || "")
   }
+  // Attach with shared: false without runtimeSessionId first so sessionTools resolves
+  // synchronously in agent-management without spawning executionHost().
   const attached = await active.request("attachSession", {
     ...(agentId ? { agentId } : {}),
     ...(teamId ? { teamId } : {}),
     ...(manager ? { manager: true } : {}),
-    ...(runtimeSessionId ? { runtimeSessionId } : {}),
     shared: false,
   })
   const externalTools = (await active.request("sessionTools", { sessionId: attached.id })) as Record<string, unknown>
@@ -531,7 +695,7 @@ export async function openAgentSession(params: {
     await active.request("bindSession", {
       sessionId: attached.id,
       runtimeSessionId: resolvedRuntimeSessionId,
-    })
+    }).catch(() => {})
     acceptSnapshot(await active.request("snapshot"))
   }
 
@@ -670,10 +834,13 @@ export async function enrichSessionReplayParams(
       agentId: isManager ? undefined : managedSession.agentId,
       teamId: managedSession.teamId || undefined,
       manager: isManager,
-      runtimeSessionId: sessionId,
       shared: false,
     })
     const externalTools = (await client.request("sessionTools", { sessionId: attached.id })) as Record<string, unknown>
+    await client.request("bindSession", {
+      sessionId: attached.id,
+      runtimeSessionId: sessionId,
+    }).catch(() => {})
     const attachment: SessionAttachment = {
       managementSessionId: String(attached.id),
       agentId: String(managedSession.agentId || ""),
@@ -695,6 +862,7 @@ export async function forwardControlToSharedRuntimeIfNeeded(
   method: string,
   params: Record<string, unknown>,
 ): Promise<unknown | undefined> {
+  if (Boolean(process.versions.electron) && !process.env.RIND_RUNTIME_PATH) return undefined
   const sessionId = typeof params.session_id === "string" ? params.session_id : ""
   if (!sessionId) return undefined
   const isLiveInShared =

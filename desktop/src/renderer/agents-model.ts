@@ -1165,27 +1165,32 @@ export function renderSidebarAgentsHtml(options: {
   const archivedList = options.archivedTeams?.length ? options.archivedTeams : snapshot.archivedTeams
 
   const managerSessionsHtml = options.managerExpanded
-    ? `<div class="sidebar-member-sessions">
-        <button type="button" class="sidebar-member-session-new" data-sidebar-new-manager-session="1">+ New conversation</button>
+    ? `<div class="project-sessions" role="group" aria-label="Manager sessions">
         ${managerSessionsList
-          .slice(0, 8)
+          .slice(0, 12)
           .map((sess) => {
             const isCurrent =
               options.surface.kind === "chat" &&
               options.chatContext.kind === "manager" &&
               sess.runtimeSessionId === options.viewedSessionId
             return `
-              <div class="sidebar-member-session-row${isCurrent ? " is-active" : ""}">
-                <button type="button" class="sidebar-member-session-btn" data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}">
-                  <span class="agent-status-dot tone-${sess.tone}"></span>
-                  <span class="sidebar-member-session-title">${escapeHtml(sess.title || "Manager conversation")}</span>
-                  <span class="sidebar-member-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+              <div class="session-item-row${isCurrent ? " selected" : ""}">
+                <button type="button" class="session-item${isCurrent ? " selected" : ""}" data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}">
+                  <span class="session-title">${escapeHtml(sess.title || "New Session")}</span>
+                  <span class="session-status">${sess.tone === "working" ? `<span class="session-spinner" aria-label="Working"></span>` : escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
                 </button>
-                <button type="button" class="sidebar-member-session-del" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-manager="1" title="Delete conversation">✕</button>
+                <div class="session-menu-wrap">
+                  <button type="button" class="session-menu-trigger" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-manager="1" title="Delete session" aria-label="Delete session">✕</button>
+                </div>
               </div>
             `
           })
           .join("")}
+        <div class="session-item-row">
+          <button type="button" class="session-item session-item-new" data-sidebar-new-manager-session="1">
+            <span class="session-title">+ New session</span>
+          </button>
+        </div>
       </div>`
     : ""
 
@@ -1196,111 +1201,155 @@ export function renderSidebarAgentsHtml(options: {
       const isCollapsed = options.collapsedTeams.has(team.id)
       const attentionCount = summary ? summary.counts.tasksAttention + summary.counts.attention : 0
       const workingCount = summary ? summary.counts.working : 0
+      const membersCount = summary?.counts.members ?? 0
+      const tasksCount = summary?.counts.tasksTotal ?? 0
+
       const membersHtml =
-        !isCollapsed && summary && summary.members.length > 0
-          ? `<div class="sidebar-team-members" role="group" aria-label="${escapeAttribute(team.name)} members">${summary.members
-              .map((member) => {
-                const memberKey = `${team.id}:${member.agentId}`
-                const isMemberActive =
-                  options.surface.kind === "chat" &&
-                  options.chatContext.kind === "member" &&
-                  options.chatContext.agentId === member.agentId
-                const isMemberExpanded = expandedMembers.has(memberKey) || isMemberActive
-                const memberSessions = member.sessions || []
-                return `
-                  <div class="sidebar-member-block">
-                    <div class="sidebar-member-row-wrap${isMemberActive ? " is-active" : ""}">
-                      <button type="button" class="sidebar-member-chevron" data-sidebar-toggle-member="${escapeAttribute(memberKey)}" aria-label="Toggle ${escapeAttribute(member.name)} conversations">${isMemberExpanded ? "▾" : "▸"}</button>
-                      <button type="button" class="sidebar-member-row${isMemberActive ? " is-active" : ""}" data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(member.latestRuntimeSessionId)}" title="${escapeAttribute(`${member.name} · ${member.position} (${member.status})`)}">
-                        <span class="agent-status-dot tone-${member.tone}"></span>
-                        <span class="sidebar-member-name">${escapeHtml(member.name)}</span>
-                        ${member.isLeader ? `<span class="sidebar-leader-tag">Lead</span>` : `<span class="sidebar-member-role">${escapeHtml(member.position)}</span>`}
-                        ${memberSessions.length > 0 ? `<span class="sidebar-session-count">${memberSessions.length}</span>` : ""}
-                      </button>
-                    </div>
-                    ${
-                      isMemberExpanded
-                        ? `<div class="sidebar-member-sessions">
-                            <button type="button" class="sidebar-member-session-new" data-agent-new-session="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}">+ New conversation</button>
-                            ${memberSessions
-                              .slice(0, 8)
-                              .map((sess) => {
-                                const isCurrent =
-                                  options.surface.kind === "chat" && sess.runtimeSessionId === options.viewedSessionId
-                                return `
-                                  <div class="sidebar-member-session-row${isCurrent ? " is-active" : ""}">
-                                    <button type="button" class="sidebar-member-session-btn" data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}">
-                                      <span class="agent-status-dot tone-${sess.tone}"></span>
-                                      <span class="sidebar-member-session-title">${escapeHtml(sess.title || "Conversation")}</span>
-                                      <span class="sidebar-member-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+        !isCollapsed && summary
+          ? `<div class="project-sessions team-members-group" role="group" aria-label="${escapeAttribute(team.name)} members">${
+              summary.members.length === 0
+                ? `<p class="sidebar-empty">No members yet</p>`
+                : summary.members
+                    .map((member) => {
+                      const memberKey = `${team.id}:${member.agentId}`
+                      const isMemberActive =
+                        options.surface.kind === "chat" &&
+                        options.chatContext.kind === "member" &&
+                        options.chatContext.agentId === member.agentId
+                      const isMemberExpanded = expandedMembers.has(memberKey)
+                      const memberSessions = member.sessions || []
+                      const roleSubtitle = [
+                        member.position,
+                        member.status,
+                        memberSessions.length > 0
+                          ? `${memberSessions.length} session${memberSessions.length === 1 ? "" : "s"}`
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                      return `
+                        <section class="project-item member-project-item${isMemberExpanded ? " expanded" : ""}${isMemberActive ? " is-selected-member" : ""}">
+                          <div class="project-row">
+                            <button type="button" class="project-trigger" data-sidebar-toggle-member="${escapeAttribute(memberKey)}" aria-expanded="${isMemberExpanded}" title="${escapeAttribute(`${member.name} · ${roleSubtitle}`)}">
+                              <span class="project-name-row">
+                                <span class="agent-status-dot tone-${member.tone}"></span>
+                                <span class="project-name">${escapeHtml(member.name)}</span>
+                                ${member.isLeader ? `<span class="sidebar-leader-tag">Lead</span>` : ""}
+                              </span>
+                              <span class="project-path">${escapeHtml(roleSubtitle)}</span>
+                            </button>
+                            <div class="project-menu-wrap project-actions-inline">
+                              <button type="button" class="project-menu-trigger" data-agent-new-session="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" title="New session with ${escapeAttribute(member.name)}" aria-label="New session with ${escapeAttribute(member.name)}">+</button>
+                            </div>
+                          </div>
+                          ${
+                            isMemberExpanded
+                              ? `<div class="project-sessions" role="group" aria-label="${escapeAttribute(member.name)} sessions">
+                                  ${memberSessions
+                                    .slice(0, 12)
+                                    .map((sess) => {
+                                      const isCurrent =
+                                        options.surface.kind === "chat" && sess.runtimeSessionId === options.viewedSessionId
+                                      return `
+                                        <div class="session-item-row${isCurrent ? " selected" : ""}">
+                                          <button type="button" class="session-item${isCurrent ? " selected" : ""}" data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}">
+                                            <span class="session-title">${escapeHtml(sess.title || "New Session")}</span>
+                                            <span class="session-status">${sess.tone === "working" ? `<span class="session-spinner" aria-label="Working"></span>` : escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+                                          </button>
+                                          <div class="session-menu-wrap">
+                                            <button type="button" class="session-menu-trigger" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-id="${escapeAttribute(member.agentId)}" title="Delete session" aria-label="Delete session">✕</button>
+                                          </div>
+                                        </div>
+                                      `
+                                    })
+                                    .join("")}
+                                  <div class="session-item-row">
+                                    <button type="button" class="session-item session-item-new" data-agent-new-session="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}">
+                                      <span class="session-title">+ New session</span>
                                     </button>
-                                    <button type="button" class="sidebar-member-session-del" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-id="${escapeAttribute(member.agentId)}" title="Delete conversation">✕</button>
                                   </div>
-                                `
-                              })
-                              .join("")}
-                          </div>`
-                        : ""
-                    }
-                  </div>
-                `
-              })
-              .join("")}</div>`
+                                </div>`
+                              : ""
+                          }
+                        </section>
+                      `
+                    })
+                    .join("")
+            }</div>`
           : ""
 
       return `
-        <div class="sidebar-team-group">
-          <div class="sidebar-team-header${isSelectedTeam ? " is-active" : ""}">
-            <button type="button" class="sidebar-team-chevron" data-sidebar-toggle-team="${escapeAttribute(team.id)}" aria-label="${isCollapsed ? "Expand" : "Collapse"} ${escapeAttribute(team.name)}">${isCollapsed ? "▸" : "▾"}</button>
-            <button type="button" class="sidebar-team-main" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="organization">
-              <span class="sidebar-team-name">${escapeHtml(String(team.name || team.id))}</span>
-              <span class="sidebar-team-badges">
+        <section class="project-item${!isCollapsed ? " expanded" : ""}${isSelectedTeam ? " is-selected-team" : ""}">
+          <div class="project-row">
+            <button type="button" class="project-trigger" data-sidebar-toggle-team="${escapeAttribute(team.id)}" aria-expanded="${!isCollapsed}">
+              <span class="project-name-row">
+                <span class="project-name">${escapeHtml(String(team.name || team.id))}</span>
                 ${workingCount > 0 ? `<span class="sidebar-mini-dot working" title="Working"></span>` : ""}
                 ${attentionCount > 0 ? `<span class="sidebar-nav-badge attention">${attentionCount}</span>` : ""}
               </span>
+              <span class="project-path">${membersCount} member${membersCount === 1 ? "" : "s"} · ${tasksCount} task${tasksCount === 1 ? "" : "s"}</span>
             </button>
-            <button type="button" class="sidebar-team-tasks-btn" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="tasks" title="Open ${escapeAttribute(team.name)} Tasks">Tasks${summary?.counts.tasksTotal ? ` (${summary.counts.tasksTotal})` : ""}</button>
+            <div class="project-menu-wrap project-actions-inline">
+              <button type="button" class="project-action-pill${isSelectedTeam && options.surface.kind === "team" && options.surface.tab === "organization" ? " is-active" : ""}" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="organization" title="Open ${escapeAttribute(team.name)} Organization">Org</button>
+              <button type="button" class="project-action-pill${isSelectedTeam && options.surface.kind === "team" && options.surface.tab === "tasks" ? " is-active" : ""}" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="tasks" title="Open ${escapeAttribute(team.name)} Tasks">Tasks${tasksCount ? ` ${tasksCount}` : ""}</button>
+            </div>
           </div>
           ${membersHtml}
-        </div>
+        </section>
       `
     })
     .join("")
 
   return `
-    <div class="sidebar-global-nav" role="navigation" aria-label="Multi-agent surfaces">
-      <button type="button" class="sidebar-nav-item${isInbox ? " is-active" : ""}" data-sidebar-surface="inbox">
-        <span class="sidebar-nav-label">Inbox</span>
-        ${inboxCount > 0 ? `<span class="sidebar-nav-badge attention">${inboxCount}</span>` : ""}
-      </button>
-      <div class="sidebar-manager-block">
-        <div class="sidebar-team-header${isManagerActive ? " is-active" : ""}">
-          <button type="button" class="sidebar-team-chevron" data-sidebar-toggle-manager="1" aria-label="Toggle Manager conversations">${options.managerExpanded ? "▾" : "▸"}</button>
-          <button type="button" class="sidebar-team-main" data-sidebar-surface="manager" title="Open Manager Coordinator">
-            <span class="sidebar-team-name">Manager</span>
-            <span class="sidebar-nav-tag">Coord</span>
+    <div class="sidebar-section">
+      <div class="sidebar-heading">
+        <h2 class="sidebar-section-title">Overview</h2>
+      </div>
+      <div class="sidebar-global-nav" role="navigation" aria-label="Multi-agent surfaces">
+        <div class="session-item-row${isInbox ? " selected" : ""}">
+          <button type="button" class="session-item${isInbox ? " selected" : ""}" data-sidebar-surface="inbox">
+            <span class="session-title">Inbox</span>
+            <span class="session-status">${inboxCount > 0 ? `<span class="sidebar-nav-badge attention">${inboxCount}</span>` : ""}</span>
           </button>
-          <button type="button" class="sidebar-team-tasks-btn" data-sidebar-open-manager="1" title="Chat with Manager">Chat</button>
+        </div>
+        <div class="session-item-row${isBg ? " selected" : ""}">
+          <button type="button" class="session-item${isBg ? " selected" : ""}" data-sidebar-surface="background">
+            <span class="session-title">Background</span>
+            <span class="session-status">${bgCount > 0 ? `<span class="sidebar-nav-badge working">${bgCount}</span>` : ""}</span>
+          </button>
+        </div>
+        ${
+          archivedList.length > 0
+            ? `<div class="session-item-row${isArchive ? " selected" : ""}">
+                <button type="button" class="session-item${isArchive ? " selected" : ""}" data-sidebar-surface="archive">
+                  <span class="session-title">Archive</span>
+                  <span class="session-status"><span class="sidebar-nav-tag">${archivedList.length}</span></span>
+                </button>
+              </div>`
+            : ""
+        }
+      </div>
+      <section class="project-item${options.managerExpanded ? " expanded" : ""}${isManagerActive ? " is-selected-team" : ""}">
+        <div class="project-row">
+          <button type="button" class="project-trigger" data-sidebar-toggle-manager="1" aria-expanded="${options.managerExpanded}">
+            <span class="project-name-row">
+              <span class="project-name">Manager</span>
+              <span class="sidebar-nav-tag">Coord</span>
+            </span>
+            <span class="project-path">Organization Coordinator · ${managerSessionsList.length} session${managerSessionsList.length === 1 ? "" : "s"}</span>
+          </button>
+          <div class="project-menu-wrap project-actions-inline">
+            <button type="button" class="project-action-pill${options.surface.kind === "manager" ? " is-active" : ""}" data-sidebar-surface="manager" title="Open Manager Overview">Overview</button>
+            <button type="button" class="project-menu-trigger" data-sidebar-new-manager-session="1" title="New session with Manager" aria-label="New session with Manager">+</button>
+          </div>
         </div>
         ${managerSessionsHtml}
-      </div>
-      <button type="button" class="sidebar-nav-item${isBg ? " is-active" : ""}" data-sidebar-surface="background">
-        <span class="sidebar-nav-label">Background</span>
-        ${bgCount > 0 ? `<span class="sidebar-nav-badge working">${bgCount}</span>` : ""}
-      </button>
-      ${
-        archivedList.length > 0
-          ? `<button type="button" class="sidebar-nav-item${isArchive ? " is-active" : ""}" data-sidebar-surface="archive">
-              <span class="sidebar-nav-label">Archive</span>
-              <span class="sidebar-nav-tag">${archivedList.length}</span>
-            </button>`
-          : ""
-      }
+      </section>
     </div>
-    <div class="sidebar-teams-section">
+    <div class="sidebar-section sidebar-teams-section">
       <div class="sidebar-heading">
         <h2 class="sidebar-section-title">Teams</h2>
-        <button type="button" class="ghost-button" data-sidebar-toggle-new-team="1">${options.newTeamOpen ? "Close" : "+ New"}</button>
+        <button type="button" class="ghost-button" data-sidebar-toggle-new-team="1">${options.newTeamOpen ? "Close" : "Add"}</button>
       </div>
       ${
         options.newTeamOpen
@@ -1315,8 +1364,8 @@ export function renderSidebarAgentsHtml(options: {
       }
       ${
         snapshot.teams.length === 0
-          ? `<div class="sidebar-teams-empty"><span>No agent teams yet.</span><button type="button" class="sidebar-inline-link" data-sidebar-toggle-new-team="1">Create a team</button></div>`
-          : `<div class="sidebar-teams-list">${teamRows}</div>`
+          ? `<p class="sidebar-empty">No teams yet</p>`
+          : `<div class="project-list sidebar-teams-list">${teamRows}</div>`
       }
     </div>
   `

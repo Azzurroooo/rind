@@ -363,7 +363,13 @@ export function useAgentsController(ctx) {
       if (!sid) return;
       setBusy(true);
       try {
-        await requestAgent("deleteSession", { runtimeSessionId: sid });
+        const client = ctx.refs.client.current;
+        if (!wsSupported && client) {
+          await client.request(methods.sessionDelete, { session_id: sid });
+          await requestAgent("forgetSession", { runtimeSessionId: sid }).catch(() => {});
+        } else {
+          await requestAgent("deleteSession", { runtimeSessionId: sid });
+        }
         await refreshAgentHistories(teamId ? [teamId] : []);
         await ctx.call.current.refreshSessions();
         ctx.toast?.show("Deleted conversation");
@@ -373,7 +379,7 @@ export function useAgentsController(ctx) {
         if (mountedRef.current) setBusy(false);
       }
     },
-    [ctx, requestAgent, refreshAgentHistories],
+    [ctx, requestAgent, refreshAgentHistories, wsSupported],
   );
 
   const runAction = useCallback(

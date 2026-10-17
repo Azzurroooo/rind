@@ -118,6 +118,130 @@ function rindAgentsDevPlugin() {
         return connecting;
       }
 
+      function normalizeWorkspaceKey(target) {
+        if (typeof target !== "string" || !target.trim()) return "";
+        const resolved = resolve(target.trim()).replace(/[\\/]+$/, "");
+        return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+      }
+
+      async function listManagedSessionsLocal(params = {}) {
+        const { managementPaths, resolveRindHome } = await loadManagement();
+        const rindHome = resolveRindHome(process.env.RIND_HOME);
+        const managerWorkspace = managementPaths(rindHome).manager;
+        let runtimeSessions = [];
+        try {
+          const raw = JSON.parse(await readFile(join(rindHome, "session_index.json"), "utf8"));
+          const map = raw && typeof raw === "object" && raw.sessions && typeof raw.sessions === "object"
+            ? raw.sessions
+            : raw && typeof raw === "object"
+              ? raw
+              : {};
+          runtimeSessions = Object.entries(map)
+            .filter(([, value]) => value && typeof value === "object")
+            .map(([id, value]) => ({
+              session_id: String(value.id || value.session_id || id),
+              title: String(value.title || ""),
+              updated_at: String(value.updated_at || value.created_at || ""),
+              workspace_root: String(value.workspace_root || ""),
+              message_count: Number(value.message_count || 0),
+              last_model: String(value.last_model || ""),
+              last_user_message: String(value.last_user_message || ""),
+            }));
+        } catch {
+          runtimeSessions = [];
+        }
+
+        const byWorkspace = new Map();
+        const byAgent = new Map();
+        for (const agent of snapshot.agents || []) {
+          byWorkspace.set(normalizeWorkspaceKey(agent.canonicalWorkspace), agent);
+          if (typeof agent.id === "string") byAgent.set(agent.id, agent);
+        }
+        const byTeam = new Map();
+        for (const team of snapshot.teams || []) {
+          if (typeof team.id === "string") byTeam.set(team.id, team);
+        }
+        const byRuntimeSession = new Map();
+        const connected = new Set(snapshot.connectedSessions || []);
+        for (const session of snapshot.sessions || []) {
+          const rId = typeof session.runtimeSessionId === "string" ? session.runtimeSessionId : "";
+          if (!rId) continue;
+          const prev = byRuntimeSession.get(rId);
+          if (
+            !prev ||
+            (connected.has(String(session.id)) && !connected.has(String(prev.id))) ||
+            String(session.updatedAt || "") > String(prev.updatedAt || "")
+          ) {
+            byRuntimeSession.set(rId, session);
+          }
+        }
+        const runningBySession = new Set(
+          (snapshot.runs || [])
+            .filter((run) => run.status === "starting" || run.status === "running")
+            .map((run) => String(run.runtimeSessionId || ""))
+            .filter(Boolean),
+        );
+        const liveBySession = new Map();
+        for (const item of snapshot.live || []) {
+          if (typeof item.id === "string") liveBySession.set(item.id, item);
+        }
+        const managerKey = normalizeWorkspaceKey(managerWorkspace);
+
+        const sessions = runtimeSessions
+          .map((item) => {
+            const runtimeSessionId = String(item.session_id || "");
+            const record = byRuntimeSession.get(runtimeSessionId);
+            const agent =
+              (record && typeof record.agentId === "string" ? byAgent.get(record.agentId) : undefined) ||
+              byWorkspace.get(normalizeWorkspaceKey(item.workspace_root));
+            const isManager = Boolean(
+              managerKey &&
+                normalizeWorkspaceKey(item.workspace_root || agent?.canonicalWorkspace) === managerKey,
+            );
+            if (!agent && !isManager) return null;
+            const memberships = agent
+              ? (snapshot.memberships || []).filter((m) => m.agentId === agent.id)
+              : [];
+            const membership =
+              (record?.teamId ? memberships.find((m) => m.teamId === record.teamId) : undefined) ||
+              (params.teamId ? memberships.find((m) => m.teamId === params.teamId) : undefined) ||
+              memberships[0];
+            const team = membership ? byTeam.get(String(membership.teamId || "")) : undefined;
+            const live = liveBySession.get(runtimeSessionId);
+            const running =
+              (live ? live.turn !== "idle" : false) || runningBySession.has(runtimeSessionId);
+            const attached = Boolean(
+              (live && Number(live.windows || 0) > 0) ||
+                (record && connected.has(String(record.id || ""))),
+            );
+            return {
+              runtimeSessionId,
+              title: String(item.title || item.last_user_message || runtimeSessionId),
+              updatedAt: String(item.updated_at || record?.updatedAt || ""),
+              workspaceRoot: String(item.workspace_root || agent?.canonicalWorkspace || managerWorkspace || ""),
+              agentId: String(agent?.id || ""),
+              agentName: isManager ? "Manager" : String(agent?.displayName || ""),
+              teamId: String(team?.id || record?.teamId || ""),
+              teamName: String(team?.name || ""),
+              roleTitle: isManager ? "Manager" : String(membership?.roleTitle || ""),
+              manager: isManager,
+              attached,
+              running,
+              status: running ? "working" : attached ? "open" : "idle",
+              messageCount: Number(item.message_count || 0),
+              model: String(item.last_model || ""),
+              lastActivity: String(item.last_user_message || ""),
+            };
+          })
+          .filter(Boolean)
+          .filter((item) => (params.manager ? item.manager : true))
+          .filter((item) => (params.agentId ? item.agentId === params.agentId : true))
+          .filter((item) => (params.teamId ? item.teamId === params.teamId : true))
+          .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+
+        return { sessions };
+      }
+
       async function tailFile(filePath, maxBytes = 16384) {
         let handle;
         try {
@@ -175,6 +299,9 @@ function rindAgentsDevPlugin() {
               const paths = managementPaths(resolveRindHome(process.env.RIND_HOME));
               const logPath = params.target === "runtime" ? join(dirname(paths.root), "runtime", "runtime.log") : join(paths.state, "service.log");
               result = { path: logPath, lines: await tailFile(logPath) };
+            } else if (method === "listSessions") {
+              if (!client && !explicitlyStopped) await ensureConnected({ start: true }).catch(() => {});
+              result = await listManagedSessionsLocal(params);
             } else if (method === "restartService") {
               const active = await ensureConnected({ start: true });
               explicitlyStopped = true;
@@ -226,24 +353,29 @@ function rindAgentsDevPlugin() {
               const agentId = typeof params.agentId === "string" ? params.agentId.trim() : "";
               let runtimeSessionId = typeof params.runtimeSessionId === "string" ? params.runtimeSessionId.trim() : "";
               if (!runtimeSessionId && params.resumeLatest === true) {
-                const history = manager
-                  ? await active.request("listSessions", { manager: true }).catch(() => ({ sessions: [] }))
-                  : await active
-                      .request("listSessions", {
+                const history = await listManagedSessionsLocal(
+                  manager
+                    ? { manager: true }
+                    : {
                         ...(teamId ? { teamId } : {}),
                         ...(agentId ? { agentId } : {}),
-                      })
-                      .catch(() => ({ sessions: [] }));
+                      },
+                ).catch(() => ({ sessions: [] }));
                 runtimeSessionId = String(history?.sessions?.[0]?.runtimeSessionId || "");
               }
               const attached = await active.request("attachSession", {
                 ...(agentId ? { agentId } : {}),
                 ...(teamId ? { teamId } : {}),
                 ...(manager ? { manager: true } : {}),
-                ...(runtimeSessionId ? { runtimeSessionId } : {}),
                 shared: false,
               });
               const externalTools = await active.request("sessionTools", { sessionId: attached.id }).catch(() => null);
+              if (runtimeSessionId) {
+                await active.request("bindSession", {
+                  sessionId: attached.id,
+                  runtimeSessionId,
+                }).catch(() => {});
+              }
               const snap = await active.request("snapshot");
               if (snap && typeof snap === "object") snapshot = { ...snapshot, ...snap };
               const { managementPaths, resolveRindHome } = await loadManagement();
@@ -259,7 +391,7 @@ function rindAgentsDevPlugin() {
                 teamId: String(attached.teamId || teamId),
                 manager,
                 workspaceRoot,
-                runtimeSessionId: String(attached.runtimeSessionId || runtimeSessionId || ""),
+                runtimeSessionId: String(runtimeSessionId || attached.runtimeSessionId || ""),
                 externalTools: externalTools || null,
               };
             } else {

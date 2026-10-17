@@ -240,11 +240,8 @@ export function Sidebar({
                 <button
                   type="button"
                   className="sidebar-manager-main"
-                  onClick={() =>
-                    agents.onOpenManagerView
-                      ? agents.onOpenManagerView()
-                      : agents.onOpenManager?.({ resumeLatest: true })
-                  }
+                  aria-expanded={managerExpanded}
+                  onClick={() => setManagerExpanded((prev) => !prev)}
                 >
                   <Sparkles size={14} aria-hidden="true" />
                   <span>Manager</span>
@@ -253,72 +250,82 @@ export function Sidebar({
                     <span className="sidebar-nav-hint">{managerSummary.sessionCount}</span>
                   )}
                 </button>
+                {agents.onOpenManagerView && (
+                  <button
+                    type="button"
+                    className={`sidebar-team-pill ${agents.surface?.kind === "manager" ? "active" : ""}`}
+                    title="Open Manager Overview"
+                    onClick={agents.onOpenManagerView}
+                  >
+                    <span>Overview</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="icon-button xs"
-                  title="New conversation with Manager"
-                  aria-label="New conversation with Manager"
-                  onClick={() => agents.onOpenManager?.({ forceNew: true })}
+                  title="New session with Manager"
+                  aria-label="New session with Manager"
+                  onClick={() => {
+                    setManagerExpanded(true);
+                    agents.onOpenManager?.({ forceNew: true });
+                  }}
                 >
                   <Plus size={12} aria-hidden="true" />
                 </button>
               </div>
               {managerExpanded && (
                 <div className="sidebar-member-sessions" role="group" aria-label="Manager conversations">
-                  {managerSummary.sessions.length === 0 ? (
-                    <button
-                      type="button"
-                      className="sidebar-subsession-empty"
-                      onClick={() => agents.onOpenManager?.({ forceNew: true })}
-                    >
-                      <Plus size={11} aria-hidden="true" />
-                      <span>Start conversation with Manager</span>
-                    </button>
-                  ) : (
-                    managerSummary.sessions.map((sess) => {
-                      const isCurrent =
-                        agents.surface?.kind === "chat" && sess.runtimeSessionId === activeId;
-                      return (
-                        <div
-                          key={sess.runtimeSessionId}
-                          className={`sidebar-subsession-row ${isCurrent ? "active" : ""}`}
+                  {managerSummary.sessions.map((sess) => {
+                    const isCurrent =
+                      agents.surface?.kind === "chat" && sess.runtimeSessionId === activeId;
+                    return (
+                      <div
+                        key={sess.runtimeSessionId}
+                        className={`sidebar-subsession-row ${isCurrent ? "active" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className="sidebar-subsession-main"
+                          onClick={() =>
+                            agents.onOpenManager?.({ runtimeSessionId: sess.runtimeSessionId })
+                          }
+                          title={`${sess.title} · ${sess.status}`}
                         >
-                          <button
-                            type="button"
-                            className="sidebar-subsession-main"
-                            onClick={() =>
-                              agents.onOpenManager?.({ runtimeSessionId: sess.runtimeSessionId })
-                            }
-                            title={`${sess.title} · ${sess.status}`}
-                          >
-                            <span className={`agent-status-dot tone-${sess.tone}`} />
-                            <span className="sidebar-subsession-title">{sess.title}</span>
-                            {sess.ageText && (
-                              <span className="sidebar-subsession-age">{sess.ageText}</span>
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            className="sidebar-subsession-delete"
-                            title="Delete conversation"
-                            aria-label={`Delete ${sess.title}`}
-                            onClick={() =>
-                              setPending({
-                                id: sess.runtimeSessionId,
-                                title: sess.title,
-                                busy: false,
-                                error: "",
-                                isAgentSession: true,
-                                teamId: "",
-                              })
-                            }
-                          >
-                            <Trash2 size={11} aria-hidden="true" />
-                          </button>
-                        </div>
-                      );
-                    })
-                  )}
+                          <span className={`agent-status-dot tone-${sess.tone}`} />
+                          <span className="sidebar-subsession-title">{sess.title}</span>
+                          {sess.ageText && (
+                            <span className="sidebar-subsession-age">{sess.ageText}</span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className="sidebar-subsession-delete"
+                          title="Delete session"
+                          aria-label={`Delete ${sess.title}`}
+                          onClick={() =>
+                            setPending({
+                              id: sess.runtimeSessionId,
+                              title: sess.title,
+                              busy: false,
+                              error: "",
+                              isAgentSession: true,
+                              teamId: "",
+                            })
+                          }
+                        >
+                          <Trash2 size={11} aria-hidden="true" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    className="sidebar-subsession-empty"
+                    onClick={() => agents.onOpenManager?.({ forceNew: true })}
+                  >
+                    <Plus size={11} aria-hidden="true" />
+                    <span>New session</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -416,7 +423,10 @@ export function Sidebar({
                         <button
                           type="button"
                           className="sidebar-team-main"
-                          onClick={() => agents.onOpenTeam?.(team.id, "organization")}
+                          aria-expanded={!collapsed}
+                          onClick={() =>
+                            setCollapsedTeams((prev) => ({ ...prev, [team.id]: !prev[team.id] }))
+                          }
                         >
                           <span className={`agent-status-dot tone-${team.tone || "idle"}`} />
                           <span className="sidebar-team-name">{team.name}</span>
@@ -431,6 +441,7 @@ export function Sidebar({
                             onClick={() => agents.onOpenTeam?.(team.id, "organization")}
                           >
                             <Network size={11} aria-hidden="true" />
+                            <span>Org</span>
                           </button>
                           <button
                             type="button"
@@ -441,7 +452,7 @@ export function Sidebar({
                             onClick={() => agents.onOpenTeam?.(team.id, "tasks")}
                           >
                             <ListChecks size={11} aria-hidden="true" />
-                            {counts.tasksTotal > 0 && <span>{counts.tasksTotal}</span>}
+                            <span>Tasks{counts.tasksTotal > 0 ? ` ${counts.tasksTotal}` : ""}</span>
                           </button>
                         </div>
                       </div>
@@ -479,15 +490,13 @@ export function Sidebar({
                                   <button
                                     type="button"
                                     className="sidebar-member-main"
-                                    onClick={() => {
-                                      setExpandedMembers((prev) => ({ ...prev, [member.agentId]: true }));
-                                      agents.onOpenMemberChat?.({
-                                        teamId: team.id,
-                                        agentId: member.agentId,
-                                        runtimeSessionId: member.latestRuntimeSessionId,
-                                        resumeLatest: true,
-                                      });
-                                    }}
+                                    aria-expanded={isExpanded}
+                                    onClick={() =>
+                                      setExpandedMembers((prev) => ({
+                                        ...prev,
+                                        [member.agentId]: !prev[member.agentId],
+                                      }))
+                                    }
                                   >
                                     <span className={`agent-status-dot tone-${member.tone}`} />
                                     <span className="sidebar-member-name">{member.name}</span>
@@ -501,7 +510,7 @@ export function Sidebar({
                                       <button
                                         type="button"
                                         className="sidebar-member-session-count"
-                                        title={`${memberSessions.length} conversation(s)`}
+                                        title={`${memberSessions.length} session(s)`}
                                         onClick={() =>
                                           setExpandedMembers((prev) => ({
                                             ...prev,
@@ -516,8 +525,8 @@ export function Sidebar({
                                     <button
                                       type="button"
                                       className="icon-button xs"
-                                      title={`New conversation with ${member.name}`}
-                                      aria-label={`New conversation with ${member.name}`}
+                                      title={`New session with ${member.name}`}
+                                      aria-label={`New session with ${member.name}`}
                                       onClick={() => {
                                         setExpandedMembers((prev) => ({ ...prev, [member.agentId]: true }));
                                         agents.onOpenMemberChat?.({
@@ -538,74 +547,71 @@ export function Sidebar({
                                     role="group"
                                     aria-label={`${member.name} conversations`}
                                   >
-                                    {memberSessions.length === 0 ? (
-                                      <button
-                                        type="button"
-                                        className="sidebar-subsession-empty"
-                                        onClick={() =>
-                                          agents.onOpenMemberChat?.({
-                                            teamId: team.id,
-                                            agentId: member.agentId,
-                                            forceNew: true,
-                                          })
-                                        }
-                                      >
-                                        <Plus size={11} aria-hidden="true" />
-                                        <span>New conversation</span>
-                                      </button>
-                                    ) : (
-                                      memberSessions.map((sess) => {
-                                        const isCurrentSession =
-                                          agents.surface?.kind === "chat" &&
-                                          sess.runtimeSessionId === activeId;
-                                        return (
-                                          <div
-                                            key={sess.runtimeSessionId}
-                                            className={`sidebar-subsession-row ${isCurrentSession ? "active" : ""}`}
+                                    {memberSessions.map((sess) => {
+                                      const isCurrentSession =
+                                        agents.surface?.kind === "chat" &&
+                                        sess.runtimeSessionId === activeId;
+                                      return (
+                                        <div
+                                          key={sess.runtimeSessionId}
+                                          className={`sidebar-subsession-row ${isCurrentSession ? "active" : ""}`}
+                                        >
+                                          <button
+                                            type="button"
+                                            className="sidebar-subsession-main"
+                                            onClick={() =>
+                                              agents.onOpenMemberChat?.({
+                                                teamId: team.id,
+                                                agentId: member.agentId,
+                                                runtimeSessionId: sess.runtimeSessionId,
+                                              })
+                                            }
+                                            title={`${sess.title} · ${sess.status}`}
                                           >
-                                            <button
-                                              type="button"
-                                              className="sidebar-subsession-main"
-                                              onClick={() =>
-                                                agents.onOpenMemberChat?.({
-                                                  teamId: team.id,
-                                                  agentId: member.agentId,
-                                                  runtimeSessionId: sess.runtimeSessionId,
-                                                })
-                                              }
-                                              title={`${sess.title} · ${sess.status}`}
-                                            >
-                                              <span className={`agent-status-dot tone-${sess.tone}`} />
-                                              <span className="sidebar-subsession-title">{sess.title}</span>
-                                              {sess.origin === "task" && (
-                                                <span className="sidebar-subsession-tag">Task</span>
-                                              )}
-                                              {sess.ageText && (
-                                                <span className="sidebar-subsession-age">{sess.ageText}</span>
-                                              )}
-                                            </button>
-                                            <button
-                                              type="button"
-                                              className="sidebar-subsession-delete"
-                                              title="Delete conversation"
-                                              aria-label={`Delete ${sess.title}`}
-                                              onClick={() =>
-                                                setPending({
-                                                  id: sess.runtimeSessionId,
-                                                  title: sess.title,
-                                                  busy: false,
-                                                  error: "",
-                                                  isAgentSession: true,
-                                                  teamId: team.id,
-                                                })
-                                              }
-                                            >
-                                              <Trash2 size={11} aria-hidden="true" />
-                                            </button>
-                                          </div>
-                                        );
-                                      })
-                                    )}
+                                            <span className={`agent-status-dot tone-${sess.tone}`} />
+                                            <span className="sidebar-subsession-title">{sess.title}</span>
+                                            {sess.origin === "task" && (
+                                              <span className="sidebar-subsession-tag">Task</span>
+                                            )}
+                                            {sess.ageText && (
+                                              <span className="sidebar-subsession-age">{sess.ageText}</span>
+                                            )}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="sidebar-subsession-delete"
+                                            title="Delete session"
+                                            aria-label={`Delete ${sess.title}`}
+                                            onClick={() =>
+                                              setPending({
+                                                id: sess.runtimeSessionId,
+                                                title: sess.title,
+                                                busy: false,
+                                                error: "",
+                                                isAgentSession: true,
+                                                teamId: team.id,
+                                              })
+                                            }
+                                          >
+                                            <Trash2 size={11} aria-hidden="true" />
+                                          </button>
+                                        </div>
+                                      );
+                                    })}
+                                    <button
+                                      type="button"
+                                      className="sidebar-subsession-empty"
+                                      onClick={() =>
+                                        agents.onOpenMemberChat?.({
+                                          teamId: team.id,
+                                          agentId: member.agentId,
+                                          forceNew: true,
+                                        })
+                                      }
+                                    >
+                                      <Plus size={11} aria-hidden="true" />
+                                      <span>New session</span>
+                                    </button>
                                   </div>
                                 )}
                               </div>
