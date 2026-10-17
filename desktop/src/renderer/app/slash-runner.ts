@@ -65,8 +65,6 @@ export async function runSlash(input: string) {
     const commands = parseSlashCommands(display.commands)
     if (commands.length) state.slashCommands = mergeSlashCatalog(commands)
     if (display.type === "session_renamed") {
-      const nextTitle = asRecordText(display.name || display.title)
-      if (nextTitle && isCurrentSlashView(projectPath, commandSessionId)) state.sessionTitle = nextTitle
       await loadSessions()
     }
     const text = asRecordText(result.text)

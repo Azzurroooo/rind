@@ -2,6 +2,7 @@ import { type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
 import { type IconNode } from "lucide"
 import { Moon, renderIcon, Sun, SunMoon } from "../icons.ts"
 import { renderComposer, syncPendingInputDock } from "../composer-region.ts"
+import { renderAgentsUI } from "./agents-ui.ts"
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
 import { renderSlashCommandMenu } from "./composer.ts"
@@ -36,6 +37,7 @@ export function render() {
   sidebarToggle.dataset.tooltip = sidebarLabel
   sidebarToggle.setAttribute("aria-label", sidebarLabel)
   sidebarToggle.setAttribute("aria-expanded", String(state.sidebarOpen))
+  renderAgentsUI()
   renderSessionHead()
   noticeText.textContent = state.notice || runtime.message || ""
   retry.hidden = runtime.status !== "error"
@@ -66,10 +68,13 @@ export function render() {
 
 export function renderComposerState() {
   const runtime = currentRuntimeSnapshot()
+  const hasWorkspace =
+    chatProject()?.available === true ||
+    Boolean(state.agentChatContext && state.agentChatContext.kind !== "independent" && state.agentChatContext.workspaceRoot)
   renderComposer(
     { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter, attachButton },
     {
-      ready: chatProject()?.available === true && (state.settings.hasApiKey || runtime.status === "ready" || state.models.length > 0),
+      ready: hasWorkspace && (state.settings.hasApiKey || runtime.status === "ready" || state.models.length > 0),
       active: runtimeTurnActive(),
       readOnly: false,
       starting: runtime.status === "starting",

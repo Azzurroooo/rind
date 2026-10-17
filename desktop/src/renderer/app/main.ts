@@ -1,4 +1,5 @@
 import "./dom.ts"
+import { bindAgentsEvents } from "./agents-ui.ts"
 import { clearSlashCommandPending } from "./composer.ts"
 import { requiredElement } from "./dom.ts"
 import { remoteAccess } from "./remote-instance.ts"
@@ -38,6 +39,7 @@ bindGoalEvents()
 bindTasksEvents()
 bindPaletteEvents()
 bindOverlays()
+const unsubscribeAgents = bindAgentsEvents()
 
 const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   state.runtime = snapshot
@@ -70,6 +72,7 @@ const onThemeMediaChange = () => { if (state.theme === "system") renderTheme() }
 if (typeof themeMedia.addEventListener === "function") themeMedia.addEventListener("change", onThemeMediaChange)
 window.addEventListener("beforeunload", () => {
   remoteAccess.dispose()
+  unsubscribeAgents()
   unsubscribeStatus()
   unsubscribeEvents()
   unsubscribeNotifyActivate()

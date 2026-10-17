@@ -1,3 +1,4 @@
+import { emptyAgentsSnapshot } from "../agents-model.ts"
 import { mergeSlashCatalog } from "../desktop-slash.ts"
 import { INSPECTOR_WIDTH } from "../inspector-model.ts"
 import { type ModelOption } from "../composer-select.ts"
@@ -44,6 +45,7 @@ export const state: AppState = {
   sidebarWidth: 264,
   inspectorOpen: false,
   inspectorWidth: INSPECTOR_WIDTH.fallback,
+  inspectorMaximized: false,
   inspectorTab: "context",
   inspectorContext: emptyLoad(),
   inspectorUsage: emptyLoad(),
@@ -86,6 +88,16 @@ export const state: AppState = {
   shortcutsOpen: false,
   lastPrompts: {},
   notice: "",
+  agentsSnapshot: emptyAgentsSnapshot(),
+  agentsService: null,
+  agentsBusy: false,
+  agentSurface: { kind: "chat" },
+  agentChatContext: null,
+  collapsedTeams: new Set(),
+  newTeamOpen: false,
+  inboxSelectedTaskId: "",
+  artifactPreview: null,
+  serviceLogView: null,
 }
 export const toolOpenRequests = new Map<string, number>()
 export const replayRequests = new Map<string, Promise<void>>()

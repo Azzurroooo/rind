@@ -137,7 +137,11 @@ export async function submitPrompt(draftKey: string, mode: RunningSendMode = "qu
   const rawInput = prompt.value.trim()
   if (!rawInput) return
   const project = chatProject()
-  if (!project?.available) {
+  const managedWorkspaceRoot =
+    state.agentChatContext && state.agentChatContext.kind !== "independent"
+      ? state.agentChatContext.workspaceRoot || state.chatProjectPath
+      : ""
+  if (!project?.available && !managedWorkspaceRoot) {
     state.notice = "Choose a project before sending a message."
     render()
     return
@@ -171,7 +175,7 @@ export async function submitPrompt(draftKey: string, mode: RunningSendMode = "qu
   state.drafts[currentDraftKey()] = ""
   autoGrowPrompt()
   closeSlashCommandMenu()
-  const projectPath = project.path
+  const projectPath = project?.available ? project.path : managedWorkspaceRoot
   const requestedSessionId = state.viewedSessionId
   const selection = draftModelSelection()
   let sessionId = requestedSessionId

@@ -160,7 +160,25 @@ export function draftModelSelection() {
 export async function ensureSession(workspaceRoot: string, requestedSessionId?: string, selection = draftModelSelection()) {
   const currentSessionId = requestedSessionId === undefined ? state.viewedSessionId : requestedSessionId
   if (currentSessionId) return currentSessionId
-  const created = asRecord(await request(runtimeMethods.sessionNew, { workspace_root: workspaceRoot }))
+  const agentCtx = state.agentChatContext
+  let created: Record<string, unknown>
+  if (agentCtx && agentCtx.kind !== "independent" && window.api.agents) {
+    const res = asRecord(
+      await window.api.agents.createSession({
+        managementSessionId: agentCtx.managementSessionId,
+        manager: agentCtx.kind === "manager",
+        teamId: agentCtx.kind === "member" ? agentCtx.teamId : undefined,
+        agentId: agentCtx.kind === "member" ? agentCtx.agentId : undefined,
+        workspace_root: workspaceRoot,
+        model_id: selection.model.trim() || undefined,
+        provider_id: selection.provider || undefined,
+        reasoning_effort: selection.effort || undefined,
+      }),
+    )
+    created = asRecord(res.runtimeSession || res)
+  } else {
+    created = asRecord(await request(runtimeMethods.sessionNew, { workspace_root: workspaceRoot }))
+  }
   const sessionId = asRecordText(created.session_id)
   if (!sessionId) throw new Error("Runtime did not create a session.")
   const selectedModel = selection.model.trim() || asRecordText(created.model)
@@ -206,7 +224,7 @@ export async function loadReplay(sessionId = state.viewedSessionId) {
 export async function loadReplayNow(sessionId: string) {
   if (!sessionId) return
   const session = knownSessions().find((item) => item.id === sessionId)
-  if (!session) return
+  if (!session && sessionId !== state.viewedSessionId) return
   await ensureRuntime()
   const result = asRecord(await requestForSession(runtimeMethods.sessionReplay, sessionId))
   const messages = Array.isArray(result.messages) ? result.messages : []

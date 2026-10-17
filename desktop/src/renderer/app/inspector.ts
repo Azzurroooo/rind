@@ -5,9 +5,10 @@
 
 import { runtimeMethods } from "../../preload/types.ts"
 import { contextDisplayFrom, renderContextDisplay } from "../context-report.ts"
+import { Maximize2, Minimize2, renderIcon } from "../icons.ts"
 import { clampInspectorWidth, INSPECTOR_CLOSE_WIDTH, INSPECTOR_TABS, INSPECTOR_WIDTH, inspectorFits, isInspectorTab, nextInspectorTab, normalizeUsageSummary, renderUsageSummary, type InspectorTab } from "../inspector-model.ts"
 import { renderPlanSection } from "../plan-section.ts"
-import { appRoot, activityPlan, inspector, inspectorContextBody, inspectorResizeHandle, inspectorToggle, inspectorUsageBody, requiredElement } from "./dom.ts"
+import { appRoot, activityPlan, inspector, inspectorContextBody, inspectorResizeHandle, inspectorToggle, inspectorUsageBody, maximizeInspectorButton, requiredElement } from "./dom.ts"
 import { loadDirectory, renderFiles } from "./files-panel.ts"
 import { escapeHtml } from "./html.ts"
 import { loadGoal, renderGoalTab } from "./inspector-goal.ts"
@@ -35,9 +36,22 @@ export function renderInspector() {
   requiredElement("inspector-scope").textContent = state.inspectorTab === "files" ? `Workspace · ${viewedProject()?.name || "No folder selected"}` : "Current session"
   const shown = inspectorShown()
   appRoot.classList.toggle("inspector-open", shown)
-  appRoot.style.setProperty("--inspector-width", `${shown ? state.inspectorWidth : 0}px`)
+  appRoot.classList.toggle("inspector-maximized", shown && state.inspectorMaximized)
+  const effectiveWidth = shown
+    ? state.inspectorMaximized
+      ? Math.max(state.inspectorWidth, Math.min(720, Math.round(window.innerWidth * 0.55)))
+      : state.inspectorWidth
+    : 0
+  appRoot.style.setProperty("--inspector-width", `${effectiveWidth}px`)
   inspector.setAttribute("aria-hidden", String(!shown))
   inspector.inert = !shown
+  const maxLabel = state.inspectorMaximized ? "Restore inspector width" : "Expand inspector"
+  maximizeInspectorButton.dataset.tooltip = maxLabel
+  maximizeInspectorButton.setAttribute("aria-label", maxLabel)
+  if (maximizeInspectorButton.dataset.maximized !== String(state.inspectorMaximized)) {
+    maximizeInspectorButton.innerHTML = renderIcon(state.inspectorMaximized ? Minimize2 : Maximize2)
+    maximizeInspectorButton.dataset.maximized = String(state.inspectorMaximized)
+  }
   const label = state.inspectorOpen ? "Hide inspector" : "Show inspector"
   inspectorToggle.dataset.tooltip = label
   inspectorToggle.setAttribute("aria-label", label)
@@ -235,6 +249,10 @@ export function bindInspectorEvents(): void {
     event.stopPropagation()
     runAction(closeInspector)
     inspectorToggle.focus()
+  })
+  maximizeInspectorButton.addEventListener("click", () => {
+    state.inspectorMaximized = !state.inspectorMaximized
+    render()
   })
   requiredElement("close-inspector").addEventListener("click", () => runAction(closeInspector))
   inspectorToggle.addEventListener("click", () => runAction(() => toggleInspector()))

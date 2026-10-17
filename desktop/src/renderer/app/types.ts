@@ -1,4 +1,5 @@
 import { type DesktopFileListing, type DesktopFilePreview, type DesktopGoal, type DesktopProject, type DesktopRecentSession, type DesktopSessionSummary, type DesktopSettings, type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
+import { type AgentsSnapshotData, type DesktopAgentSurfaceState, type SessionAgentContext } from "../agents-model.ts"
 import { type PendingInput } from "../composer-region.ts"
 import { type ModelOption } from "../composer-select.ts"
 import { type QuestionSelection } from "../question-state.ts"
@@ -68,6 +69,7 @@ export type AppState = {
   sidebarWidth: number
   inspectorOpen: boolean
   inspectorWidth: number
+  inspectorMaximized: boolean
   inspectorTab: InspectorTab
   inspectorContext: InspectorLoad<ContextDisplay>
   inspectorUsage: InspectorLoad<UsageSummary>
@@ -113,6 +115,16 @@ export type AppState = {
   shortcutsOpen: boolean
   lastPrompts: Record<string, string>
   notice: string
+  agentsSnapshot: AgentsSnapshotData
+  agentsService: Record<string, any> | null
+  agentsBusy: boolean
+  agentSurface: DesktopAgentSurfaceState
+  agentChatContext: SessionAgentContext | null
+  collapsedTeams: Set<string>
+  newTeamOpen: boolean
+  inboxSelectedTaskId: string
+  artifactPreview: { path: string; content: string; truncated: boolean } | null
+  serviceLogView: { title: string; content: string } | null
 }
 // ---------- keyboard map (C11): one table for every shortcut ----------
 

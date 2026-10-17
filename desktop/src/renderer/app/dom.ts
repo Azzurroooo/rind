@@ -1,6 +1,6 @@
 import brandMarkUrl from "../assets/brand-mark.svg"
 import { composerRegionMarkup } from "../composer-region.ts"
-import { ArrowDown, Bell, ChartNoAxesColumn, Ellipsis, Keyboard, KeyRound, ListTodo, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
+import { ArrowDown, Bell, ChartNoAxesColumn, Ellipsis, Keyboard, KeyRound, ListTodo, Maximize2, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
 import { INSPECTOR_TAB_LABELS, INSPECTOR_TABS } from "../inspector-model.ts"
 import { remoteAccessMarkup } from "../remote-access.ts"
 import { escapeHtml } from "./html.ts"
@@ -40,11 +40,12 @@ appRoot.innerHTML = `
           <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
         </div>
         <div class="sidebar-body panel-scroll">
+          <section id="sidebar-agents" class="sidebar-agents" aria-label="Multi-agent navigation"></section>
           <div class="session-search-wrap">
             ${renderIcon(Search, "session-search-icon")}
             <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search loaded sessions" autocomplete="off" />
           </div>
-          <section class="sidebar-projects" aria-label="Projects"><div class="sidebar-heading"><h2 class="sidebar-section-title">Projects</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
+          <section class="sidebar-projects" aria-label="Projects"><div class="sidebar-heading"><h2 class="sidebar-section-title">Independent Workspaces</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
           <div id="project-list" class="project-list"></div></section>
           <section id="recent-sessions" class="recent-sessions" aria-label="Recent sessions" hidden>
             <h2 class="sidebar-section-title">Recent sessions</h2>
@@ -56,6 +57,7 @@ appRoot.innerHTML = `
       <section class="conversation">
         <header class="conversation-head">
           <div class="conversation-title">
+            <div id="session-agent-context" class="session-agent-context" hidden></div>
             <h1 id="session-title" class="session-title">New session</h1>
             <span id="session-status" class="session-status" role="status" hidden><span class="session-status-dot" aria-hidden="true"></span><span id="session-status-text">Idle</span></span>
           </div>
@@ -72,7 +74,8 @@ appRoot.innerHTML = `
           </div>
         </header>
         <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Retry</button></div>
-        <div class="stream-wrap">
+        <div id="agents-surface" class="agents-surface" hidden></div>
+        <div id="stream-wrap" class="stream-wrap">
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
           <button id="jump-latest" type="button" class="jump-latest" data-tooltip="Jump to latest" aria-label="Jump to latest" hidden>${renderIcon(ArrowDown)}</button>
         </div>
@@ -84,6 +87,7 @@ appRoot.innerHTML = `
           <div class="inspector-tabs" role="tablist" aria-label="Inspector sections">
             ${INSPECTOR_TABS.map((tab) => `<button id="inspector-tab-${tab}" type="button" role="tab" class="inspector-tab" data-inspector-tab="${tab}" aria-controls="inspector-panel-${tab}" aria-selected="false" tabindex="-1">${INSPECTOR_TAB_LABELS[tab]}</button>`).join("")}
           </div>
+          <button id="maximize-inspector" type="button" class="icon-button inspector-close" data-tooltip="Expand inspector" aria-label="Expand inspector">${renderIcon(Maximize2)}</button>
           <button id="close-inspector" type="button" class="icon-button inspector-close" data-tooltip="Close inspector" aria-label="Close inspector">${renderIcon(X)}</button>
         </div>
         <div id="inspector-scope" class="inspector-scope">Current session</div>
@@ -92,6 +96,7 @@ appRoot.innerHTML = `
           <div id="inspector-context"></div>
         </section>
         <section id="inspector-panel-activity" class="inspector-panel panel-scroll activity-panel" role="tabpanel" aria-labelledby="inspector-tab-activity" tabindex="0" hidden>
+          <section id="inspector-team-panel" class="inspector-team-panel" aria-label="Team roster and tasks" hidden></section>
           <div id="activity-empty" class="activity-empty" hidden>
             ${renderIcon(ListTodo, "activity-empty-icon")}
             <h3 id="activity-empty-title">No activity yet</h3>
@@ -174,7 +179,14 @@ export const projectMenu = requiredElement("project-menu")
 export const projectList = requiredElement("project-list")
 export const recentSessions = requiredElement("recent-sessions")
 export const recentList = requiredElement("recent-list")
+export const sidebarAgents = requiredElement("sidebar-agents")
+export const sessionAgentContext = requiredElement("session-agent-context")
 export const sessionTitle = requiredElement("session-title")
+export const agentsSurface = requiredElement("agents-surface")
+export const streamWrap = requiredElement("stream-wrap")
+export const composerRegion = appRoot.querySelector<HTMLElement>(".composer-region")!
+export const inspectorTeamPanel = requiredElement("inspector-team-panel")
+export const maximizeInspectorButton = requiredElement<HTMLButtonElement>("maximize-inspector")
 export const modelMenuTrigger = requiredElement<HTMLButtonElement>("model-menu-trigger")
 export const modelMenuLabel = requiredElement("model-menu-label")
 export const modelMenu = requiredElement("model-menu")

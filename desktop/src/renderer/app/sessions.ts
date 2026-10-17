@@ -262,6 +262,8 @@ export async function removeProject(path: string) {
 export async function startNewChat() {
   closeComposerSelectMenus()
   if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
+  state.agentSurface = { kind: "chat" }
+  state.agentChatContext = null
   state.chatProjectPath = resolveNewChatProjectPath()
   state.viewedProjectPath = state.chatProjectPath
   const project = chatProject()
@@ -293,7 +295,13 @@ export async function loadMoreSessions(path: string) {
 }
 
 export async function switchSession(nextSessionId: string) {
-  if (nextSessionId === state.viewedSessionId) return
+  if (nextSessionId === state.viewedSessionId) {
+    if (state.agentSurface.kind !== "chat") {
+      state.agentSurface = { kind: "chat" }
+      render()
+    }
+    return
+  }
   const session = knownSessions().find((item) => item.id === nextSessionId)
   if (!session) {
     state.notice = "This session is unavailable in the registered Desktop projects."
@@ -303,6 +311,8 @@ export async function switchSession(nextSessionId: string) {
   const project = projectForPath(session.workspaceRoot)
   if (!project) return
   closeComposerSelectMenus()
+  state.agentSurface = { kind: "chat" }
+  state.agentChatContext = null
   showCachedSession(nextSessionId)
   state.viewedSessionId = nextSessionId
   state.model = state.sessionModels[nextSessionId] || ""
@@ -328,6 +338,8 @@ export async function selectChatProject(path: string) {
   if (!project) return
   closeComposerSelectMenus()
   if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
+  state.agentSurface = { kind: "chat" }
+  state.agentChatContext = null
   state.chatProjectPath = project.path
   state.viewedProjectPath = project.path
   state.viewedSessionId = ""
