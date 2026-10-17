@@ -101,6 +101,8 @@ export const state: AppState = {
   expandedSidebarMembers: new Set(),
   expandedOrgMembers: new Set(),
   managerExpanded: false,
+  agentItemMenuKey: "",
+  agentSessionLimits: {},
   headerSessionsMenuOpen: false,
   newTeamOpen: false,
   inboxSelectedTaskId: "",

@@ -307,6 +307,20 @@
 .sidebar-team-row.active {
   background: var(--fill-2);
 }
+.sidebar-team-row .session-more,
+.sidebar-member-row .session-more {
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease);
+}
+.sidebar-team-row:hover .session-more,
+.sidebar-team-row:focus-within .session-more,
+.sidebar-team-row.active .session-more,
+.sidebar-member-row:hover .session-more,
+.sidebar-member-row:focus-within .session-more,
+.sidebar-member-row.active .session-more,
+.session-more[aria-expanded="true"] {
+  opacity: 1;
+}
 .sidebar-team-chevron {
   display: inline-grid;
   place-items: center;
@@ -329,7 +343,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
+  height: 28px;
   padding: 0 4px;
   border: 0;
   background: transparent;
@@ -342,28 +356,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.sidebar-team-pills {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.sidebar-team-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 20px;
-  padding: 0 5px;
-  border: 0;
-  border-radius: var(--radius-chip);
-  background: transparent;
-  color: var(--muted);
-  font-size: 10px;
-}
-.sidebar-team-pill:hover,
-.sidebar-team-pill.active {
-  background: var(--surface);
-  color: var(--text);
 }
 
 .sidebar-member-list {
@@ -382,18 +374,18 @@
   align-items: center;
   gap: 2px;
   width: 100%;
-  min-height: 26px;
+  min-height: 28px;
   padding: 0 4px;
   border-radius: var(--radius-control);
   color: var(--muted);
-  font-size: var(--text-meta);
+  font-size: var(--text-dense);
 }
 .sidebar-member-row:hover {
   background: var(--fill-1);
   color: var(--text);
 }
 .sidebar-member-row.active {
-  background: var(--accent-soft);
+  background: var(--fill-2);
   color: var(--text);
   font-weight: 600;
 }
@@ -402,9 +394,9 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 2px;
+  gap: 6px;
+  height: 26px;
+  padding: 0 4px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -417,141 +409,72 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-leader-icon {
+.sidebar-leader-tag {
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
   flex: none;
-  color: var(--warning);
 }
 .sidebar-member-role {
-  max-width: 68px;
+  max-width: 72px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--dim);
-  font-size: 10px;
-}
-.sidebar-member-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-}
-.sidebar-member-session-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 18px;
-  padding: 0 5px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: var(--fill-1);
-  color: var(--muted);
-  font-size: 10px;
-}
-.sidebar-member-session-count:hover {
-  background: var(--fill-2);
-  color: var(--text);
+  font-size: 10.5px;
 }
 
-/* Nested Member / Manager Conversations in Sidebar */
+/* Nested Member / Manager Conversations in Sidebar (uses SessionRow) */
 .sidebar-member-sessions {
   display: grid;
-  gap: 1px;
+  gap: 2px;
   margin-left: 16px;
   padding-left: 6px;
-  border-left: 1px dashed var(--line-strong);
+  border-left: 1px solid var(--line);
 }
 .sidebar-subsession-empty {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 6px;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
   border: 0;
-  border-radius: var(--radius-chip);
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--text-meta);
   text-align: left;
 }
 .sidebar-subsession-empty:hover {
   background: var(--fill-1);
   color: var(--text);
 }
-.sidebar-subsession-row {
-  display: flex;
+
+/* --- ChatHeader Agent Breadcrumbs & Standalone Panel Topbar --- */
+.agent-surface-topbar {
+  background: var(--panel);
+}
+.agent-topbar-crumb {
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
-  min-height: 24px;
-  padding: 0 4px;
-  border-radius: var(--radius-chip);
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-dense);
+}
+.agent-topbar-section {
   color: var(--muted);
+  font-weight: 500;
 }
-.sidebar-subsession-row:hover {
-  background: var(--fill-1);
-  color: var(--text);
-}
-.sidebar-subsession-row.active {
-  background: var(--fill-2);
+.agent-topbar-current {
   color: var(--text);
   font-weight: 600;
-}
-.sidebar-subsession-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 11px;
-  font-weight: inherit;
-  text-align: left;
-}
-.sidebar-subsession-title {
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-subsession-tag {
-  flex: none;
-  padding: 0 4px;
-  border-radius: var(--radius-chip);
-  background: var(--fill-1);
-  color: var(--dim);
-  font-size: 9px;
-  text-transform: uppercase;
-}
-.sidebar-subsession-age {
-  flex: none;
-  color: var(--dim);
-  font-size: 10px;
-}
-.sidebar-subsession-delete {
-  opacity: 0;
-  display: inline-grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-chip);
-  background: transparent;
-  color: var(--dim);
-}
-.sidebar-subsession-row:hover .sidebar-subsession-delete {
-  opacity: 1;
-}
-.sidebar-subsession-delete:hover {
-  color: var(--danger);
-  background: var(--danger-soft);
-}
-
-/* --- ChatHeader Agent Breadcrumbs --- */
 .header-agent-breadcrumb {
   display: inline-flex;
   align-items: center;

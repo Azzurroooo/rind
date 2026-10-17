@@ -85,6 +85,39 @@ export function ChatHeader({
     })),
   ];
 
+  if (!isChatSurface) {
+    return (
+      <header className="chat-header agent-surface-topbar">
+        <Tooltip label="Toggle sidebar (Ctrl+B)">
+          <button
+            ref={sidebarToggleRef}
+            type="button"
+            className="icon-button header-button"
+            aria-label="Toggle sidebar"
+            aria-expanded={sidebarExpanded}
+            aria-controls="sidebar-panel"
+            onClick={onToggleSidebar}
+          >
+            <PanelLeft size={16} aria-hidden="true" />
+          </button>
+        </Tooltip>
+        <div className="agent-topbar-crumb">
+          <span className="agent-topbar-section">Agents &amp; Teams</span>
+          <span className="header-agent-sep">/</span>
+          <span className="agent-topbar-current">{title}</span>
+        </div>
+        <div className="chat-header-actions">
+          {onBackToChat && (
+            <button type="button" className="header-agent-pill back-chat" onClick={onBackToChat}>
+              <MessageSquare size={12} aria-hidden="true" />
+              <span>Back to Conversation</span>
+            </button>
+          )}
+        </div>
+      </header>
+    );
+  }
+
   return (
     <header className="chat-header">
       <Tooltip label="Toggle sidebar (Ctrl+B)">
@@ -103,7 +136,7 @@ export function ChatHeader({
       <h1 className="chat-title" title={title}>
         {title}
       </h1>
-      {isChatSurface && agentContext?.kind === "manager" && (
+      {agentContext?.kind === "manager" && (
         <div className="header-agent-breadcrumb">
           <button
             type="button"
@@ -112,7 +145,7 @@ export function ChatHeader({
             onClick={() => onOpenManagerView?.()}
           >
             <Sparkles size={12} aria-hidden="true" />
-            <span>Manager · Coordinator</span>
+            <span>Manager</span>
           </button>
           {onOpenAgentConversation && (
             <Menu
@@ -134,7 +167,7 @@ export function ChatHeader({
           )}
         </div>
       )}
-      {isChatSurface && agentContext?.kind === "member" && (
+      {agentContext?.kind === "member" && (
         <div className="header-agent-breadcrumb">
           <button
             type="button"
@@ -180,12 +213,6 @@ export function ChatHeader({
             <span>Tasks{teamTaskCount > 0 ? ` (${teamTaskCount})` : ""}</span>
           </button>
         </div>
-      )}
-      {!isChatSurface && onBackToChat && (
-        <button type="button" className="header-agent-pill back-chat" onClick={onBackToChat}>
-          <MessageSquare size={12} aria-hidden="true" />
-          <span>Back to Conversation</span>
-        </button>
       )}
       {status && <span className={`status-chip ${status.tone || ""}`.trim()}>{status.label}</span>}
       <div className="chat-header-actions">

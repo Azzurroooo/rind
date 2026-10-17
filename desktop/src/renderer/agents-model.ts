@@ -1044,17 +1044,70 @@ export type DesktopAgentSurfaceState =
 
 // ---------- Pure HTML Renderers for Desktop Renderer & Node Tests ----------
 
+const PROJECT_MENU_ICON_SVG = `<svg class="project-menu-icon" viewBox="0 0 16 16" focusable="false" aria-hidden="true"><circle cx="3" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="13" cy="8" r="1.3" /></svg>`
+const SESSION_MENU_ICON_SVG = `<svg class="session-menu-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`
+const SESSION_SPINNER_SVG = `<svg class="session-spinner" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`
+
+export const DEFAULT_SIDEBAR_SESSIONS_LIMIT = 5
+
+function renderAgentSidebarSessionRow(options: {
+  sess: MemberSessionSummary
+  isCurrent: boolean
+  menuOpen: boolean
+  confirmingDelete: boolean
+  deleting: boolean
+  openAttrs: string
+}): string {
+  const { sess, isCurrent, menuOpen, confirmingDelete, deleting, openAttrs } = options
+  const id = sess.runtimeSessionId
+  const title = sess.title || "Untitled"
+  const running = sess.tone === "working"
+  const when = relativeTimeLabel(sess.updatedAt)
+  const deleteLabel = isCurrent
+    ? "Delete (open session)"
+    : deleting
+      ? "Deleting…"
+      : confirmingDelete
+        ? "Confirm delete"
+        : "Delete"
+
+  return `
+    <div class="session-item-row${menuOpen ? " menu-open" : ""}" data-session-row="${escapeAttribute(id)}">
+      <button type="button" class="session-item${running ? " running" : ""}${isCurrent ? " selected" : ""}" ${openAttrs} title="${escapeAttribute(when ? `${title} - ${when}` : title)}"${isCurrent ? ' aria-current="page"' : ""}>
+        <span class="session-item-title">${running ? SESSION_SPINNER_SVG : ""}<span class="session-item-title-text">${escapeHtml(title)}</span></span>
+      </button>
+      <div class="session-menu-wrap">
+        <button type="button" class="session-menu-trigger" data-agent-session-menu="${escapeAttribute(id)}" aria-label="Actions for ${escapeAttribute(title)}" aria-haspopup="menu" aria-expanded="${String(menuOpen)}">${SESSION_MENU_ICON_SVG}</button>
+        ${
+          menuOpen
+            ? `<div class="session-menu menu" role="menu" aria-label="Actions for ${escapeAttribute(title)}">
+                <button type="button" class="menu-item" role="menuitem" data-agent-session-fork="${escapeAttribute(id)}"${running ? " disabled" : ""}>Fork</button>
+                <button type="button" class="menu-item" role="menuitem" data-agent-session-export="${escapeAttribute(id)}" data-session-title="${escapeAttribute(title)}">Export replay</button>
+                <div class="menu-separator" role="separator"></div>
+                <button type="button" class="menu-item menu-item-danger${confirmingDelete ? " confirm" : ""}" role="menuitem" data-agent-delete-session="${escapeAttribute(id)}"${isCurrent || deleting ? " disabled" : ""}${isCurrent ? ' title="The open session cannot be deleted"' : ""}>${deleteLabel}</button>
+              </div>`
+            : ""
+        }
+      </div>
+    </div>
+  `
+}
+
 export function renderOrgNodeHtml(
   node: OrgMemberSummary,
   depth = 0,
   expandedOrgMembers: ReadonlySet<string> = new Set(),
   viewedSessionId = "",
+  sessionLimits: Record<string, number> = {},
 ): string {
   const isSessionsOpen = expandedOrgMembers.has(node.agentId)
   const sessions = node.sessions || []
+  const limitKey = `org:${node.agentId}`
+  const limit = sessionLimits[limitKey] || DEFAULT_SIDEBAR_SESSIONS_LIMIT
+  const visibleSessions = sessions.slice(0, limit)
   const childrenHtml = node.children.length
     ? `<div class="org-tree-children" role="group" aria-label="Direct reports of ${escapeAttribute(node.name)}">${node.children
-        .map((c) => renderOrgNodeHtml(c, depth + 1, expandedOrgMembers, viewedSessionId))
+        .map((c) => renderOrgNodeHtml(c, depth + 1, expandedOrgMembers, viewedSessionId, sessionLimits))
         .join("")}</div>`
     : ""
 
@@ -1088,7 +1141,7 @@ export function renderOrgNodeHtml(
               <span>${isSessionsOpen ? "▾" : "▸"}</span>
               <span>Conversations (${sessions.length})</span>
             </button>
-            <button type="button" class="agent-btn ghost sm" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">+ New</button>
+            <button type="button" class="agent-btn ghost sm" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">New chat</button>
           </div>
           ${
             isSessionsOpen
@@ -1096,7 +1149,7 @@ export function renderOrgNodeHtml(
                   ${
                     sessions.length === 0
                       ? `<div class="org-sessions-empty">No saved conversations yet.</div>`
-                      : sessions
+                      : visibleSessions
                           .map((sess) => {
                             const isCurrent = sess.runtimeSessionId === viewedSessionId
                             return `
@@ -1107,11 +1160,13 @@ export function renderOrgNodeHtml(
                                   ${sess.origin === "task" ? `<span class="org-role-pill">Task</span>` : ""}
                                   <span class="org-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
                                 </button>
-                                <button type="button" class="org-session-delete" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-id="${escapeAttribute(node.agentId)}" title="Delete conversation">✕</button>
                               </div>
                             `
                           })
-                          .join("")
+                          .join("") +
+                        (sessions.length > limit
+                          ? `<button type="button" class="sidebar-load-more" data-agent-more-sessions="${escapeAttribute(limitKey)}">View more sessions (${sessions.length - limit} more)</button>`
+                          : "")
                   }
                 </div>`
               : ""
@@ -1148,6 +1203,11 @@ export function renderSidebarAgentsHtml(options: {
   managerSessions?: Array<Record<string, any>>
   archivedTeams?: Array<Record<string, any>>
   viewedSessionId?: string
+  itemMenuKey?: string
+  sessionMenuId?: string
+  sessionDeleteConfirmId?: string
+  sessionDeleteBusyId?: string
+  sessionLimits?: Record<string, number>
   newTeamOpen: boolean
   busy: boolean
 }): string {
@@ -1163,34 +1223,43 @@ export function renderSidebarAgentsHtml(options: {
   const teamSessionsByTeam = options.teamSessionsByTeam || {}
   const managerSessionsList = mergeManagerSessions(snapshot, options.managerSessions || [])
   const archivedList = options.archivedTeams?.length ? options.archivedTeams : snapshot.archivedTeams
+  const itemMenuKey = options.itemMenuKey || ""
+  const sessionMenuId = options.sessionMenuId || ""
+  const sessionDeleteConfirmId = options.sessionDeleteConfirmId || ""
+  const sessionDeleteBusyId = options.sessionDeleteBusyId || ""
+  const sessionLimits = options.sessionLimits || {}
+
+  const managerLimit = sessionLimits.manager || DEFAULT_SIDEBAR_SESSIONS_LIMIT
+  const visibleManagerSessions = managerSessionsList.slice(0, managerLimit)
+  const managerMenuOpen = itemMenuKey === "manager"
 
   const managerSessionsHtml = options.managerExpanded
     ? `<div class="project-sessions" role="group" aria-label="Manager sessions">
-        ${managerSessionsList
-          .slice(0, 12)
-          .map((sess) => {
-            const isCurrent =
-              options.surface.kind === "chat" &&
-              options.chatContext.kind === "manager" &&
-              sess.runtimeSessionId === options.viewedSessionId
-            return `
-              <div class="session-item-row${isCurrent ? " selected" : ""}">
-                <button type="button" class="session-item${isCurrent ? " selected" : ""}" data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}">
-                  <span class="session-title">${escapeHtml(sess.title || "New Session")}</span>
-                  <span class="session-status">${sess.tone === "working" ? `<span class="session-spinner" aria-label="Working"></span>` : escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
-                </button>
-                <div class="session-menu-wrap">
-                  <button type="button" class="session-menu-trigger" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-manager="1" title="Delete session" aria-label="Delete session">✕</button>
-                </div>
-              </div>
-            `
-          })
-          .join("")}
-        <div class="session-item-row">
-          <button type="button" class="session-item session-item-new" data-sidebar-new-manager-session="1">
-            <span class="session-title">+ New session</span>
-          </button>
-        </div>
+        ${
+          visibleManagerSessions.length === 0
+            ? `<p class="session-search-empty">No sessions yet.</p>`
+            : visibleManagerSessions
+                .map((sess) => {
+                  const isCurrent =
+                    options.surface.kind === "chat" &&
+                    options.chatContext.kind === "manager" &&
+                    sess.runtimeSessionId === options.viewedSessionId
+                  return renderAgentSidebarSessionRow({
+                    sess,
+                    isCurrent,
+                    menuOpen: sessionMenuId === sess.runtimeSessionId,
+                    confirmingDelete: sessionDeleteConfirmId === sess.runtimeSessionId,
+                    deleting: sessionDeleteBusyId === sess.runtimeSessionId,
+                    openAttrs: `data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}"`,
+                  })
+                })
+                .join("")
+        }
+        ${
+          managerSessionsList.length > managerLimit
+            ? `<button type="button" class="sidebar-load-more" data-agent-more-sessions="manager">View more sessions</button>`
+            : ""
+        }
       </div>`
     : ""
 
@@ -1203,27 +1272,38 @@ export function renderSidebarAgentsHtml(options: {
       const workingCount = summary ? summary.counts.working : 0
       const membersCount = summary?.counts.members ?? 0
       const tasksCount = summary?.counts.tasksTotal ?? 0
+      const teamMenuKey = `team:${team.id}`
+      const teamMenuOpen = itemMenuKey === teamMenuKey
+      const teamSubtitle = [
+        `${membersCount} ${membersCount === 1 ? "member" : "members"}`,
+        `${tasksCount} ${tasksCount === 1 ? "task" : "tasks"}`,
+        workingCount > 0 ? `${workingCount} active` : "",
+        attentionCount > 0 ? `${attentionCount} review` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
 
       const membersHtml =
         !isCollapsed && summary
           ? `<div class="project-sessions team-members-group" role="group" aria-label="${escapeAttribute(team.name)} members">${
               summary.members.length === 0
-                ? `<p class="sidebar-empty">No members yet</p>`
+                ? `<p class="session-search-empty">No members yet.</p>`
                 : summary.members
                     .map((member) => {
                       const memberKey = `${team.id}:${member.agentId}`
+                      const memberMenuKey = `member:${memberKey}`
+                      const memberMenuOpen = itemMenuKey === memberMenuKey
                       const isMemberActive =
                         options.surface.kind === "chat" &&
                         options.chatContext.kind === "member" &&
                         options.chatContext.agentId === member.agentId
                       const isMemberExpanded = expandedMembers.has(memberKey)
                       const memberSessions = member.sessions || []
+                      const memberLimit = sessionLimits[memberKey] || DEFAULT_SIDEBAR_SESSIONS_LIMIT
+                      const visibleMemberSessions = memberSessions.slice(0, memberLimit)
                       const roleSubtitle = [
-                        member.position,
-                        member.status,
-                        memberSessions.length > 0
-                          ? `${memberSessions.length} session${memberSessions.length === 1 ? "" : "s"}`
-                          : "",
+                        member.isLeader ? `${member.position} · Lead` : member.position,
+                        member.status !== "Idle" ? member.status : "",
                       ]
                         .filter(Boolean)
                         .join(" · ")
@@ -1234,40 +1314,50 @@ export function renderSidebarAgentsHtml(options: {
                               <span class="project-name-row">
                                 <span class="agent-status-dot tone-${member.tone}"></span>
                                 <span class="project-name">${escapeHtml(member.name)}</span>
-                                ${member.isLeader ? `<span class="sidebar-leader-tag">Lead</span>` : ""}
                               </span>
                               <span class="project-path">${escapeHtml(roleSubtitle)}</span>
                             </button>
-                            <div class="project-menu-wrap project-actions-inline">
-                              <button type="button" class="project-menu-trigger" data-agent-new-session="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" title="New session with ${escapeAttribute(member.name)}" aria-label="New session with ${escapeAttribute(member.name)}">+</button>
+                            <div class="project-menu-wrap">
+                              <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(memberMenuKey)}" title="Member actions" aria-label="Actions for ${escapeAttribute(member.name)}" aria-haspopup="menu" aria-expanded="${String(memberMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
+                              ${
+                                memberMenuOpen
+                                  ? `<div class="project-menu" role="menu">
+                                      <button type="button" data-agent-new-session="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">New chat</button>
+                                      <button type="button" data-sidebar-member-assign="${escapeAttribute(member.agentId)}" data-team-id="${escapeAttribute(team.id)}" role="menuitem">Assign task</button>
+                                      ${!member.isLeader ? `<button type="button" data-agent-make-leader="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">Make leader</button>` : ""}
+                                      <button type="button" data-agent-remove="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">Remove</button>
+                                    </div>`
+                                  : ""
+                              }
                             </div>
                           </div>
                           ${
                             isMemberExpanded
                               ? `<div class="project-sessions" role="group" aria-label="${escapeAttribute(member.name)} sessions">
-                                  ${memberSessions
-                                    .slice(0, 12)
-                                    .map((sess) => {
-                                      const isCurrent =
-                                        options.surface.kind === "chat" && sess.runtimeSessionId === options.viewedSessionId
-                                      return `
-                                        <div class="session-item-row${isCurrent ? " selected" : ""}">
-                                          <button type="button" class="session-item${isCurrent ? " selected" : ""}" data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}">
-                                            <span class="session-title">${escapeHtml(sess.title || "New Session")}</span>
-                                            <span class="session-status">${sess.tone === "working" ? `<span class="session-spinner" aria-label="Working"></span>` : escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
-                                          </button>
-                                          <div class="session-menu-wrap">
-                                            <button type="button" class="session-menu-trigger" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-id="${escapeAttribute(member.agentId)}" title="Delete session" aria-label="Delete session">✕</button>
-                                          </div>
-                                        </div>
-                                      `
-                                    })
-                                    .join("")}
-                                  <div class="session-item-row">
-                                    <button type="button" class="session-item session-item-new" data-agent-new-session="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}">
-                                      <span class="session-title">+ New session</span>
-                                    </button>
-                                  </div>
+                                  ${
+                                    visibleMemberSessions.length === 0
+                                      ? `<p class="session-search-empty">No sessions yet.</p>`
+                                      : visibleMemberSessions
+                                          .map((sess) => {
+                                            const isCurrent =
+                                              options.surface.kind === "chat" &&
+                                              sess.runtimeSessionId === options.viewedSessionId
+                                            return renderAgentSidebarSessionRow({
+                                              sess,
+                                              isCurrent,
+                                              menuOpen: sessionMenuId === sess.runtimeSessionId,
+                                              confirmingDelete: sessionDeleteConfirmId === sess.runtimeSessionId,
+                                              deleting: sessionDeleteBusyId === sess.runtimeSessionId,
+                                              openAttrs: `data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}"`,
+                                            })
+                                          })
+                                          .join("")
+                                  }
+                                  ${
+                                    memberSessions.length > memberLimit
+                                      ? `<button type="button" class="sidebar-load-more" data-agent-more-sessions="${escapeAttribute(memberKey)}">View more sessions</button>`
+                                      : ""
+                                  }
                                 </div>`
                               : ""
                           }
@@ -1281,17 +1371,27 @@ export function renderSidebarAgentsHtml(options: {
       return `
         <section class="project-item${!isCollapsed ? " expanded" : ""}${isSelectedTeam ? " is-selected-team" : ""}">
           <div class="project-row">
-            <button type="button" class="project-trigger" data-sidebar-toggle-team="${escapeAttribute(team.id)}" aria-expanded="${!isCollapsed}">
+            <button type="button" class="project-trigger" data-sidebar-toggle-team="${escapeAttribute(team.id)}" aria-expanded="${!isCollapsed}" title="${escapeAttribute(team.createRoot || team.name)}">
               <span class="project-name-row">
                 <span class="project-name">${escapeHtml(String(team.name || team.id))}</span>
                 ${workingCount > 0 ? `<span class="sidebar-mini-dot working" title="Working"></span>` : ""}
                 ${attentionCount > 0 ? `<span class="sidebar-nav-badge attention">${attentionCount}</span>` : ""}
               </span>
-              <span class="project-path">${membersCount} member${membersCount === 1 ? "" : "s"} · ${tasksCount} task${tasksCount === 1 ? "" : "s"}</span>
+              <span class="project-path">${escapeHtml(teamSubtitle)}</span>
             </button>
-            <div class="project-menu-wrap project-actions-inline">
-              <button type="button" class="project-action-pill${isSelectedTeam && options.surface.kind === "team" && options.surface.tab === "organization" ? " is-active" : ""}" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="organization" title="Open ${escapeAttribute(team.name)} Organization">Org</button>
-              <button type="button" class="project-action-pill${isSelectedTeam && options.surface.kind === "team" && options.surface.tab === "tasks" ? " is-active" : ""}" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="tasks" title="Open ${escapeAttribute(team.name)} Tasks">Tasks${tasksCount ? ` ${tasksCount}` : ""}</button>
+            <div class="project-menu-wrap">
+              <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(teamMenuKey)}" title="Team actions" aria-label="Team actions for ${escapeAttribute(team.name)}" aria-haspopup="menu" aria-expanded="${String(teamMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
+              ${
+                teamMenuOpen
+                  ? `<div class="project-menu" role="menu">
+                      <button type="button" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="organization" role="menuitem">Organization</button>
+                      <button type="button" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="tasks" role="menuitem">Tasks (${tasksCount})</button>
+                      <button type="button" data-sidebar-team-action="assign" data-team-id="${escapeAttribute(team.id)}" role="menuitem">Assign task</button>
+                      <button type="button" data-sidebar-team-action="add-member" data-team-id="${escapeAttribute(team.id)}" role="menuitem">Add member</button>
+                      <button type="button" data-sidebar-team-action="delete" data-team-id="${escapeAttribute(team.id)}" role="menuitem">Delete team</button>
+                    </div>`
+                  : ""
+              }
             </div>
           </div>
           ${membersHtml}
@@ -1301,72 +1401,80 @@ export function renderSidebarAgentsHtml(options: {
     .join("")
 
   return `
-    <div class="sidebar-section">
-      <div class="sidebar-heading">
-        <h2 class="sidebar-section-title">Overview</h2>
-      </div>
-      <div class="sidebar-global-nav" role="navigation" aria-label="Multi-agent surfaces">
-        <div class="session-item-row${isInbox ? " selected" : ""}">
-          <button type="button" class="session-item${isInbox ? " selected" : ""}" data-sidebar-surface="inbox">
-            <span class="session-title">Inbox</span>
-            <span class="session-status">${inboxCount > 0 ? `<span class="sidebar-nav-badge attention">${inboxCount}</span>` : ""}</span>
-          </button>
+    <div class="sidebar-actions">
+      <button type="button" class="primary-button" data-agent-top-new-chat="1" title="Start a new chat with the active agent or Manager">New chat</button>
+    </div>
+    <div class="sidebar-body panel-scroll">
+      <section class="sidebar-projects" aria-label="Multi-agent workspaces">
+        <div class="sidebar-global-nav" role="navigation" aria-label="Multi-agent surfaces">
+          <div class="session-item-row">
+            <button type="button" class="session-item${isInbox ? " selected" : ""}" data-sidebar-surface="inbox"${isInbox ? ' aria-current="page"' : ""}>
+              <span class="session-item-title"><span class="session-item-title-text">Inbox</span></span>
+              ${inboxCount > 0 ? `<span class="sidebar-nav-badge attention">${inboxCount}</span>` : ""}
+            </button>
+          </div>
+          <div class="session-item-row">
+            <button type="button" class="session-item${isBg ? " selected" : ""}" data-sidebar-surface="background"${isBg ? ' aria-current="page"' : ""}>
+              <span class="session-item-title"><span class="session-item-title-text">Background</span></span>
+              ${bgCount > 0 ? `<span class="sidebar-nav-badge working">${bgCount}</span>` : ""}
+            </button>
+          </div>
+          ${
+            archivedList.length > 0
+              ? `<div class="session-item-row">
+                  <button type="button" class="session-item${isArchive ? " selected" : ""}" data-sidebar-surface="archive"${isArchive ? ' aria-current="page"' : ""}>
+                    <span class="session-item-title"><span class="session-item-title-text">Archive</span></span>
+                    <span class="sidebar-nav-tag">${archivedList.length}</span>
+                  </button>
+                </div>`
+              : ""
+          }
         </div>
-        <div class="session-item-row${isBg ? " selected" : ""}">
-          <button type="button" class="session-item${isBg ? " selected" : ""}" data-sidebar-surface="background">
-            <span class="session-title">Background</span>
-            <span class="session-status">${bgCount > 0 ? `<span class="sidebar-nav-badge working">${bgCount}</span>` : ""}</span>
-          </button>
+        <div class="project-list">
+          <section class="project-item${options.managerExpanded ? " expanded" : ""}${isManagerActive ? " is-selected-team" : ""}">
+            <div class="project-row">
+              <button type="button" class="project-trigger" data-sidebar-toggle-manager="1" aria-expanded="${Boolean(options.managerExpanded)}" title="Organization coordinator">
+                <span class="project-name">Manager</span>
+                <span class="project-path">Organization coordinator · ${managerSessionsList.length} ${managerSessionsList.length === 1 ? "session" : "sessions"}</span>
+              </button>
+              <div class="project-menu-wrap">
+                <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="manager" title="Manager actions" aria-label="Manager actions" aria-haspopup="menu" aria-expanded="${String(managerMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
+                ${
+                  managerMenuOpen
+                    ? `<div class="project-menu" role="menu">
+                        <button type="button" data-sidebar-new-manager-session="1" role="menuitem">New chat</button>
+                        <button type="button" data-sidebar-surface="manager" role="menuitem">Coordinator panel</button>
+                      </div>`
+                    : ""
+                }
+              </div>
+            </div>
+            ${managerSessionsHtml}
+          </section>
+        </div>
+      </section>
+      <section class="sidebar-projects" aria-label="Teams">
+        <div class="sidebar-heading">
+          <h2 class="sidebar-section-title">Teams</h2>
+          <button type="button" class="ghost-button" data-sidebar-toggle-new-team="1" title="Add team">${options.newTeamOpen ? "Close" : "Add"}</button>
         </div>
         ${
-          archivedList.length > 0
-            ? `<div class="session-item-row${isArchive ? " selected" : ""}">
-                <button type="button" class="session-item${isArchive ? " selected" : ""}" data-sidebar-surface="archive">
-                  <span class="session-title">Archive</span>
-                  <span class="session-status"><span class="sidebar-nav-tag">${archivedList.length}</span></span>
-                </button>
-              </div>`
+          options.newTeamOpen
+            ? `<form id="sidebar-new-team-form" class="sidebar-new-team-form">
+                <input id="sidebar-new-team-name" type="text" class="agent-input sm" placeholder="Team name (e.g. Core Platform)" required />
+                <div class="sidebar-new-team-actions">
+                  <button type="button" class="agent-btn ghost sm" data-sidebar-toggle-new-team="1">Cancel</button>
+                  <button type="submit" class="agent-btn primary sm" ${options.busy ? "disabled" : ""}>Create</button>
+                </div>
+              </form>`
             : ""
         }
-      </div>
-      <section class="project-item${options.managerExpanded ? " expanded" : ""}${isManagerActive ? " is-selected-team" : ""}">
-        <div class="project-row">
-          <button type="button" class="project-trigger" data-sidebar-toggle-manager="1" aria-expanded="${options.managerExpanded}">
-            <span class="project-name-row">
-              <span class="project-name">Manager</span>
-              <span class="sidebar-nav-tag">Coord</span>
-            </span>
-            <span class="project-path">Organization Coordinator · ${managerSessionsList.length} session${managerSessionsList.length === 1 ? "" : "s"}</span>
-          </button>
-          <div class="project-menu-wrap project-actions-inline">
-            <button type="button" class="project-action-pill${options.surface.kind === "manager" ? " is-active" : ""}" data-sidebar-surface="manager" title="Open Manager Overview">Overview</button>
-            <button type="button" class="project-menu-trigger" data-sidebar-new-manager-session="1" title="New session with Manager" aria-label="New session with Manager">+</button>
-          </div>
-        </div>
-        ${managerSessionsHtml}
+        ${
+          snapshot.teams.length === 0
+            ? `<div class="sidebar-empty"><strong>No teams</strong><span>Create a team or ask Manager to set one up.</span></div>`
+            : `<div class="project-list sidebar-teams-list">${teamRows}</div>`
+        }
       </section>
-    </div>
-    <div class="sidebar-section sidebar-teams-section">
-      <div class="sidebar-heading">
-        <h2 class="sidebar-section-title">Teams</h2>
-        <button type="button" class="ghost-button" data-sidebar-toggle-new-team="1">${options.newTeamOpen ? "Close" : "Add"}</button>
-      </div>
-      ${
-        options.newTeamOpen
-          ? `<form id="sidebar-new-team-form" class="sidebar-new-team-form">
-              <input id="sidebar-new-team-name" type="text" class="agent-input sm" placeholder="Team name (e.g. Core Platform)" required />
-              <div class="sidebar-new-team-actions">
-                <button type="button" class="agent-btn ghost sm" data-sidebar-toggle-new-team="1">Cancel</button>
-                <button type="submit" class="agent-btn primary sm" ${options.busy ? "disabled" : ""}>Create</button>
-              </div>
-            </form>`
-          : ""
-      }
-      ${
-        snapshot.teams.length === 0
-          ? `<p class="sidebar-empty">No teams yet</p>`
-          : `<div class="project-list sidebar-teams-list">${teamRows}</div>`
-      }
     </div>
   `
 }
@@ -1397,13 +1505,14 @@ export function renderHeaderAgentBreadcrumbHtml(
                   context.kind === "manager"
                     ? `data-sidebar-new-manager-session="1"`
                     : `data-agent-new-session="${escapeAttribute(context.agentId)}" data-agent-team="${escapeAttribute(context.teamId)}"`
-                }>+ New</button>
+                }>New chat</button>
               </div>
               <div class="header-sessions-menu-list">
                 ${
                   sessions.length === 0
                     ? `<div class="org-sessions-empty">No saved conversations yet.</div>`
                     : sessions
+                        .slice(0, DEFAULT_SIDEBAR_SESSIONS_LIMIT)
                         .map((sess) => {
                           const isCurrent = sess.runtimeSessionId === options.viewedSessionId
                           return `
@@ -1436,7 +1545,7 @@ export function renderHeaderAgentBreadcrumbHtml(
           <span class="agent-status-dot tone-working"></span>
           <span>Manager</span>
         </button>
-        <span class="header-agent-role">${escapeHtml(context.roleLabel || "Organization Coordinator")}</span>
+        <span class="header-agent-role">${escapeHtml(context.roleLabel || "Organization coordinator")}</span>
         ${sessionsSwitcherHtml}
       </div>
     `
@@ -1448,7 +1557,6 @@ export function renderHeaderAgentBreadcrumbHtml(
       <span class="header-breadcrumb-sep" aria-hidden="true">/</span>
       <span class="header-agent-pill member"><span class="agent-status-dot tone-${tone}"></span><span>${escapeHtml(context.agentName)}</span></span>
       <span class="header-agent-role">${escapeHtml(context.roleLabel)}${context.isLeader ? " · Leader" : ""}</span>
-      <button type="button" class="header-agent-action" data-sidebar-open-team="${escapeAttribute(context.teamId)}" data-sidebar-team-tab="tasks">Tasks</button>
       ${sessionsSwitcherHtml}
     </div>
   `
@@ -1650,6 +1758,7 @@ export function renderTeamSurfaceHtml(options: {
   teamSessions?: Array<Record<string, any>>
   expandedOrgMembers?: ReadonlySet<string>
   viewedSessionId?: string
+  sessionLimits?: Record<string, number>
   busy: boolean
   artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
 }): string {
@@ -1736,6 +1845,7 @@ export function renderTeamSurfaceHtml(options: {
                       0,
                       options.expandedOrgMembers || new Set(),
                       options.viewedSessionId || "",
+                      options.sessionLimits || {},
                     ),
                   )
                   .join("")}</div>`

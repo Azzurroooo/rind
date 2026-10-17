@@ -25,7 +25,7 @@ const USAGE_DAYS = 7
 
 /** Open, and either on a mobile drawer or with room left for the conversation. */
 export function inspectorShown() {
-  if (!state.inspectorOpen) return false
+  if (!state.inspectorOpen || state.agentSurface.kind !== "chat") return false
   if (window.innerWidth <= MOBILE_MAX_WIDTH) return true
   return inspectorFits(window.innerWidth, state.sidebarOpen ? state.sidebarWidth : 0, state.inspectorWidth)
 }
@@ -33,7 +33,13 @@ export function inspectorShown() {
 export function renderInspector() {
   const usageDialog = requiredElement<HTMLDialogElement>("usage-dialog")
   if (usageDialog.open) inspectorUsageBody.innerHTML = renderLoad(state.inspectorUsage, "Loading usage…", renderUsageSummary, "Usage appears once the runtime is ready.")
-  requiredElement("inspector-scope").textContent = state.inspectorTab === "files" ? `Workspace · ${viewedProject()?.name || "No folder selected"}` : "Current session"
+  const activeFolderName =
+    viewedProject()?.name ||
+    (state.agentChatContext && state.agentChatContext.kind !== "independent"
+      ? state.agentChatContext.workspaceRoot?.split(/[\\/]/).filter(Boolean).pop()
+      : "") ||
+    "No folder selected"
+  requiredElement("inspector-scope").textContent = state.inspectorTab === "files" ? `Workspace · ${activeFolderName}` : "Current session"
   const shown = inspectorShown()
   appRoot.classList.toggle("inspector-open", shown)
   appRoot.classList.toggle("inspector-maximized", shown && state.inspectorMaximized)

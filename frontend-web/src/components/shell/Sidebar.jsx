@@ -6,29 +6,30 @@ import {
   Bell,
   ChevronDown,
   ChevronRight,
-  Crown,
   FolderGit2,
   History,
   Inbox,
   ListChecks,
   LoaderCircle,
-  MessageSquare,
+  MoreHorizontal,
   Network,
   Plus,
   Search,
   Settings,
   Sparkles,
   SquarePen,
-  Trash2,
   Users,
   X,
 } from "lucide-react";
 import { ConfirmDialog } from "../overlays/ConfirmDialog.jsx";
+import { Menu } from "../overlays/Menu.jsx";
 import { ProjectSelector } from "./ProjectSelector.jsx";
 import { SessionRow } from "./SessionRow.jsx";
 import { buildTeamSummary } from "../../lib/agentsModel.js";
 import { interactionTime } from "../../lib/sessionActivity.js";
 import { sessionIdOf } from "../../methods.js";
+
+const DEFAULT_SIDEBAR_SESSIONS_LIMIT = 5;
 
 // Flatten org tree into depth-annotated list so reporting hierarchy is visible in sidebar
 function flattenOrgTree(nodes, depth = 0, out = []) {
@@ -73,8 +74,16 @@ export function Sidebar({
   const [collapsedTeams, setCollapsedTeams] = useState({});
   const [expandedMembers, setExpandedMembers] = useState({});
   const [managerExpanded, setManagerExpanded] = useState(false);
+  const [sessionLimits, setSessionLimits] = useState({});
   const [newTeamOpen, setNewTeamOpen] = useState(false);
   const [newTeamName, setNewTeamName] = useState("");
+
+  function bumpSessionLimit(key) {
+    setSessionLimits((prev) => ({
+      ...prev,
+      [key]: (prev[key] || DEFAULT_SIDEBAR_SESSIONS_LIMIT) + DEFAULT_SIDEBAR_SESSIONS_LIMIT,
+    }));
+  }
 
   // Automatically switch sidebar mode when user navigates to an agent surface or member/manager chat
   const surfaceKind = agents?.surface?.kind || "chat";
@@ -127,8 +136,8 @@ export function Sidebar({
     ? agents.snapshot.archivedTeams.length
     : 0;
 
-  const totalAttention = (agents?.inboxCount || 0);
-  const totalWorking = (agents?.bgCount || 0);
+  const totalAttention = agents?.inboxCount || 0;
+  const totalWorking = agents?.bgCount || 0;
 
   async function confirmDelete() {
     if (!pending) return;
@@ -160,6 +169,35 @@ export function Sidebar({
     setNewTeamName("");
     setNewTeamOpen(false);
   }
+
+  function handleAgentTopNewSession() {
+    if (!agents) return;
+    if (agents.activeSessionContext?.kind === "member") {
+      const { teamId, agentId } = agents.activeSessionContext;
+      setExpandedMembers((prev) => ({ ...prev, [agentId]: true }));
+      agents.onOpenMemberChat?.({ teamId, agentId, forceNew: true });
+      return;
+    }
+    if (agents.surface?.kind === "team" && agents.surface.teamId) {
+      const summary = teamSummaries.find((s) => s.team.id === agents.surface.teamId);
+      const targetAgentId = summary?.team?.leaderAgentId || summary?.members?.[0]?.agentId || "";
+      if (targetAgentId) {
+        setExpandedMembers((prev) => ({ ...prev, [targetAgentId]: true }));
+        agents.onOpenMemberChat?.({
+          teamId: agents.surface.teamId,
+          agentId: targetAgentId,
+          forceNew: true,
+        });
+        return;
+      }
+    }
+    setManagerExpanded(true);
+    agents.onOpenManager?.({ forceNew: true });
+  }
+
+  const managerLimit = sessionLimits.manager || DEFAULT_SIDEBAR_SESSIONS_LIMIT;
+  const visibleManagerSessions = managerSummary.sessions.slice(0, managerLimit);
+  const moreManagerSessions = Math.max(0, managerSummary.sessions.length - visibleManagerSessions.length);
 
   return (
     <aside
@@ -206,426 +244,552 @@ export function Sidebar({
       )}
 
       {mode === "agents" && agents ? (
-        <div className="sidebar-agents panel-scroll" aria-label="Multi-agent navigation">
-          <div className="sidebar-nav-rail">
+        <>
+          <div className="sidebar-head">
             <button
               type="button"
-              className={`sidebar-nav-item ${agents.surface?.kind === "inbox" ? "active" : ""}`}
-              onClick={agents.onOpenInbox}
+              className="sidebar-new"
+              title="Start a new agent session"
+              onClick={handleAgentTopNewSession}
             >
-              <Inbox size={15} aria-hidden="true" />
-              <span>Inbox</span>
-              {agents.inboxCount > 0 && (
-                <span className="sidebar-nav-badge attention">{agents.inboxCount}</span>
-              )}
+              <SquarePen size={16} aria-hidden="true" />
+              <span>New session</span>
             </button>
-
-            <div className="sidebar-manager-group">
-              <div
-                className={`sidebar-nav-item sidebar-manager-row ${
-                  agents.surface?.kind === "manager" ||
-                  (agents.surface?.kind === "chat" && agents.activeSessionContext?.kind === "manager")
-                    ? "active"
-                    : ""
-                }`}
+          </div>
+          <div className="sidebar-agents panel-scroll" aria-label="Multi-agent navigation">
+            <div className="sidebar-nav-rail">
+              <button
+                type="button"
+                className={`sidebar-nav-item ${agents.surface?.kind === "inbox" ? "active" : ""}`}
+                onClick={agents.onOpenInbox}
               >
-                <button
-                  type="button"
-                  className="sidebar-team-chevron"
-                  aria-label={managerExpanded ? "Collapse Manager sessions" : "Expand Manager sessions"}
-                  onClick={() => setManagerExpanded((prev) => !prev)}
+                <Inbox size={15} aria-hidden="true" />
+                <span>Inbox</span>
+                {agents.inboxCount > 0 && (
+                  <span className="sidebar-nav-badge attention">{agents.inboxCount}</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                className={`sidebar-nav-item ${agents.surface?.kind === "background" ? "active" : ""}`}
+                onClick={agents.onOpenBackground}
+              >
+                <Activity size={15} aria-hidden="true" />
+                <span>Background</span>
+                {agents.bgCount > 0 && (
+                  <span className="sidebar-nav-badge working">{agents.bgCount}</span>
+                )}
+              </button>
+
+              <div className="sidebar-manager-group">
+                <div
+                  className={`sidebar-team-row ${
+                    agents.surface?.kind === "manager" ||
+                    (agents.surface?.kind === "chat" && agents.activeSessionContext?.kind === "manager")
+                      ? "active"
+                      : ""
+                  }`}
                 >
-                  {managerExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-manager-main"
-                  aria-expanded={managerExpanded}
-                  onClick={() => setManagerExpanded((prev) => !prev)}
-                >
-                  <Sparkles size={14} aria-hidden="true" />
-                  <span>Manager</span>
-                  <span className={`agent-status-dot tone-${managerSummary.tone}`} />
+                  <button
+                    type="button"
+                    className="sidebar-team-chevron"
+                    aria-label={managerExpanded ? "Collapse Manager sessions" : "Expand Manager sessions"}
+                    onClick={() => setManagerExpanded((prev) => !prev)}
+                  >
+                    {managerExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  </button>
+                  <button
+                    type="button"
+                    className="sidebar-team-main"
+                    aria-expanded={managerExpanded}
+                    onClick={() => {
+                      const isShowingManager = agents.surface?.kind === "manager";
+                      if (!managerExpanded) {
+                        setManagerExpanded(true);
+                        agents.onOpenManagerView?.();
+                      } else if (!isShowingManager) {
+                        agents.onOpenManagerView?.();
+                      } else {
+                        setManagerExpanded(false);
+                      }
+                    }}
+                  >
+                    <Sparkles size={13} aria-hidden="true" />
+                    <span className="sidebar-team-name">Manager</span>
+                    {managerSummary.tone !== "idle" && (
+                      <span className={`agent-status-dot tone-${managerSummary.tone}`} />
+                    )}
+                  </button>
                   {managerSummary.sessionCount > 0 && (
                     <span className="sidebar-nav-hint">{managerSummary.sessionCount}</span>
                   )}
-                </button>
-                {agents.onOpenManagerView && (
-                  <button
-                    type="button"
-                    className={`sidebar-team-pill ${agents.surface?.kind === "manager" ? "active" : ""}`}
-                    title="Open Manager Overview"
-                    onClick={agents.onOpenManagerView}
-                  >
-                    <span>Overview</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="icon-button xs"
-                  title="New session with Manager"
-                  aria-label="New session with Manager"
-                  onClick={() => {
-                    setManagerExpanded(true);
-                    agents.onOpenManager?.({ forceNew: true });
-                  }}
-                >
-                  <Plus size={12} aria-hidden="true" />
-                </button>
-              </div>
-              {managerExpanded && (
-                <div className="sidebar-member-sessions" role="group" aria-label="Manager conversations">
-                  {managerSummary.sessions.map((sess) => {
-                    const isCurrent =
-                      agents.surface?.kind === "chat" && sess.runtimeSessionId === activeId;
-                    return (
-                      <div
-                        key={sess.runtimeSessionId}
-                        className={`sidebar-subsession-row ${isCurrent ? "active" : ""}`}
+                  <Menu
+                    label="Manager actions"
+                    items={[
+                      {
+                        id: "mgr-new",
+                        label: "New session",
+                        icon: <Plus size={14} />,
+                        onSelect: () => {
+                          setManagerExpanded(true);
+                          agents.onOpenManager?.({ forceNew: true });
+                        },
+                      },
+                      ...(agents.onOpenManagerView
+                        ? [
+                            {
+                              id: "mgr-panel",
+                              label: "Open Manager panel",
+                              icon: <Sparkles size={14} />,
+                              onSelect: () => agents.onOpenManagerView?.(),
+                            },
+                          ]
+                        : []),
+                    ]}
+                    trigger={(props) => (
+                      <button
+                        type="button"
+                        className="session-more"
+                        aria-label="Manager actions"
+                        {...props}
                       >
-                        <button
-                          type="button"
-                          className="sidebar-subsession-main"
-                          onClick={() =>
+                        <MoreHorizontal size={15} aria-hidden="true" />
+                      </button>
+                    )}
+                  />
+                </div>
+                {managerExpanded && (
+                  <div className="sidebar-member-sessions" role="group" aria-label="Manager conversations">
+                    {visibleManagerSessions.map((sess) => {
+                      const isCurrent =
+                        agents.surface?.kind === "chat" && sess.runtimeSessionId === activeId;
+                      return (
+                        <SessionRow
+                          key={sess.runtimeSessionId}
+                          session={{
+                            title: sess.title,
+                            updated_at: sess.updatedAt,
+                          }}
+                          id={sess.runtimeSessionId}
+                          current={isCurrent}
+                          running={
+                            sess.tone === "working" ||
+                            Boolean(runningIds?.has?.(sess.runtimeSessionId))
+                          }
+                          unread={
+                            !isCurrent &&
+                            (sess.tone === "attention" ||
+                              Boolean(unreadIds?.has?.(sess.runtimeSessionId)))
+                          }
+                          canFork={canFork}
+                          canExport={canExport}
+                          onSelect={() =>
                             agents.onOpenManager?.({ runtimeSessionId: sess.runtimeSessionId })
                           }
-                          title={`${sess.title} · ${sess.status}`}
-                        >
-                          <span className={`agent-status-dot tone-${sess.tone}`} />
-                          <span className="sidebar-subsession-title">{sess.title}</span>
-                          {sess.ageText && (
-                            <span className="sidebar-subsession-age">{sess.ageText}</span>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className="sidebar-subsession-delete"
-                          title="Delete session"
-                          aria-label={`Delete ${sess.title}`}
-                          onClick={() =>
+                          onFork={onFork}
+                          onExport={onExport}
+                          onRequestDelete={(targetId, title) =>
                             setPending({
-                              id: sess.runtimeSessionId,
-                              title: sess.title,
+                              id: targetId,
+                              title,
                               busy: false,
                               error: "",
                               isAgentSession: true,
                               teamId: "",
                             })
                           }
-                        >
-                          <Trash2 size={11} aria-hidden="true" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    className="sidebar-subsession-empty"
-                    onClick={() => agents.onOpenManager?.({ forceNew: true })}
-                  >
-                    <Plus size={11} aria-hidden="true" />
-                    <span>New session</span>
-                  </button>
-                </div>
-              )}
-            </div>
+                        />
+                      );
+                    })}
+                    {moreManagerSessions > 0 && (
+                      <button
+                        type="button"
+                        className="sidebar-load-more"
+                        onClick={() => bumpSessionLimit("manager")}
+                      >
+                        <span>View more sessions</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="sidebar-subsession-empty"
+                      onClick={() => agents.onOpenManager?.({ forceNew: true })}
+                    >
+                      <Plus size={12} aria-hidden="true" />
+                      <span>New session</span>
+                    </button>
+                  </div>
+                )}
+              </div>
 
-            <button
-              type="button"
-              className={`sidebar-nav-item ${agents.surface?.kind === "background" ? "active" : ""}`}
-              onClick={agents.onOpenBackground}
-            >
-              <Activity size={15} aria-hidden="true" />
-              <span>Background</span>
-              {agents.bgCount > 0 && (
-                <span className="sidebar-nav-badge working">{agents.bgCount}</span>
-              )}
-            </button>
-
-            {archiveCount > 0 && (
-              <button
-                type="button"
-                className={`sidebar-nav-item ${agents.surface?.kind === "archive" ? "active" : ""}`}
-                onClick={agents.onOpenArchive}
-              >
-                <Archive size={15} aria-hidden="true" />
-                <span>Archive</span>
-                <span className="sidebar-nav-hint">{archiveCount}</span>
-              </button>
-            )}
-          </div>
-
-          <div className="sidebar-teams-section">
-            <div className="sidebar-section-head">
-              <span className="sidebar-section-label">Teams</span>
-              <button
-                type="button"
-                className="icon-button small"
-                aria-label="New team"
-                title="Create a new agent team"
-                onClick={() => setNewTeamOpen((prev) => !prev)}
-              >
-                <Plus size={13} aria-hidden="true" />
-              </button>
-            </div>
-
-            {newTeamOpen && (
-              <form className="sidebar-new-team-form" onSubmit={handleCreateTeam}>
-                <input
-                  type="text"
-                  value={newTeamName}
-                  onChange={(e) => setNewTeamName(e.target.value)}
-                  placeholder="Team name (e.g. core-ui)"
-                  aria-label="New team name"
-                  autoFocus
-                />
+              {archiveCount > 0 && (
                 <button
-                  type="submit"
-                  className="agent-btn primary xs"
-                  disabled={!newTeamName.trim() || agents.busy}
+                  type="button"
+                  className={`sidebar-nav-item ${agents.surface?.kind === "archive" ? "active" : ""}`}
+                  onClick={agents.onOpenArchive}
                 >
-                  Create
+                  <Archive size={15} aria-hidden="true" />
+                  <span>Archive</span>
+                  <span className="sidebar-nav-hint">{archiveCount}</span>
                 </button>
-              </form>
-            )}
+              )}
+            </div>
 
-            {teamSummaries.length === 0 ? (
-              <button
-                type="button"
-                className="sidebar-teams-empty"
-                onClick={() => setNewTeamOpen(true)}
-              >
-                <Users size={13} aria-hidden="true" />
-                <span>Create a team or ask Manager</span>
-              </button>
-            ) : (
-              <div className="sidebar-team-list">
-                {teamSummaries.map((summary) => {
-                  const { team, orgRoots, members, counts } = summary;
-                  const orderedMembers = orgRoots?.length ? flattenOrgTree(orgRoots) : members;
-                  const collapsed = Boolean(collapsedTeams[team.id]);
-                  const isTeamSelected =
-                    agents.surface?.kind === "team" && agents.surface?.teamId === team.id;
+            <div className="sidebar-teams-section">
+              <div className="sidebar-section-head">
+                <span className="sidebar-section-label">Teams</span>
+                <button
+                  type="button"
+                  className="icon-button small"
+                  aria-label="New team"
+                  title="Create a new agent team"
+                  onClick={() => setNewTeamOpen((prev) => !prev)}
+                >
+                  <Plus size={13} aria-hidden="true" />
+                </button>
+              </div>
 
-                  return (
-                    <div key={team.id} className="sidebar-team-group" data-team-id={team.id}>
-                      <div className={`sidebar-team-row ${isTeamSelected ? "active" : ""}`}>
-                        <button
-                          type="button"
-                          className="sidebar-team-chevron"
-                          aria-label={collapsed ? `Expand ${team.name}` : `Collapse ${team.name}`}
-                          onClick={() =>
-                            setCollapsedTeams((prev) => ({ ...prev, [team.id]: !prev[team.id] }))
-                          }
-                        >
-                          {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-                        </button>
-                        <button
-                          type="button"
-                          className="sidebar-team-main"
-                          aria-expanded={!collapsed}
-                          onClick={() =>
-                            setCollapsedTeams((prev) => ({ ...prev, [team.id]: !prev[team.id] }))
-                          }
-                        >
-                          <span className={`agent-status-dot tone-${team.tone || "idle"}`} />
-                          <span className="sidebar-team-name">{team.name}</span>
-                        </button>
-                        <div className="sidebar-team-pills">
+              {newTeamOpen && (
+                <form className="sidebar-new-team-form" onSubmit={handleCreateTeam}>
+                  <input
+                    type="text"
+                    value={newTeamName}
+                    onChange={(e) => setNewTeamName(e.target.value)}
+                    placeholder="Team name (e.g. core-ui)"
+                    aria-label="New team name"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    className="agent-btn primary xs"
+                    disabled={!newTeamName.trim() || agents.busy}
+                  >
+                    Create
+                  </button>
+                </form>
+              )}
+
+              {teamSummaries.length === 0 ? (
+                <button
+                  type="button"
+                  className="sidebar-teams-empty"
+                  onClick={() => setNewTeamOpen(true)}
+                >
+                  <Users size={13} aria-hidden="true" />
+                  <span>Create a team or ask Manager</span>
+                </button>
+              ) : (
+                <div className="sidebar-team-list">
+                  {teamSummaries.map((summary) => {
+                    const { team, orgRoots, members, counts } = summary;
+                    const orderedMembers = orgRoots?.length ? flattenOrgTree(orgRoots) : members;
+                    const collapsed = Boolean(collapsedTeams[team.id]);
+                    const isTeamSelected =
+                      agents.surface?.kind === "team" && agents.surface?.teamId === team.id;
+
+                    const teamMenuItems = [
+                      {
+                        id: "team-org",
+                        label: "Organization",
+                        icon: <Network size={14} />,
+                        onSelect: () => {
+                          setCollapsedTeams((prev) => ({ ...prev, [team.id]: false }));
+                          agents.onOpenTeam?.(team.id, "organization");
+                        },
+                      },
+                      {
+                        id: "team-tasks",
+                        label: counts.tasksTotal > 0 ? `Tasks (${counts.tasksTotal})` : "Tasks",
+                        icon: <ListChecks size={14} />,
+                        onSelect: () => {
+                          setCollapsedTeams((prev) => ({ ...prev, [team.id]: false }));
+                          agents.onOpenTeam?.(team.id, "tasks");
+                        },
+                      },
+                      ...(team.leaderAgentId
+                        ? [
+                            { separator: true },
+                            {
+                              id: "team-lead-chat",
+                              label: "New session with leader",
+                              icon: <Plus size={14} />,
+                              onSelect: () => {
+                                setCollapsedTeams((prev) => ({ ...prev, [team.id]: false }));
+                                setExpandedMembers((prev) => ({
+                                  ...prev,
+                                  [team.leaderAgentId]: true,
+                                }));
+                                agents.onOpenMemberChat?.({
+                                  teamId: team.id,
+                                  agentId: team.leaderAgentId,
+                                  forceNew: true,
+                                });
+                              },
+                            },
+                          ]
+                        : []),
+                    ];
+
+                    return (
+                      <div key={team.id} className="sidebar-team-group" data-team-id={team.id}>
+                        <div className={`sidebar-team-row ${isTeamSelected ? "active" : ""}`}>
                           <button
                             type="button"
-                            className={`sidebar-team-pill ${
-                              isTeamSelected && agents.surface?.tab === "organization" ? "active" : ""
-                            }`}
-                            title="Team organization & members"
-                            onClick={() => agents.onOpenTeam?.(team.id, "organization")}
+                            className="sidebar-team-chevron"
+                            aria-label={collapsed ? `Expand ${team.name}` : `Collapse ${team.name}`}
+                            onClick={() =>
+                              setCollapsedTeams((prev) => ({ ...prev, [team.id]: !prev[team.id] }))
+                            }
                           >
-                            <Network size={11} aria-hidden="true" />
-                            <span>Org</span>
+                            {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
                           </button>
                           <button
                             type="button"
-                            className={`sidebar-team-pill ${
-                              isTeamSelected && agents.surface?.tab === "tasks" ? "active" : ""
-                            }`}
-                            title="Team tasks & deliveries"
-                            onClick={() => agents.onOpenTeam?.(team.id, "tasks")}
+                            className="sidebar-team-main"
+                            aria-expanded={!collapsed}
+                            onClick={() => {
+                              if (collapsed) {
+                                setCollapsedTeams((prev) => ({ ...prev, [team.id]: false }));
+                                agents.onOpenTeam?.(team.id, "organization");
+                              } else if (!isTeamSelected) {
+                                agents.onOpenTeam?.(team.id, "organization");
+                              } else {
+                                setCollapsedTeams((prev) => ({ ...prev, [team.id]: true }));
+                              }
+                            }}
                           >
-                            <ListChecks size={11} aria-hidden="true" />
-                            <span>Tasks{counts.tasksTotal > 0 ? ` ${counts.tasksTotal}` : ""}</span>
+                            <span className={`agent-status-dot tone-${team.tone || "idle"}`} />
+                            <span className="sidebar-team-name">{team.name}</span>
                           </button>
-                        </div>
-                      </div>
-
-                      {!collapsed && orderedMembers.length > 0 && (
-                        <div className="sidebar-member-list" role="group" aria-label={`${team.name} members`}>
-                          {orderedMembers.map((member) => {
-                            const memberSessions = Array.isArray(member.sessions) ? member.sessions : [];
-                            const isMemberActive =
-                              agents.surface?.kind === "chat" &&
-                              agents.activeSessionContext?.kind === "member" &&
-                              agents.activeSessionContext?.agentId === member.agentId;
-                            const isExpanded = Boolean(expandedMembers[member.agentId]);
-
-                            return (
-                              <div
-                                key={member.agentId}
-                                className="sidebar-member-block"
-                                style={member.depth ? { paddingLeft: `${Math.min(member.depth, 3) * 10}px` } : undefined}
+                          <span className="sidebar-nav-hint">{counts.members}</span>
+                          <Menu
+                            label={`Actions for ${team.name}`}
+                            items={teamMenuItems}
+                            trigger={(props) => (
+                              <button
+                                type="button"
+                                className="session-more"
+                                aria-label={`Actions for ${team.name}`}
+                                {...props}
                               >
-                                <div className={`sidebar-member-row ${isMemberActive ? "active" : ""}`} data-member-id={member.agentId}>
-                                  <button
-                                    type="button"
-                                    className="sidebar-team-chevron"
-                                    aria-label={isExpanded ? `Collapse ${member.name} sessions` : `Expand ${member.name} sessions`}
-                                    onClick={() =>
-                                      setExpandedMembers((prev) => ({
-                                        ...prev,
-                                        [member.agentId]: !prev[member.agentId],
-                                      }))
-                                    }
+                                <MoreHorizontal size={15} aria-hidden="true" />
+                              </button>
+                            )}
+                          />
+                        </div>
+
+                        {!collapsed && orderedMembers.length > 0 && (
+                          <div className="sidebar-member-list" role="group" aria-label={`${team.name} members`}>
+                            {orderedMembers.map((member) => {
+                              const memberSessions = Array.isArray(member.sessions) ? member.sessions : [];
+                              const isMemberActive =
+                                agents.surface?.kind === "chat" &&
+                                agents.activeSessionContext?.kind === "member" &&
+                                agents.activeSessionContext?.agentId === member.agentId;
+                              const isExpanded = Boolean(expandedMembers[member.agentId]);
+                              const memberLimitKey = `${team.id}:${member.agentId}`;
+                              const memberLimit =
+                                sessionLimits[memberLimitKey] || DEFAULT_SIDEBAR_SESSIONS_LIMIT;
+                              const visibleMemberSessions = memberSessions.slice(0, memberLimit);
+                              const moreMemberSessions = Math.max(
+                                0,
+                                memberSessions.length - visibleMemberSessions.length,
+                              );
+
+                              const memberMenuItems = [
+                                {
+                                  id: "member-new",
+                                  label: "New session",
+                                  icon: <Plus size={14} />,
+                                  onSelect: () => {
+                                    setExpandedMembers((prev) => ({
+                                      ...prev,
+                                      [member.agentId]: true,
+                                    }));
+                                    agents.onOpenMemberChat?.({
+                                      teamId: team.id,
+                                      agentId: member.agentId,
+                                      forceNew: true,
+                                    });
+                                  },
+                                },
+                                {
+                                  id: "member-org",
+                                  label: "View in Organization",
+                                  icon: <Network size={14} />,
+                                  onSelect: () => agents.onOpenTeam?.(team.id, "organization"),
+                                },
+                                {
+                                  id: "member-tasks",
+                                  label: "View team tasks",
+                                  icon: <ListChecks size={14} />,
+                                  onSelect: () => agents.onOpenTeam?.(team.id, "tasks"),
+                                },
+                              ];
+
+                              return (
+                                <div
+                                  key={member.agentId}
+                                  className="sidebar-member-block"
+                                  style={
+                                    member.depth
+                                      ? { paddingLeft: `${Math.min(member.depth, 3) * 10}px` }
+                                      : undefined
+                                  }
+                                >
+                                  <div
+                                    className={`sidebar-member-row ${isMemberActive ? "active" : ""}`}
+                                    data-member-id={member.agentId}
                                   >
-                                    {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="sidebar-member-main"
-                                    aria-expanded={isExpanded}
-                                    onClick={() =>
-                                      setExpandedMembers((prev) => ({
-                                        ...prev,
-                                        [member.agentId]: !prev[member.agentId],
-                                      }))
-                                    }
-                                  >
-                                    <span className={`agent-status-dot tone-${member.tone}`} />
-                                    <span className="sidebar-member-name">{member.name}</span>
-                                    {member.isLeader && (
-                                      <Crown size={11} className="sidebar-leader-icon" aria-hidden="true" />
-                                    )}
-                                    <span className="sidebar-member-role">{member.position}</span>
-                                  </button>
-                                  <div className="sidebar-member-actions">
-                                    {memberSessions.length > 0 && (
-                                      <button
-                                        type="button"
-                                        className="sidebar-member-session-count"
-                                        title={`${memberSessions.length} session(s)`}
-                                        onClick={() =>
-                                          setExpandedMembers((prev) => ({
-                                            ...prev,
-                                            [member.agentId]: !prev[member.agentId],
-                                          }))
-                                        }
-                                      >
-                                        <MessageSquare size={10} aria-hidden="true" />
-                                        <span>{memberSessions.length}</span>
-                                      </button>
-                                    )}
                                     <button
                                       type="button"
-                                      className="icon-button xs"
-                                      title={`New session with ${member.name}`}
-                                      aria-label={`New session with ${member.name}`}
-                                      onClick={() => {
-                                        setExpandedMembers((prev) => ({ ...prev, [member.agentId]: true }));
-                                        agents.onOpenMemberChat?.({
-                                          teamId: team.id,
-                                          agentId: member.agentId,
-                                          forceNew: true,
-                                        });
-                                      }}
+                                      className="sidebar-team-chevron"
+                                      aria-label={
+                                        isExpanded
+                                          ? `Collapse ${member.name} sessions`
+                                          : `Expand ${member.name} sessions`
+                                      }
+                                      onClick={() =>
+                                        setExpandedMembers((prev) => ({
+                                          ...prev,
+                                          [member.agentId]: !prev[member.agentId],
+                                        }))
+                                      }
                                     >
-                                      <Plus size={11} aria-hidden="true" />
+                                      {isExpanded ? (
+                                        <ChevronDown size={12} />
+                                      ) : (
+                                        <ChevronRight size={12} />
+                                      )}
                                     </button>
-                                  </div>
-                                </div>
-
-                                {isExpanded && (
-                                  <div
-                                    className="sidebar-member-sessions"
-                                    role="group"
-                                    aria-label={`${member.name} conversations`}
-                                  >
-                                    {memberSessions.map((sess) => {
-                                      const isCurrentSession =
-                                        agents.surface?.kind === "chat" &&
-                                        sess.runtimeSessionId === activeId;
-                                      return (
-                                        <div
-                                          key={sess.runtimeSessionId}
-                                          className={`sidebar-subsession-row ${isCurrentSession ? "active" : ""}`}
+                                    <button
+                                      type="button"
+                                      className="sidebar-member-main"
+                                      aria-expanded={isExpanded}
+                                      onClick={() =>
+                                        setExpandedMembers((prev) => ({
+                                          ...prev,
+                                          [member.agentId]: !prev[member.agentId],
+                                        }))
+                                      }
+                                    >
+                                      <span className={`agent-status-dot tone-${member.tone}`} />
+                                      <span className="sidebar-member-name">{member.name}</span>
+                                      {member.isLeader && (
+                                        <span className="sidebar-leader-tag">Lead</span>
+                                      )}
+                                      <span className="sidebar-member-role">{member.position}</span>
+                                    </button>
+                                    {memberSessions.length > 0 && (
+                                      <span className="sidebar-nav-hint">{memberSessions.length}</span>
+                                    )}
+                                    <Menu
+                                      label={`Actions for ${member.name}`}
+                                      items={memberMenuItems}
+                                      trigger={(props) => (
+                                        <button
+                                          type="button"
+                                          className="session-more"
+                                          aria-label={`Actions for ${member.name}`}
+                                          {...props}
                                         >
-                                          <button
-                                            type="button"
-                                            className="sidebar-subsession-main"
-                                            onClick={() =>
+                                          <MoreHorizontal size={15} aria-hidden="true" />
+                                        </button>
+                                      )}
+                                    />
+                                  </div>
+
+                                  {isExpanded && (
+                                    <div
+                                      className="sidebar-member-sessions"
+                                      role="group"
+                                      aria-label={`${member.name} conversations`}
+                                    >
+                                      {visibleMemberSessions.map((sess) => {
+                                        const isCurrentSession =
+                                          agents.surface?.kind === "chat" &&
+                                          sess.runtimeSessionId === activeId;
+                                        return (
+                                          <SessionRow
+                                            key={sess.runtimeSessionId}
+                                            session={{
+                                              title: sess.title,
+                                              updated_at: sess.updatedAt,
+                                            }}
+                                            id={sess.runtimeSessionId}
+                                            current={isCurrentSession}
+                                            running={
+                                              sess.tone === "working" ||
+                                              Boolean(runningIds?.has?.(sess.runtimeSessionId))
+                                            }
+                                            unread={
+                                              !isCurrentSession &&
+                                              (sess.tone === "attention" ||
+                                                Boolean(unreadIds?.has?.(sess.runtimeSessionId)))
+                                            }
+                                            canFork={canFork}
+                                            canExport={canExport}
+                                            onSelect={() =>
                                               agents.onOpenMemberChat?.({
                                                 teamId: team.id,
                                                 agentId: member.agentId,
                                                 runtimeSessionId: sess.runtimeSessionId,
                                               })
                                             }
-                                            title={`${sess.title} · ${sess.status}`}
-                                          >
-                                            <span className={`agent-status-dot tone-${sess.tone}`} />
-                                            <span className="sidebar-subsession-title">{sess.title}</span>
-                                            {sess.origin === "task" && (
-                                              <span className="sidebar-subsession-tag">Task</span>
-                                            )}
-                                            {sess.ageText && (
-                                              <span className="sidebar-subsession-age">{sess.ageText}</span>
-                                            )}
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="sidebar-subsession-delete"
-                                            title="Delete session"
-                                            aria-label={`Delete ${sess.title}`}
-                                            onClick={() =>
+                                            onFork={onFork}
+                                            onExport={onExport}
+                                            onRequestDelete={(targetId, title) =>
                                               setPending({
-                                                id: sess.runtimeSessionId,
-                                                title: sess.title,
+                                                id: targetId,
+                                                title,
                                                 busy: false,
                                                 error: "",
                                                 isAgentSession: true,
                                                 teamId: team.id,
                                               })
                                             }
-                                          >
-                                            <Trash2 size={11} aria-hidden="true" />
-                                          </button>
-                                        </div>
-                                      );
-                                    })}
-                                    <button
-                                      type="button"
-                                      className="sidebar-subsession-empty"
-                                      onClick={() =>
-                                        agents.onOpenMemberChat?.({
-                                          teamId: team.id,
-                                          agentId: member.agentId,
-                                          forceNew: true,
-                                        })
-                                      }
-                                    >
-                                      <Plus size={11} aria-hidden="true" />
-                                      <span>New session</span>
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                                          />
+                                        );
+                                      })}
+                                      {moreMemberSessions > 0 && (
+                                        <button
+                                          type="button"
+                                          className="sidebar-load-more"
+                                          onClick={() => bumpSessionLimit(memberLimitKey)}
+                                        >
+                                          <span>View more sessions</span>
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="sidebar-subsession-empty"
+                                        onClick={() =>
+                                          agents.onOpenMemberChat?.({
+                                            teamId: team.id,
+                                            agentId: member.agentId,
+                                            forceNew: true,
+                                          })
+                                        }
+                                      >
+                                        <Plus size={12} aria-hidden="true" />
+                                        <span>New session</span>
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       ) : (
         <>
           <div className="sidebar-head">

@@ -62,7 +62,7 @@ appRoot.innerHTML = `
             </section>
           </div>
         </div>
-        <div id="sidebar-agents" class="sidebar-agents panel-scroll" aria-label="Multi-agent navigation" hidden></div>
+        <div id="sidebar-agents" class="sidebar-agents" aria-label="Multi-agent navigation" hidden></div>
         <div class="sidebar-footer"><button id="open-usage" type="button" class="sidebar-footer-button">${renderIcon(ChartNoAxesColumn)}<span>Usage</span></button></div>
       </aside>
       <section class="conversation">
@@ -195,6 +195,7 @@ export const sidebarModeAgents = requiredElement<HTMLButtonElement>("sidebar-mod
 export const sidebarModeAgentsBadges = requiredElement("sidebar-mode-agents-badges")
 export const sidebarWorkspacesPane = requiredElement("sidebar-workspaces-pane")
 export const sidebarAgents = requiredElement("sidebar-agents")
+export const conversationHead = appRoot.querySelector<HTMLElement>(".conversation-head")!
 export const sessionAgentContext = requiredElement("session-agent-context")
 export const sessionTitle = requiredElement("session-title")
 export const agentsSurface = requiredElement("agents-surface")

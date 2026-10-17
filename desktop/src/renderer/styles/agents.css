@@ -43,7 +43,8 @@
   gap: 4px;
 }
 
-.sidebar-workspaces-pane {
+.sidebar-workspaces-pane,
+.sidebar-agents {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -52,17 +53,13 @@
 }
 
 .sidebar-workspaces-pane[hidden],
-.sidebar-agents[hidden] {
+.sidebar-agents[hidden],
+.conversation-head[hidden],
+.stream-wrap[hidden],
+.composer-region[hidden],
+.session-agent-context[hidden],
+.agents-surface[hidden] {
   display: none !important;
-}
-
-.sidebar-agents {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  padding: 0 0 12px;
-  overflow-y: auto;
 }
 
 .sidebar-global-nav {
@@ -127,14 +124,6 @@
   min-width: 0;
 }
 
-.sidebar-agents .project-trigger {
-  padding-right: 92px;
-}
-
-.sidebar-agents .member-project-item > .project-row > .project-trigger {
-  padding-right: 36px;
-}
-
 .sidebar-agents .member-project-item > .project-row .project-name {
   font-size: 13px;
 }
@@ -142,53 +131,6 @@
 .sidebar-agents .project-item.is-selected-team > .project-row > .project-trigger,
 .sidebar-agents .project-item.is-selected-member > .project-row > .project-trigger {
   background: var(--fill-2);
-}
-
-.sidebar-agents .project-actions-inline {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.project-action-pill {
-  height: 22px;
-  padding: 0 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 500;
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity var(--dur-hover) var(--ease),
-    background-color var(--dur-hover) var(--ease),
-    border-color var(--dur-hover) var(--ease),
-    color var(--dur-hover) var(--ease);
-}
-
-.project-row:hover .project-action-pill,
-.project-row:focus-within .project-action-pill,
-.project-action-pill.is-active {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.project-action-pill:hover {
-  border-color: var(--line-strong);
-  background: var(--fill-2);
-  color: var(--text);
-}
-
-.project-action-pill.is-active {
-  border-color: var(--line-strong);
-  background: var(--accent-soft);
-  color: var(--text);
-  font-weight: 600;
 }
 
 .sidebar-mini-dot.working {

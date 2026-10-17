@@ -1,5 +1,7 @@
 import {
   activeBackgroundCount,
+  buildTeamSummary,
+  DEFAULT_SIDEBAR_SESSIONS_LIMIT,
   inboxBadgeCount,
   mergeManagerSessions,
   mergeTeamSessions,
@@ -18,6 +20,7 @@ import { createConversation } from "../timeline-model.ts"
 import {
   agentsSurface,
   composerRegion,
+  conversationHead,
   prompt,
   sessionAgentContext,
   sidebarAgents,
@@ -28,12 +31,13 @@ import {
   sidebarWorkspacesPane,
   streamWrap,
 } from "./dom.ts"
+import { loadDirectory } from "./files-panel.ts"
 import { asRecord, asRecordText } from "./html.ts"
 import { showToast } from "./overlays.ts"
 import { loadReplay, resetConversationPresentation, runAction } from "./runtime.ts"
-import { loadSessions, restoreProjectDraft } from "./sessions.ts"
+import { exportSessionReplay, forkSession, loadSessions, restoreProjectDraft } from "./sessions.ts"
 import { render, scheduleRender } from "./shell.ts"
-import { state } from "./state.ts"
+import { state, vars } from "./state.ts"
 
 let lastSidebarKey = ""
 let lastSurfaceKey = ""
@@ -115,8 +119,9 @@ export function renderAgentsUI() {
     bgCount > 0 ? `<span class="sidebar-nav-badge working" title="${bgCount} active runs">● ${bgCount}</span>` : "",
   ].join("")
 
-  // Toggle center-stage surface vs conversation stream + composer
+  // Toggle center-stage dedicated panel vs conversation header + stream + composer
   agentsSurface.hidden = !isAgentSurface
+  if (conversationHead) conversationHead.hidden = isAgentSurface
   streamWrap.hidden = isAgentSurface
   if (composerRegion) composerRegion.hidden = isAgentSurface
 
@@ -149,6 +154,11 @@ export function renderAgentsUI() {
     collapsed: [...state.collapsedTeams],
     expandedMembers: [...state.expandedSidebarMembers],
     managerExpanded: state.managerExpanded,
+    itemMenuKey: state.agentItemMenuKey,
+    sessionMenuId: state.sessionMenuId,
+    sessionDeleteConfirmId: state.sessionDeleteConfirmId,
+    sessionDeleteBusyId: state.sessionDeleteBusyId,
+    sessionLimits: state.agentSessionLimits,
     teamSessionCounts: Object.entries(state.teamSessionsByTeam).map(([k, v]) => `${k}:${v.length}`),
     mgrSessionCount: state.managerSessions.length,
     archiveCount: state.archivedTeams.length,
@@ -168,6 +178,11 @@ export function renderAgentsUI() {
       managerSessions: state.managerSessions,
       archivedTeams: state.archivedTeams,
       viewedSessionId: state.viewedSessionId,
+      itemMenuKey: state.agentItemMenuKey,
+      sessionMenuId: state.sessionMenuId,
+      sessionDeleteConfirmId: state.sessionDeleteConfirmId,
+      sessionDeleteBusyId: state.sessionDeleteBusyId,
+      sessionLimits: state.agentSessionLimits,
       newTeamOpen: state.newTeamOpen,
       busy: state.agentsBusy,
     })
@@ -182,6 +197,7 @@ export function renderAgentsUI() {
       inboxTask: state.inboxSelectedTaskId,
       viewedSessionId: state.viewedSessionId,
       expandedOrg: [...state.expandedOrgMembers],
+      sessionLimits: state.agentSessionLimits,
       teamSessionCounts: Object.entries(state.teamSessionsByTeam).map(([k, v]) => `${k}:${v.length}`),
       mgrSessionCount: state.managerSessions.length,
       archiveCount: state.archivedTeams.length,
@@ -199,6 +215,7 @@ export function renderAgentsUI() {
           teamSessions: state.teamSessionsByTeam[state.agentSurface.teamId] || [],
           expandedOrgMembers: state.expandedOrgMembers,
           viewedSessionId: state.viewedSessionId,
+          sessionLimits: state.agentSessionLimits,
           busy: state.agentsBusy,
           artifactPreview: state.artifactPreview,
         })
@@ -239,6 +256,9 @@ export function openTeamSurface(teamId: string, tab: "organization" | "tasks" = 
   state.sidebarMode = "agents"
   state.artifactPreview = null
   state.headerSessionsMenuOpen = false
+  state.agentItemMenuKey = ""
+  state.sessionMenuId = ""
+  state.collapsedTeams.delete(teamId)
   state.agentSurface = {
     kind: "team",
     teamId,
@@ -264,6 +284,8 @@ export async function openManagedAgentChat(options: {
   state.agentsBusy = true
   state.sidebarMode = "agents"
   state.headerSessionsMenuOpen = false
+  state.agentItemMenuKey = ""
+  state.sessionMenuId = ""
   state.notice = ""
   render()
   try {
@@ -341,9 +363,18 @@ export async function openManagedAgentChat(options: {
       }
     }
 
+    const folderChanged = state.viewedProjectPath !== workspaceRoot
     state.agentSurface = { kind: "chat" }
     state.chatProjectPath = workspaceRoot
     state.viewedProjectPath = workspaceRoot
+    if (folderChanged) {
+      state.fileListings = {}
+      state.expandedDirectories = new Set()
+      state.filePreview = undefined
+      if (state.inspectorOpen && state.inspectorTab === "files") {
+        void loadDirectory("").catch(() => {})
+      }
+    }
 
     if (runtimeSessionId) {
       state.viewedSessionId = runtimeSessionId
@@ -387,6 +418,14 @@ async function runManagementOp(op: Record<string, unknown>, toastMessage = "") {
   }
 }
 
+function resetAgentSessionDeleteConfirm() {
+  state.sessionDeleteConfirmId = ""
+  if (vars.deleteConfirmTimer) {
+    clearTimeout(vars.deleteConfirmTimer)
+    vars.deleteConfirmTimer = undefined
+  }
+}
+
 export function bindAgentsEvents(): () => void {
   const handleModeClick = (event: MouseEvent) => {
     const target = event.target as HTMLElement
@@ -394,6 +433,8 @@ export function bindAgentsEvents(): () => void {
     if (!modeBtn) return
     const nextMode = modeBtn.dataset.sidebarMode === "agents" ? "agents" : "workspaces"
     state.sidebarMode = nextMode
+    state.agentItemMenuKey = ""
+    state.sessionMenuId = ""
     if (nextMode === "workspaces" && state.agentSurface.kind !== "chat") {
       state.agentSurface = { kind: "chat" }
     }
@@ -403,8 +444,96 @@ export function bindAgentsEvents(): () => void {
   const handleContainerClick = (event: MouseEvent) => {
     const target = event.target as HTMLElement
 
+    if (target.closest("[data-agent-top-new-chat]")) {
+      state.agentItemMenuKey = ""
+      state.sessionMenuId = ""
+      const chatCtx = currentSessionAgentContext()
+      if (chatCtx.kind === "member") {
+        runAction(() =>
+          openManagedAgentChat({
+            teamId: chatCtx.teamId,
+            agentId: chatCtx.agentId,
+            resumeLatest: false,
+          }),
+        )
+        return
+      }
+      if (state.agentSurface.kind === "team") {
+        const summary = buildTeamSummary(
+          state.agentsSnapshot,
+          state.agentSurface.teamId,
+          state.teamSessionsByTeam[state.agentSurface.teamId] || [],
+        )
+        if (summary?.leader) {
+          runAction(() =>
+            openManagedAgentChat({
+              teamId: summary.team.id,
+              agentId: summary.leader!.agentId,
+              resumeLatest: false,
+            }),
+          )
+          return
+        }
+      }
+      runAction(() => openManagedAgentChat({ manager: true, resumeLatest: false }))
+      return
+    }
+
     if (target.closest("[data-header-toggle-sessions]")) {
       state.headerSessionsMenuOpen = !state.headerSessionsMenuOpen
+      render()
+      return
+    }
+
+    const itemMenuBtn = target.closest<HTMLElement>("[data-agent-item-menu]")
+    if (itemMenuBtn?.dataset.agentItemMenu) {
+      const key = itemMenuBtn.dataset.agentItemMenu
+      state.agentItemMenuKey = state.agentItemMenuKey === key ? "" : key
+      state.sessionMenuId = ""
+      resetAgentSessionDeleteConfirm()
+      render()
+      return
+    }
+
+    const sessMenuBtn = target.closest<HTMLElement>("[data-agent-session-menu]")
+    if (sessMenuBtn?.dataset.agentSessionMenu) {
+      const sid = sessMenuBtn.dataset.agentSessionMenu
+      state.agentItemMenuKey = ""
+      resetAgentSessionDeleteConfirm()
+      state.sessionMenuId = state.sessionMenuId === sid ? "" : sid
+      render()
+      return
+    }
+
+    const forkBtn = target.closest<HTMLElement>("[data-agent-session-fork]")
+    if (forkBtn?.dataset.agentSessionFork) {
+      const forkId = forkBtn.dataset.agentSessionFork
+      state.sessionMenuId = ""
+      resetAgentSessionDeleteConfirm()
+      render()
+      runAction(() => forkSession(forkId), forkId)
+      return
+    }
+
+    const exportBtn = target.closest<HTMLElement>("[data-agent-session-export]")
+    if (exportBtn?.dataset.agentSessionExport) {
+      const exportId = exportBtn.dataset.agentSessionExport
+      const title = exportBtn.dataset.sessionTitle || "Rind conversation"
+      state.sessionMenuId = ""
+      resetAgentSessionDeleteConfirm()
+      render()
+      runAction(() => exportSessionReplay(exportId, title))
+      return
+    }
+
+    const moreSessionsBtn = target.closest<HTMLElement>("[data-agent-more-sessions]")
+    if (moreSessionsBtn?.dataset.agentMoreSessions) {
+      const key = moreSessionsBtn.dataset.agentMoreSessions
+      const current = state.agentSessionLimits[key] || DEFAULT_SIDEBAR_SESSIONS_LIMIT
+      state.agentSessionLimits = {
+        ...state.agentSessionLimits,
+        [key]: current + DEFAULT_SIDEBAR_SESSIONS_LIMIT,
+      }
       render()
       return
     }
@@ -414,11 +543,14 @@ export function bindAgentsEvents(): () => void {
       const next = surfaceBtn.dataset.sidebarSurface
       state.artifactPreview = null
       state.headerSessionsMenuOpen = false
+      state.agentItemMenuKey = ""
+      state.sessionMenuId = ""
       if (next === "inbox") {
         state.sidebarMode = "agents"
         state.agentSurface = { kind: "inbox" }
       } else if (next === "manager") {
         state.sidebarMode = "agents"
+        state.managerExpanded = true
         state.agentSurface = { kind: "manager" }
       } else if (next === "background") {
         state.sidebarMode = "agents"
@@ -434,17 +566,28 @@ export function bindAgentsEvents(): () => void {
     }
 
     if (target.closest("[data-sidebar-toggle-manager]")) {
-      state.managerExpanded = !state.managerExpanded
+      state.agentItemMenuKey = ""
+      state.sessionMenuId = ""
+      if (!state.managerExpanded) {
+        state.managerExpanded = true
+        state.agentSurface = { kind: "manager" }
+      } else if (state.agentSurface.kind !== "manager") {
+        state.agentSurface = { kind: "manager" }
+      } else {
+        state.managerExpanded = false
+      }
       render()
       return
     }
 
     if (target.closest("[data-sidebar-open-manager]")) {
+      state.agentItemMenuKey = ""
       runAction(() => openManagedAgentChat({ manager: true, resumeLatest: true }))
       return
     }
 
     if (target.closest("[data-sidebar-new-manager-session]")) {
+      state.agentItemMenuKey = ""
       runAction(() => openManagedAgentChat({ manager: true, resumeLatest: false }))
       return
     }
@@ -452,6 +595,8 @@ export function bindAgentsEvents(): () => void {
     const openMgrSessBtn = target.closest<HTMLElement>("[data-sidebar-open-manager-session]")
     if (openMgrSessBtn?.dataset.sidebarOpenManagerSession) {
       const sid = openMgrSessBtn.dataset.sidebarOpenManagerSession
+      state.agentItemMenuKey = ""
+      state.sessionMenuId = ""
       runAction(() => openManagedAgentChat({ manager: true, existingRuntimeSessionId: sid, resumeLatest: false }))
       return
     }
@@ -459,6 +604,7 @@ export function bindAgentsEvents(): () => void {
     const toggleNewTeamBtn = target.closest<HTMLElement>("[data-sidebar-toggle-new-team]")
     if (toggleNewTeamBtn) {
       state.newTeamOpen = !state.newTeamOpen
+      state.agentItemMenuKey = ""
       render()
       return
     }
@@ -466,8 +612,62 @@ export function bindAgentsEvents(): () => void {
     const toggleTeamCollapseBtn = target.closest<HTMLElement>("[data-sidebar-toggle-team]")
     if (toggleTeamCollapseBtn?.dataset.sidebarToggleTeam) {
       const teamId = toggleTeamCollapseBtn.dataset.sidebarToggleTeam
-      if (state.collapsedTeams.has(teamId)) state.collapsedTeams.delete(teamId)
-      else state.collapsedTeams.add(teamId)
+      const isCollapsed = state.collapsedTeams.has(teamId)
+      const isShowingTeam = state.agentSurface.kind === "team" && state.agentSurface.teamId === teamId
+      state.agentItemMenuKey = ""
+      state.sessionMenuId = ""
+      if (isCollapsed) {
+        state.collapsedTeams.delete(teamId)
+        openTeamSurface(teamId, "organization")
+      } else if (!isShowingTeam) {
+        openTeamSurface(teamId, "organization")
+      } else {
+        state.collapsedTeams.add(teamId)
+        render()
+      }
+      return
+    }
+
+    const teamMenuActionBtn = target.closest<HTMLElement>("[data-sidebar-team-action]")
+    if (teamMenuActionBtn?.dataset.sidebarTeamAction && teamMenuActionBtn.dataset.teamId) {
+      const action = teamMenuActionBtn.dataset.sidebarTeamAction
+      const teamId = teamMenuActionBtn.dataset.teamId
+      state.agentItemMenuKey = ""
+      state.collapsedTeams.delete(teamId)
+      state.agentSurface = {
+        kind: "team",
+        teamId,
+        tab: "organization",
+        assigneeFilter: "",
+        selectedTaskId: "",
+        addMemberOpen: action === "add-member",
+        memberMode: "workspace",
+        assignOpen: action === "assign",
+        assignAgentId: "",
+        deleteConfirmOpen: action === "delete",
+      }
+      render()
+      return
+    }
+
+    const memberAssignBtn = target.closest<HTMLElement>("[data-sidebar-member-assign]")
+    if (memberAssignBtn?.dataset.sidebarMemberAssign && memberAssignBtn.dataset.teamId) {
+      const agentId = memberAssignBtn.dataset.sidebarMemberAssign
+      const teamId = memberAssignBtn.dataset.teamId
+      state.agentItemMenuKey = ""
+      state.collapsedTeams.delete(teamId)
+      state.agentSurface = {
+        kind: "team",
+        teamId,
+        tab: "organization",
+        assigneeFilter: "",
+        selectedTaskId: "",
+        addMemberOpen: false,
+        memberMode: "workspace",
+        assignOpen: true,
+        assignAgentId: agentId,
+        deleteConfirmOpen: false,
+      }
       render()
       return
     }
@@ -475,6 +675,8 @@ export function bindAgentsEvents(): () => void {
     const toggleMemberBtn = target.closest<HTMLElement>("[data-sidebar-toggle-member]")
     if (toggleMemberBtn?.dataset.sidebarToggleMember) {
       const memberKey = toggleMemberBtn.dataset.sidebarToggleMember
+      state.agentItemMenuKey = ""
+      state.sessionMenuId = ""
       if (state.expandedSidebarMembers.has(memberKey)) state.expandedSidebarMembers.delete(memberKey)
       else state.expandedSidebarMembers.add(memberKey)
       render()
@@ -502,6 +704,7 @@ export function bindAgentsEvents(): () => void {
     if (newSessionBtn?.dataset.agentNewSession) {
       const agentId = newSessionBtn.dataset.agentNewSession
       const teamId = newSessionBtn.dataset.agentTeam || ""
+      state.agentItemMenuKey = ""
       runAction(() =>
         openManagedAgentChat({
           teamId,
@@ -515,14 +718,36 @@ export function bindAgentsEvents(): () => void {
     const deleteSessionBtn = target.closest<HTMLElement>("[data-agent-delete-session]")
     if (deleteSessionBtn?.dataset.agentDeleteSession) {
       const runtimeSessionId = deleteSessionBtn.dataset.agentDeleteSession
-      runAction(async () => {
-        await runManagementOp({ op: "deleteSession", runtimeSessionId }, "Conversation deleted.")
-        if (state.viewedSessionId === runtimeSessionId) {
-          state.viewedSessionId = ""
-          state.conversation = createConversation()
-          resetConversationPresentation()
-        }
+      const insideSessionMenu = Boolean(deleteSessionBtn.closest(".session-menu"))
+      if (insideSessionMenu && state.sessionDeleteConfirmId !== runtimeSessionId) {
+        resetAgentSessionDeleteConfirm()
+        state.sessionDeleteConfirmId = runtimeSessionId
         render()
+        vars.deleteConfirmTimer = setTimeout(() => {
+          if (state.sessionDeleteConfirmId === runtimeSessionId) {
+            state.sessionDeleteConfirmId = ""
+            render()
+          }
+        }, 4000)
+        return
+      }
+      resetAgentSessionDeleteConfirm()
+      state.sessionMenuId = ""
+      state.sessionDeleteBusyId = runtimeSessionId
+      render()
+      runAction(async () => {
+        try {
+          await runManagementOp({ op: "deleteSession", runtimeSessionId }, "Session deleted.")
+          await window.api.sessions.remove(runtimeSessionId).catch(() => {})
+          if (state.viewedSessionId === runtimeSessionId) {
+            state.viewedSessionId = ""
+            state.conversation = createConversation()
+            resetConversationPresentation()
+          }
+        } finally {
+          state.sessionDeleteBusyId = ""
+          render()
+        }
       })
       return
     }
@@ -532,6 +757,8 @@ export function bindAgentsEvents(): () => void {
       const agentId = chatBtn.dataset.agentChat
       const teamId = chatBtn.dataset.agentTeam || ""
       const existingRuntimeSessionId = chatBtn.dataset.agentSession || ""
+      state.agentItemMenuKey = ""
+      state.sessionMenuId = ""
       runAction(() =>
         openManagedAgentChat({
           teamId,
@@ -944,10 +1171,26 @@ export function bindAgentsEvents(): () => void {
   }
 
   const handleDocumentPointerDown = (event: MouseEvent) => {
-    if (!state.headerSessionsMenuOpen) return
     const target = event.target as HTMLElement
-    if (!target.closest(".header-sessions-dropdown-wrap")) {
+    let changed = false
+    if (state.headerSessionsMenuOpen && !target.closest(".header-sessions-dropdown-wrap")) {
       state.headerSessionsMenuOpen = false
+      changed = true
+    }
+    if (state.agentItemMenuKey && !target.closest(".project-menu-wrap")) {
+      state.agentItemMenuKey = ""
+      changed = true
+    }
+    if (
+      (state.sessionMenuId || state.sessionDeleteConfirmId) &&
+      !target.closest(".session-menu-wrap") &&
+      state.sidebarMode === "agents"
+    ) {
+      resetAgentSessionDeleteConfirm()
+      state.sessionMenuId = ""
+      changed = true
+    }
+    if (changed) {
       render()
     }
   }

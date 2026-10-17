@@ -186,6 +186,13 @@ test("resolveSessionAgentContext identifies team member, manager, and independen
 })
 
 test("pure HTML renderers produce accessible markup for sidebar, team, task drawer, manager, inbox, background, archive, and header sessions switcher", () => {
+  const sixLeadSessions = Array.from({ length: 6 }, (_, idx) => ({
+    runtimeSessionId: `rt-lead-${idx + 1}`,
+    teamId: "team-1",
+    agentId: "agent-lead",
+    title: idx === 0 ? "Architecture kickoff" : `Session ${idx + 1}`,
+    updatedAt: `2026-10-17T1${5 - idx}:00:00Z`,
+  }))
   const sidebarHtml = renderSidebarAgentsHtml({
     snapshot: sampleSnapshot,
     surface: { kind: "chat" },
@@ -194,15 +201,7 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
     expandedSidebarMembers: new Set(["team-1:agent-lead"]),
     managerExpanded: true,
     teamSessionsByTeam: {
-      "team-1": [
-        {
-          runtimeSessionId: "rt-lead-1",
-          teamId: "team-1",
-          agentId: "agent-lead",
-          title: "Architecture kickoff",
-          updatedAt: "2026-10-17T12:00:00Z",
-        },
-      ],
+      "team-1": sixLeadSessions,
     },
     newTeamOpen: true,
     busy: false,
@@ -212,7 +211,14 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
   assert.match(sidebarHtml, /Core Platform/)
   assert.match(sidebarHtml, /frontend-specialist/)
   assert.match(sidebarHtml, /Architecture kickoff/)
+  assert.match(sidebarHtml, /session-item-row/)
+  assert.match(sidebarHtml, /session-menu-trigger/)
+  assert.match(sidebarHtml, /View more sessions/)
+  assert.doesNotMatch(sidebarHtml, /Session 6/)
   assert.doesNotMatch(sidebarHtml, />Board</)
+  assert.doesNotMatch(sidebarHtml, />Coord</)
+  assert.doesNotMatch(sidebarHtml, />Overview</)
+  assert.doesNotMatch(sidebarHtml, /project-action-pill/)
 
   const teamOrgHtml = renderTeamSurfaceHtml({
     snapshot: sampleSnapshot,

@@ -128,6 +128,8 @@ export type AppState = {
   expandedSidebarMembers: Set<string>
   expandedOrgMembers: Set<string>
   managerExpanded: boolean
+  agentItemMenuKey: string
+  agentSessionLimits: Record<string, number>
   headerSessionsMenuOpen: boolean
   newTeamOpen: boolean
   inboxSelectedTaskId: string

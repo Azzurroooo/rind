@@ -506,7 +506,7 @@ export function Shell() {
             </>
           )}
         </main>
-        {!layout.narrow && layout.inspectorVisible && (
+        {isChatSurface && !layout.narrow && layout.inspectorVisible && (
           <ResizeHandle
             label="Resize inspector"
             width={layout.inspectorWidth}
@@ -517,7 +517,7 @@ export function Shell() {
           />
         )}
         <Inspector
-          visible={layout.inspectorVisible}
+          visible={isChatSurface && layout.inspectorVisible}
           tab={layout.inspectorTab}
           onTab={layout.setInspectorTab}
           onClose={layout.closeInspector}
@@ -540,7 +540,10 @@ export function Shell() {
           readFile={actions.readFile}
           fileRequest={fileRequest}
           panelRef={layout.inspectorPanelRef}
-          panelAttrs={panelAttrs({ narrow: layout.narrow, visible: layout.inspectorVisible })}
+          panelAttrs={panelAttrs({
+            narrow: layout.narrow,
+            visible: isChatSurface && layout.inspectorVisible,
+          })}
           style={
             layout.narrow
               ? undefined
