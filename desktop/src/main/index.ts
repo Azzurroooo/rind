@@ -28,6 +28,19 @@ import {
   subscribeRuntime,
   subscribeRuntimeEvents,
 } from "./runtime"
+import {
+  closeManagement,
+  createAgentSession,
+  enrichSessionReplayParams,
+  forwardControlToSharedRuntimeIfNeeded,
+  getManagementState,
+  isManagedWorkspacePath,
+  openAgentSession,
+  requestManagement,
+  subscribeManagement,
+  subscribeSharedRuntimeEvents,
+  type ManagementStatePayload,
+} from "./management"
 
 const appId = "ai.rind.desktop"
 const root = dirname(fileURLToPath(import.meta.url))
@@ -48,11 +61,31 @@ let remoteGateway: DesktopGateway | undefined
 function gateway() {
   remoteGateway ||= new DesktopGateway({
     initialize: initializeRuntime,
-    request: (method, params) => {
+    request: async (method, params) => {
       if (!isRemoteRuntimeMethod(method)) throw new Error("Unsupported remote method.")
-      return requestRuntime(method, params)
+      const nextParams = method === "session/replay"
+        ? await enrichSessionReplayParams(String(params.session_id || ""), params)
+        : params
+      try {
+        return await requestRuntime(method, nextParams)
+      } catch (error: any) {
+        if (error?.name === "TurnNotActive" || error?.name === "QuestionNotFound") {
+          const forwarded = await forwardControlToSharedRuntimeIfNeeded(method, nextParams)
+          if (forwarded !== undefined) return forwarded
+        }
+        throw error
+      }
     },
-    subscribe: subscribeRuntimeEvents,
+    subscribe: (listener) => {
+      const offDirect = subscribeRuntimeEvents(listener)
+      const offShared = subscribeSharedRuntimeEvents(listener)
+      return () => {
+        offDirect()
+        offShared()
+      }
+    },
+    agentsRequest: (method, params) => requestManagement(method, params),
+    subscribeAgents: subscribeManagement,
   }, app.isPackaged ? join(process.resourcesPath, "web") : join(app.getAppPath(), "../frontend-web/dist"),
   (state) => mainWindow?.webContents.send("gateway-changed", state))
   return remoteGateway
@@ -178,9 +211,14 @@ async function requireProject(path: unknown) {
   if (typeof path !== "string" || !path.trim()) throw new Error("Project path is required.")
   const overview = await projectStore().overview()
   const project = overview.projects.find((item) => samePath(item.path, path))
-  if (!project) throw new Error("Choose a registered project before browsing files.")
-  if (!project.available) throw new Error("The selected project folder is unavailable.")
-  return project.path
+  if (project) {
+    if (!project.available) throw new Error("The selected project folder is unavailable.")
+    return project.path
+  }
+  if (await isManagedWorkspacePath(path.trim())) {
+    return path.trim()
+  }
+  throw new Error("Choose a registered project before browsing files.")
 }
 
 function registerIpc() {
@@ -204,13 +242,48 @@ function registerIpc() {
     if (!isDesktopRuntimeMethod(method)) {
       throw new Error("Runtime method is not available to the desktop client.")
     }
-    const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
+    let safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
+    if (method === "session/replay") {
+      safeParams = await enrichSessionReplayParams(String(safeParams.session_id || ""), safeParams)
+    }
     // Return worker errors as a wrapped envelope instead of rejecting: Electron
     // prints a full stack for every rejected ipcMain.handle, which turned
     // expected races (e.g. TurnNotActive after a turn finished) into alarming
     // console noise. The preload bridge unwraps and re-throws for the renderer.
     try {
       return await requestRuntime(method, safeParams)
+    } catch (error: any) {
+      if (error?.name === "TurnNotActive" || error?.name === "QuestionNotFound") {
+        try {
+          const forwarded = await forwardControlToSharedRuntimeIfNeeded(method, safeParams)
+          if (forwarded !== undefined) return forwarded
+        } catch (sharedError) {
+          return wrapRuntimeIpcError(sharedError)
+        }
+      }
+      return wrapRuntimeIpcError(error)
+    }
+  })
+  ipcMain.handle("agents-request", async (_event, method: unknown, params: unknown) => {
+    const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
+    try {
+      return await requestManagement(String(method || ""), safeParams)
+    } catch (error) {
+      return wrapRuntimeIpcError(error)
+    }
+  })
+  ipcMain.handle("agents-open-session", async (_event, params: unknown) => {
+    const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
+    try {
+      return await openAgentSession(safeParams)
+    } catch (error) {
+      return wrapRuntimeIpcError(error)
+    }
+  })
+  ipcMain.handle("agents-create-session", async (_event, params: unknown) => {
+    const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
+    try {
+      return await createAgentSession(safeParams)
     } catch (error) {
       return wrapRuntimeIpcError(error)
     }
@@ -322,6 +395,7 @@ function createMainWindow() {
   win.webContents.once("did-finish-load", () => {
     const snapshot = getRuntimeSnapshot()
     if (snapshot) notifyRuntime(snapshot)
+    notifyAgentsState(getManagementState())
   })
   win.on("focus", () => { windowFocused = true })
   win.on("blur", () => { windowFocused = false })
@@ -339,6 +413,10 @@ function notifyRuntime(snapshot: RuntimeSnapshot) {
 
 function notifyRuntimeEvent(event: RuntimeEvent) {
   mainWindow?.webContents.send("runtime-event", event)
+}
+
+function notifyAgentsState(state: ManagementStatePayload) {
+  mainWindow?.webContents.send("agents-state", state)
 }
 
 function notifyAuthPrompt(prompt: DesktopAuthPrompt) {
@@ -390,6 +468,8 @@ if (!hasLock) {
     app.setAppUserModelId(appId)
     subscribeRuntime(notifyRuntime)
     subscribeRuntimeEvents(notifyRuntimeEvent)
+    subscribeSharedRuntimeEvents(notifyRuntimeEvent)
+    subscribeManagement(notifyAgentsState)
     subscribeAuthPrompts(notifyAuthPrompt)
     subscribeAuthUpdates(notifyAuthUpdate)
     registerIpc()
@@ -422,7 +502,11 @@ if (!hasLock) {
     event.preventDefault()
     if (quitting) return
     quitting = true
-    void (async () => { await remoteGateway?.stop(); await shutdownRuntime() })().finally(() => {
+    void (async () => {
+      await remoteGateway?.stop()
+      await closeManagement()
+      await shutdownRuntime()
+    })().finally(() => {
       runtimeShutdownComplete = true
       app.quit()
     })

@@ -14,10 +14,26 @@ type Bridge = {
   initialize: () => Promise<unknown>
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   subscribe: (listener: (event: RuntimeEvent) => void) => () => void
+  agentsRequest?: (method: string, params: Record<string, unknown>) => Promise<unknown>
+  subscribeAgents?: (listener: (state: unknown) => void) => () => void
 }
 type Client = { subscriptions: Set<string>; pending: Set<string | number>; selected: string; workspace: string; alive: boolean }
 const allowed = new Set(Object.values(runtimeMethods).filter(isRemoteRuntimeMethod))
-const unscoped = new Set(["session/new", "session/list", "rind/usage/summary", "rind/auth/list", "model/list"])
+const unscoped = new Set([
+  "session/new",
+  "session/create",
+  "session/list",
+  "rind/usage/summary",
+  "rind/auth/list",
+  "model/list",
+  "rind/folder_defaults/get",
+  "rind/folder_defaults/set",
+  "rind/folder_defaults/unset",
+  "rind/folder_defaults/resolve",
+  "agents/request",
+  "agents/openSession",
+  "agents/createSession",
+])
 const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2" }
 const secret = () => randomBytes(24).toString("base64url")
 // Packaged Rind clients serve only bundled assets at these fixed origins.
@@ -29,6 +45,7 @@ export class DesktopGateway {
   private server?: Server
   private sockets?: WebSocketServer
   private unsubscribe?: () => void
+  private unsubscribeAgents?: () => void
   private accessCode = ""
   private tickets = new Map<string, number>()
   private attempts = new Map<string, { count: number; expires: number }>()
@@ -107,7 +124,17 @@ export class DesktopGateway {
       }, 30000)
       this.heartbeat.unref()
       this.unsubscribe = this.bridge.subscribe((event) => {
-        for (const [ws, client] of this.clients) if (client.subscriptions.has(event.sessionId)) this.send(ws, { kind: "event", method: "session/update", sequence: event.sequence, durability: event.durability, session_id: event.sessionId, turn_id: event.turnId, event: event.event })
+        const globalEvent = !event.sessionId || event.type === "folder_defaults_changed"
+        for (const [ws, client] of this.clients) {
+          if (globalEvent || client.subscriptions.has(event.sessionId)) {
+            this.send(ws, { kind: "event", method: "session/update", sequence: event.sequence, durability: event.durability, session_id: event.sessionId, turn_id: event.turnId, event: event.event })
+          }
+        }
+      })
+      this.unsubscribeAgents = this.bridge.subscribeAgents?.((state) => {
+        for (const ws of this.clients.keys()) {
+          this.send(ws, { kind: "event", method: "agents/update", event: state })
+        }
       })
       this.publish(); return this.state()
     } catch (error) { await this.stop(); throw error }
@@ -128,6 +155,7 @@ export class DesktopGateway {
   }
   private async close() {
     ++this.epoch; this.unsubscribe?.(); this.unsubscribe = undefined
+    this.unsubscribeAgents?.(); this.unsubscribeAgents = undefined
     clearInterval(this.heartbeat); this.heartbeat = undefined
     this.tickets.clear(); this.attempts.clear(); this.accessCode = ""
     for (const ws of this.clients.keys()) ws.terminate()
@@ -226,7 +254,30 @@ export class DesktopGateway {
       client.selected = String(result.session_id || "")
       client.workspace = String(result.workspace_root || "")
       if (client.selected) client.subscriptions.add(client.selected)
-      return { ...result, methods: [...new Set([...allowed, "initialize", "ping", "session/subscribe", "session/unsubscribe"])], gateway: { desktop: true, files_follow_session: true } }
+      const agentMethods = this.bridge.agentsRequest ? ["agents/request", "agents/openSession", "agents/createSession"] : []
+      const caps = Array.isArray(result.capabilities) ? result.capabilities : []
+      const capabilities = this.bridge.agentsRequest ? [...new Set([...caps, "agents_management"])] : caps
+      return { ...result, capabilities, methods: [...new Set([...allowed, "initialize", "ping", "session/subscribe", "session/unsubscribe", ...agentMethods])], gateway: { desktop: true, files_follow_session: true, agents: Boolean(this.bridge.agentsRequest) } }
+    }
+    if (method === "agents/request" || method === "agents/openSession" || method === "agents/createSession") {
+      if (!this.bridge.agentsRequest) throw new Error("Agents management is not available on this gateway.")
+      if (method === "agents/openSession") {
+        const res = object(await this.bridge.agentsRequest("openSession", params))
+        client.selected = String(res.runtimeSessionId || "")
+        if (typeof res.workspaceRoot === "string" && res.workspaceRoot) client.workspace = res.workspaceRoot
+        if (client.selected && client.subscriptions.size < 128) client.subscriptions.add(client.selected)
+        return res
+      }
+      if (method === "agents/createSession") {
+        const res = object(await this.bridge.agentsRequest("createSession", { ...params, workspace_root: params.workspace_root || client.workspace }))
+        client.selected = String(res.session_id || "")
+        if (typeof res.workspace_root === "string" && res.workspace_root) client.workspace = res.workspace_root
+        if (client.selected && client.subscriptions.size < 128) client.subscriptions.add(client.selected)
+        return res
+      }
+      const op = typeof params.operation === "string" ? params.operation : ""
+      if (!op) throw new Error("agents/request requires operation.")
+      return this.bridge.agentsRequest(op, object(params.params))
     }
     const sessionId = typeof params.session_id === "string" ? params.session_id.trim() : ""
     if (method === "session/unsubscribe") { client.subscriptions.delete(sessionId); return { ok: true } }
@@ -235,24 +286,34 @@ export class DesktopGateway {
       await this.bridge.request("session/subscribe", params); client.subscriptions.add(sessionId); return { ok: true }
     }
     if (method.startsWith("file/")) {
-      if (!["file/list", "file/read", "file/write"].includes(method) || !sessionId) throw new Error("Choose a session before browsing files.")
-      const session = object(await this.bridge.request("session/switch", { session_id: sessionId }))
-      if (typeof session.workspace_root !== "string") throw new Error("Session workspace unavailable.")
-      return workspaceFileRequest(session.workspace_root, method, params)
+      if (!["file/list", "file/read", "file/write"].includes(method)) throw new Error("Choose a session before browsing files.")
+      if (sessionId) {
+        const session = object(await this.bridge.request("session/switch", { session_id: sessionId }))
+        if (typeof session.workspace_root !== "string") throw new Error("Session workspace unavailable.")
+        return workspaceFileRequest(session.workspace_root, method, params)
+      }
+      if (client.workspace && !client.selected) {
+        return workspaceFileRequest(client.workspace, method, params)
+      }
+      throw new Error("Choose a session before browsing files.")
     }
     if (!isRemoteRuntimeMethod(method)) throw new Error("Method is not available through remote access.")
     if (!unscoped.has(method) && !sessionId) throw new Error("session_id is required.")
-    if (method === "session/new") {
+    if (method === "session/new" || method === "session/create") {
       const workspace = typeof params.workspace_root === "string" ? params.workspace_root.trim() : client.workspace
       if (!workspace) throw new Error("Choose a project folder on the Rind computer first.")
-      params = { ...params, workspace_root: workspace }
+      const { external_tools: _ignoredTools, enable_user_question: _ignoredQuestion, ...safeParams } = params
+      params = { ...safeParams, workspace_root: workspace }
+    } else if (method === "session/replay") {
+      const { external_tools: _ignoredTools, enable_user_question: _ignoredQuestion, ...safeParams } = params
+      params = safeParams
     }
     if (sessionId && client.subscriptions.size < 128) client.subscriptions.add(sessionId)
     const result = await this.bridge.request(method, params)
-    if (method === "session/switch" || method === "session/new") {
+    if (method === "session/switch" || method === "session/new" || method === "session/create") {
       client.selected = String(object(result).session_id || sessionId)
       client.workspace = String(object(result).workspace_root || params.workspace_root || client.workspace)
-      if (client.selected) client.subscriptions.add(client.selected)
+      if (client.selected && client.subscriptions.size < 128) client.subscriptions.add(client.selected)
     }
     return result
   }

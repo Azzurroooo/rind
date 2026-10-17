@@ -115,6 +115,24 @@ const api: DesktopApi = {
     list: (projectPath, path = "") => ipcRenderer.invoke("project-files-list", projectPath, path),
     preview: (projectPath, path) => ipcRenderer.invoke("project-files-preview", projectPath, path),
   },
+  agents: {
+    request: async (method, params = {}) => unwrapRuntimeIpcResult(await ipcRenderer.invoke("agents-request", method, params)),
+    openSession: async (params = {}) => unwrapRuntimeIpcResult(await ipcRenderer.invoke("agents-open-session", params)),
+    createSession: async (params = {}) => unwrapRuntimeIpcResult(await ipcRenderer.invoke("agents-create-session", params)),
+    subscribe: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: Record<string, unknown>) => listener(state)
+      ipcRenderer.on("agents-state", handler)
+      void ipcRenderer.invoke("agents-request", "getState", {}).then((raw) => {
+        try {
+          const unwrapped = unwrapRuntimeIpcResult(raw) as Record<string, unknown>
+          if (unwrapped && typeof unwrapped === "object") listener(unwrapped)
+        } catch {
+          // Ignore initial fetch errors; subscription events will follow.
+        }
+      })
+      return () => ipcRenderer.removeListener("agents-state", handler)
+    },
+  },
   quit: () => ipcRenderer.invoke("app-quit"),
   platform: process.platform,
 }

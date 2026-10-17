@@ -205,10 +205,11 @@ export async function startServer(options: { home?: string; python?: string; rep
     const managed = session?.origin === "managed";
     const task = managed && !session.delegationId;
     const tools = toolsFor(manager ? "manager" : "agent", { supervises: Boolean(session?.teamId && supervises(store.state, session.teamId, session.agentId)), task });
+    const nodeEnv = process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {};
     return {
       skill_files: principal.kind === "manager" ? [] : skills.filter(ref => path.isAbsolute(ref)),
-      command: process.execPath, args: [bridge], env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: token },
-      lifecycle: { before: "hostTurnStart", after: "hostTurnEnd", env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: hostToken } },
+      command: process.execPath, args: [bridge], env: { ...nodeEnv, RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: token },
+      lifecycle: { before: "hostTurnStart", after: "hostTurnEnd", env: { ...nodeEnv, RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: hostToken } },
       tools,
       ...(manager ? { instructions: managerInstructions(path.dirname(paths.root)) }
         : managed || !session ? {} : { instructions: memberInstructions(store.state, session) }),

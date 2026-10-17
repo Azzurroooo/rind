@@ -1,13 +1,21 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { isDesktopRuntimeMethod as isRuntimeMethod } from "../src/main/method-policy.ts"
+import { isDesktopRuntimeMethod as isRuntimeMethod, isRemoteRuntimeMethod } from "../src/main/method-policy.ts"
 import { runtimeMethods, sessionScopedMethods } from "../src/preload/types.ts"
 
 test("unblocked desktop methods pass the runtime allowlist", () => {
   const required = [
     "model/effort",
     "session/delete",
+    "session/create",
+    "session/open",
+    "rind/session/deliver",
+    "rind/folder_defaults/get",
+    "rind/folder_defaults/set",
+    "rind/folder_defaults/unset",
+    "rind/folder_defaults/apply",
+    "rind/folder_defaults/resolve",
     "file/write",
     "file/list",
     "file/read",
@@ -24,6 +32,10 @@ test("unblocked desktop methods pass the runtime allowlist", () => {
   for (const method of required) {
     assert.equal(isRuntimeMethod(method), true, `${method} must pass isRuntimeMethod`)
   }
+  // session/open is local-only because external_tools must be configured on the trusted host.
+  assert.equal(isRemoteRuntimeMethod("session/open"), false)
+  assert.equal(isRemoteRuntimeMethod("session/create"), true)
+  assert.equal(isRemoteRuntimeMethod("rind/folder_defaults/get"), true)
 })
 
 test("unknown methods are still rejected", () => {
@@ -37,6 +49,8 @@ test("unknown methods are still rejected", () => {
 test("session-scoped new methods receive session_id automatically", () => {
   for (const method of [
     runtimeMethods.sessionDelete,
+    runtimeMethods.sessionDeliver,
+    runtimeMethods.folderDefaultsApply,
     runtimeMethods.modelEffort,
     runtimeMethods.backgroundList,
     runtimeMethods.backgroundOutput,
@@ -47,8 +61,16 @@ test("session-scoped new methods receive session_id automatically", () => {
   ]) {
     assert.equal(sessionScopedMethods.has(method), true, `${method} must be session-scoped`)
   }
-  // file/* methods are workspace-scoped, not session-scoped.
-  for (const method of [runtimeMethods.fileList, runtimeMethods.fileRead, runtimeMethods.fileWrite]) {
+  // file/* and folder_defaults/{get,set,unset,resolve} methods are workspace-scoped, not session-scoped.
+  for (const method of [
+    runtimeMethods.fileList,
+    runtimeMethods.fileRead,
+    runtimeMethods.fileWrite,
+    runtimeMethods.folderDefaultsGet,
+    runtimeMethods.folderDefaultsSet,
+    runtimeMethods.folderDefaultsUnset,
+    runtimeMethods.folderDefaultsResolve,
+  ]) {
     assert.equal(sessionScopedMethods.has(method), false, `${method} must not be session-scoped`)
   }
 })
