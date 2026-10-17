@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -6,6 +7,12 @@ import react from "@vitejs/plugin-react";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(currentDir, "..");
+const fsAllow = [currentDir, repoRoot];
+try {
+  fsAllow.push(realpathSync(resolve(currentDir, "node_modules")));
+} catch {
+  // Ignore if node_modules does not exist yet
+}
 
 function rindAgentsDevPlugin() {
   return {
@@ -275,6 +282,10 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5173,
+    fs: {
+      strict: false,
+      allow: fsAllow,
+    },
     proxy: {
       "/ws": {
         target: "ws://127.0.0.1:8765",
