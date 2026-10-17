@@ -1566,8 +1566,10 @@ export function renderTaskDrawerHtml(options: {
   task: EnrichedTask | null
   busy: boolean
   artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
+  width?: number
+  expanded?: boolean
 }): string {
-  const { task, busy, artifactPreview } = options
+  const { task, busy, artifactPreview, width, expanded = false } = options
   if (!task) return ""
   const needsUserAnswer = task.status === "blocked" && task.blockedOn?.responder === "user"
   const canReviewReport = task.status === "done" && Boolean(task.report) && !task.parentTaskId
@@ -1581,9 +1583,11 @@ export function renderTaskDrawerHtml(options: {
       : Array.isArray(task.report?.files)
         ? task.report.files
         : []
+  const styleAttr = !expanded && width && width >= 320 ? ` style="width: ${Math.round(width)}px;"` : ""
 
   return `
-    <aside class="agent-task-drawer" aria-label="Task inspection drawer">
+    <aside class="agent-task-drawer${expanded ? " is-expanded" : ""}" aria-label="Task inspection drawer"${styleAttr}>
+      <div class="task-drawer-resize-handle" data-task-drawer-resize="1" role="separator" aria-orientation="vertical" aria-label="Resize task report panel" title="Drag to resize · Double-click to toggle wide view"></div>
       <header class="agent-drawer-head">
         <div class="agent-drawer-title-group">
           <div class="agent-drawer-meta-row">
@@ -1602,7 +1606,10 @@ export function renderTaskDrawerHtml(options: {
             <span>Assignee <strong>${escapeHtml(task.assigneeName)}</strong> (${escapeHtml(task.assigneePosition)})</span>
           </div>
         </div>
-        <button type="button" class="icon-button" data-task-drawer-close="1" aria-label="Close task drawer">✕</button>
+        <div class="agent-drawer-head-actions">
+          <button type="button" class="icon-button" data-task-drawer-expand="1" aria-pressed="${expanded}" aria-label="${expanded ? "Restore panel width" : "Expand for wide reading"}" title="${expanded ? "Restore panel width" : "Expand for wide reading"}">${expanded ? "❐" : "⤢"}</button>
+          <button type="button" class="icon-button" data-task-drawer-close="1" aria-label="Close task drawer" title="Close (Esc)">✕</button>
+        </div>
       </header>
       <div class="agent-drawer-body panel-scroll">
         <div class="agent-drawer-actions-bar">
@@ -1761,6 +1768,8 @@ export function renderTeamSurfaceHtml(options: {
   sessionLimits?: Record<string, number>
   busy: boolean
   artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
+  drawerWidth?: number
+  drawerExpanded?: boolean
 }): string {
   const snapshot = normalizeAgentsSnapshot(options.snapshot)
   const { surface, busy, artifactPreview } = options
@@ -1929,7 +1938,13 @@ export function renderTeamSurfaceHtml(options: {
         ${assignFormHtml}
         <div class="agent-surface-body panel-scroll">${bodyHtml}</div>
       </div>
-      ${renderTaskDrawerHtml({ task: selectedTask, busy, artifactPreview })}
+      ${renderTaskDrawerHtml({
+        task: selectedTask,
+        busy,
+        artifactPreview,
+        width: options.drawerWidth,
+        expanded: options.drawerExpanded,
+      })}
     </div>
   `
 }
@@ -2026,6 +2041,8 @@ export function renderInboxSurfaceHtml(options: {
   selectedTaskId: string
   busy: boolean
   artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
+  drawerWidth?: number
+  drawerExpanded?: boolean
 }): string {
   const snapshot = normalizeAgentsSnapshot(options.snapshot)
   const sections = buildInboxSections(snapshot)
@@ -2124,7 +2141,13 @@ export function renderInboxSurfaceHtml(options: {
           }
         </div>
       </div>
-      ${renderTaskDrawerHtml({ task: selectedTask, busy: options.busy, artifactPreview: options.artifactPreview })}
+      ${renderTaskDrawerHtml({
+        task: selectedTask,
+        busy: options.busy,
+        artifactPreview: options.artifactPreview,
+        width: options.drawerWidth,
+        expanded: options.drawerExpanded,
+      })}
     </div>
   `
 }

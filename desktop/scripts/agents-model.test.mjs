@@ -348,4 +348,39 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
   assert.match(breadcrumbHtml, /Engineering Lead · Leader/)
   assert.match(breadcrumbHtml, /Sessions \(1\)/)
   assert.match(breadcrumbHtml, /Architecture kickoff/)
+
+  const customWidthDrawerHtml = renderTeamSurfaceHtml({
+    snapshot: sampleSnapshot,
+    surface: {
+      kind: "team",
+      teamId: "team-1",
+      tab: "tasks",
+      assigneeFilter: "",
+      selectedTaskId: "task-2",
+      addMemberOpen: false,
+      memberMode: "workspace",
+      assignOpen: false,
+      assignAgentId: "",
+      deleteConfirmOpen: false,
+    },
+    busy: false,
+    artifactPreview: null,
+    drawerWidth: 560,
+    drawerExpanded: false,
+  })
+  assert.match(customWidthDrawerHtml, /data-task-drawer-resize="1"/)
+  assert.match(customWidthDrawerHtml, /data-task-drawer-expand="1"/)
+  assert.match(customWidthDrawerHtml, /style="width: 560px;"/)
+
+  const expandedDrawerHtml = renderInboxSurfaceHtml({
+    snapshot: sampleSnapshot,
+    selectedTaskId: "task-2",
+    busy: false,
+    artifactPreview: null,
+    drawerWidth: 560,
+    drawerExpanded: true,
+  })
+  assert.match(expandedDrawerHtml, /agent-task-drawer is-expanded/)
+  assert.match(expandedDrawerHtml, /Restore panel width/)
 })
+

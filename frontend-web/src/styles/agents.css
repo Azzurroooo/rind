@@ -124,7 +124,7 @@
 /* --- Sidebar Mode Switcher (Workspaces vs Agents & Teams) --- */
 .sidebar-mode-switcher {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--line);
@@ -135,15 +135,39 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
+  min-width: 0;
   height: 28px;
   padding: 0 6px;
+  overflow: hidden;
   border: 0;
   border-radius: var(--radius-chip);
   background: transparent;
   color: var(--muted);
-  font-size: var(--text-meta);
+  font-size: 11px;
   font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+.sidebar-mode-tab svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+.sidebar-mode-tab > span:not(.sidebar-nav-badge) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-mode-tab .sidebar-nav-badge {
+  margin-left: 0;
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 1;
   white-space: nowrap;
 }
 .sidebar-mode-tab:hover {
@@ -1212,13 +1236,47 @@ button.header-agent-pill:hover {
 
 /* --- Task Report Drawer --- */
 .task-drawer {
+  position: relative;
   flex: none;
-  width: min(460px, 46vw);
+  width: min(480px, 48vw);
+  min-width: 320px;
+  max-width: 82%;
   min-height: 0;
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--line);
   background: var(--surface);
+  transition: width 140ms var(--ease);
+}
+.task-drawer.is-resizing {
+  transition: none;
+}
+.task-drawer.is-expanded {
+  width: min(860px, 76%) !important;
+}
+.task-drawer-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  z-index: 10;
+  width: 8px;
+  cursor: col-resize;
+}
+.task-drawer-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: background-color var(--motion-fast) var(--ease);
+}
+.task-drawer-resize-handle:hover::after,
+.task-drawer.is-resizing .task-drawer-resize-handle::after {
+  background: var(--accent);
 }
 .task-drawer-head {
   flex: none;
@@ -1228,6 +1286,12 @@ button.header-agent-pill:hover {
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--line);
+}
+.task-drawer-head-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
 }
 .task-drawer-title-group {
   display: flex;

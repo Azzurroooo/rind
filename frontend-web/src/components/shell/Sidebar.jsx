@@ -228,15 +228,15 @@ export function Sidebar({
             className={`sidebar-mode-tab ${mode === "agents" ? "active" : ""}`}
             onClick={() => setMode("agents")}
           >
-            <Users size={14} aria-hidden="true" />
+            <Users size={13} aria-hidden="true" />
             <span>Agents & Teams</span>
             {totalAttention > 0 ? (
               <span className="sidebar-nav-badge attention" title={`${totalAttention} item(s) need attention`}>
-                ! {totalAttention}
+                !{totalAttention}
               </span>
             ) : totalWorking > 0 ? (
               <span className="sidebar-nav-badge working" title={`${totalWorking} active run(s)`}>
-                ● {totalWorking}
+                ●{totalWorking}
               </span>
             ) : null}
           </button>

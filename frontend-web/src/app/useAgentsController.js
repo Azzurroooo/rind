@@ -46,18 +46,24 @@ export function useAgentsController(ctx) {
     };
   }, []);
 
+  const teamsRef = useRef(snapshot.teams);
+  teamsRef.current = snapshot.teams;
+
   const acceptPayload = useCallback((payload) => {
     if (!mountedRef.current || !payload || typeof payload !== "object") return;
     if (payload.snapshot) {
-      setSnapshot(normalizeAgentsSnapshot(payload.snapshot));
+      const normalized = normalizeAgentsSnapshot(payload.snapshot);
+      setSnapshot((prev) => (JSON.stringify(prev) === JSON.stringify(normalized) ? prev : normalized));
     } else if (Array.isArray(payload.teams)) {
-      setSnapshot(normalizeAgentsSnapshot(payload));
+      const normalized = normalizeAgentsSnapshot(payload);
+      setSnapshot((prev) => (JSON.stringify(prev) === JSON.stringify(normalized) ? prev : normalized));
     }
     if (typeof payload.connection === "string") {
-      setConnection(payload.connection);
+      setConnection((prev) => (prev === payload.connection ? prev : payload.connection));
     }
     if ("service" in payload) {
-      setService(payload.service || null);
+      const nextService = payload.service || null;
+      setService((prev) => (JSON.stringify(prev) === JSON.stringify(nextService) ? prev : nextService));
     }
   }, []);
 
@@ -138,7 +144,7 @@ export function useAgentsController(ctx) {
       if (connection !== "connected") return;
       const teamIds = Array.isArray(targetTeamIds)
         ? targetTeamIds
-        : snapshot.teams.map((t) => String(t.id));
+        : (teamsRef.current || []).map((t) => String(t.id));
       try {
         const [mgrRes, ...teamResults] = await Promise.all([
           requestAgent("listSessions", { manager: true }).catch(() => ({ sessions: [] })),
@@ -150,22 +156,28 @@ export function useAgentsController(ctx) {
         ]);
         if (!mountedRef.current) return;
         if (Array.isArray(mgrRes?.sessions)) {
-          setManagerHistory(mgrRes.sessions);
+          setManagerHistory((prev) =>
+            JSON.stringify(prev) === JSON.stringify(mgrRes.sessions) ? prev : mgrRes.sessions,
+          );
         }
         if (teamResults.length > 0) {
           setTeamHistories((prev) => {
+            let changed = false;
             const next = { ...prev };
             for (const item of teamResults) {
-              next[item.teamId] = item.sessions;
+              if (JSON.stringify(next[item.teamId] || []) !== JSON.stringify(item.sessions)) {
+                next[item.teamId] = item.sessions;
+                changed = true;
+              }
             }
-            return next;
+            return changed ? next : prev;
           });
         }
       } catch {
         // Session history refresh is advisory.
       }
     },
-    [connection, requestAgent, snapshot.teams],
+    [connection, requestAgent],
   );
 
   // Refresh saved session histories whenever teams or snapshot sequence changes
@@ -224,12 +236,23 @@ export function useAgentsController(ctx) {
   );
 
   const selectTask = useCallback((teamId, taskId) => {
-    setSurface((current) => ({
-      kind: "team",
-      teamId: String(teamId || (current.kind === "team" ? current.teamId : "")),
-      tab: "tasks",
-      selectedTaskId: taskId ? String(taskId) : "",
-    }));
+    setSurface((current) => {
+      const resolvedTeamId = String(teamId || (current.kind === "team" ? current.teamId : ""));
+      const nextTaskId = taskId ? String(taskId) : "";
+      const toggledTaskId =
+        current.kind === "team" &&
+        current.teamId === resolvedTeamId &&
+        nextTaskId &&
+        current.selectedTaskId === nextTaskId
+          ? ""
+          : nextTaskId;
+      return {
+        kind: "team",
+        teamId: resolvedTeamId,
+        tab: "tasks",
+        selectedTaskId: toggledTaskId,
+      };
+    });
   }, []);
 
   const openAgentConversation = useCallback(

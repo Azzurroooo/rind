@@ -803,6 +803,13 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
               requireValue(!Object.values(state.runs).some(r => r.sessionId === existing.id && ["starting", "running"].includes(r.status)), "SESSION_PRIVATE_HOST", "This session is running in a private Worker. Finish it before moving to the shared Runtime.");
               for (const run of Object.values(state.runs)) if (run.sessionId === existing.id && !run.taskId && !run.delegationId && run.status === "unknown") run.status = "failed";
               existing.shared = true;
+            } else if (p.shared === false) {
+              for (const s of Object.values(state.sessions)) {
+                if (s.origin === "direct" && s.runtimeSessionId === p.runtimeSessionId && s.agentId === agent.id && s.teamId === p.teamId && !Object.values(state.runs).some(r => r.sessionId === s.id && live.has(r.id))) {
+                  delete s.shared;
+                  for (const run of Object.values(state.runs)) if (run.sessionId === s.id && !run.taskId && !run.delegationId && run.status === "unknown") run.status = "failed";
+                }
+              }
             }
             return existing;
           }
@@ -815,7 +822,13 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         const session = ownSession(state, actor, p.sessionId);
         requireValue(!session.runtimeSessionId || session.runtimeSessionId === p.runtimeSessionId, "SESSION_MISMATCH", "Cannot change the runtime identity of an attached session.");
         requireValue(!Object.values(state.sessions).some(s => s.id !== session.id && s.runtimeSessionId === p.runtimeSessionId && (s.teamId !== session.teamId || s.agentId !== session.agentId)), "SESSION_SCOPE_CONFLICT", "This conversation belongs to a different team or agent. Start a new session.");
-        session.runtimeSessionId = text(p.runtimeSessionId, "Runtime session"); return session;
+        session.runtimeSessionId = text(p.runtimeSessionId, "Runtime session");
+        for (const s of Object.values(state.sessions)) {
+          if (s.id !== session.id && s.origin === "direct" && s.runtimeSessionId === session.runtimeSessionId && s.agentId === session.agentId && s.teamId === session.teamId) {
+            if (!session.shared) delete s.shared;
+          }
+        }
+        return session;
       }
       case "beginRun": {
         userOnly(actor); const session = ownSession(state, actor, p.sessionId);
@@ -840,7 +853,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         session.runtimeSessionId = p.runtimeSessionId;
         if (session.teamId) requireMember(state, session.teamId, session.agentId);
         for (const r of Object.values(state.runs)) {
-          if (r.sessionId !== session.id && !r.taskId && !r.delegationId && r.status === "unknown" && state.sessions[r.sessionId]?.agentId === session.agentId) r.status = "failed";
+          const rs = state.sessions[r.sessionId];
+          if (r.sessionId !== session.id && !r.taskId && !r.delegationId && rs?.agentId === session.agentId) {
+            const idleInRuntime = Boolean(rs.runtimeSessionId && runtimeSessions.get(rs.runtimeSessionId)?.turn === "idle");
+            if (r.status === "unknown" || idleInRuntime || (session.runtimeSessionId && rs.runtimeSessionId === session.runtimeSessionId)) r.status = "failed";
+          }
         }
         const run = Object.values(state.runs).find(r => r.sessionId === session.id && activeRun(r)) || newRun(state, session.id);
         run.status = "running"; run.needsInput = false; run.lastObservedAt = new Date().toISOString();
@@ -849,14 +866,15 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       case "hostTurnEnd": {
         userOnly(actor);
         const session = ownSession(state, actor, p.sessionId);
-        const run = Object.values(state.runs).find(r => r.sessionId === session.id && activeRun(r));
+        const run = Object.values(state.runs).find(r => r.sessionId === session.id && activeRun(r))
+          || (session.runtimeSessionId ? Object.values(state.runs).find(r => !r.taskId && !r.delegationId && activeRun(r) && state.sessions[r.sessionId]?.agentId === session.agentId && state.sessions[r.sessionId]?.runtimeSessionId === session.runtimeSessionId) : undefined);
         if (run) {
           run.lastObservedAt = new Date().toISOString();
           if (!run.taskId && !run.delegationId && !p.pending) {
             run.status = p.outcome === "turn_completed" ? "succeeded" : p.outcome === "turn_cancelled" ? "cancelled" : "failed";
-            const children = sessionDelegations(state, session.id);
+            const children = sessionDelegations(state, run.sessionId);
             if (!children.some(awaitingDelegation)) {
-              returnDelegations(state, children, text => { (state.deliveries[session.id] ||= { texts: [] }).texts.push(text); });
+              returnDelegations(state, children, text => { (state.deliveries[run.sessionId] ||= { texts: [] }).texts.push(text); });
             }
           }
           run.needsInput = false;

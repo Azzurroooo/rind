@@ -1,17 +1,35 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
   Check,
   CheckCircle2,
   FileText,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   Play,
   RotateCcw,
   Send,
   Square,
   X,
 } from "lucide-react";
+
+const TASK_DRAWER_MIN_WIDTH = 340;
+const TASK_DRAWER_DEFAULT_WIDTH = 480;
+const TASK_DRAWER_STORAGE_KEY = "rind:taskDrawerWidth";
+
+function readInitialDrawerWidth() {
+  try {
+    const raw = Number(window.localStorage?.getItem(TASK_DRAWER_STORAGE_KEY));
+    if (Number.isFinite(raw) && raw >= TASK_DRAWER_MIN_WIDTH && raw <= 1200) {
+      return Math.round(raw);
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return TASK_DRAWER_DEFAULT_WIDTH;
+}
 
 export function TaskReportDrawer({
   task,
@@ -32,8 +50,69 @@ export function TaskReportDrawer({
   const [reworkOpen, setReworkOpen] = useState(false);
   const [reworkFeedback, setReworkFeedback] = useState("");
   const [artifactPreview, setArtifactPreview] = useState(null); // { id, name, content, path, loading, error }
+  const [drawerWidth, setDrawerWidth] = useState(readInitialDrawerWidth);
+  const [expanded, setExpanded] = useState(false);
+  const [resizing, setResizing] = useState(false);
+  const drawerRef = useRef(null);
+
+  useEffect(() => {
+    if (!task) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      const activeEl = document.activeElement;
+      if (
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        activeEl instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      onClose?.();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [task, onClose]);
 
   if (!task) return null;
+
+  function handleResizePointerDown(event) {
+    event.preventDefault();
+    const drawerEl = drawerRef.current;
+    const startX = event.clientX;
+    const startWidth = drawerEl?.getBoundingClientRect().width || drawerWidth;
+    const containerWidth = drawerEl?.parentElement?.getBoundingClientRect().width || window.innerWidth;
+    const maxWidth = Math.max(TASK_DRAWER_MIN_WIDTH + 80, Math.floor(containerWidth * 0.78));
+
+    setExpanded(false);
+    setResizing(true);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    let latestWidth = startWidth;
+    const onPointerMove = (moveEvent) => {
+      const delta = startX - moveEvent.clientX;
+      latestWidth = Math.max(TASK_DRAWER_MIN_WIDTH, Math.min(maxWidth, Math.round(startWidth + delta)));
+      setDrawerWidth(latestWidth);
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+      setResizing(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      try {
+        window.localStorage?.setItem(TASK_DRAWER_STORAGE_KEY, String(latestWidth));
+      } catch {
+        // ignore storage errors
+      }
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+  }
 
   const isUserBlocked = task.status === "blocked" && task.blockedOn?.responder === "user";
   const canReview = task.status === "done" && Boolean(task.report) && !task.review;
@@ -74,7 +153,21 @@ export function TaskReportDrawer({
   }
 
   return (
-    <aside className="task-drawer" aria-label="Task details">
+    <aside
+      ref={drawerRef}
+      className={`task-drawer${expanded ? " is-expanded" : ""}${resizing ? " is-resizing" : ""}`}
+      style={!expanded && drawerWidth ? { width: `${drawerWidth}px` } : undefined}
+      aria-label="Task details"
+    >
+      <div
+        className="task-drawer-resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize task report panel"
+        title="Drag to resize · Double-click to toggle wide view"
+        onPointerDown={handleResizePointerDown}
+        onDoubleClick={() => setExpanded((prev) => !prev)}
+      />
       <div className="task-drawer-head">
         <div className="task-drawer-title-group">
           <span className={`agent-status-pill tone-${task.tone}`}>{task.statusLabel}</span>
@@ -83,9 +176,27 @@ export function TaskReportDrawer({
             {task.assigneeName} ({task.assigneePosition})
           </span>
         </div>
-        <button type="button" className="icon-button" aria-label="Close task details" onClick={onClose}>
-          <X size={16} aria-hidden="true" />
-        </button>
+        <div className="task-drawer-head-actions">
+          <button
+            type="button"
+            className="icon-button"
+            aria-pressed={expanded}
+            aria-label={expanded ? "Restore panel width" : "Expand for wide reading"}
+            title={expanded ? "Restore panel width" : "Expand for wide reading"}
+            onClick={() => setExpanded((prev) => !prev)}
+          >
+            {expanded ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Close task details"
+            title="Close (Esc)"
+            onClick={onClose}
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       <div className="task-drawer-body panel-scroll">

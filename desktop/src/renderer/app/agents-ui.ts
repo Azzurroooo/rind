@@ -39,10 +39,39 @@ import { exportSessionReplay, forkSession, loadSessions, restoreProjectDraft } f
 import { render, scheduleRender } from "./shell.ts"
 import { state, vars } from "./state.ts"
 
-let lastSidebarKey = ""
-let lastSurfaceKey = ""
+const TASK_DRAWER_MIN_WIDTH = 340
+const TASK_DRAWER_DEFAULT_WIDTH = 460
+const TASK_DRAWER_WIDTH_STORAGE_KEY = "rind:taskDrawerWidth"
+
+function loadInitialTaskDrawerWidth(): number {
+  try {
+    const raw = Number(window.localStorage?.getItem(TASK_DRAWER_WIDTH_STORAGE_KEY))
+    if (Number.isFinite(raw) && raw >= TASK_DRAWER_MIN_WIDTH && raw <= 1200) {
+      return Math.round(raw)
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return TASK_DRAWER_DEFAULT_WIDTH
+}
+
+function saveTaskDrawerWidth(width: number) {
+  try {
+    window.localStorage?.setItem(TASK_DRAWER_WIDTH_STORAGE_KEY, String(Math.round(width)))
+  } catch {
+    // ignore storage errors
+  }
+}
+
+let lastSidebarHtml = ""
+let lastSurfaceHtml = ""
+let lastBreadcrumbHtml = ""
 let lastRefreshedSeq = -1
 let refreshInFlight = false
+let refreshPending = false
+let refreshDebounceTimer: ReturnType<typeof setTimeout> | undefined
+let taskDrawerWidth = loadInitialTaskDrawerWidth()
+let taskDrawerExpanded = false
 
 export function currentSessionAgentContext(): SessionAgentContext {
   if (state.agentChatContext && state.agentChatContext.kind !== "independent") {
@@ -55,8 +84,21 @@ export function currentSessionAgentContext(): SessionAgentContext {
   )
 }
 
+function scheduleRefreshAgentSessionsAndArchive() {
+  if (!window.api.agents) return
+  if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer)
+  refreshDebounceTimer = setTimeout(() => {
+    refreshDebounceTimer = undefined
+    void refreshAgentSessionsAndArchive()
+  }, 60)
+}
+
 export async function refreshAgentSessionsAndArchive() {
-  if (!window.api.agents || refreshInFlight) return
+  if (!window.api.agents) return
+  if (refreshInFlight) {
+    refreshPending = true
+    return
+  }
   refreshInFlight = true
   try {
     const teams = state.agentsSnapshot.teams || []
@@ -71,25 +113,41 @@ export async function refreshAgentSessionsAndArchive() {
       ),
     ])
 
+    let changed = false
     const mgrRec = asRecord(managerRes)
     if (Array.isArray(mgrRec.sessions)) {
-      state.managerSessions = mgrRec.sessions as Array<Record<string, any>>
+      if (JSON.stringify(state.managerSessions) !== JSON.stringify(mgrRec.sessions)) {
+        state.managerSessions = mgrRec.sessions as Array<Record<string, any>>
+        changed = true
+      }
     }
     const archRec = asRecord(archiveRes)
     if (Array.isArray(archRec.archivedTeams)) {
-      state.archivedTeams = archRec.archivedTeams as Array<Record<string, any>>
+      if (JSON.stringify(state.archivedTeams) !== JSON.stringify(archRec.archivedTeams)) {
+        state.archivedTeams = archRec.archivedTeams as Array<Record<string, any>>
+        changed = true
+      }
     }
     const nextTeamSessions: Record<string, Array<Record<string, any>>> = { ...state.teamSessionsByTeam }
     for (const item of teamResults) {
       const rec = asRecord(item.res)
       if (Array.isArray(rec.sessions)) {
-        nextTeamSessions[item.teamId] = rec.sessions as Array<Record<string, any>>
+        if (JSON.stringify(nextTeamSessions[item.teamId] || []) !== JSON.stringify(rec.sessions)) {
+          nextTeamSessions[item.teamId] = rec.sessions as Array<Record<string, any>>
+          changed = true
+        }
       }
     }
-    state.teamSessionsByTeam = nextTeamSessions
-    scheduleRender()
+    if (changed) {
+      state.teamSessionsByTeam = nextTeamSessions
+      scheduleRender()
+    }
   } finally {
     refreshInFlight = false
+    if (refreshPending) {
+      refreshPending = false
+      scheduleRefreshAgentSessionsAndArchive()
+    }
   }
 }
 
@@ -97,7 +155,7 @@ export function renderAgentsUI() {
   const snapshot = state.agentsSnapshot
   if (snapshot.seq !== lastRefreshedSeq && window.api.agents) {
     lastRefreshedSeq = snapshot.seq
-    void refreshAgentSessionsAndArchive()
+    scheduleRefreshAgentSessionsAndArchive()
   }
 
   const chatContext = currentSessionAgentContext()
@@ -114,10 +172,15 @@ export function renderAgentsUI() {
 
   const inboxCount = inboxBadgeCount(snapshot)
   const bgCount = activeBackgroundCount(snapshot)
-  sidebarModeAgentsBadges.innerHTML = [
-    inboxCount > 0 ? `<span class="sidebar-nav-badge attention" title="${inboxCount} pending in Inbox">! ${inboxCount}</span>` : "",
-    bgCount > 0 ? `<span class="sidebar-nav-badge working" title="${bgCount} active runs">● ${bgCount}</span>` : "",
-  ].join("")
+  const modeBadgeHtml =
+    inboxCount > 0
+      ? `<span class="sidebar-nav-badge attention" title="${inboxCount} pending in Inbox">!${inboxCount}</span>`
+      : bgCount > 0
+        ? `<span class="sidebar-nav-badge working" title="${bgCount} active runs">●${bgCount}</span>`
+        : ""
+  if (sidebarModeAgentsBadges.innerHTML !== modeBadgeHtml) {
+    sidebarModeAgentsBadges.innerHTML = modeBadgeHtml
+  }
 
   // Toggle center-stage dedicated panel vs conversation header + stream + composer
   agentsSurface.hidden = !isAgentSurface
@@ -139,35 +202,16 @@ export function renderAgentsUI() {
     viewedSessionId: state.viewedSessionId,
     menuOpen: state.headerSessionsMenuOpen,
   })
-  sessionAgentContext.innerHTML = breadcrumbHtml
+  if (breadcrumbHtml !== lastBreadcrumbHtml) {
+    lastBreadcrumbHtml = breadcrumbHtml
+    sessionAgentContext.innerHTML = breadcrumbHtml
+  }
   sessionAgentContext.hidden = !breadcrumbHtml || isAgentSurface
 
-  // Sidebar navigation
+  // Sidebar navigation — only update DOM when the actual rendered HTML changes, and preserve scroll position
   const activeSidebarInput = sidebarAgents.querySelector<HTMLInputElement>("input:focus")
-  const sidebarKey = JSON.stringify({
-    seq: snapshot.seq,
-    mode: state.sidebarMode,
-    surface: state.agentSurface.kind === "team" ? `team:${state.agentSurface.teamId}:${state.agentSurface.tab}` : state.agentSurface.kind,
-    chatKind: chatContext.kind,
-    chatAgent: chatContext.kind === "member" ? chatContext.agentId : "",
-    viewedSessionId: state.viewedSessionId,
-    collapsed: [...state.collapsedTeams],
-    expandedMembers: [...state.expandedSidebarMembers],
-    managerExpanded: state.managerExpanded,
-    itemMenuKey: state.agentItemMenuKey,
-    sessionMenuId: state.sessionMenuId,
-    sessionDeleteConfirmId: state.sessionDeleteConfirmId,
-    sessionDeleteBusyId: state.sessionDeleteBusyId,
-    sessionLimits: state.agentSessionLimits,
-    teamSessionCounts: Object.entries(state.teamSessionsByTeam).map(([k, v]) => `${k}:${v.length}`),
-    mgrSessionCount: state.managerSessions.length,
-    archiveCount: state.archivedTeams.length,
-    newTeamOpen: state.newTeamOpen,
-    busy: state.agentsBusy,
-  })
-  if (!activeSidebarInput && sidebarKey !== lastSidebarKey) {
-    lastSidebarKey = sidebarKey
-    sidebarAgents.innerHTML = renderSidebarAgentsHtml({
+  if (!activeSidebarInput) {
+    const nextSidebarHtml = renderSidebarAgentsHtml({
       snapshot,
       surface: state.agentSurface,
       chatContext,
@@ -184,32 +228,27 @@ export function renderAgentsUI() {
       sessionDeleteBusyId: state.sessionDeleteBusyId,
       sessionLimits: state.agentSessionLimits,
       newTeamOpen: state.newTeamOpen,
-      busy: state.agentsBusy,
+      busy: state.agentsBusy && state.newTeamOpen,
     })
+    if (nextSidebarHtml !== lastSidebarHtml) {
+      const prevScrollTop = sidebarAgents.querySelector<HTMLElement>(".sidebar-body")?.scrollTop ?? 0
+      lastSidebarHtml = nextSidebarHtml
+      sidebarAgents.innerHTML = nextSidebarHtml
+      const nextBody = sidebarAgents.querySelector<HTMLElement>(".sidebar-body")
+      if (nextBody && prevScrollTop > 0) {
+        nextBody.scrollTop = prevScrollTop
+      }
+    }
   }
 
-  // Center-stage multi-agent surface
+  // Center-stage multi-agent surface — only update DOM when rendered HTML changes, and preserve scroll positions
   if (isAgentSurface) {
     const activeSurfaceInput = agentsSurface.querySelector<HTMLElement>("input:focus, textarea:focus, select:focus")
-    const surfaceKey = JSON.stringify({
-      seq: snapshot.seq,
-      surface: state.agentSurface,
-      inboxTask: state.inboxSelectedTaskId,
-      viewedSessionId: state.viewedSessionId,
-      expandedOrg: [...state.expandedOrgMembers],
-      sessionLimits: state.agentSessionLimits,
-      teamSessionCounts: Object.entries(state.teamSessionsByTeam).map(([k, v]) => `${k}:${v.length}`),
-      mgrSessionCount: state.managerSessions.length,
-      archiveCount: state.archivedTeams.length,
-      busy: state.agentsBusy,
-      artifactPath: state.artifactPreview?.path || "",
-      logTitle: state.serviceLogView?.title || "",
-      hasService: Boolean(state.agentsService),
-    })
-    if (!activeSurfaceInput && surfaceKey !== lastSurfaceKey) {
-      lastSurfaceKey = surfaceKey
+    const isResizingDrawer = Boolean(agentsSurface.querySelector(".agent-task-drawer.is-resizing"))
+    if (!activeSurfaceInput && !isResizingDrawer) {
+      let nextSurfaceHtml = ""
       if (state.agentSurface.kind === "team") {
-        agentsSurface.innerHTML = renderTeamSurfaceHtml({
+        nextSurfaceHtml = renderTeamSurfaceHtml({
           snapshot,
           surface: state.agentSurface,
           teamSessions: state.teamSessionsByTeam[state.agentSurface.teamId] || [],
@@ -218,37 +257,55 @@ export function renderAgentsUI() {
           sessionLimits: state.agentSessionLimits,
           busy: state.agentsBusy,
           artifactPreview: state.artifactPreview,
+          drawerWidth: taskDrawerWidth,
+          drawerExpanded: taskDrawerExpanded,
         })
       } else if (state.agentSurface.kind === "inbox") {
-        agentsSurface.innerHTML = renderInboxSurfaceHtml({
+        nextSurfaceHtml = renderInboxSurfaceHtml({
           snapshot,
           selectedTaskId: state.inboxSelectedTaskId,
           busy: state.agentsBusy,
           artifactPreview: state.artifactPreview,
+          drawerWidth: taskDrawerWidth,
+          drawerExpanded: taskDrawerExpanded,
         })
       } else if (state.agentSurface.kind === "manager") {
-        agentsSurface.innerHTML = renderManagerSurfaceHtml({
+        nextSurfaceHtml = renderManagerSurfaceHtml({
           snapshot,
           managerSessions: state.managerSessions,
           viewedSessionId: state.viewedSessionId,
           busy: state.agentsBusy,
         })
       } else if (state.agentSurface.kind === "background") {
-        agentsSurface.innerHTML = renderBackgroundSurfaceHtml({
+        nextSurfaceHtml = renderBackgroundSurfaceHtml({
           snapshot,
           serviceInfo: state.agentsService,
           logView: state.serviceLogView,
           busy: state.agentsBusy,
         })
       } else if (state.agentSurface.kind === "archive") {
-        agentsSurface.innerHTML = renderArchiveSurfaceHtml({
+        nextSurfaceHtml = renderArchiveSurfaceHtml({
           snapshot,
           archivedTeams: state.archivedTeams,
         })
       }
+      if (nextSurfaceHtml && nextSurfaceHtml !== lastSurfaceHtml) {
+        const prevBodyScroll = agentsSurface.querySelector<HTMLElement>(".agent-surface-body")?.scrollTop ?? 0
+        const prevDrawerScroll = agentsSurface.querySelector<HTMLElement>(".agent-drawer-body")?.scrollTop ?? 0
+        lastSurfaceHtml = nextSurfaceHtml
+        agentsSurface.innerHTML = nextSurfaceHtml
+        const nextSurfaceBody = agentsSurface.querySelector<HTMLElement>(".agent-surface-body")
+        if (nextSurfaceBody && prevBodyScroll > 0) {
+          nextSurfaceBody.scrollTop = prevBodyScroll
+        }
+        const nextDrawerBody = agentsSurface.querySelector<HTMLElement>(".agent-drawer-body")
+        if (nextDrawerBody && prevDrawerScroll > 0) {
+          nextDrawerBody.scrollTop = prevDrawerScroll
+        }
+      }
     }
   } else {
-    lastSurfaceKey = ""
+    lastSurfaceHtml = ""
   }
 }
 
@@ -281,13 +338,16 @@ export async function openManagedAgentChat(options: {
   existingRuntimeSessionId?: string
   resumeLatest?: boolean
 }) {
+  const hadMenuOpen = Boolean(state.headerSessionsMenuOpen || state.agentItemMenuKey || state.sessionMenuId)
   state.agentsBusy = true
   state.sidebarMode = "agents"
   state.headerSessionsMenuOpen = false
   state.agentItemMenuKey = ""
   state.sessionMenuId = ""
   state.notice = ""
-  render()
+  if (hadMenuOpen) {
+    render()
+  }
   try {
     const opened = asRecord(
       await window.api.agents.openSession({
@@ -381,18 +441,15 @@ export async function openManagedAgentChat(options: {
       state.conversation = state.conversationCache[runtimeSessionId] || createConversation()
       resetConversationPresentation()
       restoreProjectDraft()
-      render()
       await loadSessions().catch(() => {})
       await loadReplay(runtimeSessionId)
-      render()
     } else {
       state.viewedSessionId = ""
       state.conversation = createConversation()
       resetConversationPresentation()
       restoreProjectDraft()
-      render()
     }
-    void refreshAgentSessionsAndArchive()
+    scheduleRefreshAgentSessionsAndArchive()
     prompt.focus()
   } finally {
     state.agentsBusy = false
@@ -402,7 +459,6 @@ export async function openManagedAgentChat(options: {
 
 async function runManagementOp(op: Record<string, unknown>, toastMessage = "") {
   state.agentsBusy = true
-  render()
   try {
     const { op: method, ...params } = op
     const res = asRecord(await window.api.agents.request(String(method || "getState"), params))
@@ -410,7 +466,7 @@ async function runManagementOp(op: Record<string, unknown>, toastMessage = "") {
       state.agentsSnapshot = normalizeAgentsSnapshot(res.snapshot)
     }
     if (toastMessage) showToast(toastMessage, "success")
-    void refreshAgentSessionsAndArchive()
+    scheduleRefreshAgentSessionsAndArchive()
     return res
   } finally {
     state.agentsBusy = false
@@ -778,11 +834,18 @@ export function bindAgentsEvents(): () => void {
         (state.agentSurface.kind === "team" ? state.agentSurface.teamId : "")
       state.artifactPreview = null
       if (state.agentSurface.kind === "team" && state.agentSurface.teamId === teamId) {
-        state.agentSurface = { ...state.agentSurface, selectedTaskId: taskId }
+        const nextTaskId = state.agentSurface.selectedTaskId === taskId ? "" : taskId
+        state.agentSurface = { ...state.agentSurface, selectedTaskId: nextTaskId }
         render()
       } else if (teamId) {
         openTeamSurface(teamId, "tasks", taskId)
       }
+      return
+    }
+
+    if (target.closest("[data-task-drawer-expand]")) {
+      taskDrawerExpanded = !taskDrawerExpanded
+      render()
       return
     }
 
@@ -947,8 +1010,9 @@ export function bindAgentsEvents(): () => void {
 
     const inboxInspectBtn = target.closest<HTMLElement>("[data-inbox-inspect-task]")
     if (inboxInspectBtn?.dataset.inboxInspectTask) {
+      const taskId = inboxInspectBtn.dataset.inboxInspectTask
       state.artifactPreview = null
-      state.inboxSelectedTaskId = inboxInspectBtn.dataset.inboxInspectTask
+      state.inboxSelectedTaskId = state.inboxSelectedTaskId === taskId ? "" : taskId
       render()
       return
     }
@@ -1170,6 +1234,81 @@ export function bindAgentsEvents(): () => void {
     }
   }
 
+  const handleSurfacePointerDown = (event: PointerEvent) => {
+    const target = event.target as HTMLElement
+    const handle = target.closest<HTMLElement>("[data-task-drawer-resize]")
+    if (!handle) return
+    const drawer = handle.closest<HTMLElement>(".agent-task-drawer")
+    const surfaceEl = handle.closest<HTMLElement>(".agent-surface")
+    if (!drawer) return
+
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = drawer.getBoundingClientRect().width || taskDrawerWidth
+    const maxWidth = Math.max(
+      TASK_DRAWER_MIN_WIDTH + 80,
+      Math.floor((surfaceEl?.getBoundingClientRect().width || window.innerWidth) * 0.78),
+    )
+
+    taskDrawerExpanded = false
+    drawer.classList.remove("is-expanded")
+    drawer.classList.add("is-resizing")
+    document.body.style.cursor = "col-resize"
+    document.body.style.userSelect = "none"
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const delta = startX - moveEvent.clientX
+      const nextWidth = Math.max(TASK_DRAWER_MIN_WIDTH, Math.min(maxWidth, Math.round(startWidth + delta)))
+      taskDrawerWidth = nextWidth
+      drawer.style.width = `${nextWidth}px`
+    }
+
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove)
+      window.removeEventListener("pointerup", onPointerUp)
+      window.removeEventListener("pointercancel", onPointerUp)
+      drawer.classList.remove("is-resizing")
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+      saveTaskDrawerWidth(taskDrawerWidth)
+      render()
+    }
+
+    window.addEventListener("pointermove", onPointerMove)
+    window.addEventListener("pointerup", onPointerUp)
+    window.addEventListener("pointercancel", onPointerUp)
+  }
+
+  const handleSurfaceDoubleClick = (event: MouseEvent) => {
+    const target = event.target as HTMLElement
+    if (target.closest("[data-task-drawer-resize]")) {
+      event.preventDefault()
+      taskDrawerExpanded = !taskDrawerExpanded
+      render()
+    }
+  }
+
+  const handleDocumentKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return
+    const activeEl = document.activeElement
+    if (
+      activeEl instanceof HTMLInputElement ||
+      activeEl instanceof HTMLTextAreaElement ||
+      activeEl instanceof HTMLSelectElement
+    ) {
+      return
+    }
+    if (state.agentSurface.kind === "team" && state.agentSurface.selectedTaskId) {
+      state.artifactPreview = null
+      state.agentSurface = { ...state.agentSurface, selectedTaskId: "" }
+      render()
+    } else if (state.agentSurface.kind === "inbox" && state.inboxSelectedTaskId) {
+      state.artifactPreview = null
+      state.inboxSelectedTaskId = ""
+      render()
+    }
+  }
+
   const handleDocumentPointerDown = (event: MouseEvent) => {
     const target = event.target as HTMLElement
     let changed = false
@@ -1202,7 +1341,10 @@ export function bindAgentsEvents(): () => void {
   agentsSurface.addEventListener("click", handleContainerClick)
   agentsSurface.addEventListener("change", handleContainerChange)
   agentsSurface.addEventListener("submit", handleContainerSubmit)
+  agentsSurface.addEventListener("pointerdown", handleSurfacePointerDown)
+  agentsSurface.addEventListener("dblclick", handleSurfaceDoubleClick)
   document.addEventListener("pointerdown", handleDocumentPointerDown)
+  document.addEventListener("keydown", handleDocumentKeyDown)
 
   let unsubscribe = () => {}
   if (window.api.agents) {
@@ -1227,6 +1369,9 @@ export function bindAgentsEvents(): () => void {
     agentsSurface.removeEventListener("click", handleContainerClick)
     agentsSurface.removeEventListener("change", handleContainerChange)
     agentsSurface.removeEventListener("submit", handleContainerSubmit)
+    agentsSurface.removeEventListener("pointerdown", handleSurfacePointerDown)
+    agentsSurface.removeEventListener("dblclick", handleSurfaceDoubleClick)
     document.removeEventListener("pointerdown", handleDocumentPointerDown)
+    document.removeEventListener("keydown", handleDocumentKeyDown)
   }
 }

@@ -547,5 +547,55 @@ test("resolveRun settles delegations, returns direct-session deliveries, and mar
   assert.equal(secondRun.status, "failed", "resumed run that fails before starting is marked failed, not unknown");
 });
 
+test("direct Manager and Team Member sessions support multi-turn conversation across reopened sessions and auto-heal stale direct runs without WORKSPACE_BUSY", async t => {
+  const f = await fixture(t);
+
+  // 1. Legacy shared session followed by Web/Desktop attachSession(shared: false) + bindSession on the same runtimeSessionId.
+  const oldShared = await f.call("attachSession", {
+    agentId: f.leader.id,
+    teamId: f.team.id,
+    runtimeSessionId: "rt-member-1",
+    shared: true,
+  });
+  assert.equal(f.store.state.sessions[oldShared.id].shared, true);
+
+  const webAttached = await f.call("attachSession", {
+    agentId: f.leader.id,
+    teamId: f.team.id,
+    shared: false,
+  });
+  await f.call("bindSession", {
+    sessionId: webAttached.id,
+    runtimeSessionId: "rt-member-1",
+  });
+  assert.ok(!f.store.state.sessions[oldShared.id].shared, "bindSession with shared:false clears shared on older duplicate session");
+
+  // Start a turn on webAttached, and end it even if hostTurnEnd receives oldShared.id:
+  const turn1 = await f.call("hostTurnStart", { sessionId: webAttached.id, runtimeSessionId: "rt-member-1" });
+  assert.equal(f.store.state.runs[turn1.id].status, "running");
+  await f.call("hostTurnEnd", { sessionId: oldShared.id, outcome: "completed" });
+  assert.equal(f.store.state.runs[turn1.id].status, "succeeded", "hostTurnEnd matches active direct run by runtimeSessionId fallback");
+
+  // Second turn on the same member workspace succeeds immediately without WORKSPACE_BUSY:
+  const turn2 = await f.call("hostTurnStart", { sessionId: webAttached.id, runtimeSessionId: "rt-member-1" });
+  assert.equal(f.store.state.runs[turn2.id].status, "running");
+  await f.call("hostTurnEnd", { sessionId: webAttached.id, outcome: "completed" });
+  assert.equal(f.store.state.runs[turn2.id].status, "succeeded");
+
+  // 2. Manager session with a stranded direct run whose runtime session is idle in runtimeSessions:
+  const mgr1 = await f.call("attachSession", { manager: true, runtimeSessionId: "rt-mgr-1", shared: false });
+  const mgrRun1 = await f.call("hostTurnStart", { sessionId: mgr1.id, runtimeSessionId: "rt-mgr-1" });
+  assert.equal(f.store.state.runs[mgrRun1.id].status, "running");
+
+  // Simulate runtime reporting rt-mgr-1 is now idle (previous turn ended while notification was missed), then user sends next message:
+  f.service.setLive([{ id: "rt-mgr-1", turn: "idle", watchers: 1 }]);
+  const mgrRun2 = await f.call("hostTurnStart", { sessionId: mgr1.id, runtimeSessionId: "rt-mgr-1" });
+  assert.equal(f.store.state.runs[mgrRun1.id].status, "succeeded", "previous direct run on same runtimeSessionId is settled automatically");
+  assert.equal(f.store.state.runs[mgrRun2.id].status, "running");
+  await f.call("hostTurnEnd", { sessionId: mgr1.id, outcome: "completed" });
+  assert.equal(f.store.state.runs[mgrRun2.id].status, "succeeded");
+});
+
+
 
 

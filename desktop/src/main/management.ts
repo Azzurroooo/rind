@@ -400,10 +400,11 @@ export function ensureManagementConnected({ start = true }: { start?: boolean } 
           agentId: attachment.manager ? undefined : attachment.agentId,
           teamId: attachment.teamId || undefined,
           manager: attachment.manager,
+          ...(attachment.runtimeSessionId ? { runtimeSessionId: attachment.runtimeSessionId } : {}),
           shared: false,
         })
         const tools = await connected.request("sessionTools", { sessionId: reattached.id })
-        if (attachment.runtimeSessionId) {
+        if (attachment.runtimeSessionId && !reattached.runtimeSessionId) {
           await connected.request("bindSession", {
             sessionId: reattached.id,
             runtimeSessionId: attachment.runtimeSessionId,
@@ -430,6 +431,62 @@ export function ensureManagementConnected({ start = true }: { start?: boolean } 
     })
 
   return connecting
+}
+
+async function reconcileStaleWorkspaceRuns(
+  active: ManagementClient,
+  snap: AgentsSnapshot,
+  targetAgentId: string,
+  targetWorkspaceRoot: string,
+): Promise<boolean> {
+  const wsKey = normalizeWorkspaceKey(targetWorkspaceRoot)
+  const matchingAgentIds = new Set<string>()
+  if (targetAgentId) matchingAgentIds.add(targetAgentId)
+  for (const agent of snap.agents || []) {
+    if (typeof agent.id === "string" && wsKey && normalizeWorkspaceKey(agent.canonicalWorkspace) === wsKey) {
+      matchingAgentIds.add(agent.id)
+    }
+  }
+  if (matchingAgentIds.size === 0) return false
+  const sessionById = new Map<string, Record<string, unknown>>()
+  for (const session of snap.sessions || []) {
+    if (typeof session.id === "string" && matchingAgentIds.has(String(session.agentId || ""))) {
+      sessionById.set(session.id, session)
+    }
+  }
+  const liveRunningIds = new Set(
+    (snap.live || [])
+      .filter((item) => item && typeof item.id === "string" && item.turn && item.turn !== "idle")
+      .map((item) => String(item.id)),
+  )
+  let changed = false
+  for (const run of snap.runs || []) {
+    const session = sessionById.get(String(run.sessionId || ""))
+    if (!session) continue
+    if (run.status === "unknown" && typeof run.id === "string") {
+      await active.request("resolveRun", { runId: run.id, confirmStopped: true }).catch(() => {})
+      changed = true
+    } else if (
+      !run.taskId &&
+      !run.delegationId &&
+      (run.status === "running" || run.status === "starting") &&
+      typeof run.sessionId === "string"
+    ) {
+      const rSid = String(session.runtimeSessionId || "")
+      if (!rSid || !liveRunningIds.has(rSid)) {
+        await active
+          .request("reconcileSession", {
+            sessionId: run.sessionId,
+            connected: true,
+            active: false,
+            outcome: "failed",
+          })
+          .catch(() => {})
+        changed = true
+      }
+    }
+  }
+  return changed
 }
 
 async function tailFile(filePath: string, maxBytes = 16384): Promise<string[]> {
@@ -660,16 +717,17 @@ export async function openAgentSession(params: {
     ).catch(() => ({ sessions: [] }))
     runtimeSessionId = String(history?.sessions?.[0]?.runtimeSessionId || "")
   }
-  // Attach with shared: false without runtimeSessionId first so sessionTools resolves
-  // synchronously in agent-management without spawning executionHost().
+  // Attach with shared: false and pass runtimeSessionId when known so existing
+  // management sessions are reused instead of creating duplicate session entries.
   const attached = await active.request("attachSession", {
     ...(agentId ? { agentId } : {}),
     ...(teamId ? { teamId } : {}),
     ...(manager ? { manager: true } : {}),
+    ...(runtimeSessionId ? { runtimeSessionId } : {}),
     shared: false,
   })
   const externalTools = (await active.request("sessionTools", { sessionId: attached.id })) as Record<string, unknown>
-  const snap = (await active.request("snapshot")) as AgentsSnapshot
+  let snap = (await active.request("snapshot")) as AgentsSnapshot
   acceptSnapshot(snap)
 
   const { managementPaths } = await loadManagementModule()
@@ -680,6 +738,11 @@ export async function openAgentSession(params: {
   )
   if (!workspaceRoot) {
     throw new Error("Could not resolve workspace for this agent.")
+  }
+
+  if (await reconcileStaleWorkspaceRuns(active, snap, String(attached.agentId || agentId), workspaceRoot)) {
+    snap = (await active.request("snapshot")) as AgentsSnapshot
+    acceptSnapshot(snap)
   }
 
   await ensureRuntimeForWorkspace(workspaceRoot)
@@ -772,6 +835,12 @@ export async function createAgentSession(params: Record<string, unknown>) {
     attachment?.workspaceRoot ||
       (typeof params.workspace_root === "string" ? params.workspace_root.trim() : ""),
   )
+  if (attachment) {
+    const active = await ensureManagementConnected({ start: true })
+    if (await reconcileStaleWorkspaceRuns(active, currentSnapshot, attachment.agentId, workspaceRoot)) {
+      acceptSnapshot(await active.request("snapshot"))
+    }
+  }
   await ensureRuntimeForWorkspace(workspaceRoot || undefined)
 
   const createParams: Record<string, unknown> = {
@@ -821,7 +890,7 @@ export async function enrichSessionReplayParams(
   if (existing) {
     return { ...params, external_tools: existing.externalTools }
   }
-  const managedSession = currentSnapshot.sessions.find((s) => s.runtimeSessionId === sessionId)
+  const managedSession = [...currentSnapshot.sessions].reverse().find((s) => s.runtimeSessionId === sessionId)
   if (!managedSession || !client) return params
   try {
     const agent = currentSnapshot.agents.find((a) => a.id === managedSession.agentId)
@@ -834,13 +903,16 @@ export async function enrichSessionReplayParams(
       agentId: isManager ? undefined : managedSession.agentId,
       teamId: managedSession.teamId || undefined,
       manager: isManager,
+      runtimeSessionId: sessionId,
       shared: false,
     })
     const externalTools = (await client.request("sessionTools", { sessionId: attached.id })) as Record<string, unknown>
-    await client.request("bindSession", {
-      sessionId: attached.id,
-      runtimeSessionId: sessionId,
-    }).catch(() => {})
+    if (!attached.runtimeSessionId) {
+      await client.request("bindSession", {
+        sessionId: attached.id,
+        runtimeSessionId: sessionId,
+      }).catch(() => {})
+    }
     const attachment: SessionAttachment = {
       managementSessionId: String(attached.id),
       agentId: String(managedSession.agentId || ""),

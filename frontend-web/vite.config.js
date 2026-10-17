@@ -367,16 +367,17 @@ function rindAgentsDevPlugin() {
                 ...(agentId ? { agentId } : {}),
                 ...(teamId ? { teamId } : {}),
                 ...(manager ? { manager: true } : {}),
+                ...(runtimeSessionId ? { runtimeSessionId } : {}),
                 shared: false,
               });
               const externalTools = await active.request("sessionTools", { sessionId: attached.id }).catch(() => null);
-              if (runtimeSessionId) {
+              if (runtimeSessionId && !attached.runtimeSessionId) {
                 await active.request("bindSession", {
                   sessionId: attached.id,
                   runtimeSessionId,
                 }).catch(() => {});
               }
-              const snap = await active.request("snapshot");
+              let snap = await active.request("snapshot");
               if (snap && typeof snap === "object") snapshot = { ...snapshot, ...snap };
               const { managementPaths, resolveRindHome } = await loadManagement();
               const agentRecord = snapshot.agents.find((a) => a.id === attached.agentId);
@@ -384,6 +385,54 @@ function rindAgentsDevPlugin() {
                 agentRecord?.canonicalWorkspace ||
                   (manager ? managementPaths(resolveRindHome(process.env.RIND_HOME)).manager : params.workspace || ""),
               );
+              // Reconcile any stale unknown or idle direct runs on this agent/workspace so chatting is never blocked.
+              const wsKey = normalizeWorkspaceKey(workspaceRoot);
+              const matchingAgentIds = new Set([String(attached.agentId || agentId)].filter(Boolean));
+              for (const ag of snapshot.agents || []) {
+                if (typeof ag.id === "string" && wsKey && normalizeWorkspaceKey(ag.canonicalWorkspace) === wsKey) {
+                  matchingAgentIds.add(ag.id);
+                }
+              }
+              const sessionById = new Map();
+              for (const s of snapshot.sessions || []) {
+                if (typeof s.id === "string" && matchingAgentIds.has(String(s.agentId || ""))) {
+                  sessionById.set(s.id, s);
+                }
+              }
+              const liveRunningIds = new Set(
+                (snapshot.live || [])
+                  .filter((item) => item && typeof item.id === "string" && item.turn && item.turn !== "idle")
+                  .map((item) => String(item.id)),
+              );
+              let reconciledAny = false;
+              for (const run of snapshot.runs || []) {
+                const s = sessionById.get(String(run.sessionId || ""));
+                if (!s) continue;
+                if (run.status === "unknown" && typeof run.id === "string") {
+                  await active.request("resolveRun", { runId: run.id, confirmStopped: true }).catch(() => {});
+                  reconciledAny = true;
+                } else if (
+                  !run.taskId &&
+                  !run.delegationId &&
+                  (run.status === "running" || run.status === "starting") &&
+                  typeof run.sessionId === "string"
+                ) {
+                  const rSid = String(s.runtimeSessionId || "");
+                  if (!rSid || !liveRunningIds.has(rSid)) {
+                    await active.request("reconcileSession", {
+                      sessionId: run.sessionId,
+                      connected: true,
+                      active: false,
+                      outcome: "failed",
+                    }).catch(() => {});
+                    reconciledAny = true;
+                  }
+                }
+              }
+              if (reconciledAny) {
+                snap = await active.request("snapshot").catch(() => null);
+                if (snap && typeof snap === "object") snapshot = { ...snapshot, ...snap };
+              }
               broadcast();
               result = {
                 managementSessionId: String(attached.id),
