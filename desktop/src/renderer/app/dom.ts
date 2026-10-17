@@ -36,22 +36,33 @@ appRoot.innerHTML = `
     <main class="layout">
       <aside id="sidebar" class="sidebar" aria-label="Projects and sessions">
         <div id="sidebar-resize-handle" class="sidebar-resize-handle" role="separator" aria-label="Resize projects sidebar" aria-orientation="vertical"></div>
-        <div class="sidebar-actions">
-          <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
+        <div id="sidebar-mode-switcher" class="sidebar-mode-switcher" role="tablist" aria-label="Sidebar mode">
+          <button id="sidebar-mode-workspaces" type="button" role="tab" class="sidebar-mode-tab is-active" data-sidebar-mode="workspaces" aria-selected="true">
+            <span>Workspaces</span>
+          </button>
+          <button id="sidebar-mode-agents" type="button" role="tab" class="sidebar-mode-tab" data-sidebar-mode="agents" aria-selected="false">
+            <span>Agents &amp; Teams</span>
+            <span id="sidebar-mode-agents-badges" class="sidebar-mode-badges"></span>
+          </button>
         </div>
-        <div class="sidebar-body panel-scroll">
-          <section id="sidebar-agents" class="sidebar-agents" aria-label="Multi-agent navigation"></section>
-          <div class="session-search-wrap">
-            ${renderIcon(Search, "session-search-icon")}
-            <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search loaded sessions" autocomplete="off" />
+        <div id="sidebar-workspaces-pane" class="sidebar-workspaces-pane">
+          <div class="sidebar-actions">
+            <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
           </div>
-          <section class="sidebar-projects" aria-label="Projects"><div class="sidebar-heading"><h2 class="sidebar-section-title">Independent Workspaces</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
-          <div id="project-list" class="project-list"></div></section>
-          <section id="recent-sessions" class="recent-sessions" aria-label="Recent sessions" hidden>
-            <h2 class="sidebar-section-title">Recent sessions</h2>
-            <div id="recent-list" class="recent-list"></div>
-          </section>
+          <div class="sidebar-body panel-scroll">
+            <div class="session-search-wrap">
+              ${renderIcon(Search, "session-search-icon")}
+              <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search loaded sessions" autocomplete="off" />
+            </div>
+            <section class="sidebar-projects" aria-label="Projects"><div class="sidebar-heading"><h2 class="sidebar-section-title">Independent Workspaces</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
+            <div id="project-list" class="project-list"></div></section>
+            <section id="recent-sessions" class="recent-sessions" aria-label="Recent sessions" hidden>
+              <h2 class="sidebar-section-title">Recent sessions</h2>
+              <div id="recent-list" class="recent-list"></div>
+            </section>
+          </div>
         </div>
+        <div id="sidebar-agents" class="sidebar-agents panel-scroll" aria-label="Multi-agent navigation" hidden></div>
         <div class="sidebar-footer"><button id="open-usage" type="button" class="sidebar-footer-button">${renderIcon(ChartNoAxesColumn)}<span>Usage</span></button></div>
       </aside>
       <section class="conversation">
@@ -96,7 +107,6 @@ appRoot.innerHTML = `
           <div id="inspector-context"></div>
         </section>
         <section id="inspector-panel-activity" class="inspector-panel panel-scroll activity-panel" role="tabpanel" aria-labelledby="inspector-tab-activity" tabindex="0" hidden>
-          <section id="inspector-team-panel" class="inspector-team-panel" aria-label="Team roster and tasks" hidden></section>
           <div id="activity-empty" class="activity-empty" hidden>
             ${renderIcon(ListTodo, "activity-empty-icon")}
             <h3 id="activity-empty-title">No activity yet</h3>
@@ -179,13 +189,17 @@ export const projectMenu = requiredElement("project-menu")
 export const projectList = requiredElement("project-list")
 export const recentSessions = requiredElement("recent-sessions")
 export const recentList = requiredElement("recent-list")
+export const sidebarModeSwitcher = requiredElement("sidebar-mode-switcher")
+export const sidebarModeWorkspaces = requiredElement<HTMLButtonElement>("sidebar-mode-workspaces")
+export const sidebarModeAgents = requiredElement<HTMLButtonElement>("sidebar-mode-agents")
+export const sidebarModeAgentsBadges = requiredElement("sidebar-mode-agents-badges")
+export const sidebarWorkspacesPane = requiredElement("sidebar-workspaces-pane")
 export const sidebarAgents = requiredElement("sidebar-agents")
 export const sessionAgentContext = requiredElement("session-agent-context")
 export const sessionTitle = requiredElement("session-title")
 export const agentsSurface = requiredElement("agents-surface")
 export const streamWrap = requiredElement("stream-wrap")
 export const composerRegion = appRoot.querySelector<HTMLElement>(".composer-region")!
-export const inspectorTeamPanel = requiredElement("inspector-team-panel")
 export const maximizeInspectorButton = requiredElement<HTMLButtonElement>("maximize-inspector")
 export const modelMenuTrigger = requiredElement<HTMLButtonElement>("model-menu-trigger")
 export const modelMenuLabel = requiredElement("model-menu-label")

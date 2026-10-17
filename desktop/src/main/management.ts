@@ -452,12 +452,19 @@ export async function openAgentSession(params: {
   agentId?: unknown
   manager?: unknown
   runtimeSessionId?: unknown
+  existingRuntimeSessionId?: unknown
+  resumeLatest?: unknown
   workspace?: unknown
 }) {
   const manager = params.manager === true
   const teamId = typeof params.teamId === "string" && !manager ? params.teamId.trim() : ""
   const agentId = typeof params.agentId === "string" ? params.agentId.trim() : ""
-  const runtimeSessionId = typeof params.runtimeSessionId === "string" ? params.runtimeSessionId.trim() : ""
+  let runtimeSessionId =
+    typeof params.runtimeSessionId === "string"
+      ? params.runtimeSessionId.trim()
+      : typeof params.existingRuntimeSessionId === "string"
+        ? params.existingRuntimeSessionId.trim()
+        : ""
   const explicitWorkspace = typeof params.workspace === "string" ? params.workspace.trim() : ""
 
   // Plain independent workspace session (outside any team and not Manager):
@@ -479,6 +486,17 @@ export async function openAgentSession(params: {
   }
 
   const active = await ensureManagementConnected({ start: true })
+  if (!runtimeSessionId && params.resumeLatest === true) {
+    const history = manager
+      ? await active.request("listSessions", { manager: true }).catch(() => ({ sessions: [] }))
+      : await active
+          .request("listSessions", {
+            ...(teamId ? { teamId } : {}),
+            ...(agentId ? { agentId } : {}),
+          })
+          .catch(() => ({ sessions: [] }))
+    runtimeSessionId = String(history?.sessions?.[0]?.runtimeSessionId || "")
+  }
   const attached = await active.request("attachSession", {
     ...(agentId ? { agentId } : {}),
     ...(teamId ? { teamId } : {}),
@@ -502,7 +520,6 @@ export async function openAgentSession(params: {
 
   await ensureRuntimeForWorkspace(workspaceRoot)
 
-  // If runtimeSessionId was not specified for Manager, optionally check if user asked to open latest or new.
   // Passing runtimeSessionId opens that conversation; omitting it returns blank_info for a new draft conversation.
   const opened = (await requestRuntime(runtimeMethods.sessionOpen, {
     workspace_root: workspaceRoot,

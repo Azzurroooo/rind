@@ -123,23 +123,27 @@ export function createSessionActions(ctx) {
     if (sessionId) refs.drafts.current = { ...refs.drafts.current, [sessionId]: refs.input.current };
   }
 
-  async function replayWithRetry(client, target, loadId) {
-    let replay = await client.request(methods.sessionReplay, { session_id: target });
+  async function replayWithRetry(client, target, loadId, externalTools = null) {
+    const replayParams = externalTools
+      ? { session_id: target, external_tools: externalTools }
+      : { session_id: target };
+    let replay = await client.request(methods.sessionReplay, replayParams);
     // A completed turn can overtake the history read. Read once more when a
     // durable boundary arrived during it; never append overlapping deltas.
     const overtaken = () => refs.loadingEvents.current.some((item) => item.session_id === target && item.durability === "durable" && item.event?.type !== "task_updated");
     for (let retry = 0; retry < 3 && overtaken(); retry++) {
       if (loadId !== refs.sessionLoad.current) return null;
       refs.loadingEvents.current = [];
-      replay = await client.request(methods.sessionReplay, { session_id: target });
+      replay = await client.request(methods.sessionReplay, replayParams);
     }
     return replay;
   }
 
-  async function loadSession(sessionId, switchSession = true, throwOnError = false) {
+  async function loadSession(sessionId, switchSession = true, throwOnError = false, options = {}) {
     const target = String(sessionId || "").trim();
     const client = refs.client.current;
     if (!target || !client) return;
+    const externalTools = options?.externalTools || null;
     const loadId = ++refs.sessionLoad.current;
     const previousId = refs.info.current.session_id;
     if (previousId && previousId !== target) saveDraft(previousId);
@@ -149,9 +153,12 @@ export function createSessionActions(ctx) {
     call().clearUnread(target);
     ctx.setBusySession(true);
     try {
-      const switched = switchSession ? await client.request(methods.sessionSwitch, { session_id: target }) : refs.info.current;
+      const switchParams = externalTools
+        ? { session_id: target, external_tools: externalTools }
+        : { session_id: target };
+      const switched = switchSession ? await client.request(methods.sessionSwitch, switchParams) : refs.info.current;
       if (loadId !== refs.sessionLoad.current) return;
-      const replay = await replayWithRetry(client, target, loadId);
+      const replay = await replayWithRetry(client, target, loadId, externalTools);
       if (loadId !== refs.sessionLoad.current) return;
       const workspace = String(switched?.workspace_root || ctx.selectedWorkspace || "").trim();
       if (previousId && previousId !== target) saveDraft(previousId);

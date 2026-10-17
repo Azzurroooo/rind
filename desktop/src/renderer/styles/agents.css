@@ -1,11 +1,69 @@
-/* ---------- Native Multi-Agent Workbench (Teams, Org Tree, Kanban, Inbox, Background) ---------- */
+/* ---------- Native Multi-Agent Workbench (Two-Mode Sidebar, Teams, Org Tree, Sessions, Tasks, Inbox, Background) ---------- */
+
+.sidebar-mode-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  margin: 10px 10px 6px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.sidebar-mode-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: background-color var(--dur-hover) var(--ease), color var(--dur-hover) var(--ease);
+}
+
+.sidebar-mode-tab:hover {
+  color: var(--text);
+}
+
+.sidebar-mode-tab.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+}
+
+.sidebar-mode-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-workspaces-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sidebar-workspaces-pane[hidden],
+.sidebar-agents[hidden] {
+  display: none !important;
+}
 
 .sidebar-agents {
-  display: grid;
-  gap: 10px;
-  padding-bottom: 10px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 12px;
+  min-height: 0;
+  padding: 8px 10px 14px;
+  overflow-y: auto;
 }
 
 .sidebar-global-nav {
@@ -197,7 +255,7 @@
   background: var(--info);
 }
 
-.sidebar-team-board-btn {
+.sidebar-team-tasks-btn {
   height: 22px;
   padding: 0 6px;
   border: 1px solid var(--line);
@@ -208,22 +266,44 @@
   font-weight: 500;
 }
 
-.sidebar-team-board-btn:hover {
+.sidebar-team-tasks-btn:hover {
   border-color: var(--line-strong);
   color: var(--text);
 }
 
 .sidebar-team-members {
   display: grid;
-  gap: 1px;
+  gap: 2px;
   margin-left: 10px;
   padding-left: 8px;
   border-left: 1px solid var(--line);
 }
 
+.sidebar-member-block {
+  display: grid;
+  gap: 2px;
+}
+
+.sidebar-member-row-wrap {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-member-chevron {
+  width: 18px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 10px;
+}
+
 .sidebar-member-row {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-columns: 8px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
   min-height: 25px;
@@ -271,7 +351,93 @@
   white-space: nowrap;
 }
 
-/* ---------- Header Agent Context Breadcrumb ---------- */
+.sidebar-session-count {
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--fill-2);
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.sidebar-member-sessions {
+  display: grid;
+  gap: 2px;
+  margin-left: 16px;
+  padding-left: 8px;
+  border-left: 1px dashed var(--line);
+}
+
+.sidebar-member-session-new {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.sidebar-member-session-new:hover {
+  background: var(--fill-1);
+}
+
+.sidebar-member-session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.sidebar-member-session-row.is-active {
+  background: var(--accent-soft);
+}
+
+.sidebar-member-session-btn {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 2px 5px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: left;
+}
+
+.sidebar-member-session-btn:hover {
+  color: var(--text);
+}
+
+.sidebar-member-session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-member-session-time {
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.sidebar-member-session-del {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 10px;
+  opacity: 0;
+}
+
+.sidebar-member-session-row:hover .sidebar-member-session-del {
+  opacity: 1;
+}
+
+/* ---------- Header Agent Context Breadcrumb & Sessions Switcher ---------- */
 
 .session-agent-context {
   display: inline-flex;
@@ -280,6 +446,7 @@
 }
 
 .header-agent-breadcrumb {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -310,6 +477,9 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--text);
   font-weight: 600;
 }
@@ -317,6 +487,62 @@
 .header-agent-role {
   color: var(--muted);
   font-size: 11px;
+}
+
+.header-agent-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.header-agent-action:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.header-sessions-dropdown-wrap {
+  position: relative;
+}
+
+.header-sessions-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: 280px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 28%);
+}
+
+.header-sessions-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.header-sessions-menu-list {
+  display: grid;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 /* ---------- Status Dots & Pills ---------- */
@@ -855,6 +1081,105 @@
   white-space: nowrap;
 }
 
+.org-member-sessions-box {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.org-member-sessions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.org-sessions-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.org-sessions-toggle:hover {
+  color: var(--text);
+}
+
+.org-member-sessions-list {
+  display: grid;
+  gap: 3px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.org-sessions-empty {
+  padding: 4px 2px;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.org-session-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--radius-xs);
+}
+
+.org-session-item.is-active {
+  background: var(--accent-soft);
+}
+
+.org-session-open {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+
+.org-session-open:hover {
+  background: var(--fill-1);
+}
+
+.org-session-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.org-session-time {
+  flex: none;
+  color: var(--dim);
+  font-size: 10.5px;
+}
+
+.org-session-delete {
+  padding: 2px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.org-session-delete:hover {
+  color: var(--danger);
+}
+
 .org-member-footer {
   display: flex;
   flex-wrap: wrap;
@@ -883,11 +1208,11 @@
   gap: 6px;
 }
 
-/* ---------- 4-Column Semantic Kanban & Task List ---------- */
+/* ---------- Action-First Task Sections ---------- */
 
 .agent-tasks-canvas {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .agent-tasks-toolbar {
@@ -924,103 +1249,36 @@
   font-weight: 600;
 }
 
-.agent-kanban-grid {
+.agent-task-sections {
   display: grid;
-  grid-template-columns: repeat(4, minmax(210px, 1fr));
-  gap: 12px;
-  align-items: start;
-  overflow-x: auto;
+  gap: 14px;
 }
 
-.agent-kanban-col {
+.agent-task-section {
   display: grid;
   gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--panel);
 }
 
-.agent-kanban-col-head {
+.agent-task-section-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 2px 4px;
+  gap: 8px;
 }
 
-.agent-kanban-col-title {
+.agent-task-section-head h4 {
+  margin: 0;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
-.agent-kanban-col-count {
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--dim);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.agent-kanban-col-body {
-  display: grid;
-  gap: 8px;
-}
-
-.agent-kanban-empty {
-  padding: 18px 8px;
+.agent-section-empty {
+  padding: 10px 12px;
   border: 1px dashed var(--line);
   border-radius: var(--radius-sm);
   color: var(--dim);
-  font-size: 11.5px;
-  text-align: center;
-}
-
-.agent-task-card {
-  display: grid;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  text-align: left;
-  transition: border-color var(--dur-hover) var(--ease);
-}
-
-.agent-task-card:hover,
-.agent-task-card.is-selected {
-  border-color: var(--accent);
-}
-
-.agent-task-card-top,
-.agent-task-card-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.agent-task-card-brief {
-  margin: 0;
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.agent-task-card-report {
-  margin: 0;
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.4;
-}
-
-.agent-task-assignee {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 12px;
 }
 
 .agent-task-list-table {
@@ -1038,6 +1296,12 @@
   border-radius: var(--radius-sm);
   background: var(--surface);
   text-align: left;
+  transition: border-color var(--dur-hover) var(--ease);
+}
+
+.agent-task-list-row:hover,
+.agent-task-list-row.is-selected {
+  border-color: var(--accent);
 }
 
 .agent-task-row-brief {
@@ -1047,6 +1311,12 @@
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agent-task-row-summary {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 400;
 }
 
 .agent-task-row-assignee {
@@ -1059,7 +1329,7 @@
 .agent-task-drawer {
   display: flex;
   flex-direction: column;
-  width: min(420px, 46%);
+  width: min(440px, 48%);
   min-height: 0;
   border-left: 1px solid var(--line);
   background: var(--surface);
@@ -1158,6 +1428,14 @@
   white-space: pre-wrap;
 }
 
+.agent-evidence-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .agent-report-pre {
   margin: 0;
   padding: 8px 10px;
@@ -1188,6 +1466,12 @@
   background: var(--surface);
 }
 
+.agent-artifact-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .agent-artifact-path {
   overflow: hidden;
   font-family: var(--font-mono);
@@ -1208,7 +1492,7 @@
   gap: 8px;
 }
 
-/* ---------- Inbox & Background Views ---------- */
+/* ---------- Inbox, Manager, Archive & Background Views ---------- */
 
 .agent-inbox-list,
 .agent-runs-list {
@@ -1227,6 +1511,10 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
+}
+
+.agent-run-row.is-selected {
+  border-color: var(--accent);
 }
 
 .agent-inbox-card-main {
@@ -1346,58 +1634,4 @@
   max-width: 44ch;
   color: var(--muted);
   font-size: 12.5px;
-}
-
-/* ---------- Inspector Team Box ---------- */
-
-.inspector-team-box {
-  display: grid;
-  gap: 8px;
-}
-
-.inspector-team-links {
-  display: flex;
-  gap: 4px;
-}
-
-.inspector-team-roster,
-.inspector-team-tasks {
-  display: grid;
-  gap: 4px;
-}
-
-.inspector-member-row,
-.inspector-task-mini {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
-  background: var(--panel);
-  color: var(--text);
-  font-size: 12px;
-  text-align: left;
-}
-
-.inspector-task-mini {
-  grid-template-columns: auto minmax(0, 1fr);
-}
-
-.inspector-member-row.is-active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.inspector-member-name,
-.inspector-task-mini-brief {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.inspector-member-role {
-  color: var(--dim);
-  font-size: 11px;
 }

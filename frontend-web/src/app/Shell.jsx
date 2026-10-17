@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { UsageDialog } from "../components/inspector/UsageDialog.jsx";
 import { LoginGate } from "../components/LoginGate.jsx";
 import { CommandPalette } from "../components/CommandPalette.jsx";
@@ -13,44 +13,62 @@ import { SettingsDialog } from "../components/settings/SettingsDialog.jsx";
 import { TeamView } from "../components/agents/TeamView.jsx";
 import { InboxView } from "../components/agents/InboxView.jsx";
 import { BackgroundView } from "../components/agents/BackgroundView.jsx";
+import { ManagerView } from "../components/agents/ManagerView.jsx";
 import { methods } from "../methods.js";
 import { INSPECTOR_WIDTH, SIDEBAR_WIDTH } from "./constants.js";
 import { useAppController } from "./useAppController.js";
 import { headerStatus, lastUserPrompt, panelAttrs, sessionTitle } from "./shellModel.js";
 
 // The v2 shell (spec section 2): sidebar | header + center-stage surface |
-// inspector. Below 768px the side panels become exclusive drawers over a scrim.
+// inspector (strictly scoped to current session & workspace folder).
 export function Shell() {
   const [usageOpen, setUsageOpen] = useState(false);
   const { ctx, actions, view, agents, request, fileRequest, openFile } = useAppController();
   const { layout, info, connection, refs } = ctx;
 
   if (connection.phase === "login") {
-    return <LoginGate onSubmit={actions.handleLogin} busy={ctx.authBusy} error={connection.message} initialToken={ctx.loginToken} />;
+    return (
+      <LoginGate
+        onSubmit={actions.handleLogin}
+        busy={ctx.authBusy}
+        error={connection.message}
+        initialToken={ctx.loginToken}
+      />
+    );
   }
 
   const sessionId = info.session_id || "";
   const compacting = ctx.compacting || ctx.conversation.operation === "compact";
   const available = info.methods || [];
   const canFork = available.includes(methods.sessionFork);
-  const hasTeams = Boolean(
-    agents.snapshot.teams.length > 0 ||
-      agents.activeSessionContext.kind === "manager" ||
-      agents.activeSessionContext.kind === "member",
-  );
-  const tabs = visibleTabs(info, { hasTeam: hasTeams });
+  const tabs = visibleTabs(info);
   const connected = connection.phase === "online" || connection.phase === "syncing";
   const drawerOpen = layout.narrow && Boolean(layout.drawer);
   const isChatSurface = agents.surface.kind === "chat";
 
   const activeHeaderTitle =
     agents.surface.kind === "inbox"
-      ? "Inbox & Triage"
-      : agents.surface.kind === "background"
-        ? "Background & Runtime"
-        : agents.surface.kind === "team"
-          ? agents.currentTeamSummary?.team?.name || "Team"
-          : sessionTitle(ctx.sessions, sessionId);
+      ? "Inbox"
+      : agents.surface.kind === "manager"
+        ? "Manager · Coordinator"
+        : agents.surface.kind === "archive"
+          ? "Archived Teams"
+          : agents.surface.kind === "background"
+            ? "Background & Runtime"
+            : agents.surface.kind === "team"
+              ? agents.currentTeamSummary?.team?.name || "Team"
+              : sessionTitle(ctx.sessions, sessionId);
+
+  const activeMemberSessions = useMemo(() => {
+    if (agents.activeSessionContext?.kind !== "member") return [];
+    const teamSum = agents.teamSummaries?.find(
+      (s) => s.team.id === agents.activeSessionContext.teamId,
+    );
+    const member = teamSum?.members?.find(
+      (m) => m.agentId === agents.activeSessionContext.agentId,
+    );
+    return member?.sessions || [];
+  }, [agents.activeSessionContext, agents.teamSummaries]);
 
   function guardedFork(beforeMessageId) {
     void actions.forkSession(sessionId, beforeMessageId || "");
@@ -58,7 +76,12 @@ export function Shell() {
 
   return (
     <div className={`app-shell${layout.narrow ? " is-narrow" : ""}`}>
-      <ConnectionStrip phase={connection.phase} syncRemaining={connection.syncRemaining} syncTotal={connection.syncTotal} onReconnect={actions.reconnect} />
+      <ConnectionStrip
+        phase={connection.phase}
+        syncRemaining={connection.syncRemaining}
+        syncTotal={connection.syncTotal}
+        onReconnect={actions.reconnect}
+      />
       {drawerOpen && <div className="drawer-backdrop" onClick={layout.closeDrawers} aria-hidden="true" />}
       <div className="shell-grid">
         <Sidebar
@@ -82,18 +105,27 @@ export function Shell() {
           }}
           agents={{
             snapshot: agents.snapshot,
+            teamSummaries: agents.teamSummaries,
+            managerSummary: agents.managerSummary,
             surface: agents.surface,
             activeSessionContext: agents.activeSessionContext,
             inboxCount: agents.inboxCount,
             bgCount: agents.bgCount,
             busy: agents.busy,
             onOpenInbox: agents.openInbox,
-            onOpenManager: () => void agents.openAgentConversation({ manager: true }),
+            onOpenManagerView: agents.openManagerView,
+            onOpenManager: (opts = {}) => void agents.openAgentConversation({ manager: true, ...opts }),
             onOpenBackground: agents.openBackground,
+            onOpenArchive: agents.openArchive,
             onOpenTeam: agents.openTeam,
             onOpenMemberChat: (target) => void agents.openAgentConversation(target),
-            onCreateTeam: async (name) => {
-              const created = await agents.runAction("createTeam", { name }, `Created team "${name}"`);
+            onDeleteAgentSession: (sid, meta) => agents.deleteAgentConversation(sid, meta),
+            onCreateTeam: async (name, createRoot) => {
+              const created = await agents.runAction(
+                "createTeam",
+                { name, ...(createRoot ? { createRoot } : {}) },
+                `Created team "${name}"`,
+              );
               if (created?.id) agents.openTeam(created.id, "organization");
             },
           }}
@@ -122,13 +154,29 @@ export function Shell() {
           style={layout.narrow ? undefined : { width: layout.sidebarWidth }}
         />
         {!layout.narrow && layout.sidebarVisible && (
-          <ResizeHandle label="Resize sidebar" width={layout.sidebarWidth} min={SIDEBAR_WIDTH.min} max={SIDEBAR_WIDTH.max} edge="end" onResize={layout.setSidebarWidth} />
+          <ResizeHandle
+            label="Resize sidebar"
+            width={layout.sidebarWidth}
+            min={SIDEBAR_WIDTH.min}
+            max={SIDEBAR_WIDTH.max}
+            edge="end"
+            onResize={layout.setSidebarWidth}
+          />
         )}
         <main className="main-column" aria-busy={ctx.busySession}>
           <ChatHeader
             title={activeHeaderTitle}
-            status={headerStatus({ phase: connection.phase, active: view.active, compacting, waitingCount: view.backgroundWait?.count })}
+            status={headerStatus({
+              phase: connection.phase,
+              active: view.active,
+              compacting,
+              waitingCount: view.backgroundWait?.count,
+            })}
+            activeSessionId={sessionId}
             agentContext={agents.activeSessionContext}
+            memberSessions={activeMemberSessions}
+            managerSessions={agents.managerSummary?.sessions || []}
+            teamTaskCount={agents.currentTeamSummary?.counts?.tasksTotal || 0}
             surface={agents.surface}
             sidebarExpanded={layout.sidebarVisible}
             inspectorExpanded={layout.inspectorVisible}
@@ -149,6 +197,8 @@ export function Shell() {
             onToggleInspector={layout.toggleInspector}
             onOpenTasks={() => layout.openInspector("activity")}
             onOpenTeam={agents.openTeam}
+            onOpenManagerView={agents.openManagerView}
+            onOpenAgentConversation={(target) => void agents.openAgentConversation(target)}
             onBackToChat={agents.openChatSurface}
           />
           {agents.surface.kind === "team" ? (
@@ -158,21 +208,50 @@ export function Shell() {
               activeTab={agents.surface.tab}
               selectedTaskId={agents.surface.selectedTaskId}
               busy={agents.busy}
-              onTabChange={(tab) => agents.openTeam(agents.currentTeamId, tab, agents.surface.selectedTaskId)}
+              onTabChange={(tab) =>
+                agents.openTeam(agents.currentTeamId, tab, agents.surface.selectedTaskId)
+              }
               onSelectTask={(teamId, taskId) => agents.selectTask(teamId, taskId)}
               onOpenChat={(target) => void agents.openAgentConversation(target)}
-              onOpenManager={() => void agents.openAgentConversation({ manager: true })}
-              onCreateMember={async ({ mode, teamId, name, workspace, repository, branch, position, responsibility, reportsToAgentId }) => {
+              onRenameSession={(sid, name, meta) => agents.renameAgentConversation(sid, name, meta)}
+              onDeleteSession={(sid, meta) => agents.deleteAgentConversation(sid, meta)}
+              onOpenManager={() => agents.openManagerView()}
+              onCreateMember={async ({
+                mode,
+                teamId,
+                name,
+                workspace,
+                repository,
+                branch,
+                position,
+                responsibility,
+                reportsToAgentId,
+              }) => {
                 if (mode === "existing") {
                   await agents.runAction(
                     "addMember",
-                    { teamId, workspace, name: name || undefined, position, responsibility, reportsToAgentId },
+                    {
+                      teamId,
+                      workspace,
+                      name: name || undefined,
+                      position,
+                      responsibility,
+                      reportsToAgentId,
+                    },
                     "Added folder to team",
                   );
                 } else if (mode === "worktree") {
                   await agents.runAction(
                     "createWorktree",
-                    { teamId, name, repository, branch, position, responsibility, reportsToAgentId },
+                    {
+                      teamId,
+                      name,
+                      repository,
+                      branch,
+                      position,
+                      responsibility,
+                      reportsToAgentId,
+                    },
                     `Created worktree member "${name}"`,
                   );
                 } else {
@@ -184,7 +263,11 @@ export function Shell() {
                 }
               }}
               onUpdateMember={({ teamId, agentId, position, responsibility }) =>
-                agents.runAction("updateMember", { teamId, agentId, position, responsibility }, "Updated member role")
+                agents.runAction(
+                  "updateMember",
+                  { teamId, agentId, position, responsibility },
+                  "Updated member role",
+                )
               }
               onRemoveMember={({ teamId, agentId }) =>
                 agents.runAction("removeMember", { teamId, agentId }, "Removed member from team")
@@ -193,15 +276,36 @@ export function Shell() {
                 agents.runAction("setLeader", { teamId, agentId }, "Updated team leader")
               }
               onSetSupervisor={({ teamId, agentId, reportsToAgentId }) =>
-                agents.runAction("setSupervisor", { teamId, agentId, reportsToAgentId }, "Updated reporting line")
+                agents.runAction(
+                  "setSupervisor",
+                  { teamId, agentId, reportsToAgentId },
+                  "Updated reporting line",
+                )
+              }
+              onGetMemberModel={({ teamId, agentId }) =>
+                agents.requestAgent("getMemberModel", { teamId, agentId })
+              }
+              onSetMemberModel={(params) =>
+                agents.runAction("setMemberModel", params, "Updated member model defaults")
+              }
+              onClearMemberModel={(params) =>
+                agents.runAction("clearMemberModel", params, "Cleared member model override")
               }
               onAssignTask={({ teamId, assigneeAgentId, brief, start }) =>
-                agents.runAction("assignTask", { teamId, assigneeAgentId, brief, start }, "Assigned task")
+                agents.runAction(
+                  "assignTask",
+                  { teamId, assigneeAgentId, brief, start },
+                  "Assigned task",
+                )
               }
               onStartTask={(taskId) => agents.runAction("startTask", { taskId }, "Started task")}
               onCancelTask={(taskId) => agents.runAction("cancelTask", { taskId }, "Cancelled task")}
               onSetPriority={(taskId, priority) =>
-                agents.runAction("setTaskPriority", { taskId, priority }, `Priority set to ${priority}`)
+                agents.runAction(
+                  "setTaskPriority",
+                  { taskId, priority },
+                  `Priority set to ${priority}`,
+                )
               }
               onReviewTask={(taskId, decision, feedback) =>
                 agents.runAction(
@@ -217,14 +321,48 @@ export function Shell() {
                   answer ? "Answered blocker & resumed task" : "Added task note",
                 )
               }
-              onReadArtifact={(artifactId) => agents.requestAgent("readArtifactPreview", { artifactId })}
+              onReadArtifact={(artifactId) =>
+                agents.requestAgent("readArtifactPreview", { artifactId })
+              }
               onDeleteTeam={async ({ teamId, confirmName }) => {
-                await agents.runAction("deleteTeam", { teamId, confirmName }, `Deleted team "${confirmName}"`);
+                await agents.runAction(
+                  "deleteTeam",
+                  { teamId, confirmName },
+                  `Deleted team "${confirmName}"`,
+                );
                 agents.openChatSurface();
               }}
             />
+          ) : agents.surface.kind === "manager" || agents.surface.kind === "archive" ? (
+            <ManagerView
+              mode={agents.surface.kind === "archive" ? "archive" : "manager"}
+              managerSummary={agents.managerSummary}
+              teamSummaries={agents.teamSummaries}
+              archiveList={agents.archiveList}
+              busy={agents.busy}
+              onOpenManagerChat={(opts = {}) =>
+                void agents.openAgentConversation({ manager: true, ...opts })
+              }
+              onRenameSession={(sid, name) =>
+                agents.renameAgentConversation(sid, name, { manager: true })
+              }
+              onDeleteSession={(sid) => agents.deleteAgentConversation(sid, { manager: true })}
+              onOpenTeam={agents.openTeam}
+              onCreateTeam={async (name, createRoot) => {
+                const created = await agents.runAction(
+                  "createTeam",
+                  { name, ...(createRoot ? { createRoot } : {}) },
+                  `Created team "${name}"`,
+                );
+                if (created?.id) agents.openTeam(created.id, "organization");
+              }}
+              onSwitchMode={(nextMode) =>
+                nextMode === "archive" ? agents.openArchive() : agents.openManagerView()
+              }
+            />
           ) : agents.surface.kind === "inbox" ? (
             <InboxView
+              sections={agents.inboxSections}
               items={agents.inboxItems}
               busy={agents.busy}
               onResolveApproval={(approvalId, approve) =>
@@ -250,7 +388,11 @@ export function Shell() {
                 )
               }
               onResolveRun={(runId) =>
-                agents.runAction("resolveRun", { runId, confirmStopped: true }, "Confirmed run stopped")
+                agents.runAction(
+                  "resolveRun",
+                  { runId, confirmStopped: true },
+                  "Confirmed run stopped",
+                )
               }
               onDismissNotice={(noticeId) => agents.runAction("dismissNotice", { noticeId })}
               onOpenTask={(teamId, taskId) => agents.selectTask(teamId, taskId)}
@@ -260,23 +402,38 @@ export function Shell() {
           ) : agents.surface.kind === "background" ? (
             <BackgroundView
               snapshot={agents.snapshot}
+              backgroundModel={agents.backgroundModel}
               connection={agents.connection}
               service={agents.service}
               busy={agents.busy}
               onRefresh={() => agents.requestAgent("serviceInfo", {})}
-              onRestartService={() => agents.runAction("restartService", {}, "Restarted management service")}
+              onRestartService={() =>
+                agents.runAction("restartService", {}, "Restarted management service")
+              }
               onStopServices={(stopAgents) =>
                 agents.runAction("stopServices", { stopAgents }, "Stopped background services")
               }
               onCancelRun={(runId) => agents.runAction("cancelRun", { runId }, "Cancelled run")}
               onResolveRun={(runId) =>
-                agents.runAction("resolveRun", { runId, confirmStopped: true }, "Confirmed run stopped")
+                agents.runAction(
+                  "resolveRun",
+                  { runId, confirmStopped: true },
+                  "Confirmed run stopped",
+                )
               }
               onReadLog={(target) => agents.requestAgent("serviceLog", { target })}
               onOpenTask={(teamId, taskId) => agents.selectTask(teamId, taskId)}
-              onOpenSession={(id) => {
-                agents.openChatSurface();
-                void actions.handleSelectSession(id);
+              onOpenSession={(id, item) => {
+                if (item?.teamId || item?.agentId) {
+                  void agents.openAgentConversation({
+                    teamId: item.teamId,
+                    agentId: item.agentId,
+                    runtimeSessionId: id,
+                  });
+                } else {
+                  agents.openChatSurface();
+                  void actions.handleSelectSession(id);
+                }
               }}
             />
           ) : (
@@ -296,12 +453,21 @@ export function Shell() {
                 onEdit={actions.editMessage}
                 onFork={guardedFork}
                 onQuote={(text) => {
-                  const quoted = String(text || "").trim().split("\n").map((line) => `> ${line}`).join("\n");
+                  const quoted = String(text || "")
+                    .trim()
+                    .split("\n")
+                    .map((line) => `> ${line}`)
+                    .join("\n");
                   if (!quoted) return;
-                  ctx.setInput((prev) => (prev && prev.trim() ? `${prev.trimEnd()}\n\n${quoted}\n\n` : `${quoted}\n\n`));
+                  ctx.setInput((prev) =>
+                    prev && prev.trim() ? `${prev.trimEnd()}\n\n${quoted}\n\n` : `${quoted}\n\n`,
+                  );
                   refs.composer.current?.focus();
                 }}
-                onSuggestion={(value) => { ctx.setInput(value); refs.composer.current?.focus(); }}
+                onSuggestion={(value) => {
+                  ctx.setInput(value);
+                  refs.composer.current?.focus();
+                }}
                 onOpenFile={openFile}
               />
               {/* Invariant: the composer is never disabled by connection state. */}
@@ -341,7 +507,14 @@ export function Shell() {
           )}
         </main>
         {!layout.narrow && layout.inspectorVisible && (
-          <ResizeHandle label="Resize inspector" width={layout.inspectorWidth} min={INSPECTOR_WIDTH.min} max={INSPECTOR_WIDTH.max} edge="start" onResize={layout.setInspectorWidth} />
+          <ResizeHandle
+            label="Resize inspector"
+            width={layout.inspectorWidth}
+            min={INSPECTOR_WIDTH.min}
+            max={INSPECTOR_WIDTH.max}
+            edge="start"
+            onResize={layout.setInspectorWidth}
+          />
         )}
         <Inspector
           visible={layout.inspectorVisible}
@@ -366,16 +539,6 @@ export function Shell() {
           listFiles={actions.listFiles}
           readFile={actions.readFile}
           fileRequest={fileRequest}
-          teamProps={{
-            hasTeams,
-            agentContext: agents.activeSessionContext,
-            teamSummary: agents.currentTeamSummary,
-            teamTasks: agents.currentTeamTasks,
-            onOpenTeam: agents.openTeam,
-            onSelectTask: agents.selectTask,
-            onOpenChat: (target) => void agents.openAgentConversation(target),
-            onOpenManager: () => void agents.openAgentConversation({ manager: true }),
-          }}
           panelRef={layout.inspectorPanelRef}
           panelAttrs={panelAttrs({ narrow: layout.narrow, visible: layout.inspectorVisible })}
           style={
@@ -392,13 +555,27 @@ export function Shell() {
         onClose={() => ctx.setSettingsOpen(false)}
         theme={ctx.theme.preference}
         onTheme={ctx.theme.set}
-        onLogout={() => { ctx.setSettingsOpen(false); void actions.logout(); }}
+        onLogout={() => {
+          ctx.setSettingsOpen(false);
+          void actions.logout();
+        }}
       />
-      <UsageDialog open={usageOpen} onClose={() => setUsageOpen(false)} request={request} usageEnabled={tabs.usage} authEnabled={tabs.auth} />
-      <CommandPalette open={ctx.paletteOpen} commands={ctx.commandList} onClose={actions.closePalette} onRun={(cmd) => {
-        if (!isChatSurface) agents.openChatSurface();
-        actions.runCommand(cmd);
-      }} />
+      <UsageDialog
+        open={usageOpen}
+        onClose={() => setUsageOpen(false)}
+        request={request}
+        usageEnabled={tabs.usage}
+        authEnabled={tabs.auth}
+      />
+      <CommandPalette
+        open={ctx.paletteOpen}
+        commands={ctx.commandList}
+        onClose={actions.closePalette}
+        onRun={(cmd) => {
+          if (!isChatSurface) agents.openChatSurface();
+          actions.runCommand(cmd);
+        }}
+      />
     </div>
   );
 }

@@ -1,27 +1,32 @@
 import {
+  ChevronDown,
   Command,
   Crown,
   Download,
   GitFork,
-  Kanban,
   ListChecks,
   MessageSquare,
   MoreHorizontal,
   Network,
   PanelLeft,
   PanelRight,
+  Plus,
   Sparkles,
 } from "lucide-react";
 import { Menu } from "../overlays/Menu.jsx";
 import { Tooltip } from "../overlays/Tooltip.jsx";
 
 // Chat header (spec section 2): 44px (48px on narrow screens) with the sidebar
-// toggle, the session title, agent/team context badge, and status chip on the
-// left, and 28px icon buttons on the right.
+// toggle, the session title, agent/team context badge, member/manager session
+// switcher, and status chip on the left, and 28px icon buttons on the right.
 export function ChatHeader({
   title,
   status,
+  activeSessionId = "",
   agentContext,
+  memberSessions = [],
+  managerSessions = [],
+  teamTaskCount = 0,
   surface,
   sidebarExpanded,
   inspectorExpanded,
@@ -33,9 +38,52 @@ export function ChatHeader({
   onToggleInspector,
   onOpenTasks,
   onOpenTeam,
+  onOpenManagerView,
+  onOpenAgentConversation,
   onBackToChat,
 }) {
   const isChatSurface = !surface || surface.kind === "chat";
+
+  const scopedSessions =
+    agentContext?.kind === "member"
+      ? memberSessions
+      : agentContext?.kind === "manager"
+        ? managerSessions
+        : [];
+
+  const sessionSwitchItems = [
+    {
+      id: "new-agent-chat",
+      label:
+        agentContext?.kind === "manager"
+          ? "New conversation with Manager"
+          : `New conversation with ${agentContext?.agentName || "member"}`,
+      icon: <Plus size={14} />,
+      onSelect: () =>
+        onOpenAgentConversation?.(
+          agentContext?.kind === "manager"
+            ? { manager: true, forceNew: true }
+            : { teamId: agentContext?.teamId, agentId: agentContext?.agentId, forceNew: true },
+        ),
+    },
+    ...(scopedSessions.length > 0 ? [{ separator: true }] : []),
+    ...scopedSessions.slice(0, 12).map((sess) => ({
+      id: `sess:${sess.runtimeSessionId}`,
+      label: sess.runtimeSessionId === activeSessionId ? `● ${sess.title}` : sess.title,
+      hint: [sess.status !== "Idle" ? sess.status : "", sess.ageText].filter(Boolean).join(" · "),
+      icon: <MessageSquare size={13} />,
+      onSelect: () =>
+        onOpenAgentConversation?.(
+          agentContext?.kind === "manager"
+            ? { manager: true, runtimeSessionId: sess.runtimeSessionId }
+            : {
+                teamId: agentContext?.teamId,
+                agentId: agentContext?.agentId,
+                runtimeSessionId: sess.runtimeSessionId,
+              },
+        ),
+    })),
+  ];
 
   return (
     <header className="chat-header">
@@ -52,12 +100,39 @@ export function ChatHeader({
           <PanelLeft size={16} aria-hidden="true" />
         </button>
       </Tooltip>
-      <h1 className="chat-title" title={title}>{title}</h1>
+      <h1 className="chat-title" title={title}>
+        {title}
+      </h1>
       {isChatSurface && agentContext?.kind === "manager" && (
-        <span className="header-agent-pill manager" title="Talking with the Organization Manager">
-          <Sparkles size={12} aria-hidden="true" />
-          <span>Manager · Coordinator</span>
-        </span>
+        <div className="header-agent-breadcrumb">
+          <button
+            type="button"
+            className="header-agent-pill manager"
+            title="Open Manager overview & conversations"
+            onClick={() => onOpenManagerView?.()}
+          >
+            <Sparkles size={12} aria-hidden="true" />
+            <span>Manager · Coordinator</span>
+          </button>
+          {onOpenAgentConversation && (
+            <Menu
+              label="Manager conversations"
+              items={sessionSwitchItems}
+              trigger={(props) => (
+                <button
+                  type="button"
+                  className="header-agent-pill subtle"
+                  title="Switch or start a Manager conversation"
+                  {...props}
+                >
+                  <MessageSquare size={11} aria-hidden="true" />
+                  <span>Sessions ({managerSessions.length})</span>
+                  <ChevronDown size={11} aria-hidden="true" />
+                </button>
+              )}
+            />
+          )}
+        </div>
       )}
       {isChatSurface && agentContext?.kind === "member" && (
         <div className="header-agent-breadcrumb">
@@ -67,20 +142,42 @@ export function ChatHeader({
             title={`View ${agentContext.teamName} organization`}
             onClick={() => onOpenTeam?.(agentContext.teamId, "organization")}
           >
-            {agentContext.isLeader ? <Crown size={11} aria-hidden="true" /> : <Network size={11} aria-hidden="true" />}
+            {agentContext.isLeader ? (
+              <Crown size={11} aria-hidden="true" />
+            ) : (
+              <Network size={11} aria-hidden="true" />
+            )}
             <span>{agentContext.teamName}</span>
             <span className="header-agent-sep">/</span>
             <strong>{agentContext.agentName}</strong>
             <span className="header-agent-role">{agentContext.roleLabel}</span>
           </button>
+          {onOpenAgentConversation && (
+            <Menu
+              label={`${agentContext.agentName} conversations`}
+              items={sessionSwitchItems}
+              trigger={(props) => (
+                <button
+                  type="button"
+                  className="header-agent-pill subtle"
+                  title={`Browse ${agentContext.agentName}'s conversations or start a new one`}
+                  {...props}
+                >
+                  <MessageSquare size={11} aria-hidden="true" />
+                  <span>Sessions ({memberSessions.length})</span>
+                  <ChevronDown size={11} aria-hidden="true" />
+                </button>
+              )}
+            />
+          )}
           <button
             type="button"
             className="header-agent-pill subtle"
-            title={`Open ${agentContext.teamName} tasks board`}
+            title={`Open ${agentContext.teamName} tasks`}
             onClick={() => onOpenTeam?.(agentContext.teamId, "tasks")}
           >
-            <Kanban size={11} aria-hidden="true" />
-            <span>Board</span>
+            <ListChecks size={11} aria-hidden="true" />
+            <span>Tasks{teamTaskCount > 0 ? ` (${teamTaskCount})` : ""}</span>
           </button>
         </div>
       )}
@@ -93,8 +190,13 @@ export function ChatHeader({
       {status && <span className={`status-chip ${status.tone || ""}`.trim()}>{status.label}</span>}
       <div className="chat-header-actions">
         {showTasks && (
-          <Tooltip label="Tasks">
-            <button type="button" className="icon-button header-button" aria-label="Open tasks" onClick={onOpenTasks}>
+          <Tooltip label="Current session activity">
+            <button
+              type="button"
+              className="icon-button header-button"
+              aria-label="Open session activity"
+              onClick={onOpenTasks}
+            >
               <ListChecks size={16} aria-hidden="true" />
             </button>
           </Tooltip>

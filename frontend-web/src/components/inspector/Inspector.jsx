@@ -4,36 +4,31 @@ import { FileTree } from "../FileTree.jsx";
 import { methods } from "../../methods.js";
 import { ContextTab } from "./ContextTab.jsx";
 import { ActivityTab } from "./ActivityTab.jsx";
-import { TeamTab } from "./TeamTab.jsx";
 
-const TAB_LABELS = Object.freeze({ context: "Context", activity: "Activity", files: "Files", team: "Team" });
+const TAB_LABELS = Object.freeze({ context: "Context", activity: "Activity", files: "Files" });
 
 // Which tabs the connected runtime can back. Activity needs a way to watch
 // background commands; the global Usage entry may also show provider status.
-export function visibleTabs(info, options = {}) {
+export function visibleTabs(info) {
   const available = new Set(info?.methods || []);
   const capabilities = new Set(info?.capabilities || []);
   const tasks = available.has(methods.taskList) || capabilities.has("rind/tasks");
   const background = available.has(methods.backgroundList);
-  const hasTeam = Boolean(options?.hasTeam);
   return {
     tabs: [
       "context",
       ...(tasks || background ? ["activity"] : []),
       "files",
-      ...(hasTeam ? ["team"] : []),
     ],
     tasks,
     background,
-    team: hasTeam,
     usage: available.has(methods.usageSummary),
     auth: available.has(methods.authList),
   };
 }
 
 // Inspector (spec section 2), after LobeHub's right panel: a 360px column of
-// tabs (Context, Activity, Files, Team). Tabs follow the WAI-ARIA tabs
-// pattern with roving arrow keys.
+// tabs (Context, Activity, Files) scoped strictly to the current session and its folder.
 export function Inspector({
   tab,
   onTab,
@@ -56,20 +51,12 @@ export function Inspector({
   listFiles,
   readFile,
   fileRequest,
-  teamProps,
   panelRef,
   panelAttrs = {},
   style,
   visible = true,
 }) {
-  const hasTeam = Boolean(
-    teamProps &&
-      (teamProps.teamSummary ||
-        teamProps.agentContext?.kind === "manager" ||
-        teamProps.agentContext?.kind === "member" ||
-        teamProps.hasTeams),
-  );
-  const gates = visibleTabs(info, { hasTeam });
+  const gates = visibleTabs(info);
   const current = gates.tabs.includes(tab) ? tab : gates.tabs[0];
   const tabRefs = useRef({});
   const sessionId = info?.session_id || "";
@@ -88,12 +75,11 @@ export function Inspector({
   }
 
   const { className = "", ...attrs } = panelAttrs;
+  const folderName = String(workspace || "No folder selected").replace(/\\/g, "/").split("/").filter(Boolean).pop() || "No folder selected";
   const scopeLabel =
     current === "files"
-      ? `Workspace · ${String(workspace || "No folder selected").replace(/\\/g, "/").split("/").filter(Boolean).pop()}`
-      : current === "team" && teamProps?.teamSummary?.team?.name
-        ? `Team · ${teamProps.teamSummary.team.name}`
-        : "Current session";
+      ? `Workspace · ${folderName}`
+      : `Current session · ${folderName}`;
 
   return (
     <aside
@@ -163,7 +149,6 @@ export function Inspector({
             <FileTree key={workspace || "none"} workspace={workspace} listFiles={listFiles} readFile={readFile} embedded openRequest={fileRequest} />
           </div>
         )}
-        {current === "team" && <TeamTab {...teamProps} />}
       </div>
     </aside>
   );

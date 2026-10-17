@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react";
 import {
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Cpu,
   Crown,
+  FileText,
   FolderGit2,
   GitBranch,
-  Kanban,
-  List,
+  ListChecks,
   MessageSquare,
   Network,
   Pencil,
@@ -15,7 +18,7 @@ import {
   Trash2,
   UserPlus,
 } from "lucide-react";
-import { KANBAN_COLUMNS } from "../../lib/agentsModel.js";
+import { TASK_SECTION_DEFS } from "../../lib/agentsModel.js";
 import { TaskReportDrawer } from "./TaskReportDrawer.jsx";
 
 function OrgMemberNode({
@@ -24,17 +27,36 @@ function OrgMemberNode({
   depth = 0,
   busy,
   onOpenChat,
+  onRenameSession,
+  onDeleteSession,
   onQuickAssign,
+  onQuickAddReport,
   onSelectTask,
   onSetLeader,
   onSetSupervisor,
   onUpdateMember,
   onRemoveMember,
+  onGetMemberModel,
+  onSetMemberModel,
+  onClearMemberModel,
 }) {
   const [editing, setEditing] = useState(false);
   const [position, setPosition] = useState(node.position || "");
   const [responsibility, setResponsibility] = useState(node.responsibility || "");
   const [reportsTo, setReportsTo] = useState(node.reportsToAgentId || "");
+
+  const [modelOpen, setModelOpen] = useState(false);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [modelInput, setModelInput] = useState("");
+  const [providerInput, setProviderInput] = useState("");
+  const [effortInput, setEffortInput] = useState("");
+  const [modelSource, setModelSource] = useState("");
+
+  const [sessionsExpanded, setSessionsExpanded] = useState(true);
+  const [renamingSessionId, setRenamingSessionId] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
+
+  const memberSessions = Array.isArray(node.sessions) ? node.sessions : [];
 
   async function saveEdits(event) {
     event.preventDefault();
@@ -52,6 +74,44 @@ function OrgMemberNode({
       });
     }
     setEditing(false);
+  }
+
+  async function toggleModelConfig() {
+    if (modelOpen) {
+      setModelOpen(false);
+      return;
+    }
+    setModelOpen(true);
+    if (!onGetMemberModel) return;
+    setModelLoading(true);
+    try {
+      const info = await onGetMemberModel({ teamId: node.teamId, agentId: node.agentId });
+      setModelInput(String(info?.saved?.model || info?.effective?.model || ""));
+      setProviderInput(String(info?.saved?.provider || info?.effective?.provider || ""));
+      setEffortInput(String(info?.saved?.reasoningEffort || info?.effective?.reasoningEffort || ""));
+      setModelSource(String(info?.source?.model || "default"));
+    } catch {
+      // Ignore model fetch error
+    } finally {
+      setModelLoading(false);
+    }
+  }
+
+  async function saveModelConfig(event) {
+    event.preventDefault();
+    if (!onSetMemberModel) return;
+    if (!modelInput.trim() && onClearMemberModel) {
+      await onClearMemberModel({ teamId: node.teamId, agentId: node.agentId, part: "model" });
+    } else {
+      await onSetMemberModel({
+        teamId: node.teamId,
+        agentId: node.agentId,
+        ...(providerInput.trim() ? { provider: providerInput.trim() } : {}),
+        ...(modelInput.trim() ? { model: modelInput.trim() } : {}),
+        ...(effortInput.trim() ? { reasoningEffort: effortInput.trim() } : {}),
+      });
+    }
+    setModelOpen(false);
   }
 
   return (
@@ -109,13 +169,157 @@ function OrgMemberNode({
           </button>
         )}
 
+        {/* Member Conversations (Sessions) Section */}
+        <div className="org-member-sessions">
+          <div className="org-member-sessions-head">
+            <button
+              type="button"
+              className="org-member-sessions-toggle"
+              onClick={() => setSessionsExpanded((prev) => !prev)}
+            >
+              {sessionsExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              <MessageSquare size={12} aria-hidden="true" />
+              <span>Conversations ({memberSessions.length})</span>
+            </button>
+            <button
+              type="button"
+              className="agent-btn ghost xs"
+              disabled={busy}
+              onClick={() =>
+                onOpenChat?.({
+                  teamId: node.teamId,
+                  agentId: node.agentId,
+                  forceNew: true,
+                })
+              }
+            >
+              <Plus size={11} aria-hidden="true" />
+              <span>New conversation</span>
+            </button>
+          </div>
+
+          {sessionsExpanded && (
+            <div className="org-member-session-list">
+              {memberSessions.length === 0 ? (
+                <div className="org-member-session-empty">
+                  <span>No conversations yet with {node.name}.</span>
+                  <button
+                    type="button"
+                    className="agent-btn secondary xs"
+                    disabled={busy}
+                    onClick={() =>
+                      onOpenChat?.({
+                        teamId: node.teamId,
+                        agentId: node.agentId,
+                        forceNew: true,
+                      })
+                    }
+                  >
+                    <Plus size={11} aria-hidden="true" />
+                    <span>Start first conversation</span>
+                  </button>
+                </div>
+              ) : (
+                memberSessions.map((sess) => (
+                  <div key={sess.runtimeSessionId} className="org-member-session-row">
+                    {renamingSessionId === sess.runtimeSessionId ? (
+                      <form
+                        className="org-session-rename-form"
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          await onRenameSession?.(sess.runtimeSessionId, renameDraft, {
+                            teamId: node.teamId,
+                          });
+                          setRenamingSessionId("");
+                        }}
+                      >
+                        <input
+                          type="text"
+                          value={renameDraft}
+                          onChange={(e) => setRenameDraft(e.target.value)}
+                          placeholder="Conversation title"
+                          autoFocus
+                        />
+                        <button type="submit" className="agent-btn primary xs" disabled={busy}>
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-btn ghost xs"
+                          onClick={() => setRenamingSessionId("")}
+                        >
+                          Cancel
+                        </button>
+                      </form>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="org-member-session-main"
+                          onClick={() =>
+                            onOpenChat?.({
+                              teamId: node.teamId,
+                              agentId: node.agentId,
+                              runtimeSessionId: sess.runtimeSessionId,
+                            })
+                          }
+                        >
+                          <span className={`agent-status-dot tone-${sess.tone}`} />
+                          <span className="org-member-session-title">{sess.title}</span>
+                          {sess.origin === "task" && (
+                            <span className="org-member-session-badge">Task</span>
+                          )}
+                          <span className={`org-member-session-status tone-${sess.tone}`}>
+                            {sess.status}
+                          </span>
+                          {sess.model && (
+                            <span className="org-member-session-meta">{sess.model}</span>
+                          )}
+                          {sess.ageText && (
+                            <span className="org-member-session-age">{sess.ageText}</span>
+                          )}
+                        </button>
+                        <div className="org-member-session-actions">
+                          <button
+                            type="button"
+                            className="icon-button xs"
+                            title="Rename conversation"
+                            aria-label={`Rename ${sess.title}`}
+                            onClick={() => {
+                              setRenamingSessionId(sess.runtimeSessionId);
+                              setRenameDraft(sess.title);
+                            }}
+                          >
+                            <Pencil size={11} aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button xs"
+                            title="Delete conversation"
+                            aria-label={`Delete ${sess.title}`}
+                            onClick={() =>
+                              onDeleteSession?.(sess.runtimeSessionId, { teamId: node.teamId })
+                            }
+                          >
+                            <Trash2 size={11} aria-hidden="true" />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="org-member-footer">
           <div className="org-member-stats">
-            <span>{node.taskCounts.active} active</span>
+            <span>{node.taskCounts.active} active task(s)</span>
             {node.taskCounts.attention > 0 && (
               <span className="org-stat-attention">{node.taskCounts.attention} need review</span>
             )}
-            <span>{node.taskCounts.done} completed</span>
+            <span>{node.taskCounts.done} delivered</span>
           </div>
           <div className="org-member-actions">
             <button
@@ -127,11 +331,12 @@ function OrgMemberNode({
                   teamId: node.teamId,
                   agentId: node.agentId,
                   runtimeSessionId: node.latestRuntimeSessionId,
+                  resumeLatest: true,
                 })
               }
             >
               <MessageSquare size={13} aria-hidden="true" />
-              <span>Chat</span>
+              <span>{memberSessions.length > 0 ? "Open chat" : "New chat"}</span>
             </button>
             <button
               type="button"
@@ -141,6 +346,16 @@ function OrgMemberNode({
             >
               <Plus size={13} aria-hidden="true" />
               <span>Assign task</span>
+            </button>
+            <button
+              type="button"
+              className="agent-btn ghost sm"
+              disabled={busy}
+              title={`Add a direct report under ${node.name}`}
+              onClick={() => onQuickAddReport?.(node.agentId)}
+            >
+              <UserPlus size={13} aria-hidden="true" />
+              <span>Add report</span>
             </button>
             {!node.isLeader && (
               <button
@@ -152,6 +367,17 @@ function OrgMemberNode({
               >
                 <Crown size={13} aria-hidden="true" />
                 <span>Make leader</span>
+              </button>
+            )}
+            {onGetMemberModel && (
+              <button
+                type="button"
+                className="icon-button small"
+                aria-label={`Model settings for ${node.name}`}
+                title="Configure member default model & reasoning effort"
+                onClick={() => void toggleModelConfig()}
+              >
+                <Cpu size={13} aria-hidden="true" />
               </button>
             )}
             <button
@@ -180,6 +406,54 @@ function OrgMemberNode({
             </button>
           </div>
         </div>
+
+        {modelOpen && (
+          <form className="org-member-edit-form" onSubmit={saveModelConfig}>
+            <div className="org-form-grid">
+              <label>
+                <span>Default Model ({modelSource || "folder"})</span>
+                <input
+                  type="text"
+                  value={modelInput}
+                  disabled={modelLoading}
+                  onChange={(e) => setModelInput(e.target.value)}
+                  placeholder="Leave empty to inherit runtime default"
+                />
+              </label>
+              <label>
+                <span>Provider (Optional)</span>
+                <input
+                  type="text"
+                  value={providerInput}
+                  disabled={modelLoading}
+                  onChange={(e) => setProviderInput(e.target.value)}
+                  placeholder="e.g. openai, anthropic"
+                />
+              </label>
+              <label>
+                <span>Reasoning Effort</span>
+                <select
+                  value={effortInput}
+                  disabled={modelLoading}
+                  onChange={(e) => setEffortInput(e.target.value)}
+                >
+                  <option value="">Default</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+            </div>
+            <div className="org-form-actions">
+              <button type="button" className="agent-btn ghost sm" onClick={() => setModelOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="agent-btn primary sm" disabled={busy || modelLoading}>
+                Save model defaults
+              </button>
+            </div>
+          </form>
+        )}
 
         {editing && (
           <form className="org-member-edit-form" onSubmit={saveEdits}>
@@ -238,12 +512,18 @@ function OrgMemberNode({
               depth={depth + 1}
               busy={busy}
               onOpenChat={onOpenChat}
+              onRenameSession={onRenameSession}
+              onDeleteSession={onDeleteSession}
               onQuickAssign={onQuickAssign}
+              onQuickAddReport={onQuickAddReport}
               onSelectTask={onSelectTask}
               onSetLeader={onSetLeader}
               onSetSupervisor={onSetSupervisor}
               onUpdateMember={onUpdateMember}
               onRemoveMember={onRemoveMember}
+              onGetMemberModel={onGetMemberModel}
+              onSetMemberModel={onSetMemberModel}
+              onClearMemberModel={onClearMemberModel}
             />
           ))}
         </div>
@@ -261,12 +541,17 @@ export function TeamView({
   onTabChange,
   onSelectTask,
   onOpenChat,
+  onRenameSession,
+  onDeleteSession,
   onOpenManager,
   onCreateMember,
   onUpdateMember,
   onRemoveMember,
   onSetLeader,
   onSetSupervisor,
+  onGetMemberModel,
+  onSetMemberModel,
+  onClearMemberModel,
   onAssignTask,
   onStartTask,
   onCancelTask,
@@ -276,8 +561,8 @@ export function TeamView({
   onReadArtifact,
   onDeleteTeam,
 }) {
-  const [taskLayout, setTaskLayout] = useState("board"); // "board" | "list"
   const [assigneeFilter, setAssigneeFilter] = useState("");
+  const [sectionFilter, setSectionFilter] = useState("all"); // "all" | "needs" | "active" | "done"
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [memberMode, setMemberMode] = useState("workspace"); // "workspace" | "existing" | "worktree"
   const [memberName, setMemberName] = useState("");
@@ -302,6 +587,7 @@ export function TeamView({
     members: 0,
     working: 0,
     attention: 0,
+    sessions: 0,
     tasksTotal: 0,
     tasksQueued: 0,
     tasksInProgress: 0,
@@ -309,21 +595,29 @@ export function TeamView({
     tasksCompleted: 0,
   };
 
-  const selectedTask = useMemo(
-    () => (selectedTaskId ? teamTasks?.all?.find((t) => t.id === selectedTaskId) || null : null),
-    [selectedTaskId, teamTasks],
-  );
+  const filteredSections = useMemo(() => {
+    const allTasks = (teamTasks?.all || []).filter((t) =>
+      assigneeFilter ? t.assigneeAgentId === assigneeFilter : true,
+    );
+    const defs = TASK_SECTION_DEFS.filter((def) => {
+      if (sectionFilter === "needs") return def.id === "needs";
+      if (sectionFilter === "active") return def.id === "needs" || def.id === "working" || def.id === "queued" || def.id === "delegated";
+      if (sectionFilter === "done") return def.id === "done" || def.id === "cancelled";
+      return true;
+    });
+    return defs.map((def) => ({
+      ...def,
+      tasks: allTasks.filter((t) => t.group === def.id),
+    }));
+  }, [teamTasks, assigneeFilter, sectionFilter]);
 
-  const filteredTasks = useMemo(() => {
+  const selectedTask = useMemo(() => {
     const all = teamTasks?.all || [];
-    if (!assigneeFilter) return teamTasks;
-    const filteredAll = all.filter((t) => t.assigneeAgentId === assigneeFilter);
-    const columns = { queued: [], in_progress: [], needs_attention: [], completed: [] };
-    for (const item of filteredAll) {
-      columns[item.column]?.push(item);
+    if (selectedTaskId) {
+      return all.find((t) => t.id === selectedTaskId) || null;
     }
-    return { all: filteredAll, columns };
-  }, [teamTasks, assigneeFilter]);
+    return null;
+  }, [selectedTaskId, teamTasks]);
 
   if (!team) {
     return (
@@ -334,7 +628,7 @@ export function TeamView({
           <p>Select a team from the sidebar or talk with the Manager to spin up an agent team.</p>
           <button type="button" className="agent-btn primary" onClick={onOpenManager}>
             <Sparkles size={14} aria-hidden="true" />
-            <span>Open Manager Chat</span>
+            <span>Open Manager</span>
           </button>
         </div>
       </div>
@@ -344,6 +638,13 @@ export function TeamView({
   function handleQuickAssign(agentId) {
     setAssignAgentId(agentId || teamSummary?.leader?.agentId || members[0]?.agentId || "");
     setAssignOpen(true);
+    setAddMemberOpen(false);
+  }
+
+  function handleQuickAddReport(supervisorAgentId) {
+    setMemberSupervisor(supervisorAgentId || "");
+    setAddMemberOpen(true);
+    setAssignOpen(false);
   }
 
   async function submitNewMember(event) {
@@ -397,7 +698,8 @@ export function TeamView({
               </span>
             )}
             <span className="agents-header-meta">
-              {counts.members} {counts.members === 1 ? "member" : "members"} · {counts.tasksTotal}{" "}
+              {counts.members} {counts.members === 1 ? "member" : "members"} · {counts.sessions || 0}{" "}
+              {counts.sessions === 1 ? "conversation" : "conversations"} · {counts.tasksTotal}{" "}
               {counts.tasksTotal === 1 ? "task" : "tasks"}
             </span>
           </div>
@@ -427,8 +729,8 @@ export function TeamView({
               className={`agents-seg-btn ${activeTab === "tasks" ? "active" : ""}`}
               onClick={() => onTabChange?.("tasks")}
             >
-              <Kanban size={14} aria-hidden="true" />
-              <span>Tasks</span>
+              <ListChecks size={14} aria-hidden="true" />
+              <span>Tasks &amp; Deliveries</span>
               {counts.tasksTotal > 0 && <span className="agents-seg-count">{counts.tasksTotal}</span>}
             </button>
           </div>
@@ -442,6 +744,7 @@ export function TeamView({
                   teamId: team.id,
                   agentId: teamSummary.leader.agentId,
                   runtimeSessionId: teamSummary.leader.latestRuntimeSessionId,
+                  resumeLatest: true,
                 })
               }
             >
@@ -657,12 +960,18 @@ export function TeamView({
                       allMembers={members}
                       busy={busy}
                       onOpenChat={onOpenChat}
+                      onRenameSession={onRenameSession}
+                      onDeleteSession={onDeleteSession}
                       onQuickAssign={handleQuickAssign}
+                      onQuickAddReport={handleQuickAddReport}
                       onSelectTask={onSelectTask}
                       onSetLeader={onSetLeader}
                       onSetSupervisor={onSetSupervisor}
                       onUpdateMember={onUpdateMember}
                       onRemoveMember={onRemoveMember}
+                      onGetMemberModel={onGetMemberModel}
+                      onSetMemberModel={onSetMemberModel}
+                      onClearMemberModel={onClearMemberModel}
                     />
                   ))}
                 </div>
@@ -728,46 +1037,77 @@ export function TeamView({
                     </select>
                   </label>
                 </div>
-                <div className="agents-segmented" role="group" aria-label="Tasks layout">
+                <div className="agents-segmented" role="group" aria-label="Filter tasks by stage">
                   <button
                     type="button"
-                    className={`agents-seg-btn ${taskLayout === "board" ? "active" : ""}`}
-                    onClick={() => setTaskLayout("board")}
+                    className={`agents-seg-btn ${sectionFilter === "all" ? "active" : ""}`}
+                    onClick={() => setSectionFilter("all")}
                   >
-                    <Kanban size={13} aria-hidden="true" />
-                    <span>Board</span>
+                    <span>All</span>
                   </button>
                   <button
                     type="button"
-                    className={`agents-seg-btn ${taskLayout === "list" ? "active" : ""}`}
-                    onClick={() => setTaskLayout("list")}
+                    className={`agents-seg-btn ${sectionFilter === "needs" ? "active" : ""}`}
+                    onClick={() => setSectionFilter("needs")}
                   >
-                    <List size={13} aria-hidden="true" />
-                    <span>List</span>
+                    <span>Needs You</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`agents-seg-btn ${sectionFilter === "active" ? "active" : ""}`}
+                    onClick={() => setSectionFilter("active")}
+                  >
+                    <span>Active &amp; Queued</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`agents-seg-btn ${sectionFilter === "done" ? "active" : ""}`}
+                    onClick={() => setSectionFilter("done")}
+                  >
+                    <span>Delivered</span>
                   </button>
                 </div>
               </div>
 
-              {taskLayout === "board" ? (
-                <div className="kanban-board" role="region" aria-label="Team tasks Kanban board">
-                  {KANBAN_COLUMNS.map((col) => {
-                    const colTasks = filteredTasks?.columns?.[col.id] || [];
+              {(teamTasks?.all?.length || 0) === 0 ? (
+                <div className="agents-empty-hero">
+                  <ListChecks size={26} aria-hidden="true" />
+                  <h3>No tasks assigned in {team.name} yet</h3>
+                  <p>
+                    Assign a task to the team leader or a specialist member to track execution, sub-delegations, and delivery reports.
+                  </p>
+                  <button
+                    type="button"
+                    className="agent-btn primary"
+                    disabled={members.length === 0}
+                    onClick={() => handleQuickAssign(teamSummary.leader?.agentId)}
+                  >
+                    <Plus size={14} aria-hidden="true" />
+                    <span>Assign First Task</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="task-sections-stack" role="region" aria-label="Grouped team tasks">
+                  {filteredSections.map((section) => {
+                    if (section.tasks.length === 0 && sectionFilter === "all" && section.id === "cancelled") {
+                      return null;
+                    }
                     return (
-                      <div key={col.id} className="kanban-column" data-column={col.id}>
-                        <div className="kanban-column-head">
-                          <span className="kanban-column-title">{col.label}</span>
-                          <span className="kanban-column-count">{colTasks.length}</span>
+                      <section key={section.id} className="task-group-section" data-section={section.id}>
+                        <div className="task-group-head">
+                          <h3 className="task-group-title">{section.label}</h3>
+                          <span className="task-group-count">{section.tasks.length}</span>
                         </div>
-                        <div className="kanban-column-cards">
-                          {colTasks.length === 0 ? (
-                            <div className="kanban-empty">{col.emptyText}</div>
-                          ) : (
-                            colTasks.map((task) => (
+                        {section.tasks.length === 0 ? (
+                          <div className="task-group-empty">{section.emptyText}</div>
+                        ) : (
+                          <div className="task-list-table" role="list">
+                            {section.tasks.map((task) => (
                               <div
                                 key={task.id}
-                                role="button"
+                                role="listitem"
                                 tabIndex={0}
-                                className={`kanban-card ${selectedTask?.id === task.id ? "selected" : ""}`}
+                                className={`task-list-row ${selectedTask?.id === task.id ? "selected" : ""}`}
                                 onClick={() => onSelectTask?.(team.id, task.id)}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter" || e.key === " ") {
@@ -776,86 +1116,92 @@ export function TeamView({
                                   }
                                 }}
                               >
-                                <div className="kanban-card-top">
-                                  <span className={`agent-status-pill tone-${task.tone}`}>{task.statusLabel}</span>
-                                  {task.priority !== "normal" && (
-                                    <span className={`task-priority-chip ${task.priority}`}>{task.priority}</span>
+                                <div className="task-list-main">
+                                  <div className="task-list-title-line">
+                                    <span className={`agent-status-pill tone-${task.tone}`}>
+                                      {task.statusLabel}
+                                    </span>
+                                    {task.priority !== "normal" && (
+                                      <span className={`task-priority-chip ${task.priority}`}>
+                                        {task.priority}
+                                      </span>
+                                    )}
+                                    <strong className="task-list-brief">{task.brief}</strong>
+                                  </div>
+
+                                  {task.blockedSummary && (
+                                    <div className="task-list-callout attention">
+                                      {task.blockedSummary}
+                                    </div>
+                                  )}
+
+                                  {task.report?.summary && (
+                                    <div className="task-list-callout report">
+                                      {task.report.outcome && (
+                                        <span className="task-outcome-inline">{task.report.outcome}: </span>
+                                      )}
+                                      {task.report.summary}
+                                    </div>
                                   )}
                                 </div>
-                                <div className="kanban-card-brief">{task.brief}</div>
-                                {task.blockedOn?.action && (
-                                  <div className="kanban-card-callout attention">
-                                    Blocker: {task.blockedOn.action}
-                                  </div>
-                                )}
-                                {task.report?.summary && (
-                                  <div className="kanban-card-callout report">{task.report.summary}</div>
-                                )}
-                                <div className="kanban-card-foot">
-                                  <span className="kanban-card-assignee">{task.assigneeName}</span>
-                                  <div className="kanban-card-quick" onClick={(e) => e.stopPropagation()}>
-                                    {task.status === "queued" && (
-                                      <button
-                                        type="button"
-                                        className="agent-btn ghost xs"
-                                        title="Start task"
-                                        onClick={() => void onStartTask?.(task.id)}
-                                      >
-                                        <Play size={12} aria-hidden="true" />
-                                        <span>Start</span>
-                                      </button>
-                                    )}
-                                    {task.status === "done" && task.report && !task.review && (
-                                      <button
-                                        type="button"
-                                        className="agent-btn primary xs"
-                                        title="Accept delivery"
-                                        onClick={() => void onReviewTask?.(task.id, "accept")}
-                                      >
-                                        <CheckCircle2 size={12} aria-hidden="true" />
-                                        <span>Accept</span>
-                                      </button>
-                                    )}
-                                  </div>
+
+                                <div className="task-list-meta" onClick={(e) => e.stopPropagation()}>
+                                  <span className="task-list-assignee">
+                                    {task.assigneeName} · {task.assigneePosition}
+                                  </span>
+                                  {task.artifactRecords?.length > 0 && (
+                                    <span className="task-list-badge" title="Published artifacts">
+                                      <FileText size={11} aria-hidden="true" />
+                                      <span>{task.artifactRecords.length}</span>
+                                    </span>
+                                  )}
+                                  {task.ageText && <span className="task-list-age">{task.ageText}</span>}
+                                  {task.status === "queued" && (
+                                    <button
+                                      type="button"
+                                      className="agent-btn ghost xs"
+                                      disabled={busy}
+                                      onClick={() => void onStartTask?.(task.id)}
+                                    >
+                                      <Play size={11} aria-hidden="true" />
+                                      <span>Start</span>
+                                    </button>
+                                  )}
+                                  {task.unreviewed && (
+                                    <button
+                                      type="button"
+                                      className="agent-btn primary xs"
+                                      disabled={busy}
+                                      onClick={() => void onReviewTask?.(task.id, "accept")}
+                                    >
+                                      <CheckCircle2 size={11} aria-hidden="true" />
+                                      <span>Accept</span>
+                                    </button>
+                                  )}
+                                  {task.runtimeSessionId && (
+                                    <button
+                                      type="button"
+                                      className="agent-btn ghost xs"
+                                      onClick={() =>
+                                        onOpenChat?.({
+                                          teamId: task.teamId,
+                                          agentId: task.assigneeAgentId,
+                                          runtimeSessionId: task.runtimeSessionId,
+                                        })
+                                      }
+                                    >
+                                      <MessageSquare size={11} aria-hidden="true" />
+                                      <span>Session</span>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
+                            ))}
+                          </div>
+                        )}
+                      </section>
                     );
                   })}
-                </div>
-              ) : (
-                <div className="tasks-grouped-list">
-                  {filteredTasks?.all?.length === 0 ? (
-                    <div className="agents-empty-hero">
-                      <p>No tasks assigned yet.</p>
-                    </div>
-                  ) : (
-                    filteredTasks.all.map((task) => (
-                      <div
-                        key={task.id}
-                        role="button"
-                        tabIndex={0}
-                        className={`task-list-row-card ${selectedTask?.id === task.id ? "selected" : ""}`}
-                        onClick={() => onSelectTask?.(team.id, task.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            onSelectTask?.(team.id, task.id);
-                          }
-                        }}
-                      >
-                        <span className={`agent-status-pill tone-${task.tone}`}>{task.statusLabel}</span>
-                        <span className="task-list-brief">{task.brief}</span>
-                        {task.priority !== "normal" && (
-                          <span className={`task-priority-chip ${task.priority}`}>{task.priority}</span>
-                        )}
-                        <span className="task-list-assignee">{task.assigneeName}</span>
-                      </div>
-                    ))
-                  )}
                 </div>
               )}
             </div>

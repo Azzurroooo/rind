@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
+  Activity,
   AlertTriangle,
+  Check,
   CheckCircle2,
   FileText,
   MessageSquare,
@@ -16,6 +18,8 @@ export function TaskReportDrawer({
   onClose,
   onStartTask,
   onCancelTask,
+  onCancelRun,
+  onResolveRun,
   onSetPriority,
   onReviewTask,
   onPostNote,
@@ -34,7 +38,14 @@ export function TaskReportDrawer({
   const isUserBlocked = task.status === "blocked" && task.blockedOn?.responder === "user";
   const canReview = task.status === "done" && Boolean(task.report) && !task.review;
   const canStart = task.status === "queued" || task.status === "needs_attention";
-  const canCancel = task.status === "queued" || task.status === "running" || task.status === "blocked";
+  const activeRun =
+    task.activeRun &&
+    (task.activeRun.status === "starting" ||
+      task.activeRun.status === "running" ||
+      task.activeRun.status === "unknown")
+      ? task.activeRun
+      : null;
+  const canCancelTask = !activeRun && (task.status === "queued" || task.status === "blocked" || task.status === "needs_attention");
 
   async function handlePreviewArtifact(artifact) {
     if (artifactPreview?.id === artifact.id) {
@@ -68,7 +79,7 @@ export function TaskReportDrawer({
         <div className="task-drawer-title-group">
           <span className={`agent-status-pill tone-${task.tone}`}>{task.statusLabel}</span>
           <span className="task-drawer-meta">
-            {task.teamName ? `${task.teamName} · ` : ""}
+            {task.teamName ? `${task.teamName} › ` : ""}
             {task.assigneeName} ({task.assigneePosition})
           </span>
         </div>
@@ -81,19 +92,25 @@ export function TaskReportDrawer({
         <div className="task-drawer-section">
           <h3 className="task-drawer-brief">{task.brief}</h3>
           <div className="task-drawer-controls">
-            <label className="task-priority-label">
-              <span>Priority</span>
-              <select
-                value={task.priority || "normal"}
-                disabled={busy}
-                aria-label="Task priority"
-                onChange={(e) => void onSetPriority?.(task.id, e.target.value)}
-              >
-                <option value="high">High</option>
-                <option value="normal">Normal</option>
-                <option value="low">Low</option>
-              </select>
-            </label>
+            {task.status === "queued" ? (
+              <label className="task-priority-label">
+                <span>Priority</span>
+                <select
+                  value={task.priority || "normal"}
+                  disabled={busy}
+                  aria-label="Task priority"
+                  onChange={(e) => void onSetPriority?.(task.id, e.target.value)}
+                >
+                  <option value="high">High</option>
+                  <option value="normal">Normal</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+            ) : (
+              <span className={`task-priority-chip ${task.priority || "normal"}`}>
+                Priority: {task.priority || "normal"}
+              </span>
+            )}
             <div className="task-drawer-action-row">
               {canStart && (
                 <button
@@ -103,10 +120,32 @@ export function TaskReportDrawer({
                   onClick={() => void onStartTask?.(task.id)}
                 >
                   <Play size={13} aria-hidden="true" />
-                  <span>{task.status === "needs_attention" ? "Resume task" : "Start now"}</span>
+                  <span>{task.status === "needs_attention" ? "Retry / Resume" : "Start now"}</span>
                 </button>
               )}
-              {canCancel && (
+              {activeRun?.status === "unknown" && onResolveRun && (
+                <button
+                  type="button"
+                  className="agent-btn primary sm"
+                  disabled={busy}
+                  onClick={() => void onResolveRun(activeRun.id)}
+                >
+                  <Check size={13} aria-hidden="true" />
+                  <span>Confirm stopped</span>
+                </button>
+              )}
+              {(activeRun?.status === "starting" || activeRun?.status === "running") && onCancelRun && (
+                <button
+                  type="button"
+                  className="agent-btn danger sm"
+                  disabled={busy}
+                  onClick={() => void onCancelRun(activeRun.id)}
+                >
+                  <Square size={13} aria-hidden="true" />
+                  <span>Stop run</span>
+                </button>
+              )}
+              {canCancelTask && (
                 <button
                   type="button"
                   className="agent-btn danger sm"
@@ -114,7 +153,7 @@ export function TaskReportDrawer({
                   onClick={() => void onCancelTask?.(task.id)}
                 >
                   <Square size={13} aria-hidden="true" />
-                  <span>Cancel</span>
+                  <span>Cancel task</span>
                 </button>
               )}
               <button
@@ -126,6 +165,7 @@ export function TaskReportDrawer({
                     teamId: task.teamId,
                     agentId: task.assigneeAgentId,
                     runtimeSessionId: task.runtimeSessionId,
+                    resumeLatest: !task.runtimeSessionId,
                   })
                 }
               >
@@ -168,6 +208,12 @@ export function TaskReportDrawer({
           </div>
         )}
 
+        {task.status === "blocked" && task.blockedOn?.responder !== "user" && task.blockedSummary && (
+          <div className="task-error-banner">
+            <strong>Sub-delegation in progress:</strong> {task.blockedSummary}
+          </div>
+        )}
+
         {task.error && (
           <div className="task-error-banner">
             <strong>Run issue:</strong> {task.error}
@@ -195,7 +241,7 @@ export function TaskReportDrawer({
 
             {(task.artifactRecords?.length > 0 || task.report.artifacts?.length > 0) && (
               <div className="task-report-block">
-                <h4>Artifacts</h4>
+                <h4>Published Files &amp; Artifacts</h4>
                 <div className="task-artifact-list">
                   {(task.artifactRecords?.length > 0
                     ? task.artifactRecords
@@ -210,7 +256,9 @@ export function TaskReportDrawer({
                         <FileText size={13} aria-hidden="true" />
                         <span className="task-artifact-name">{artifact.name}</span>
                         {artifact.size != null && (
-                          <span className="task-artifact-size">{Math.max(1, Math.round(Number(artifact.size) / 1024))} KB</span>
+                          <span className="task-artifact-size">
+                            {Math.max(1, Math.round(Number(artifact.size) / 1024))} KB
+                          </span>
                         )}
                       </button>
                       {artifactPreview?.id === artifact.id && (
@@ -221,8 +269,12 @@ export function TaskReportDrawer({
                             <div className="task-artifact-status error">{artifactPreview.error}</div>
                           ) : (
                             <>
-                              {artifactPreview.path && <div className="task-artifact-path">{artifactPreview.path}</div>}
-                              <pre className="task-artifact-code">{artifactPreview.content || "(Empty file)"}</pre>
+                              {artifactPreview.path && (
+                                <div className="task-artifact-path">{artifactPreview.path}</div>
+                              )}
+                              <pre className="task-artifact-code">
+                                {artifactPreview.content || "(Empty file)"}
+                              </pre>
                             </>
                           )}
                         </div>
@@ -306,7 +358,7 @@ export function TaskReportDrawer({
         )}
 
         <div className="task-drawer-section">
-          <span className="task-section-kicker">Notes &amp; Activity ({task.notes?.length || 0})</span>
+          <span className="task-section-kicker">Notes &amp; Guidance ({task.notes?.length || 0})</span>
           {task.notes?.length > 0 ? (
             <ul className="task-notes-list">
               {task.notes.map((note) => (
@@ -345,6 +397,25 @@ export function TaskReportDrawer({
             </button>
           </form>
         </div>
+
+        {Array.isArray(task.runs) && task.runs.length > 0 && (
+          <div className="task-drawer-section">
+            <span className="task-section-kicker">
+              <Activity size={11} aria-hidden="true" /> Runs ({task.runs.length})
+            </span>
+            <ul className="task-notes-list">
+              {task.runs.map((run) => (
+                <li key={run.id} className="task-note-item">
+                  <div className="task-note-meta">
+                    <strong>{run.status}</strong>
+                    {run.startedAt && <span>{String(run.startedAt).slice(0, 19).replace("T", " ")}</span>}
+                  </div>
+                  {run.error && <p className="task-note-text">{run.error}</p>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     </aside>
   );

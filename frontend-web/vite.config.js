@@ -224,7 +224,18 @@ function rindAgentsDevPlugin() {
               const manager = params.manager === true;
               const teamId = typeof params.teamId === "string" && !manager ? params.teamId.trim() : "";
               const agentId = typeof params.agentId === "string" ? params.agentId.trim() : "";
-              const runtimeSessionId = typeof params.runtimeSessionId === "string" ? params.runtimeSessionId.trim() : "";
+              let runtimeSessionId = typeof params.runtimeSessionId === "string" ? params.runtimeSessionId.trim() : "";
+              if (!runtimeSessionId && params.resumeLatest === true) {
+                const history = manager
+                  ? await active.request("listSessions", { manager: true }).catch(() => ({ sessions: [] }))
+                  : await active
+                      .request("listSessions", {
+                        ...(teamId ? { teamId } : {}),
+                        ...(agentId ? { agentId } : {}),
+                      })
+                      .catch(() => ({ sessions: [] }));
+                runtimeSessionId = String(history?.sessions?.[0]?.runtimeSessionId || "");
+              }
               const attached = await active.request("attachSession", {
                 ...(agentId ? { agentId } : {}),
                 ...(teamId ? { teamId } : {}),
@@ -232,6 +243,7 @@ function rindAgentsDevPlugin() {
                 ...(runtimeSessionId ? { runtimeSessionId } : {}),
                 shared: false,
               });
+              const externalTools = await active.request("sessionTools", { sessionId: attached.id }).catch(() => null);
               const snap = await active.request("snapshot");
               if (snap && typeof snap === "object") snapshot = { ...snapshot, ...snap };
               const { managementPaths, resolveRindHome } = await loadManagement();
@@ -247,7 +259,8 @@ function rindAgentsDevPlugin() {
                 teamId: String(attached.teamId || teamId),
                 manager,
                 workspaceRoot,
-                runtimeSessionId,
+                runtimeSessionId: String(attached.runtimeSessionId || runtimeSessionId || ""),
+                externalTools: externalTools || null,
               };
             } else {
               const active = await ensureConnected({ start: true });

@@ -1,5 +1,5 @@
 import { activePlan } from "../timeline-model.ts"
-import { inspectorTeamPanel, requiredElement } from "./dom.ts"
+import { requiredElement } from "./dom.ts"
 import { state } from "./state.ts"
 
 /** One empty state for the whole Activity tab, updated by goals and task polls. */
@@ -7,7 +7,6 @@ export function renderActivityEmpty() {
   const monitor = state.taskMonitor
   const empty = requiredElement("activity-empty")
   empty.hidden = Boolean(
-    !inspectorTeamPanel.hidden ||
     activePlan(state.conversation) ||
     state.goal.value ||
     monitor.tasks.length ||

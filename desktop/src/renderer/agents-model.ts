@@ -1,6 +1,6 @@
-// Pure data projection, hierarchy builder, 4-column semantic Kanban grouping,
-// inbox triage builder, and HTML renderers for Rind Desktop's native Team
-// Agents Management workbench.
+// Pure data projection, hierarchy builder, session history merger, action-first
+// task grouping, inbox triage builder, and HTML renderers for Rind Desktop's
+// native Team Agents Management workbench.
 
 import { escapeAttribute, escapeHtml } from "./app/html.ts"
 
@@ -23,7 +23,38 @@ export type AgentsSnapshotData = {
 }
 
 export type StatusTone = "working" | "attention" | "waiting" | "completed" | "idle"
-export type KanbanColumnId = "queued" | "in_progress" | "needs_attention" | "completed"
+export type TaskSectionKey = "needs" | "working" | "queued" | "delegated" | "done" | "cancelled"
+
+export const STATUS_META: Record<string, { dot: string; tone: StatusTone; label: string }> = {
+  Working: { dot: "●", tone: "working", label: "Working" },
+  "Running job": { dot: "◐", tone: "working", label: "Running job" },
+  "Needs input": { dot: "!", tone: "attention", label: "Needs input" },
+  Unconfirmed: { dot: "?", tone: "attention", label: "Unconfirmed" },
+  Delegated: { dot: "↗", tone: "waiting", label: "Delegated" },
+  Queued: { dot: "…", tone: "waiting", label: "Queued" },
+  Open: { dot: "○", tone: "completed", label: "Open" },
+  Idle: { dot: "·", tone: "idle", label: "Idle" },
+}
+
+export type MemberSessionSummary = {
+  runtimeSessionId: string
+  managementSessionId: string
+  teamId?: string
+  agentId?: string
+  agentName?: string
+  position?: string
+  workspaceRoot: string
+  origin: string
+  taskId: string
+  title: string
+  updatedAt: string
+  createdAt: string
+  model: string
+  status: string
+  tone: StatusTone
+  connected: boolean
+  live: Record<string, any> | null
+}
 
 export type OrgMemberSummary = {
   agentId: string
@@ -41,6 +72,8 @@ export type OrgMemberSummary = {
   tone: StatusTone
   activeTask: Record<string, any> | null
   latestRuntimeSessionId: string
+  sessions: MemberSessionSummary[]
+  sessionCount: number
   taskCounts: {
     active: number
     attention: number
@@ -59,6 +92,7 @@ export type TeamSummary = {
   leader: OrgMemberSummary | null
   members: OrgMemberSummary[]
   orgRoots: OrgMemberSummary[]
+  sessionsByAgent: Map<string, MemberSessionSummary[]>
   counts: {
     members: number
     working: number
@@ -80,17 +114,21 @@ export type EnrichedTask = Record<string, any> & {
   assigneePosition: string
   brief: string
   priority: "high" | "normal" | "low"
-  column: KanbanColumnId
+  section: TaskSectionKey
   tone: StatusTone
   statusLabel: string
   notes: Array<Record<string, any>>
   artifactRecords: Array<Record<string, any>>
+  runs: Array<Record<string, any>>
   activeRun: Record<string, any> | null
   runtimeSessionId: string
+  parentTask: Record<string, any> | null
+  childTasks: Array<Record<string, any>>
 }
 
 export type InboxItem = {
   id: string
+  section: "needsYou" | "notices" | "delivered"
   kind: "approval" | "blocker" | "attention" | "delivery" | "unconfirmed_run" | "notice"
   tone: StatusTone
   badge: string
@@ -167,82 +205,282 @@ export function normalizeAgentsSnapshot(raw: unknown): AgentsSnapshotData {
 }
 
 export function memberStatusTone(status: unknown): StatusTone {
-  switch (String(status || "Idle")) {
-    case "Working":
-    case "Running job":
-      return "working"
-    case "Needs input":
-    case "Unconfirmed":
-      return "attention"
-    case "Delegated":
-    case "Queued":
-      return "waiting"
-    case "Open":
-      return "completed"
-    default:
-      return "idle"
-  }
+  return STATUS_META[String(status || "Idle")]?.tone || "idle"
 }
 
-export function taskColumnKey(task: Record<string, any> | null | undefined): KanbanColumnId {
+export function relativeTimeLabel(iso: unknown): string {
+  if (!iso) return ""
+  const ts = Date.parse(String(iso))
+  if (!Number.isFinite(ts)) return String(iso)
+  const diffSec = Math.max(0, Math.round((Date.now() - ts) / 1000))
+  if (diffSec < 45) return "just now"
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`
+  return `${Math.floor(diffSec / 86400)}d ago`
+}
+
+export function mergeTeamSessions(
+  rawSnapshot: unknown,
+  teamId: string,
+  savedTeamSessions: Array<Record<string, any>> = [],
+): Map<string, MemberSessionSummary[]> {
+  const snapshot = normalizeAgentsSnapshot(rawSnapshot)
+  const byAgent = new Map<string, MemberSessionSummary[]>()
+  const liveByRuntimeId = new Map(snapshot.live.map((item) => [item.runtimeSessionId, item]))
+  const connectedSet = new Set(snapshot.connectedSessions)
+  const savedList = Array.isArray(savedTeamSessions) ? savedTeamSessions : []
+
+  const seenByAgent = new Map<string, Set<string>>()
+  const ensureList = (agentId: string) => {
+    if (!byAgent.has(agentId)) {
+      byAgent.set(agentId, [])
+      seenByAgent.set(agentId, new Set())
+    }
+    return { list: byAgent.get(agentId)!, seen: seenByAgent.get(agentId)! }
+  }
+
+  for (const row of savedList) {
+    if (!row?.agentId || !row?.runtimeSessionId) continue
+    const { list, seen } = ensureList(String(row.agentId))
+    const rid = String(row.runtimeSessionId)
+    if (seen.has(rid)) continue
+    seen.add(rid)
+    const live = liveByRuntimeId.get(rid) || null
+    const connected = connectedSet.has(rid)
+    const status = live?.question
+      ? "Needs input"
+      : live?.turnStatus === "running"
+        ? "Working"
+        : live?.background?.count
+          ? "Running job"
+          : connected
+            ? "Open"
+            : String(row.status || "Idle")
+    list.push({
+      runtimeSessionId: rid,
+      managementSessionId: String(row.managementSessionId || ""),
+      teamId: String(row.teamId || teamId),
+      agentId: String(row.agentId),
+      agentName: String(row.agentName || ""),
+      position: String(row.position || ""),
+      workspaceRoot: String(row.workspaceRoot || ""),
+      origin: String(row.origin || "direct"),
+      taskId: row.taskId ? String(row.taskId) : "",
+      title: String(row.title || "Conversation"),
+      updatedAt: String(row.updatedAt || row.createdAt || ""),
+      createdAt: String(row.createdAt || ""),
+      model: String(row.model || ""),
+      status,
+      tone: memberStatusTone(status),
+      connected,
+      live,
+    })
+  }
+
+  for (const ms of snapshot.sessions) {
+    if (ms.teamId !== teamId || !ms.agentId || !ms.runtimeSessionId) continue
+    const { list, seen } = ensureList(String(ms.agentId))
+    const rid = String(ms.runtimeSessionId)
+    if (seen.has(rid)) continue
+    seen.add(rid)
+    const live = liveByRuntimeId.get(rid) || null
+    const connected = connectedSet.has(rid)
+    const status = live?.question
+      ? "Needs input"
+      : live?.turnStatus === "running"
+        ? "Working"
+        : live?.background?.count
+          ? "Running job"
+          : connected
+            ? "Open"
+            : "Idle"
+    const linkedTask = ms.taskId ? snapshot.tasks.find((t) => t.id === ms.taskId) : null
+    list.push({
+      runtimeSessionId: rid,
+      managementSessionId: String(ms.id || ""),
+      teamId: String(teamId),
+      agentId: String(ms.agentId),
+      workspaceRoot: String(ms.workspaceRoot || ""),
+      origin: String(ms.origin || "direct"),
+      taskId: ms.taskId ? String(ms.taskId) : "",
+      title: linkedTask?.brief ? String(linkedTask.brief) : ms.origin === "task" ? "Task session" : "Active conversation",
+      updatedAt: String(ms.updatedAt || ms.createdAt || ""),
+      createdAt: String(ms.createdAt || ""),
+      model: "",
+      status,
+      tone: memberStatusTone(status),
+      connected,
+      live,
+    })
+  }
+
+  for (const [, list] of byAgent.entries()) {
+    list.sort((a, b) => {
+      if (a.tone === "working" && b.tone !== "working") return -1
+      if (b.tone === "working" && a.tone !== "working") return 1
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))
+    })
+  }
+
+  return byAgent
+}
+
+export function mergeManagerSessions(
+  rawSnapshot: unknown,
+  savedManagerSessions: Array<Record<string, any>> = [],
+): MemberSessionSummary[] {
+  const snapshot = normalizeAgentsSnapshot(rawSnapshot)
+  const liveByRuntimeId = new Map(snapshot.live.map((item) => [item.runtimeSessionId, item]))
+  const connectedSet = new Set(snapshot.connectedSessions)
+  const seen = new Set<string>()
+  const result: MemberSessionSummary[] = []
+
+  const savedList = Array.isArray(savedManagerSessions) ? savedManagerSessions : []
+  for (const row of savedList) {
+    if (!row?.runtimeSessionId) continue
+    const rid = String(row.runtimeSessionId)
+    if (seen.has(rid)) continue
+    seen.add(rid)
+    const live = liveByRuntimeId.get(rid) || null
+    const connected = connectedSet.has(rid)
+    const status = live?.question
+      ? "Needs input"
+      : live?.turnStatus === "running"
+        ? "Working"
+        : live?.background?.count
+          ? "Running job"
+          : connected
+            ? "Open"
+            : String(row.status || "Idle")
+    result.push({
+      runtimeSessionId: rid,
+      managementSessionId: String(row.managementSessionId || ""),
+      workspaceRoot: String(row.workspaceRoot || ""),
+      origin: String(row.origin || "direct"),
+      taskId: "",
+      title: String(row.title || "Manager conversation"),
+      updatedAt: String(row.updatedAt || row.createdAt || ""),
+      createdAt: String(row.createdAt || ""),
+      model: String(row.model || ""),
+      status,
+      tone: memberStatusTone(status),
+      connected,
+      live,
+    })
+  }
+
+  const managerAgent = snapshot.agents.find((a) => String(a.name).toLowerCase() === "manager")
+  if (managerAgent) {
+    for (const ms of snapshot.sessions) {
+      if (ms.agentId !== managerAgent.id || ms.teamId || !ms.runtimeSessionId) continue
+      const rid = String(ms.runtimeSessionId)
+      if (seen.has(rid)) continue
+      seen.add(rid)
+      const live = liveByRuntimeId.get(rid) || null
+      const connected = connectedSet.has(rid)
+      const status = live?.question
+        ? "Needs input"
+        : live?.turnStatus === "running"
+          ? "Working"
+          : connected
+            ? "Open"
+            : "Idle"
+      result.push({
+        runtimeSessionId: rid,
+        managementSessionId: String(ms.id || ""),
+        workspaceRoot: String(ms.workspaceRoot || managerAgent.canonicalWorkspace || ""),
+        origin: String(ms.origin || "direct"),
+        taskId: "",
+        title: "Manager conversation",
+        updatedAt: String(ms.updatedAt || ms.createdAt || ""),
+        createdAt: String(ms.createdAt || ""),
+        model: "",
+        status,
+        tone: memberStatusTone(status),
+        connected,
+        live,
+      })
+    }
+  }
+
+  result.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+  return result
+}
+
+export const TASK_SECTION_DEFS: ReadonlyArray<{ id: TaskSectionKey; label: string; emptyText: string }> = [
+  { id: "needs", label: "Needs you", emptyText: "Nothing waiting on your answer or review" },
+  { id: "working", label: "In progress", emptyText: "No tasks currently running" },
+  { id: "queued", label: "Queued", emptyText: "No queued tasks" },
+  { id: "delegated", label: "Delegated to members", emptyText: "No parent tasks waiting on delegated sub-tasks" },
+  { id: "done", label: "Delivered", emptyText: "No delivered tasks yet" },
+  { id: "cancelled", label: "Cancelled", emptyText: "No cancelled tasks" },
+]
+
+export function taskSectionKey(task: Record<string, any> | null | undefined): TaskSectionKey {
   const status = String(task?.status || "queued")
-  if (status === "queued") return "queued"
-  if (status === "running") return "in_progress"
+  if (status === "needs_attention") return "needs"
   if (status === "blocked") {
-    return task?.blockedOn?.responder === "user" ? "needs_attention" : "in_progress"
+    return task?.blockedOn?.responder === "user" ? "needs" : "delegated"
   }
-  if (status === "needs_attention") return "needs_attention"
   if (status === "done") {
-    if (task?.report && !task?.review) return "needs_attention"
-    return "completed"
+    if (task?.report && !task?.review && !task?.parentTaskId) return "needs"
+    return "done"
   }
-  return "completed"
+  if (status === "running") return "working"
+  if (status === "queued") return "queued"
+  if (status === "cancelled") return "cancelled"
+  return "queued"
 }
 
 export function taskStatusMeta(task: Record<string, any> | null | undefined): {
   label: string
   tone: StatusTone
-  column: KanbanColumnId
+  section: TaskSectionKey
 } {
   const status = String(task?.status || "queued")
+  const section = taskSectionKey(task)
   if (status === "running") {
-    return { label: "Running", tone: "working", column: "in_progress" }
+    return { label: "Working", tone: "working", section }
   }
   if (status === "queued") {
     return {
       label: task?.queueReason ? `Queued · ${task.queueReason}` : "Queued",
       tone: "waiting",
-      column: "queued",
+      section,
     }
   }
   if (status === "blocked") {
     if (task?.blockedOn?.responder === "user") {
-      return { label: "Needs user input", tone: "attention", column: "needs_attention" }
+      return { label: "Needs input", tone: "attention", section }
     }
-    return { label: "Waiting on sub-task", tone: "waiting", column: "in_progress" }
+    return { label: "Delegated", tone: "waiting", section }
   }
   if (status === "needs_attention") {
-    return { label: "Needs attention", tone: "attention", column: "needs_attention" }
+    return { label: "Needs attention", tone: "attention", section }
   }
   if (status === "done") {
-    if (task?.report && !task?.review) {
-      return { label: "Ready for review", tone: "attention", column: "needs_attention" }
+    if (task?.report && !task?.review && !task?.parentTaskId) {
+      return { label: "Ready for review", tone: "attention", section }
     }
     if (task?.review?.decision === "rework") {
-      return { label: "Sent for rework", tone: "waiting", column: "completed" }
+      return { label: "Rework requested", tone: "waiting", section }
     }
     if (task?.review?.decision === "accepted") {
-      return { label: "Accepted", tone: "completed", column: "completed" }
+      return { label: "Accepted", tone: "completed", section }
     }
-    return { label: "Done", tone: "completed", column: "completed" }
+    return { label: "Delivered", tone: "completed", section }
   }
   if (status === "cancelled") {
-    return { label: "Cancelled", tone: "idle", column: "completed" }
+    return { label: "Cancelled", tone: "idle", section }
   }
-  return { label: status, tone: "idle", column: "queued" }
+  return { label: status, tone: "idle", section }
 }
 
-export function buildTeamSummary(rawSnapshot: unknown, teamId: string): TeamSummary | null {
+export function buildTeamSummary(
+  rawSnapshot: unknown,
+  teamId: string,
+  savedTeamSessions: Array<Record<string, any>> = [],
+): TeamSummary | null {
   const snapshot = normalizeAgentsSnapshot(rawSnapshot)
   const team = snapshot.teams.find((item) => item.id === teamId) || null
   if (!team) return null
@@ -251,6 +489,7 @@ export function buildTeamSummary(rawSnapshot: unknown, teamId: string): TeamSumm
   const teamMemberships = snapshot.memberships.filter((m) => m.teamId === team.id)
   const teamTasks = snapshot.tasks.filter((t) => t.teamId === team.id)
   const teamSessions = snapshot.sessions.filter((s) => s.teamId === team.id)
+  const sessionsByAgent = mergeTeamSessions(snapshot, team.id, savedTeamSessions)
 
   const members: OrgMemberSummary[] = teamMemberships.map((membership) => {
     const agent = agentById.get(membership.agentId) || { id: membership.agentId, name: membership.agentId }
@@ -261,10 +500,14 @@ export function buildTeamSummary(rawSnapshot: unknown, teamId: string): TeamSumm
       memberTasks.find((t) => t.status === "running" || t.status === "blocked" || t.status === "needs_attention") ||
       memberTasks.find((t) => t.status === "queued") ||
       null
+    const memberSessions = sessionsByAgent.get(String(membership.agentId)) || []
     const directSessions = teamSessions.filter(
       (s) => s.agentId === membership.agentId && s.origin === "direct" && s.runtimeSessionId,
     )
     const latestDirectSession = directSessions[directSessions.length - 1] || null
+    const latestRuntimeSessionId =
+      memberSessions[0]?.runtimeSessionId ||
+      (latestDirectSession ? String(latestDirectSession.runtimeSessionId) : "")
     const status = String(membership.status || "Idle")
 
     return {
@@ -282,14 +525,16 @@ export function buildTeamSummary(rawSnapshot: unknown, teamId: string): TeamSumm
       status,
       tone: memberStatusTone(status),
       activeTask,
-      latestRuntimeSessionId: latestDirectSession ? String(latestDirectSession.runtimeSessionId) : "",
+      latestRuntimeSessionId,
+      sessions: memberSessions,
+      sessionCount: memberSessions.length,
       taskCounts: {
         active: memberTasks.filter((t) => t.status === "running" || t.status === "queued" || t.status === "blocked").length,
         attention: memberTasks.filter(
           (t) =>
             t.status === "needs_attention" ||
             (t.status === "blocked" && t.blockedOn?.responder === "user") ||
-            (t.status === "done" && t.report && !t.review),
+            (t.status === "done" && t.report && !t.review && !t.parentTaskId),
         ).length,
         done: memberTasks.filter((t) => t.status === "done").length,
       },
@@ -332,10 +577,12 @@ export function buildTeamSummary(rawSnapshot: unknown, teamId: string): TeamSumm
     working: members.filter((m) => m.tone === "working").length,
     attention: members.filter((m) => m.tone === "attention").length,
     tasksTotal: teamTasks.length,
-    tasksQueued: teamTasks.filter((t) => taskColumnKey(t) === "queued").length,
-    tasksInProgress: teamTasks.filter((t) => taskColumnKey(t) === "in_progress").length,
-    tasksAttention: teamTasks.filter((t) => taskColumnKey(t) === "needs_attention").length,
-    tasksCompleted: teamTasks.filter((t) => taskColumnKey(t) === "completed").length,
+    tasksQueued: teamTasks.filter((t) => taskSectionKey(t) === "queued").length,
+    tasksInProgress: teamTasks.filter(
+      (t) => taskSectionKey(t) === "working" || taskSectionKey(t) === "delegated",
+    ).length,
+    tasksAttention: teamTasks.filter((t) => taskSectionKey(t) === "needs").length,
+    tasksCompleted: teamTasks.filter((t) => taskSectionKey(t) === "done").length,
   }
 
   return {
@@ -348,6 +595,7 @@ export function buildTeamSummary(rawSnapshot: unknown, teamId: string): TeamSumm
     leader,
     members,
     orgRoots: roots,
+    sessionsByAgent,
     counts,
   }
 }
@@ -363,13 +611,14 @@ export function enrichTask(rawSnapshot: unknown, task: Record<string, any> | nul
   const meta = taskStatusMeta(task)
   const notes = snapshot.notes.filter((n) => n.taskId === task.id)
   const artifactRecords = snapshot.artifacts.filter((a) => a.taskId === task.id)
+  const runs = snapshot.runs.filter((r) => r.taskId === task.id)
   const activeRun =
-    snapshot.runs.find(
-      (r) => r.taskId === task.id && (r.status === "starting" || r.status === "running" || r.status === "unknown"),
-    ) ||
-    snapshot.runs.filter((r) => r.taskId === task.id).pop() ||
+    runs.find((r) => r.status === "starting" || r.status === "running" || r.status === "unknown") ||
+    runs[runs.length - 1] ||
     null
   const taskSession = snapshot.sessions.find((s) => s.taskId === task.id && s.runtimeSessionId) || null
+  const parentTask = task.parentTaskId ? snapshot.tasks.find((t) => t.id === task.parentTaskId) || null : null
+  const childTasks = snapshot.tasks.filter((t) => t.parentTaskId === task.id)
 
   return {
     ...task,
@@ -383,22 +632,22 @@ export function enrichTask(rawSnapshot: unknown, task: Record<string, any> | nul
     ),
     brief: String(task.brief || ""),
     priority: task.priority === "high" || task.priority === "low" ? task.priority : "normal",
-    column: meta.column,
+    section: meta.section,
     tone: meta.tone,
     statusLabel: meta.label,
     notes,
     artifactRecords,
+    runs,
     activeRun,
-    runtimeSessionId: taskSession ? String(taskSession.runtimeSessionId) : "",
+    runtimeSessionId: taskSession
+      ? String(taskSession.runtimeSessionId)
+      : activeRun?.runtimeSessionId
+        ? String(activeRun.runtimeSessionId)
+        : "",
+    parentTask,
+    childTasks,
   }
 }
-
-export const KANBAN_COLUMNS: ReadonlyArray<{ id: KanbanColumnId; label: string; emptyText: string }> = [
-  { id: "queued", label: "Queued", emptyText: "No queued tasks" },
-  { id: "in_progress", label: "In Progress", emptyText: "No tasks currently running" },
-  { id: "needs_attention", label: "Needs Review / Input", emptyText: "Nothing blocked or awaiting review" },
-  { id: "completed", label: "Completed", emptyText: "No completed tasks yet" },
-]
 
 export function groupTeamTasks(rawSnapshot: unknown, teamId = "") {
   const snapshot = normalizeAgentsSnapshot(rawSnapshot)
@@ -408,32 +657,45 @@ export function groupTeamTasks(rawSnapshot: unknown, teamId = "") {
   const priorityRank: Record<string, number> = { high: 0, normal: 1, low: 2 }
   enriched.sort((a, b) => {
     const rankDiff = (priorityRank[a.priority] ?? 1) - (priorityRank[b.priority] ?? 1)
-    if (rankDiff !== 0 && a.column !== "completed" && b.column !== "completed") return rankDiff
-    return String(b.id).localeCompare(String(a.id))
+    if (rankDiff !== 0 && a.section !== "done" && b.section !== "done") return rankDiff
+    return String(b.updatedAt || b.createdAt || b.id).localeCompare(String(a.updatedAt || a.createdAt || a.id))
   })
 
-  const columns: Record<KanbanColumnId, EnrichedTask[]> = {
+  const sections: Record<TaskSectionKey, EnrichedTask[]> = {
+    needs: [],
+    working: [],
     queued: [],
-    in_progress: [],
-    needs_attention: [],
-    completed: [],
+    delegated: [],
+    done: [],
+    cancelled: [],
   }
   for (const item of enriched) {
-    columns[item.column].push(item)
+    sections[item.section].push(item)
   }
-  return { all: enriched, columns }
+
+  const nonEmptySections = TASK_SECTION_DEFS.map((def) => ({
+    ...def,
+    items: sections[def.id],
+  })).filter((sec) => sec.items.length > 0)
+
+  return { all: enriched, sections, nonEmptySections }
 }
 
-export function buildInboxItems(rawSnapshot: unknown): InboxItem[] {
+export function buildInboxSections(rawSnapshot: unknown) {
   const snapshot = normalizeAgentsSnapshot(rawSnapshot)
   const teamById = new Map(snapshot.teams.map((t) => [t.id, t]))
   const agentById = new Map(snapshot.agents.map((a) => [a.id, a]))
-  const items: InboxItem[] = []
+
+  const needsYou: InboxItem[] = []
+  const notices: InboxItem[] = []
+  const delivered: InboxItem[] = []
 
   for (const approval of snapshot.approvals) {
+    if (approval.status && approval.status !== "pending") continue
     const team = teamById.get(approval.teamId)
-    items.push({
+    needsYou.push({
       id: `approval:${approval.id}`,
+      section: "needsYou",
       kind: "approval",
       tone: "attention",
       badge: approval.kind === "deleteTeam" ? "Delete Team Approval" : "Cancel Run Approval",
@@ -454,8 +716,9 @@ export function buildInboxItems(rawSnapshot: unknown): InboxItem[] {
     const subtitle = [team?.name, agent?.name].filter(Boolean).join(" · ")
 
     if (task.status === "blocked" && task.blockedOn?.responder === "user") {
-      items.push({
+      needsYou.push({
         id: `blocker:${task.id}`,
+        section: "needsYou",
         kind: "blocker",
         tone: "attention",
         badge: "Needs Your Input",
@@ -465,11 +728,13 @@ export function buildInboxItems(rawSnapshot: unknown): InboxItem[] {
         teamId: String(task.teamId || ""),
         agentId: String(task.assigneeAgentId || ""),
         taskId: String(task.id),
+        createdAt: String(task.updatedAt || task.createdAt || ""),
         raw: enrichTask(snapshot, task),
       })
     } else if (task.status === "needs_attention") {
-      items.push({
+      needsYou.push({
         id: `attention:${task.id}`,
+        section: "needsYou",
         kind: "attention",
         tone: "attention",
         badge: "Needs Attention",
@@ -479,13 +744,15 @@ export function buildInboxItems(rawSnapshot: unknown): InboxItem[] {
         teamId: String(task.teamId || ""),
         agentId: String(task.assigneeAgentId || ""),
         taskId: String(task.id),
+        createdAt: String(task.updatedAt || task.createdAt || ""),
         raw: enrichTask(snapshot, task),
       })
-    } else if (task.status === "done" && task.report && !task.review) {
-      items.push({
+    } else if (task.status === "done" && task.report && !task.review && !task.parentTaskId) {
+      needsYou.push({
         id: `delivery:${task.id}`,
+        section: "needsYou",
         kind: "delivery",
-        tone: "completed",
+        tone: "attention",
         badge: "Delivery Ready for Review",
         title: String(task.brief || "Completed task delivery"),
         subtitle: subtitle || `Task ${task.id}`,
@@ -493,7 +760,23 @@ export function buildInboxItems(rawSnapshot: unknown): InboxItem[] {
         teamId: String(task.teamId || ""),
         agentId: String(task.assigneeAgentId || ""),
         taskId: String(task.id),
-        createdAt: String(task.deliveredAt || ""),
+        createdAt: String(task.deliveredAt || task.updatedAt || ""),
+        raw: enrichTask(snapshot, task),
+      })
+    } else if (task.status === "done" && task.report) {
+      delivered.push({
+        id: `delivered:${task.id}`,
+        section: "delivered",
+        kind: "delivery",
+        tone: "completed",
+        badge: task.review?.decision === "accepted" ? "Accepted" : "Delivered",
+        title: String(task.brief || "Delivered task"),
+        subtitle: subtitle || `Task ${task.id}`,
+        detail: String(task.report.summary || ""),
+        teamId: String(task.teamId || ""),
+        agentId: String(task.assigneeAgentId || ""),
+        taskId: String(task.id),
+        createdAt: String(task.deliveredAt || task.updatedAt || ""),
         raw: enrichTask(snapshot, task),
       })
     }
@@ -502,30 +785,36 @@ export function buildInboxItems(rawSnapshot: unknown): InboxItem[] {
   for (const run of snapshot.runs) {
     if (run.status === "unknown") {
       const task = run.taskId ? snapshot.tasks.find((t) => t.id === run.taskId) : null
-      items.push({
+      const agent = agentById.get(run.agentId)
+      needsYou.push({
         id: `run:${run.id}`,
+        section: "needsYou",
         kind: "unconfirmed_run",
         tone: "attention",
         badge: "Unconfirmed Run",
         title: task ? `Unconfirmed run for "${task.brief}"` : `Run ${run.id} lost host contact`,
-        subtitle: `Started ${run.startedAt || "recently"}`,
+        subtitle: [agent?.name, `Started ${relativeTimeLabel(run.startedAt)}`].filter(Boolean).join(" · "),
+        detail: String(run.error || "Check Background before starting duplicate work."),
         runId: String(run.id),
         taskId: run.taskId ? String(run.taskId) : "",
         teamId: task?.teamId ? String(task.teamId) : "",
+        createdAt: String(run.startedAt || ""),
         raw: run,
       })
     }
   }
 
   for (const notice of snapshot.notices) {
+    if (notice.dismissedAt) continue
     const team = teamById.get(notice.teamId)
     const agent = agentById.get(notice.agentId)
-    items.push({
+    notices.push({
       id: `notice:${notice.id}`,
+      section: "notices",
       kind: "notice",
       tone: "waiting",
-      badge: "Notice",
-      title: String(notice.title || "Team update"),
+      badge: "Manager Change",
+      title: String(notice.title || "Organization update"),
       subtitle: [team?.name, agent?.name].filter(Boolean).join(" · "),
       noticeId: String(notice.id),
       teamId: String(notice.teamId || ""),
@@ -535,20 +824,120 @@ export function buildInboxItems(rawSnapshot: unknown): InboxItem[] {
     })
   }
 
-  return items
+  return {
+    needsYou,
+    notices,
+    delivered: delivered.slice(0, 10),
+    badgeCount: needsYou.length + notices.length,
+    totalCount: needsYou.length + notices.length + delivered.length,
+  }
+}
+
+export function buildInboxItems(rawSnapshot: unknown): InboxItem[] {
+  const sections = buildInboxSections(rawSnapshot)
+  return [...sections.needsYou, ...sections.notices, ...sections.delivered]
 }
 
 export function inboxBadgeCount(rawSnapshot: unknown): number {
-  return buildInboxItems(rawSnapshot).length
+  return buildInboxSections(rawSnapshot).badgeCount
+}
+
+export function buildBackgroundModel(rawSnapshot: unknown, serviceInfo: Record<string, any> | null = null) {
+  const snapshot = normalizeAgentsSnapshot(rawSnapshot)
+  const agentById = new Map(snapshot.agents.map((a) => [a.id, a]))
+  const teamById = new Map(snapshot.teams.map((t) => [t.id, t]))
+  const sessionByRuntimeId = new Map(snapshot.sessions.map((s) => [s.runtimeSessionId, s]))
+
+  const runningNow: Array<Record<string, any>> = []
+  const unconfirmedRuns: Array<Record<string, any>> = []
+  const seenRuntimeIds = new Set<string>()
+
+  for (const run of snapshot.runs) {
+    const task = run.taskId ? snapshot.tasks.find((t) => t.id === run.taskId) : null
+    const agent = agentById.get(run.agentId)
+    const team = task ? teamById.get(task.teamId) : null
+    const live = run.runtimeSessionId
+      ? snapshot.live.find((l) => l.runtimeSessionId === run.runtimeSessionId) || null
+      : null
+
+    if (run.status === "starting" || run.status === "running") {
+      if (run.runtimeSessionId) seenRuntimeIds.add(String(run.runtimeSessionId))
+      runningNow.push({
+        id: `run:${run.id}`,
+        kind: "delegated_run",
+        runId: String(run.id),
+        taskId: run.taskId ? String(run.taskId) : "",
+        teamId: team?.id ? String(team.id) : "",
+        teamName: team?.name ? String(team.name) : "",
+        agentId: String(run.agentId || ""),
+        agentName: String(agent?.name || run.agentId || "Agent"),
+        runtimeSessionId: run.runtimeSessionId ? String(run.runtimeSessionId) : "",
+        status: String(run.status),
+        title: String(task?.brief || `Delegated run ${run.id}`),
+        detail: live?.currentTool
+          ? `Tool: ${live.currentTool}`
+          : live?.lastPreview
+            ? String(live.lastPreview)
+            : `Started ${relativeTimeLabel(run.startedAt)}`,
+      })
+    } else if (run.status === "unknown") {
+      unconfirmedRuns.push({
+        id: `unknown:${run.id}`,
+        runId: String(run.id),
+        taskId: run.taskId ? String(run.taskId) : "",
+        teamId: team?.id ? String(team.id) : "",
+        teamName: team?.name ? String(team.name) : "",
+        agentId: String(run.agentId || ""),
+        agentName: String(agent?.name || run.agentId || "Agent"),
+        runtimeSessionId: run.runtimeSessionId ? String(run.runtimeSessionId) : "",
+        title: String(task?.brief || `Unconfirmed run ${run.id}`),
+        detail: String(run.error || "Lost contact with runtime session while running."),
+        startedAt: String(run.startedAt || ""),
+      })
+    }
+  }
+
+  for (const live of snapshot.live) {
+    if (!live.runtimeSessionId || seenRuntimeIds.has(live.runtimeSessionId)) continue
+    const isWorking = live.turnStatus === "running" || Number(live.background?.count) > 0 || Boolean(live.question)
+    if (!isWorking) continue
+    const ms = sessionByRuntimeId.get(live.runtimeSessionId)
+    const agent = ms ? agentById.get(ms.agentId) : null
+    const team = ms?.teamId ? teamById.get(ms.teamId) : null
+    runningNow.push({
+      id: `live:${live.runtimeSessionId}`,
+      kind: "live_session",
+      runtimeSessionId: String(live.runtimeSessionId),
+      teamId: team?.id ? String(team.id) : "",
+      teamName: team?.name ? String(team.name) : "",
+      agentId: agent?.id ? String(agent.id) : "",
+      agentName: String(agent?.name || (ms && !ms.teamId ? "Manager" : "Session")),
+      status: live.question
+        ? "Needs input"
+        : Number(live.background?.count) > 0
+          ? `${live.background.count} bg job(s)`
+          : "Working",
+      title: String(live.lastPreview || "Active conversation turn"),
+      detail: live.currentTool ? `Running ${live.currentTool}` : "",
+    })
+  }
+
+  const recentRuns = snapshot.runs
+    .filter((r) => r.status !== "starting" && r.status !== "running" && r.status !== "unknown")
+    .slice(-15)
+    .reverse()
+
+  return {
+    runningNow,
+    unconfirmedRuns,
+    recentRuns,
+    service: serviceInfo || null,
+    runningCount: runningNow.length + unconfirmedRuns.length,
+  }
 }
 
 export function activeBackgroundCount(rawSnapshot: unknown): number {
-  const snapshot = normalizeAgentsSnapshot(rawSnapshot)
-  const activeRuns = snapshot.runs.filter(
-    (r) => r.status === "starting" || r.status === "running" || r.status === "unknown",
-  ).length
-  const liveBg = snapshot.live.reduce((sum, item) => sum + (Number(item?.background?.count) || 0), 0)
-  return activeRuns + liveBg
+  return buildBackgroundModel(rawSnapshot).runningCount
 }
 
 function normalizePathKey(value: unknown): string {
@@ -575,6 +964,8 @@ export function resolveSessionAgentContext(
       if (team && agent) {
         return {
           kind: "member",
+          managementSessionId: String(managedSession.id || ""),
+          workspaceRoot: String(managedSession.workspaceRoot || agent.canonicalWorkspace || ""),
           teamId: String(team.id),
           teamName: String(team.name || team.id),
           agentId: String(agent.id),
@@ -589,6 +980,8 @@ export function resolveSessionAgentContext(
       if (!managedSession.teamId && agent && String(agent.name).toLowerCase() === "manager") {
         return {
           kind: "manager",
+          managementSessionId: String(managedSession.id || ""),
+          workspaceRoot: String(managedSession.workspaceRoot || agent.canonicalWorkspace || ""),
           agentName: "Manager",
           roleLabel: "Organization Coordinator",
         }
@@ -630,12 +1023,38 @@ export function resolveSessionAgentContext(
   return { kind: "independent" }
 }
 
+export type DesktopAgentSurfaceState =
+  | { kind: "chat" }
+  | { kind: "inbox" }
+  | { kind: "manager" }
+  | { kind: "background" }
+  | { kind: "archive" }
+  | {
+      kind: "team"
+      teamId: string
+      tab: "organization" | "tasks"
+      assigneeFilter: string
+      selectedTaskId: string
+      addMemberOpen: boolean
+      memberMode: "workspace" | "existing" | "worktree"
+      assignOpen: boolean
+      assignAgentId: string
+      deleteConfirmOpen: boolean
+    }
+
 // ---------- Pure HTML Renderers for Desktop Renderer & Node Tests ----------
 
-export function renderOrgNodeHtml(node: OrgMemberSummary, depth = 0): string {
+export function renderOrgNodeHtml(
+  node: OrgMemberSummary,
+  depth = 0,
+  expandedOrgMembers: ReadonlySet<string> = new Set(),
+  viewedSessionId = "",
+): string {
+  const isSessionsOpen = expandedOrgMembers.has(node.agentId)
+  const sessions = node.sessions || []
   const childrenHtml = node.children.length
     ? `<div class="org-tree-children" role="group" aria-label="Direct reports of ${escapeAttribute(node.name)}">${node.children
-        .map((c) => renderOrgNodeHtml(c, depth + 1))
+        .map((c) => renderOrgNodeHtml(c, depth + 1, expandedOrgMembers, viewedSessionId))
         .join("")}</div>`
     : ""
 
@@ -663,14 +1082,50 @@ export function renderOrgNodeHtml(node: OrgMemberSummary, depth = 0): string {
             ? `<button type="button" class="org-active-task" data-agent-select-task="${escapeAttribute(node.activeTask.id)}" data-agent-team="${escapeAttribute(node.teamId)}"><span class="org-active-task-kicker">Current Task</span><span class="org-active-task-brief">${escapeHtml(String(node.activeTask.brief || ""))}</span></button>`
             : ""
         }
+        <div class="org-member-sessions-box">
+          <div class="org-member-sessions-head">
+            <button type="button" class="org-sessions-toggle" data-org-toggle-member-sessions="${escapeAttribute(node.agentId)}">
+              <span>${isSessionsOpen ? "▾" : "▸"}</span>
+              <span>Conversations (${sessions.length})</span>
+            </button>
+            <button type="button" class="agent-btn ghost sm" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">+ New</button>
+          </div>
+          ${
+            isSessionsOpen
+              ? `<div class="org-member-sessions-list">
+                  ${
+                    sessions.length === 0
+                      ? `<div class="org-sessions-empty">No saved conversations yet.</div>`
+                      : sessions
+                          .map((sess) => {
+                            const isCurrent = sess.runtimeSessionId === viewedSessionId
+                            return `
+                              <div class="org-session-item${isCurrent ? " is-active" : ""}">
+                                <button type="button" class="org-session-open" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}">
+                                  <span class="agent-status-dot tone-${sess.tone}"></span>
+                                  <span class="org-session-title">${escapeHtml(sess.title || "Conversation")}</span>
+                                  ${sess.origin === "task" ? `<span class="org-role-pill">Task</span>` : ""}
+                                  <span class="org-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+                                </button>
+                                <button type="button" class="org-session-delete" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-id="${escapeAttribute(node.agentId)}" title="Delete conversation">✕</button>
+                              </div>
+                            `
+                          })
+                          .join("")
+                  }
+                </div>`
+              : ""
+          }
+        </div>
         <div class="org-member-footer">
           <div class="org-member-stats">
+            <span>${sessions.length} ${sessions.length === 1 ? "session" : "sessions"}</span>
             <span>${node.taskCounts.active} active</span>
             ${node.taskCounts.attention > 0 ? `<span class="org-stat-attention">${node.taskCounts.attention} need review</span>` : ""}
-            <span>${node.taskCounts.done} completed</span>
+            <span>${node.taskCounts.done} delivered</span>
           </div>
           <div class="org-member-actions">
-            <button type="button" class="agent-btn primary sm" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(node.latestRuntimeSessionId)}">Chat</button>
+            <button type="button" class="agent-btn primary sm" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(node.latestRuntimeSessionId)}">${node.latestRuntimeSessionId ? "Open Chat" : "Start Chat"}</button>
             <button type="button" class="agent-btn secondary sm" data-agent-quick-assign="${escapeAttribute(node.agentId)}">Assign task</button>
             ${!node.isLeader ? `<button type="button" class="agent-btn ghost sm" data-agent-make-leader="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">Make leader</button>` : ""}
             <button type="button" class="agent-btn ghost sm danger-text" data-agent-remove="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">Remove</button>
@@ -682,29 +1137,17 @@ export function renderOrgNodeHtml(node: OrgMemberSummary, depth = 0): string {
   `
 }
 
-export type DesktopAgentSurfaceState =
-  | { kind: "chat" }
-  | { kind: "inbox" }
-  | { kind: "background" }
-  | {
-      kind: "team"
-      teamId: string
-      tab: "organization" | "tasks"
-      taskLayout: "board" | "list"
-      assigneeFilter: string
-      selectedTaskId: string
-      addMemberOpen: boolean
-      memberMode: "workspace" | "existing" | "worktree"
-      assignOpen: boolean
-      assignAgentId: string
-      deleteConfirmOpen: boolean
-    }
-
 export function renderSidebarAgentsHtml(options: {
   snapshot: AgentsSnapshotData
   surface: DesktopAgentSurfaceState
   chatContext: SessionAgentContext
   collapsedTeams: ReadonlySet<string>
+  expandedSidebarMembers?: ReadonlySet<string>
+  managerExpanded?: boolean
+  teamSessionsByTeam?: Record<string, Array<Record<string, any>>>
+  managerSessions?: Array<Record<string, any>>
+  archivedTeams?: Array<Record<string, any>>
+  viewedSessionId?: string
   newTeamOpen: boolean
   busy: boolean
 }): string {
@@ -713,11 +1156,42 @@ export function renderSidebarAgentsHtml(options: {
   const bgCount = activeBackgroundCount(snapshot)
   const isInbox = options.surface.kind === "inbox"
   const isBg = options.surface.kind === "background"
-  const isManagerChat = options.surface.kind === "chat" && options.chatContext.kind === "manager"
+  const isArchive = options.surface.kind === "archive"
+  const isManagerActive =
+    options.surface.kind === "manager" || (options.surface.kind === "chat" && options.chatContext.kind === "manager")
+  const expandedMembers = options.expandedSidebarMembers || new Set<string>()
+  const teamSessionsByTeam = options.teamSessionsByTeam || {}
+  const managerSessionsList = mergeManagerSessions(snapshot, options.managerSessions || [])
+  const archivedList = options.archivedTeams?.length ? options.archivedTeams : snapshot.archivedTeams
+
+  const managerSessionsHtml = options.managerExpanded
+    ? `<div class="sidebar-member-sessions">
+        <button type="button" class="sidebar-member-session-new" data-sidebar-new-manager-session="1">+ New conversation</button>
+        ${managerSessionsList
+          .slice(0, 8)
+          .map((sess) => {
+            const isCurrent =
+              options.surface.kind === "chat" &&
+              options.chatContext.kind === "manager" &&
+              sess.runtimeSessionId === options.viewedSessionId
+            return `
+              <div class="sidebar-member-session-row${isCurrent ? " is-active" : ""}">
+                <button type="button" class="sidebar-member-session-btn" data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}">
+                  <span class="agent-status-dot tone-${sess.tone}"></span>
+                  <span class="sidebar-member-session-title">${escapeHtml(sess.title || "Manager conversation")}</span>
+                  <span class="sidebar-member-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+                </button>
+                <button type="button" class="sidebar-member-session-del" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-manager="1" title="Delete conversation">✕</button>
+              </div>
+            `
+          })
+          .join("")}
+      </div>`
+    : ""
 
   const teamRows = snapshot.teams
     .map((team) => {
-      const summary = buildTeamSummary(snapshot, team.id)
+      const summary = buildTeamSummary(snapshot, team.id, teamSessionsByTeam[team.id] || [])
       const isSelectedTeam = options.surface.kind === "team" && options.surface.teamId === team.id
       const isCollapsed = options.collapsedTeams.has(team.id)
       const attentionCount = summary ? summary.counts.tasksAttention + summary.counts.attention : 0
@@ -726,11 +1200,50 @@ export function renderSidebarAgentsHtml(options: {
         !isCollapsed && summary && summary.members.length > 0
           ? `<div class="sidebar-team-members" role="group" aria-label="${escapeAttribute(team.name)} members">${summary.members
               .map((member) => {
+                const memberKey = `${team.id}:${member.agentId}`
                 const isMemberActive =
                   options.surface.kind === "chat" &&
                   options.chatContext.kind === "member" &&
                   options.chatContext.agentId === member.agentId
-                return `<button type="button" class="sidebar-member-row${isMemberActive ? " is-active" : ""}" data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(member.latestRuntimeSessionId)}" title="${escapeAttribute(`${member.name} · ${member.position} (${member.status})`)}"><span class="agent-status-dot tone-${member.tone}"></span><span class="sidebar-member-name">${escapeHtml(member.name)}</span>${member.isLeader ? `<span class="sidebar-leader-tag">Lead</span>` : `<span class="sidebar-member-role">${escapeHtml(member.position)}</span>`}</button>`
+                const isMemberExpanded = expandedMembers.has(memberKey) || isMemberActive
+                const memberSessions = member.sessions || []
+                return `
+                  <div class="sidebar-member-block">
+                    <div class="sidebar-member-row-wrap${isMemberActive ? " is-active" : ""}">
+                      <button type="button" class="sidebar-member-chevron" data-sidebar-toggle-member="${escapeAttribute(memberKey)}" aria-label="Toggle ${escapeAttribute(member.name)} conversations">${isMemberExpanded ? "▾" : "▸"}</button>
+                      <button type="button" class="sidebar-member-row${isMemberActive ? " is-active" : ""}" data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(member.latestRuntimeSessionId)}" title="${escapeAttribute(`${member.name} · ${member.position} (${member.status})`)}">
+                        <span class="agent-status-dot tone-${member.tone}"></span>
+                        <span class="sidebar-member-name">${escapeHtml(member.name)}</span>
+                        ${member.isLeader ? `<span class="sidebar-leader-tag">Lead</span>` : `<span class="sidebar-member-role">${escapeHtml(member.position)}</span>`}
+                        ${memberSessions.length > 0 ? `<span class="sidebar-session-count">${memberSessions.length}</span>` : ""}
+                      </button>
+                    </div>
+                    ${
+                      isMemberExpanded
+                        ? `<div class="sidebar-member-sessions">
+                            <button type="button" class="sidebar-member-session-new" data-agent-new-session="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}">+ New conversation</button>
+                            ${memberSessions
+                              .slice(0, 8)
+                              .map((sess) => {
+                                const isCurrent =
+                                  options.surface.kind === "chat" && sess.runtimeSessionId === options.viewedSessionId
+                                return `
+                                  <div class="sidebar-member-session-row${isCurrent ? " is-active" : ""}">
+                                    <button type="button" class="sidebar-member-session-btn" data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}">
+                                      <span class="agent-status-dot tone-${sess.tone}"></span>
+                                      <span class="sidebar-member-session-title">${escapeHtml(sess.title || "Conversation")}</span>
+                                      <span class="sidebar-member-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+                                    </button>
+                                    <button type="button" class="sidebar-member-session-del" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-id="${escapeAttribute(member.agentId)}" title="Delete conversation">✕</button>
+                                  </div>
+                                `
+                              })
+                              .join("")}
+                          </div>`
+                        : ""
+                    }
+                  </div>
+                `
               })
               .join("")}</div>`
           : ""
@@ -746,7 +1259,7 @@ export function renderSidebarAgentsHtml(options: {
                 ${attentionCount > 0 ? `<span class="sidebar-nav-badge attention">${attentionCount}</span>` : ""}
               </span>
             </button>
-            <button type="button" class="sidebar-team-board-btn" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="tasks" title="Open ${escapeAttribute(team.name)} Tasks Board">Board</button>
+            <button type="button" class="sidebar-team-tasks-btn" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="tasks" title="Open ${escapeAttribute(team.name)} Tasks">Tasks${summary?.counts.tasksTotal ? ` (${summary.counts.tasksTotal})` : ""}</button>
           </div>
           ${membersHtml}
         </div>
@@ -755,19 +1268,34 @@ export function renderSidebarAgentsHtml(options: {
     .join("")
 
   return `
-    <div class="sidebar-global-nav" role="navigation" aria-label="Workspace surfaces">
+    <div class="sidebar-global-nav" role="navigation" aria-label="Multi-agent surfaces">
       <button type="button" class="sidebar-nav-item${isInbox ? " is-active" : ""}" data-sidebar-surface="inbox">
-        <span class="sidebar-nav-label">Inbox &amp; Approvals</span>
+        <span class="sidebar-nav-label">Inbox</span>
         ${inboxCount > 0 ? `<span class="sidebar-nav-badge attention">${inboxCount}</span>` : ""}
       </button>
-      <button type="button" class="sidebar-nav-item${isManagerChat ? " is-active" : ""}" data-sidebar-open-manager="1" title="Chat with the global Organization Manager">
-        <span class="sidebar-nav-label">Manager Agent</span>
-        <span class="sidebar-nav-tag">Coord</span>
-      </button>
+      <div class="sidebar-manager-block">
+        <div class="sidebar-team-header${isManagerActive ? " is-active" : ""}">
+          <button type="button" class="sidebar-team-chevron" data-sidebar-toggle-manager="1" aria-label="Toggle Manager conversations">${options.managerExpanded ? "▾" : "▸"}</button>
+          <button type="button" class="sidebar-team-main" data-sidebar-surface="manager" title="Open Manager Coordinator">
+            <span class="sidebar-team-name">Manager</span>
+            <span class="sidebar-nav-tag">Coord</span>
+          </button>
+          <button type="button" class="sidebar-team-tasks-btn" data-sidebar-open-manager="1" title="Chat with Manager">Chat</button>
+        </div>
+        ${managerSessionsHtml}
+      </div>
       <button type="button" class="sidebar-nav-item${isBg ? " is-active" : ""}" data-sidebar-surface="background">
-        <span class="sidebar-nav-label">Background &amp; Runtime</span>
+        <span class="sidebar-nav-label">Background</span>
         ${bgCount > 0 ? `<span class="sidebar-nav-badge working">${bgCount}</span>` : ""}
       </button>
+      ${
+        archivedList.length > 0
+          ? `<button type="button" class="sidebar-nav-item${isArchive ? " is-active" : ""}" data-sidebar-surface="archive">
+              <span class="sidebar-nav-label">Archive</span>
+              <span class="sidebar-nav-tag">${archivedList.length}</span>
+            </button>`
+          : ""
+      }
     </div>
     <div class="sidebar-teams-section">
       <div class="sidebar-heading">
@@ -794,10 +1322,75 @@ export function renderSidebarAgentsHtml(options: {
   `
 }
 
-export function renderHeaderAgentBreadcrumbHtml(context: SessionAgentContext): string {
+export function renderHeaderAgentBreadcrumbHtml(
+  context: SessionAgentContext,
+  options: {
+    sessions?: MemberSessionSummary[]
+    viewedSessionId?: string
+    menuOpen?: boolean
+  } = {},
+): string {
   if (!context || context.kind === "independent") return ""
+  const sessions = options.sessions || []
+  const menuOpen = Boolean(options.menuOpen)
+  const sessionsSwitcherHtml = `
+    <div class="header-sessions-dropdown-wrap">
+      <button type="button" class="header-agent-action" data-header-toggle-sessions="1" aria-expanded="${menuOpen}">
+        <span>Sessions (${sessions.length})</span>
+        <span>▾</span>
+      </button>
+      ${
+        menuOpen
+          ? `<div class="header-sessions-menu" role="menu">
+              <div class="header-sessions-menu-head">
+                <span>${escapeHtml(context.agentName)} conversations</span>
+                <button type="button" class="agent-btn primary sm" ${
+                  context.kind === "manager"
+                    ? `data-sidebar-new-manager-session="1"`
+                    : `data-agent-new-session="${escapeAttribute(context.agentId)}" data-agent-team="${escapeAttribute(context.teamId)}"`
+                }>+ New</button>
+              </div>
+              <div class="header-sessions-menu-list">
+                ${
+                  sessions.length === 0
+                    ? `<div class="org-sessions-empty">No saved conversations yet.</div>`
+                    : sessions
+                        .map((sess) => {
+                          const isCurrent = sess.runtimeSessionId === options.viewedSessionId
+                          return `
+                            <div class="org-session-item${isCurrent ? " is-active" : ""}">
+                              <button type="button" class="org-session-open" ${
+                                context.kind === "manager"
+                                  ? `data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}"`
+                                  : `data-agent-chat="${escapeAttribute(context.agentId)}" data-agent-team="${escapeAttribute(context.teamId)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}"`
+                              }>
+                                <span class="agent-status-dot tone-${sess.tone}"></span>
+                                <span class="org-session-title">${escapeHtml(sess.title || "Conversation")}</span>
+                                <span class="org-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+                              </button>
+                            </div>
+                          `
+                        })
+                        .join("")
+                }
+              </div>
+            </div>`
+          : ""
+      }
+    </div>
+  `
+
   if (context.kind === "manager") {
-    return `<div class="header-agent-breadcrumb"><span class="header-agent-pill manager"><span class="agent-status-dot tone-working"></span><span>Manager</span></span><span class="header-agent-role">${escapeHtml(context.roleLabel || "Organization Coordinator")}</span></div>`
+    return `
+      <div class="header-agent-breadcrumb">
+        <button type="button" class="header-agent-pill manager" data-sidebar-surface="manager">
+          <span class="agent-status-dot tone-working"></span>
+          <span>Manager</span>
+        </button>
+        <span class="header-agent-role">${escapeHtml(context.roleLabel || "Organization Coordinator")}</span>
+        ${sessionsSwitcherHtml}
+      </div>
+    `
   }
   const tone = memberStatusTone(context.status)
   return `
@@ -806,6 +1399,8 @@ export function renderHeaderAgentBreadcrumbHtml(context: SessionAgentContext): s
       <span class="header-breadcrumb-sep" aria-hidden="true">/</span>
       <span class="header-agent-pill member"><span class="agent-status-dot tone-${tone}"></span><span>${escapeHtml(context.agentName)}</span></span>
       <span class="header-agent-role">${escapeHtml(context.roleLabel)}${context.isLeader ? " · Leader" : ""}</span>
+      <button type="button" class="header-agent-action" data-sidebar-open-team="${escapeAttribute(context.teamId)}" data-sidebar-team-tab="tasks">Tasks</button>
+      ${sessionsSwitcherHtml}
     </div>
   `
 }
@@ -813,14 +1408,22 @@ export function renderHeaderAgentBreadcrumbHtml(context: SessionAgentContext): s
 export function renderTaskDrawerHtml(options: {
   task: EnrichedTask | null
   busy: boolean
-  artifactPreview: { path: string; content: string; truncated: boolean } | null
+  artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
 }): string {
   const { task, busy, artifactPreview } = options
   if (!task) return ""
   const needsUserAnswer = task.status === "blocked" && task.blockedOn?.responder === "user"
-  const canReviewReport = task.status === "done" && Boolean(task.report)
+  const canReviewReport = task.status === "done" && Boolean(task.report) && !task.parentTaskId
+  const canStartNow = task.status === "queued"
+  const canStopRun = task.activeRun && (task.activeRun.status === "starting" || task.activeRun.status === "running")
   const canCancel = task.status === "queued" || task.status === "running" || task.status === "blocked"
-  const filesChanged: string[] = Array.isArray(task.report?.filesChanged) ? task.report.filesChanged : []
+  const reportEvidence: string[] = Array.isArray(task.report?.evidence) ? task.report.evidence : []
+  const publishedFiles: Array<Record<string, any>> =
+    Array.isArray(task.artifactRecords) && task.artifactRecords.length > 0
+      ? task.artifactRecords
+      : Array.isArray(task.report?.files)
+        ? task.report.files
+        : []
 
   return `
     <aside class="agent-task-drawer" aria-label="Task inspection drawer">
@@ -828,7 +1431,11 @@ export function renderTaskDrawerHtml(options: {
         <div class="agent-drawer-title-group">
           <div class="agent-drawer-meta-row">
             <span class="agent-status-pill tone-${task.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(task.statusLabel)}</span></span>
-            <span class="agent-priority-pill priority-${task.priority}">${escapeHtml(task.priority)}</span>
+            <select class="agent-select sm" data-task-priority="${escapeAttribute(task.id)}" aria-label="Task priority" ${busy ? "disabled" : ""}>
+              <option value="high" ${task.priority === "high" ? "selected" : ""}>High priority</option>
+              <option value="normal" ${task.priority === "normal" ? "selected" : ""}>Normal priority</option>
+              <option value="low" ${task.priority === "low" ? "selected" : ""}>Low priority</option>
+            </select>
             <code class="agent-id-chip">${escapeHtml(task.id)}</code>
           </div>
           <h3 class="agent-drawer-title">${escapeHtml(task.brief)}</h3>
@@ -842,7 +1449,9 @@ export function renderTaskDrawerHtml(options: {
       </header>
       <div class="agent-drawer-body panel-scroll">
         <div class="agent-drawer-actions-bar">
-          <button type="button" class="agent-btn secondary" data-agent-chat="${escapeAttribute(task.assigneeAgentId)}" data-agent-team="${escapeAttribute(task.teamId)}" data-agent-session="${escapeAttribute(task.runtimeSessionId)}">Open ${escapeHtml(task.assigneeName)} Chat</button>
+          <button type="button" class="agent-btn secondary" data-agent-chat="${escapeAttribute(task.assigneeAgentId)}" data-agent-team="${escapeAttribute(task.teamId)}" data-agent-session="${escapeAttribute(task.runtimeSessionId)}">${task.runtimeSessionId ? "Open Task Session" : `Chat with ${escapeHtml(task.assigneeName)}`}</button>
+          ${canStartNow ? `<button type="button" class="agent-btn primary" data-task-start="${escapeAttribute(task.id)}" ${busy ? "disabled" : ""}>Start Now</button>` : ""}
+          ${canStopRun && task.activeRun ? `<button type="button" class="agent-btn warning" data-inbox-stop-run="${escapeAttribute(String(task.activeRun.id))}" ${busy ? "disabled" : ""}>Stop Run</button>` : ""}
           ${canCancel ? `<button type="button" class="agent-btn danger-ghost" data-task-cancel="${escapeAttribute(task.id)}" ${busy ? "disabled" : ""}>Cancel Task</button>` : ""}
         </div>
         ${
@@ -868,32 +1477,49 @@ export function renderTaskDrawerHtml(options: {
           task.report
             ? `<section class="agent-drawer-card report-card">
                 <div class="agent-card-header-row">
-                  <div class="agent-card-kicker">Delivery Report</div>
-                  ${task.deliveredAt ? `<span class="agent-timestamp">${escapeHtml(String(task.deliveredAt))}</span>` : ""}
+                  <div class="agent-card-kicker">Delivery Report · ${escapeHtml(String(task.report.outcome || "Completed"))}</div>
+                  ${task.deliveredAt ? `<span class="agent-timestamp">${escapeHtml(relativeTimeLabel(task.deliveredAt))}</span>` : ""}
                 </div>
                 <div class="agent-report-section">
                   <h4>Summary</h4>
                   <p class="agent-report-text">${escapeHtml(String(task.report.summary || ""))}</p>
                 </div>
                 ${
-                  task.report.details
-                    ? `<div class="agent-report-section"><h4>Details</h4><pre class="agent-report-pre">${escapeHtml(String(task.report.details))}</pre></div>`
+                  reportEvidence.length > 0
+                    ? `<div class="agent-report-section">
+                        <h4>Evidence &amp; Verification</h4>
+                        <ul class="agent-evidence-list">
+                          ${reportEvidence.map((item) => `<li>${escapeHtml(String(item))}</li>`).join("")}
+                        </ul>
+                      </div>`
                     : ""
                 }
                 ${
-                  filesChanged.length > 0
+                  publishedFiles.length > 0
                     ? `<div class="agent-report-section">
-                        <h4>Artifacts &amp; Changed Files (${filesChanged.length})</h4>
+                        <h4>Published Files &amp; Artifacts (${publishedFiles.length})</h4>
                         <div class="agent-artifact-list">
-                          ${filesChanged
-                            .map(
-                              (filePath) => `
-                            <div class="agent-artifact-item">
-                              <code class="agent-artifact-path">${escapeHtml(filePath)}</code>
-                              <button type="button" class="agent-btn ghost sm" data-task-read-artifact="${escapeAttribute(task.id)}" data-artifact-path="${escapeAttribute(filePath)}">${artifactPreview?.path === filePath ? "Hide" : "Preview"}</button>
-                            </div>
-                          `,
-                            )
+                          ${publishedFiles
+                            .map((art) => {
+                              const artId = String(art.id || "")
+                              const filePath = String(art.sourcePath || art.publishedPath || art.label || "")
+                              const isPreviewing =
+                                (artId && artifactPreview?.artifactId === artId) ||
+                                (filePath && artifactPreview?.path === filePath)
+                              return `
+                                <div class="agent-artifact-item">
+                                  <div class="agent-artifact-meta">
+                                    <strong>${escapeHtml(String(art.label || filePath))}</strong>
+                                    <code class="agent-artifact-path">${escapeHtml(filePath)}</code>
+                                  </div>
+                                  ${
+                                    artId
+                                      ? `<button type="button" class="agent-btn ghost sm" data-task-read-artifact="${escapeAttribute(artId)}" data-artifact-path="${escapeAttribute(filePath)}">${isPreviewing ? "Hide" : "Preview"}</button>`
+                                      : ""
+                                  }
+                                </div>
+                              `
+                            })
                             .join("")}
                         </div>
                         ${
@@ -905,14 +1531,19 @@ export function renderTaskDrawerHtml(options: {
                     : ""
                 }
                 ${
+                  task.report.next
+                    ? `<div class="agent-report-section"><h4>Recommended Next Step</h4><p class="agent-report-text">${escapeHtml(String(task.report.next))}</p></div>`
+                    : ""
+                }
+                ${
                   canReviewReport
                     ? `<div class="agent-review-box">
                         <div class="agent-card-kicker">${task.review ? `Reviewed · ${task.review.decision === "accepted" ? "Accepted" : "Rework requested"}` : "Review Delivery"}</div>
-                        ${task.review?.comment ? `<p class="agent-review-existing">Previous review note: ${escapeHtml(String(task.review.comment))}</p>` : ""}
-                        <textarea id="agent-task-review-comment" class="agent-textarea" rows="2" placeholder="Optional review note or rework instructions..."></textarea>
+                        ${task.review?.feedback ? `<p class="agent-review-existing">Feedback: ${escapeHtml(String(task.review.feedback))}</p>` : ""}
+                        <textarea id="agent-task-review-comment" class="agent-textarea" rows="2" placeholder="Optional review feedback or rework instructions..."></textarea>
                         <div class="agent-form-actions">
-                          <button type="button" class="agent-btn primary" data-task-review="${escapeAttribute(task.id)}" data-review-decision="accepted" ${busy ? "disabled" : ""}>Accept Delivery</button>
-                          <button type="button" class="agent-btn warning" data-task-review="${escapeAttribute(task.id)}" data-review-decision="rework" ${busy ? "disabled" : ""}>Request Rework</button>
+                          <button type="button" class="agent-btn primary" data-task-review="${escapeAttribute(task.id)}" data-review-decision="accept" ${busy ? "disabled" : ""}>Accept Delivery</button>
+                          <button type="button" class="agent-btn warning" data-task-review="${escapeAttribute(task.id)}" data-review-decision="rework" ${busy ? "disabled" : ""}>Send for Rework</button>
                         </div>
                       </div>`
                     : ""
@@ -920,19 +1551,42 @@ export function renderTaskDrawerHtml(options: {
               </section>`
             : ""
         }
+        ${
+          task.runs.length > 0
+            ? `<section class="agent-drawer-card">
+                <div class="agent-card-kicker">Execution Runs (${task.runs.length})</div>
+                <div class="agent-notes-list">
+                  ${task.runs
+                    .map(
+                      (r) => `
+                        <div class="agent-note-item">
+                          <div class="agent-note-meta">
+                            <strong>${escapeHtml(String(r.status))}</strong>
+                            <span>${escapeHtml(relativeTimeLabel(r.startedAt))}</span>
+                          </div>
+                          ${r.summary ? `<p>${escapeHtml(String(r.summary))}</p>` : ""}
+                          ${r.error ? `<p class="danger-text">${escapeHtml(String(r.error))}</p>` : ""}
+                        </div>
+                      `,
+                    )
+                    .join("")}
+                </div>
+              </section>`
+            : ""
+        }
         <section class="agent-drawer-card">
-          <div class="agent-card-kicker">Task Notes (${task.notes.length})</div>
+          <div class="agent-card-kicker">Notes &amp; Guidance (${task.notes.length})</div>
           ${
             task.notes.length > 0
               ? `<div class="agent-notes-list">${task.notes
                   .map(
-                    (note) => `<div class="agent-note-item"><div class="agent-note-meta"><strong>${escapeHtml(String(note.author || "user"))}</strong><span>${escapeHtml(String(note.createdAt || ""))}</span></div><p>${escapeHtml(String(note.text || ""))}</p></div>`,
+                    (note) => `<div class="agent-note-item"><div class="agent-note-meta"><strong>${escapeHtml(String(note.author || "user"))}</strong><span>${escapeHtml(relativeTimeLabel(note.createdAt))}</span></div><p>${escapeHtml(String(note.text || ""))}</p></div>`,
                   )
                   .join("")}</div>`
               : `<p class="agent-empty-hint">No notes recorded on this task yet.</p>`
           }
           <form id="agent-task-note-form" class="agent-inline-form" data-task-id="${escapeAttribute(task.id)}">
-            <input id="agent-task-note-input" type="text" class="agent-input" placeholder="Add a coordination note to this task..." />
+            <input id="agent-task-note-input" type="text" class="agent-input" placeholder="Add guidance or a coordination note..." />
             <button type="submit" class="agent-btn secondary sm" ${busy ? "disabled" : ""}>Add Note</button>
           </form>
         </section>
@@ -944,48 +1598,44 @@ export function renderTaskDrawerHtml(options: {
 export function renderTeamSurfaceHtml(options: {
   snapshot: AgentsSnapshotData
   surface: Extract<DesktopAgentSurfaceState, { kind: "team" }>
+  teamSessions?: Array<Record<string, any>>
+  expandedOrgMembers?: ReadonlySet<string>
+  viewedSessionId?: string
   busy: boolean
-  artifactPreview: { path: string; content: string; truncated: boolean } | null
+  artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
 }): string {
   const snapshot = normalizeAgentsSnapshot(options.snapshot)
   const { surface, busy, artifactPreview } = options
-  const summary = buildTeamSummary(snapshot, surface.teamId)
+  const summary = buildTeamSummary(snapshot, surface.teamId, options.teamSessions || [])
   if (!summary) {
     return `<div class="agent-surface-empty"><h2>Team not found</h2><p>Select another team or return to the conversation.</p><button type="button" class="agent-btn secondary" data-sidebar-surface="chat">Back to Chat</button></div>`
   }
   const { team, leader, members, orgRoots, counts } = summary
   const groupedTasks = groupTeamTasks(snapshot, team.id)
-  const filteredTasks = surface.assigneeFilter
-    ? groupedTasks.all.filter((t) => t.assigneeAgentId === surface.assigneeFilter)
-    : groupedTasks.all
   const selectedTask = surface.selectedTaskId ? groupedTasks.all.find((t) => t.id === surface.selectedTaskId) || null : null
-  const existingAgentsOutsideTeam = snapshot.agents.filter(
-    (a) => !members.some((m) => m.agentId === a.id) && String(a.name).toLowerCase() !== "manager",
-  )
 
   const addMemberFormHtml = surface.addMemberOpen
     ? `<form id="agent-add-member-form" class="agent-inline-panel" data-team-id="${escapeAttribute(team.id)}">
         <div class="agent-panel-head">
           <h3>Add Member to ${escapeHtml(team.name)}</h3>
           <div class="agent-segmented" role="group" aria-label="Member source">
-            <button type="button" class="agent-seg-btn${surface.memberMode === "workspace" ? " is-active" : ""}" data-member-mode="workspace">New / Folder</button>
+            <button type="button" class="agent-seg-btn${surface.memberMode === "workspace" ? " is-active" : ""}" data-member-mode="workspace">New Managed Workspace</button>
             <button type="button" class="agent-seg-btn${surface.memberMode === "worktree" ? " is-active" : ""}" data-member-mode="worktree">Git Worktree</button>
-            ${existingAgentsOutsideTeam.length > 0 ? `<button type="button" class="agent-seg-btn${surface.memberMode === "existing" ? " is-active" : ""}" data-member-mode="existing">Existing Agent</button>` : ""}
+            <button type="button" class="agent-seg-btn${surface.memberMode === "existing" ? " is-active" : ""}" data-member-mode="existing">Existing Folder</button>
           </div>
         </div>
         <div class="agent-form-grid">
+          <label class="agent-field"><span>Agent Name</span><input name="name" type="text" class="agent-input" placeholder="e.g. frontend-specialist" required /></label>
           ${
-            surface.memberMode === "existing"
-              ? `<label class="agent-field"><span>Agent</span><select name="existingAgentId" class="agent-select" required><option value="">Select existing agent...</option>${existingAgentsOutsideTeam.map((a) => `<option value="${escapeAttribute(a.id)}">${escapeHtml(a.name)} (${escapeHtml(a.canonicalWorkspace)})</option>`).join("")}</select></label>`
-              : `<label class="agent-field"><span>Agent Name</span><input name="name" type="text" class="agent-input" placeholder="e.g. frontend-specialist" required /></label>
-                 ${
-                   surface.memberMode === "worktree"
-                     ? `<label class="agent-field"><span>Source Git Repo Path</span><input name="worktreeFrom" type="text" class="agent-input" value="${escapeAttribute(team.createRoot)}" placeholder="Leave blank to use team root (${escapeAttribute(team.createRoot || "repo root")})" /></label>`
-                     : `<label class="agent-field"><span>Workspace Folder (optional)</span><input name="workspace" type="text" class="agent-input" placeholder="Leave blank to auto-create under ~/.rind/agents/" /></label>`
-                 }`
+            surface.memberMode === "worktree"
+              ? `<label class="agent-field"><span>Source Git Repository</span><input name="repository" type="text" class="agent-input" value="${escapeAttribute(team.createRoot)}" placeholder="${escapeAttribute(team.createRoot || "Path to git repository")}" required /></label>
+                 <label class="agent-field"><span>Branch Name (optional)</span><input name="branch" type="text" class="agent-input" placeholder="e.g. feat/agent-worktree" /></label>`
+              : surface.memberMode === "existing"
+                ? `<label class="agent-field"><span>Existing Workspace Folder</span><input name="workspace" type="text" class="agent-input" placeholder="Absolute path to folder" required /></label>`
+                : ""
           }
           <label class="agent-field"><span>Role / Position</span><input name="position" type="text" class="agent-input" placeholder="e.g. UI Architecture Specialist" /></label>
-          <label class="agent-field"><span>Reports To</span><select name="reportsTo" class="agent-select"><option value="">${leader ? `${escapeHtml(leader.name)} (Team Leader)` : "Team Leader"}</option>${members.map((m) => `<option value="${escapeAttribute(m.agentId)}">${escapeHtml(m.name)} (${escapeHtml(m.position)})</option>`).join("")}</select></label>
+          <label class="agent-field"><span>Reports To</span><select name="reportsToAgentId" class="agent-select"><option value="">${leader ? `${escapeHtml(leader.name)} (Team Leader)` : "Team Leader"}</option>${members.map((m) => `<option value="${escapeAttribute(m.agentId)}">${escapeHtml(m.name)} (${escapeHtml(m.position)})</option>`).join("")}</select></label>
           <label class="agent-field span-2"><span>Responsibility</span><input name="responsibility" type="text" class="agent-input" placeholder="What is this member responsible for?" /></label>
         </div>
         <div class="agent-form-actions">
@@ -999,7 +1649,7 @@ export function renderTeamSurfaceHtml(options: {
     ? `<form id="agent-assign-task-form" class="agent-inline-panel" data-team-id="${escapeAttribute(team.id)}">
         <div class="agent-panel-head"><h3>Assign Delegated Task</h3></div>
         <div class="agent-form-grid">
-          <label class="agent-field"><span>Assignee</span><select name="agentId" class="agent-select"><option value="">${leader ? `${escapeHtml(leader.name)} (Team Leader - default)` : "Select member..."}</option>${members.map((m) => `<option value="${escapeAttribute(m.agentId)}" ${surface.assignAgentId === m.agentId ? "selected" : ""}>${escapeHtml(m.name)} · ${escapeHtml(m.position)} (${escapeHtml(m.status)})</option>`).join("")}</select></label>
+          <label class="agent-field"><span>Assignee</span><select name="assigneeAgentId" class="agent-select"><option value="">${leader ? `${escapeHtml(leader.name)} (Team Leader - default)` : "Select member..."}</option>${members.map((m) => `<option value="${escapeAttribute(m.agentId)}" ${surface.assignAgentId === m.agentId ? "selected" : ""}>${escapeHtml(m.name)} · ${escapeHtml(m.position)} (${escapeHtml(m.status)})</option>`).join("")}</select></label>
           <label class="agent-field"><span>Priority</span><select name="priority" class="agent-select"><option value="high">High</option><option value="normal" selected>Normal</option><option value="low">Low</option></select></label>
           <label class="agent-field span-2"><span>Task Brief</span><textarea name="brief" class="agent-textarea" rows="3" placeholder="Describe the objective, deliverables, and constraints..." required></textarea></label>
         </div>
@@ -1011,15 +1661,17 @@ export function renderTeamSurfaceHtml(options: {
     : ""
 
   const deleteConfirmHtml = surface.deleteConfirmOpen
-    ? `<div class="agent-inline-panel danger-panel">
+    ? `<form id="agent-delete-team-form" class="agent-inline-panel danger-panel" data-team-id="${escapeAttribute(team.id)}">
         <div class="agent-panel-head"><h3>Delete Team "${escapeHtml(team.name)}"?</h3></div>
-        <p class="agent-empty-hint">Deleting a team archives its structure and stops queued tasks. Member workspaces on disk are preserved unless you choose to clean up managed workspaces.</p>
+        <p class="agent-empty-hint">Deleting a team archives its structure and stops active runs. Type <strong>${escapeHtml(team.name)}</strong> to confirm:</p>
+        <div class="agent-form-grid">
+          <input id="agent-delete-confirm-name" name="confirmName" type="text" class="agent-input" placeholder="${escapeAttribute(team.name)}" required />
+        </div>
         <div class="agent-form-actions">
           <button type="button" class="agent-btn ghost" data-team-toggle-delete="0">Cancel</button>
-          <button type="button" class="agent-btn secondary" data-team-confirm-delete="${escapeAttribute(team.id)}" data-cleanup-workspaces="0" ${busy ? "disabled" : ""}>Archive Team Only</button>
-          <button type="button" class="agent-btn danger-ghost" data-team-confirm-delete="${escapeAttribute(team.id)}" data-cleanup-workspaces="1" ${busy ? "disabled" : ""}>Delete &amp; Clean Up Managed Workspaces</button>
+          <button type="submit" class="agent-btn danger-ghost" ${busy ? "disabled" : ""}>Confirm Delete Team</button>
         </div>
-      </div>`
+      </form>`
     : ""
 
   const bodyHtml =
@@ -1028,7 +1680,16 @@ export function renderTeamSurfaceHtml(options: {
           ${
             orgRoots.length === 0
               ? `<div class="agent-empty-box"><h3>No members in ${escapeHtml(team.name)} yet</h3><p>Add a team leader and specialists to build your reporting hierarchy and start delegating tasks.</p><button type="button" class="agent-btn primary" data-team-toggle-add-member="1">+ Add First Member</button></div>`
-              : `<div class="org-tree-root" role="tree" aria-label="${escapeAttribute(team.name)} organization hierarchy">${orgRoots.map((rootNode) => renderOrgNodeHtml(rootNode, 0)).join("")}</div>`
+              : `<div class="org-tree-root" role="tree" aria-label="${escapeAttribute(team.name)} organization hierarchy">${orgRoots
+                  .map((rootNode) =>
+                    renderOrgNodeHtml(
+                      rootNode,
+                      0,
+                      options.expandedOrgMembers || new Set(),
+                      options.viewedSessionId || "",
+                    ),
+                  )
+                  .join("")}</div>`
           }
         </div>`
       : `<div class="agent-tasks-canvas">
@@ -1037,72 +1698,42 @@ export function renderTeamSurfaceHtml(options: {
               <button type="button" class="agent-filter-chip${!surface.assigneeFilter ? " is-active" : ""}" data-team-filter-assignee="">All members (${groupedTasks.all.length})</button>
               ${members.map((m) => `<button type="button" class="agent-filter-chip${surface.assigneeFilter === m.agentId ? " is-active" : ""}" data-team-filter-assignee="${escapeAttribute(m.agentId)}"><span class="agent-status-dot tone-${m.tone}"></span><span>${escapeHtml(m.name)}</span></button>`).join("")}
             </div>
-            <div class="agent-segmented" role="group" aria-label="Task view layout">
-              <button type="button" class="agent-seg-btn${surface.taskLayout === "board" ? " is-active" : ""}" data-team-task-layout="board">Board</button>
-              <button type="button" class="agent-seg-btn${surface.taskLayout === "list" ? " is-active" : ""}" data-team-task-layout="list">List</button>
-            </div>
           </div>
-          ${
-            surface.taskLayout === "board"
-              ? `<div class="agent-kanban-grid">
-                  ${KANBAN_COLUMNS.map((col) => {
-                    const colTasks = groupedTasks.columns[col.id].filter(
-                      (t) => !surface.assigneeFilter || t.assigneeAgentId === surface.assigneeFilter,
-                    )
-                    return `
-                      <div class="agent-kanban-col">
-                        <div class="agent-kanban-col-head">
-                          <span class="agent-kanban-col-title">${escapeHtml(col.label)}</span>
-                          <span class="agent-kanban-col-count">${colTasks.length}</span>
-                        </div>
-                        <div class="agent-kanban-col-body">
-                          ${
-                            colTasks.length === 0
-                              ? `<div class="agent-kanban-empty">${escapeHtml(col.emptyText)}</div>`
-                              : colTasks
-                                  .map(
-                                    (task) => `
-                                  <button type="button" class="agent-task-card${surface.selectedTaskId === task.id ? " is-selected" : ""}" data-agent-select-task="${escapeAttribute(task.id)}" data-agent-team="${escapeAttribute(team.id)}">
-                                    <div class="agent-task-card-top">
-                                      <span class="agent-status-pill tone-${task.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(task.statusLabel)}</span></span>
-                                      <span class="agent-priority-pill priority-${task.priority}">${escapeHtml(task.priority)}</span>
-                                    </div>
-                                    <p class="agent-task-card-brief">${escapeHtml(task.brief)}</p>
-                                    ${task.report?.summary ? `<p class="agent-task-card-report">${escapeHtml(String(task.report.summary))}</p>` : ""}
-                                    <div class="agent-task-card-foot">
-                                      <span class="agent-task-assignee">${escapeHtml(task.assigneeName)}</span>
-                                      <code class="agent-id-chip">${escapeHtml(task.id)}</code>
-                                    </div>
-                                  </button>
-                                `,
-                                  )
-                                  .join("")
-                          }
-                        </div>
-                      </div>
-                    `
-                  }).join("")}
-                </div>`
-              : `<div class="agent-task-list-table">
+          <div class="agent-task-sections">
+            ${TASK_SECTION_DEFS.map((sec) => {
+              const secTasks = groupedTasks.sections[sec.id].filter(
+                (t) => !surface.assigneeFilter || t.assigneeAgentId === surface.assigneeFilter,
+              )
+              if (secTasks.length === 0 && sec.id === "cancelled") return ""
+              return `
+                <section class="agent-task-section">
+                  <header class="agent-task-section-head">
+                    <h4>${escapeHtml(sec.label)}</h4>
+                    <span class="agent-tab-count">${secTasks.length}</span>
+                  </header>
                   ${
-                    filteredTasks.length === 0
-                      ? `<div class="agent-empty-box"><p>No tasks match the current filter.</p></div>`
-                      : filteredTasks
-                          .map(
-                            (task) => `
-                          <button type="button" class="agent-task-list-row${surface.selectedTaskId === task.id ? " is-selected" : ""}" data-agent-select-task="${escapeAttribute(task.id)}" data-agent-team="${escapeAttribute(team.id)}">
-                            <span class="agent-status-pill tone-${task.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(task.statusLabel)}</span></span>
-                            <span class="agent-priority-pill priority-${task.priority}">${escapeHtml(task.priority)}</span>
-                            <span class="agent-task-row-brief">${escapeHtml(task.brief)}</span>
-                            <span class="agent-task-row-assignee">${escapeHtml(task.assigneeName)}</span>
-                            <code class="agent-id-chip">${escapeHtml(task.id)}</code>
-                          </button>
-                        `,
-                          )
-                          .join("")
+                    secTasks.length === 0
+                      ? `<div class="agent-section-empty">${escapeHtml(sec.emptyText)}</div>`
+                      : `<div class="agent-task-list-table">
+                          ${secTasks
+                            .map(
+                              (task) => `
+                                <button type="button" class="agent-task-list-row${surface.selectedTaskId === task.id ? " is-selected" : ""}" data-agent-select-task="${escapeAttribute(task.id)}" data-agent-team="${escapeAttribute(team.id)}">
+                                  <span class="agent-status-pill tone-${task.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(task.statusLabel)}</span></span>
+                                  <span class="agent-priority-pill priority-${task.priority}">${escapeHtml(task.priority)}</span>
+                                  <span class="agent-task-row-brief">${escapeHtml(task.brief)}${task.report?.summary ? ` <em class="agent-task-row-summary">— ${escapeHtml(String(task.report.summary))}</em>` : ""}</span>
+                                  <span class="agent-task-row-assignee">${escapeHtml(task.assigneeName)}</span>
+                                  <code class="agent-id-chip">${escapeHtml(task.id)}</code>
+                                </button>
+                              `,
+                            )
+                            .join("")}
+                        </div>`
                   }
-                </div>`
-          }
+                </section>
+              `
+            }).join("")}
+          </div>
         </div>`
 
   return `
@@ -1130,7 +1761,7 @@ export function renderTeamSurfaceHtml(options: {
         </header>
         <div class="agent-subnav-bar">
           <div class="agent-subnav-tabs" role="tablist" aria-label="Team surface views">
-            <button type="button" role="tab" aria-selected="${surface.tab === "organization"}" class="agent-subnav-tab${surface.tab === "organization" ? " is-active" : ""}" data-team-switch-tab="organization">Organization &amp; Hierarchy <span class="agent-tab-count">${counts.members}</span></button>
+            <button type="button" role="tab" aria-selected="${surface.tab === "organization"}" class="agent-subnav-tab${surface.tab === "organization" ? " is-active" : ""}" data-team-switch-tab="organization">Organization &amp; Sessions <span class="agent-tab-count">${counts.members}</span></button>
             <button type="button" role="tab" aria-selected="${surface.tab === "tasks"}" class="agent-subnav-tab${surface.tab === "tasks" ? " is-active" : ""}" data-team-switch-tab="tasks">Tasks &amp; Deliveries <span class="agent-tab-count">${counts.tasksTotal}</span></button>
           </div>
         </div>
@@ -1144,16 +1775,146 @@ export function renderTeamSurfaceHtml(options: {
   `
 }
 
+export function renderManagerSurfaceHtml(options: {
+  snapshot: AgentsSnapshotData
+  managerSessions?: Array<Record<string, any>>
+  viewedSessionId?: string
+  busy: boolean
+}): string {
+  const snapshot = normalizeAgentsSnapshot(options.snapshot)
+  const sessions = mergeManagerSessions(snapshot, options.managerSessions || [])
+  const inbox = buildInboxSections(snapshot)
+
+  return `
+    <div class="agent-surface manager-surface">
+      <div class="agent-surface-main">
+        <header class="agent-surface-header">
+          <div class="agent-surface-title-block">
+            <div class="agent-surface-kicker">Organization Coordinator</div>
+            <div class="agent-surface-headline-row">
+              <h2 class="agent-surface-title">Manager Agent</h2>
+              <span class="agent-metric-pill">${sessions.length} ${sessions.length === 1 ? "conversation" : "conversations"}</span>
+              <span class="agent-metric-pill">${snapshot.teams.length} ${snapshot.teams.length === 1 ? "team" : "teams"}</span>
+            </div>
+            <p class="agent-surface-desc">Manager creates teams, organizes member reporting hierarchies, and coordinates cross-team work. Browse past Manager conversations or start a new one.</p>
+          </div>
+          <div class="agent-surface-actions">
+            <button type="button" class="agent-btn secondary" data-sidebar-new-manager-session="1" ${options.busy ? "disabled" : ""}>+ New Conversation</button>
+            <button type="button" class="agent-btn primary" data-sidebar-open-manager="1" ${options.busy ? "disabled" : ""}>Resume Latest Chat</button>
+          </div>
+        </header>
+        <div class="agent-surface-body panel-scroll">
+          <section class="agent-bg-section">
+            <h3 class="agent-section-heading">Manager Conversations (${sessions.length})</h3>
+            ${
+              sessions.length === 0
+                ? `<div class="agent-empty-box compact"><p>No Manager conversations yet. Start a conversation to create or reorganize teams.</p></div>`
+                : `<div class="agent-runs-list">
+                    ${sessions
+                      .map((sess) => {
+                        const isCurrent = sess.runtimeSessionId === options.viewedSessionId
+                        return `
+                          <div class="agent-run-row${isCurrent ? " is-selected" : ""}">
+                            <div class="agent-run-main">
+                              <span class="agent-status-pill tone-${sess.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(sess.status)}</span></span>
+                              <strong>${escapeHtml(sess.title || "Manager conversation")}</strong>
+                              <span class="agent-timestamp">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+                            </div>
+                            <div class="agent-run-actions">
+                              <button type="button" class="agent-btn primary sm" data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}">Open Chat</button>
+                              <button type="button" class="agent-btn ghost sm danger-text" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-manager="1">Delete</button>
+                            </div>
+                          </div>
+                        `
+                      })
+                      .join("")}
+                  </div>`
+            }
+          </section>
+          ${
+            inbox.notices.length > 0
+              ? `<section class="agent-bg-section">
+                  <h3 class="agent-section-heading">Recent Manager Changes (${inbox.notices.length})</h3>
+                  <div class="agent-runs-list">
+                    ${inbox.notices
+                      .map(
+                        (notice) => `
+                          <div class="agent-run-row">
+                            <div class="agent-run-main">
+                              <span class="agent-status-pill tone-waiting"><span>Changed</span></span>
+                              <strong>${escapeHtml(notice.title)}</strong>
+                              ${notice.subtitle ? `<span>${escapeHtml(notice.subtitle)}</span>` : ""}
+                            </div>
+                            <div class="agent-run-actions">
+                              <button type="button" class="agent-btn ghost sm" data-inbox-dismiss-notice="${escapeAttribute(notice.noticeId || "")}">Dismiss</button>
+                            </div>
+                          </div>
+                        `,
+                      )
+                      .join("")}
+                  </div>
+                </section>`
+              : ""
+          }
+        </div>
+      </div>
+    </div>
+  `
+}
+
 export function renderInboxSurfaceHtml(options: {
   snapshot: AgentsSnapshotData
   selectedTaskId: string
   busy: boolean
-  artifactPreview: { path: string; content: string; truncated: boolean } | null
+  artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
 }): string {
   const snapshot = normalizeAgentsSnapshot(options.snapshot)
-  const items = buildInboxItems(snapshot)
+  const sections = buildInboxSections(snapshot)
   const rawTask = options.selectedTaskId ? snapshot.tasks.find((t) => t.id === options.selectedTaskId) : null
   const selectedTask = rawTask ? enrichTask(snapshot, rawTask) : null
+
+  const renderCard = (item: InboxItem) => `
+    <article class="agent-inbox-card tone-${item.tone}">
+      <div class="agent-inbox-card-main">
+        <div class="agent-inbox-meta">
+          <span class="agent-status-pill tone-${item.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(item.badge)}</span></span>
+          ${item.subtitle ? `<span class="agent-inbox-subtitle">${escapeHtml(item.subtitle)}</span>` : ""}
+          ${item.createdAt ? `<span class="agent-timestamp">${escapeHtml(relativeTimeLabel(item.createdAt))}</span>` : ""}
+        </div>
+        <h3 class="agent-inbox-title">${escapeHtml(item.title)}</h3>
+        ${item.detail ? `<p class="agent-inbox-detail">${escapeHtml(item.detail)}</p>` : ""}
+      </div>
+      <div class="agent-inbox-actions">
+        ${
+          item.kind === "approval" && item.approvalId
+            ? `<button type="button" class="agent-btn primary sm" data-inbox-approve="${escapeAttribute(item.approvalId)}" ${options.busy ? "disabled" : ""}>Approve</button>
+               <button type="button" class="agent-btn ghost sm" data-inbox-reject="${escapeAttribute(item.approvalId)}" ${options.busy ? "disabled" : ""}>Reject</button>`
+            : ""
+        }
+        ${
+          (item.kind === "blocker" || item.kind === "delivery" || item.kind === "attention") && item.taskId
+            ? `<button type="button" class="agent-btn primary sm" data-inbox-inspect-task="${escapeAttribute(item.taskId)}">${item.kind === "delivery" ? "Review Delivery" : item.kind === "blocker" ? "Answer Blocker" : "Inspect Task"}</button>`
+            : ""
+        }
+        ${
+          item.kind === "unconfirmed_run" && item.runId
+            ? `<button type="button" class="agent-btn warning sm" data-inbox-resolve-run="${escapeAttribute(item.runId)}" ${options.busy ? "disabled" : ""}>Confirm Stopped</button>
+               <button type="button" class="agent-btn danger-ghost sm" data-inbox-stop-run="${escapeAttribute(item.runId)}" ${options.busy ? "disabled" : ""}>Stop Run</button>`
+            : ""
+        }
+        ${
+          item.kind === "notice" && item.noticeId
+            ? `<button type="button" class="agent-btn ghost sm" data-inbox-dismiss-notice="${escapeAttribute(item.noticeId)}" ${options.busy ? "disabled" : ""}>Dismiss</button>`
+            : ""
+        }
+        ${
+          item.teamId
+            ? `<button type="button" class="agent-btn ghost sm" data-sidebar-open-team="${escapeAttribute(item.teamId)}" data-sidebar-team-tab="organization">Open Team</button>`
+            : ""
+        }
+      </div>
+    </article>
+  `
 
   return `
     <div class="agent-surface inbox-surface">
@@ -1162,10 +1923,10 @@ export function renderInboxSurfaceHtml(options: {
           <div class="agent-surface-title-block">
             <div class="agent-surface-kicker">Management Triage</div>
             <div class="agent-surface-headline-row">
-              <h2 class="agent-surface-title">Inbox &amp; Approvals</h2>
-              <span class="agent-metric-pill">${items.length} pending</span>
+              <h2 class="agent-surface-title">Inbox</h2>
+              <span class="agent-metric-pill">${sections.badgeCount} pending</span>
             </div>
-            <p class="agent-surface-desc">Human-in-the-loop approvals, blocked questions, completed task deliveries awaiting acceptance, and runtime notices across all teams.</p>
+            <p class="agent-surface-desc">Human-in-the-loop approvals, blocked questions, deliveries awaiting review, and Manager updates across all teams.</p>
           </div>
           <div class="agent-surface-actions">
             <button type="button" class="agent-btn ghost" data-sidebar-surface="chat">Back to Chat</button>
@@ -1173,55 +1934,34 @@ export function renderInboxSurfaceHtml(options: {
         </header>
         <div class="agent-surface-body panel-scroll">
           ${
-            items.length === 0
+            sections.totalCount === 0
               ? `<div class="agent-empty-box"><h3>Inbox Zero</h3><p>No pending approvals, blocked questions, or unreviewed task deliveries right now.</p></div>`
-              : `<div class="agent-inbox-list">
-                  ${items
-                    .map(
-                      (item) => `
-                    <article class="agent-inbox-card tone-${item.tone}">
-                      <div class="agent-inbox-card-main">
-                        <div class="agent-inbox-meta">
-                          <span class="agent-status-pill tone-${item.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(item.badge)}</span></span>
-                          ${item.subtitle ? `<span class="agent-inbox-subtitle">${escapeHtml(item.subtitle)}</span>` : ""}
-                          ${item.createdAt ? `<span class="agent-timestamp">${escapeHtml(item.createdAt)}</span>` : ""}
-                        </div>
-                        <h3 class="agent-inbox-title">${escapeHtml(item.title)}</h3>
-                        ${item.detail ? `<p class="agent-inbox-detail">${escapeHtml(item.detail)}</p>` : ""}
-                      </div>
-                      <div class="agent-inbox-actions">
-                        ${
-                          item.kind === "approval" && item.approvalId
-                            ? `<button type="button" class="agent-btn primary sm" data-inbox-approve="${escapeAttribute(item.approvalId)}" ${options.busy ? "disabled" : ""}>Approve</button>
-                               <button type="button" class="agent-btn ghost sm" data-inbox-reject="${escapeAttribute(item.approvalId)}" ${options.busy ? "disabled" : ""}>Reject</button>`
-                            : ""
-                        }
-                        ${
-                          (item.kind === "blocker" || item.kind === "delivery" || item.kind === "attention") && item.taskId
-                            ? `<button type="button" class="agent-btn primary sm" data-inbox-inspect-task="${escapeAttribute(item.taskId)}">${item.kind === "delivery" ? "Review Delivery" : item.kind === "blocker" ? "Answer Blocker" : "Inspect Task"}</button>`
-                            : ""
-                        }
-                        ${
-                          item.kind === "unconfirmed_run" && item.runId
-                            ? `<button type="button" class="agent-btn warning sm" data-inbox-stop-run="${escapeAttribute(item.runId)}" ${options.busy ? "disabled" : ""}>Stop Unconfirmed Run</button>`
-                            : ""
-                        }
-                        ${
-                          item.kind === "notice" && item.noticeId
-                            ? `<button type="button" class="agent-btn ghost sm" data-inbox-dismiss-notice="${escapeAttribute(item.noticeId)}" ${options.busy ? "disabled" : ""}>Dismiss</button>`
-                            : ""
-                        }
-                        ${
-                          item.teamId
-                            ? `<button type="button" class="agent-btn ghost sm" data-sidebar-open-team="${escapeAttribute(item.teamId)}" data-sidebar-team-tab="organization">Open Team</button>`
-                            : ""
-                        }
-                      </div>
-                    </article>
-                  `,
-                    )
-                    .join("")}
-                </div>`
+              : `
+                <section class="agent-bg-section">
+                  <h3 class="agent-section-heading">Needs you (${sections.needsYou.length})</h3>
+                  ${
+                    sections.needsYou.length === 0
+                      ? `<div class="agent-section-empty">Nothing waiting on your decision right now.</div>`
+                      : `<div class="agent-inbox-list">${sections.needsYou.map(renderCard).join("")}</div>`
+                  }
+                </section>
+                ${
+                  sections.notices.length > 0
+                    ? `<section class="agent-bg-section">
+                        <h3 class="agent-section-heading">Changed by the Manager (${sections.notices.length})</h3>
+                        <div class="agent-inbox-list">${sections.notices.map(renderCard).join("")}</div>
+                      </section>`
+                    : ""
+                }
+                ${
+                  sections.delivered.length > 0
+                    ? `<section class="agent-bg-section">
+                        <h3 class="agent-section-heading">Recently delivered (${sections.delivered.length})</h3>
+                        <div class="agent-inbox-list">${sections.delivered.map(renderCard).join("")}</div>
+                      </section>`
+                    : ""
+                }
+              `
           }
         </div>
       </div>
@@ -1237,13 +1977,7 @@ export function renderBackgroundSurfaceHtml(options: {
   busy: boolean
 }): string {
   const snapshot = normalizeAgentsSnapshot(options.snapshot)
-  const activeRuns = snapshot.runs.filter(
-    (r) => r.status === "starting" || r.status === "running" || r.status === "unknown",
-  )
-  const recentRuns = snapshot.runs
-    .filter((r) => r.status !== "starting" && r.status !== "running" && r.status !== "unknown")
-    .slice(-15)
-    .reverse()
+  const bg = buildBackgroundModel(snapshot, options.serviceInfo)
   const runtimeInfo = options.serviceInfo?.runtime || null
   const mgmtInfo = options.serviceInfo?.service || null
 
@@ -1254,10 +1988,10 @@ export function renderBackgroundSurfaceHtml(options: {
           <div class="agent-surface-title-block">
             <div class="agent-surface-kicker">Operations &amp; Observability</div>
             <div class="agent-surface-headline-row">
-              <h2 class="agent-surface-title">Background Runs &amp; Shared Runtime</h2>
-              <span class="agent-metric-pill tone-working">${activeRuns.length} active runs</span>
+              <h2 class="agent-surface-title">Background &amp; Runtime</h2>
+              <span class="agent-metric-pill tone-working">${bg.runningCount} active</span>
             </div>
-            <p class="agent-surface-desc">Monitor delegated background agent runs, live runtime sessions, and shared management daemon health.</p>
+            <p class="agent-surface-desc">Monitor delegated background agent runs, live runtime sessions, unconfirmed runs, and shared daemon health.</p>
           </div>
           <div class="agent-surface-actions">
             <button type="button" class="agent-btn secondary" data-bg-read-log="service" ${options.busy ? "disabled" : ""}>Service Log</button>
@@ -1297,55 +2031,61 @@ export function renderBackgroundSurfaceHtml(options: {
               : ""
           }
           <section class="agent-bg-section">
-            <h3 class="agent-section-heading">Active Delegated Runs (${activeRuns.length})</h3>
+            <h3 class="agent-section-heading">Running Now (${bg.runningNow.length})</h3>
             ${
-              activeRuns.length === 0
-                ? `<div class="agent-empty-box compact"><p>No delegated agent runs are currently executing.</p></div>`
+              bg.runningNow.length === 0
+                ? `<div class="agent-empty-box compact"><p>No delegated agent runs or live turns are currently executing.</p></div>`
                 : `<div class="agent-runs-list">
-                    ${activeRuns
-                      .map((run) => {
-                        const task = snapshot.tasks.find((t) => t.id === run.taskId)
-                        const agent = snapshot.agents.find((a) => a.id === run.agentId)
-                        return `
+                    ${bg.runningNow
+                      .map(
+                        (item) => `
                           <div class="agent-run-row">
                             <div class="agent-run-main">
-                              <span class="agent-status-pill tone-${run.status === "unknown" ? "attention" : "working"}"><span class="agent-status-dot"></span><span>${escapeHtml(String(run.status))}</span></span>
-                              <strong>${escapeHtml(String(agent?.name || run.agentId))}</strong>
-                              <span class="agent-run-brief">${escapeHtml(String(task?.brief || `Run ${run.id}`))}</span>
+                              <span class="agent-status-pill tone-working"><span class="agent-status-dot"></span><span>${escapeHtml(String(item.status))}</span></span>
+                              <strong>${escapeHtml(String(item.agentName))}</strong>
+                              <span class="agent-run-brief">${escapeHtml(String(item.title))}</span>
+                              ${item.detail ? `<span class="agent-timestamp">${escapeHtml(String(item.detail))}</span>` : ""}
                             </div>
                             <div class="agent-run-actions">
-                              <button type="button" class="agent-btn ghost sm" data-bg-read-run-log="${escapeAttribute(run.id)}">Logs</button>
-                              <button type="button" class="agent-btn danger-ghost sm" data-inbox-stop-run="${escapeAttribute(run.id)}" ${options.busy ? "disabled" : ""}>Stop</button>
+                              ${
+                                item.agentId && item.teamId
+                                  ? `<button type="button" class="agent-btn secondary sm" data-agent-chat="${escapeAttribute(String(item.agentId))}" data-agent-team="${escapeAttribute(String(item.teamId))}" data-agent-session="${escapeAttribute(String(item.runtimeSessionId || ""))}">Open Session</button>`
+                                  : ""
+                              }
+                              ${
+                                item.runId
+                                  ? `<button type="button" class="agent-btn danger-ghost sm" data-inbox-stop-run="${escapeAttribute(String(item.runId))}" ${options.busy ? "disabled" : ""}>Stop</button>`
+                                  : ""
+                              }
                             </div>
                           </div>
-                        `
-                      })
+                        `,
+                      )
                       .join("")}
                   </div>`
             }
           </section>
           ${
-            recentRuns.length > 0
+            bg.unconfirmedRuns.length > 0
               ? `<section class="agent-bg-section">
-                  <h3 class="agent-section-heading">Recent Runs</h3>
+                  <h3 class="agent-section-heading">Unconfirmed Runs (${bg.unconfirmedRuns.length})</h3>
                   <div class="agent-runs-list">
-                    ${recentRuns
-                      .map((run) => {
-                        const task = snapshot.tasks.find((t) => t.id === run.taskId)
-                        const agent = snapshot.agents.find((a) => a.id === run.agentId)
-                        return `
+                    ${bg.unconfirmedRuns
+                      .map(
+                        (run) => `
                           <div class="agent-run-row">
                             <div class="agent-run-main">
-                              <span class="agent-status-pill tone-${run.status === "completed" ? "completed" : "idle"}"><span>${escapeHtml(String(run.status))}</span></span>
-                              <strong>${escapeHtml(String(agent?.name || run.agentId))}</strong>
-                              <span class="agent-run-brief">${escapeHtml(String(task?.brief || `Run ${run.id}`))}</span>
+                              <span class="agent-status-pill tone-attention"><span class="agent-status-dot"></span><span>Unconfirmed</span></span>
+                              <strong>${escapeHtml(String(run.agentName))}</strong>
+                              <span class="agent-run-brief">${escapeHtml(String(run.title))}</span>
                             </div>
                             <div class="agent-run-actions">
-                              <button type="button" class="agent-btn ghost sm" data-bg-read-run-log="${escapeAttribute(run.id)}">Logs</button>
+                              <button type="button" class="agent-btn warning sm" data-inbox-resolve-run="${escapeAttribute(String(run.runId))}" ${options.busy ? "disabled" : ""}>Confirm Stopped</button>
+                              <button type="button" class="agent-btn danger-ghost sm" data-inbox-stop-run="${escapeAttribute(String(run.runId))}" ${options.busy ? "disabled" : ""}>Cancel Run</button>
                             </div>
                           </div>
-                        `
-                      })
+                        `,
+                      )
                       .join("")}
                   </div>
                 </section>`
@@ -1357,74 +2097,55 @@ export function renderBackgroundSurfaceHtml(options: {
   `
 }
 
-export function renderInspectorTeamSectionHtml(options: {
+export function renderArchiveSurfaceHtml(options: {
   snapshot: AgentsSnapshotData
-  chatContext: SessionAgentContext
+  archivedTeams?: Array<Record<string, any>>
 }): string {
   const snapshot = normalizeAgentsSnapshot(options.snapshot)
-  const { chatContext } = options
-  const activeTeamId = chatContext.kind === "member" ? chatContext.teamId : snapshot.teams[0]?.id || ""
-  const summary = activeTeamId ? buildTeamSummary(snapshot, activeTeamId) : null
-
-  if (!summary && chatContext.kind !== "manager") return ""
-
-  if (chatContext.kind === "manager" && !summary) {
-    return `
-      <div class="activity-section inspector-team-box">
-        <div class="inspector-section-head">
-          <span class="inspector-section-title">Manager Context</span>
-          <span class="agent-status-pill tone-working">Coordinator</span>
-        </div>
-        <p class="inspector-empty">Chatting with the global Manager agent. Ask Manager to create teams or coordinate multi-agent workflows.</p>
-      </div>
-    `
-  }
-
-  if (!summary) return ""
-  const { team, members, counts } = summary
-  const grouped = groupTeamTasks(snapshot, team.id)
-  const activeTasks = [...grouped.columns.needs_attention, ...grouped.columns.in_progress, ...grouped.columns.queued]
+  const archived = options.archivedTeams?.length ? options.archivedTeams : snapshot.archivedTeams
 
   return `
-    <div class="activity-section inspector-team-box">
-      <div class="inspector-section-head">
-        <span class="inspector-section-title">Team · ${escapeHtml(team.name)}</span>
-        <div class="inspector-team-links">
-          <button type="button" class="ghost-button" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="organization">Org</button>
-          <button type="button" class="ghost-button" data-sidebar-open-team="${escapeAttribute(team.id)}" data-sidebar-team-tab="tasks">Board (${counts.tasksTotal})</button>
+    <div class="agent-surface archive-surface">
+      <div class="agent-surface-main">
+        <header class="agent-surface-header">
+          <div class="agent-surface-title-block">
+            <div class="agent-surface-kicker">History</div>
+            <div class="agent-surface-headline-row">
+              <h2 class="agent-surface-title">Archived Teams</h2>
+              <span class="agent-metric-pill">${archived.length} archived</span>
+            </div>
+            <p class="agent-surface-desc">Previously deleted teams and their preserved workspace paths.</p>
+          </div>
+          <div class="agent-surface-actions">
+            <button type="button" class="agent-btn ghost" data-sidebar-surface="chat">Back to Chat</button>
+          </div>
+        </header>
+        <div class="agent-surface-body panel-scroll">
+          ${
+            archived.length === 0
+              ? `<div class="agent-empty-box"><h3>No archived teams</h3><p>Deleted teams will appear here with their preserved workspace paths.</p></div>`
+              : `<div class="agent-runs-list">
+                  ${archived
+                    .map(
+                      (item) => `
+                        <div class="agent-run-row">
+                          <div class="agent-run-main">
+                            <strong>${escapeHtml(String(item.name || item.id))}</strong>
+                            <span class="agent-timestamp">Archived ${escapeHtml(relativeTimeLabel(item.deletedAt))}</span>
+                            ${
+                              Array.isArray(item.workspaces) && item.workspaces.length > 0
+                                ? `<code class="org-workspace-path">${escapeHtml(item.workspaces.map((w: any) => w.workspace || w).join(", "))}</code>`
+                                : ""
+                            }
+                          </div>
+                        </div>
+                      `,
+                    )
+                    .join("")}
+                </div>`
+          }
         </div>
       </div>
-      <div class="inspector-team-roster">
-        ${members
-          .map(
-            (member) => `
-          <button type="button" class="inspector-member-row${chatContext.kind === "member" && chatContext.agentId === member.agentId ? " is-active" : ""}" data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(member.latestRuntimeSessionId)}">
-            <span class="agent-status-dot tone-${member.tone}"></span>
-            <span class="inspector-member-name">${escapeHtml(member.name)}</span>
-            <span class="inspector-member-role">${escapeHtml(member.position)}</span>
-          </button>
-        `,
-          )
-          .join("")}
-      </div>
-      ${
-        activeTasks.length > 0
-          ? `<div class="inspector-team-tasks">
-              ${activeTasks
-                .slice(0, 4)
-                .map(
-                  (task) => `
-                <button type="button" class="inspector-task-mini" data-agent-select-task="${escapeAttribute(task.id)}" data-agent-team="${escapeAttribute(team.id)}">
-                  <span class="agent-status-pill tone-${task.tone}">${escapeHtml(task.statusLabel)}</span>
-                  <span class="inspector-task-mini-brief">${escapeHtml(task.brief)}</span>
-                </button>
-              `,
-                )
-                .join("")}
-            </div>`
-          : ""
-      }
     </div>
   `
 }
-

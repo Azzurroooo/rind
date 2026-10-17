@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { methods } from "../methods.js";
 import {
   activeBackgroundCount,
+  buildBackgroundModel,
   buildInboxItems,
+  buildInboxSections,
   buildTeamSummary,
   emptyAgentsSnapshot,
   groupTeamTasks,
   inboxBadgeCount,
+  mergeManagerSessions,
   normalizeAgentsSnapshot,
   resolveSessionAgentContext,
 } from "../lib/agentsModel.js";
@@ -21,10 +24,15 @@ export function useAgentsController(ctx) {
   const [connection, setConnection] = useState("connecting");
   const [service, setService] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [teamHistories, setTeamHistories] = useState({});
+  const [managerHistory, setManagerHistory] = useState([]);
+  const [archiveList, setArchiveList] = useState([]);
   // Active center-stage surface:
   // { kind: "chat" }
   // | { kind: "inbox" }
+  // | { kind: "manager" }
   // | { kind: "background" }
+  // | { kind: "archive" }
   // | { kind: "team", teamId: string, tab: "organization" | "tasks", selectedTaskId?: string }
   const [surface, setSurface] = useState({ kind: "chat" });
   const [activeAgentOverride, setActiveAgentOverride] = useState(null);
@@ -125,6 +133,48 @@ export function useAgentsController(ctx) {
     };
   }, [wsSupported, acceptPayload]);
 
+  const refreshAgentHistories = useCallback(
+    async (targetTeamIds = null) => {
+      if (connection !== "connected") return;
+      const teamIds = Array.isArray(targetTeamIds)
+        ? targetTeamIds
+        : snapshot.teams.map((t) => String(t.id));
+      try {
+        const [mgrRes, ...teamResults] = await Promise.all([
+          requestAgent("listSessions", { manager: true }).catch(() => ({ sessions: [] })),
+          ...teamIds.map((teamId) =>
+            requestAgent("listSessions", { teamId })
+              .then((res) => ({ teamId, sessions: Array.isArray(res?.sessions) ? res.sessions : [] }))
+              .catch(() => ({ teamId, sessions: [] })),
+          ),
+        ]);
+        if (!mountedRef.current) return;
+        if (Array.isArray(mgrRes?.sessions)) {
+          setManagerHistory(mgrRes.sessions);
+        }
+        if (teamResults.length > 0) {
+          setTeamHistories((prev) => {
+            const next = { ...prev };
+            for (const item of teamResults) {
+              next[item.teamId] = item.sessions;
+            }
+            return next;
+          });
+        }
+      } catch {
+        // Session history refresh is advisory.
+      }
+    },
+    [connection, requestAgent, snapshot.teams],
+  );
+
+  // Refresh saved session histories whenever teams or snapshot sequence changes
+  const teamIdsKey = snapshot.teams.map((t) => t.id).join(",");
+  useEffect(() => {
+    if (connection !== "connected") return;
+    void refreshAgentHistories();
+  }, [connection, snapshot.seq, teamIdsKey, refreshAgentHistories]);
+
   const openChatSurface = useCallback(() => {
     setSurface({ kind: "chat" });
   }, []);
@@ -134,10 +184,28 @@ export function useAgentsController(ctx) {
     setSurface({ kind: "inbox" });
   }, [ctx.layout]);
 
+  const openManagerView = useCallback(() => {
+    ctx.layout.closeDrawersSilently?.();
+    setSurface({ kind: "manager" });
+    void refreshAgentHistories([]);
+  }, [ctx.layout, refreshAgentHistories]);
+
   const openBackground = useCallback(() => {
     ctx.layout.closeDrawersSilently?.();
     setSurface({ kind: "background" });
     void requestAgent("serviceInfo", {}).catch(() => {});
+  }, [ctx.layout, requestAgent]);
+
+  const openArchive = useCallback(() => {
+    ctx.layout.closeDrawersSilently?.();
+    setSurface({ kind: "archive" });
+    void requestAgent("listArchive", {})
+      .then((res) => {
+        if (mountedRef.current && Array.isArray(res?.teams)) {
+          setArchiveList(res.teams);
+        }
+      })
+      .catch(() => {});
   }, [ctx.layout, requestAgent]);
 
   const openTeam = useCallback(
@@ -150,8 +218,9 @@ export function useAgentsController(ctx) {
         tab: tab === "tasks" ? "tasks" : "organization",
         selectedTaskId: selectedTaskId ? String(selectedTaskId) : "",
       });
+      void refreshAgentHistories([String(teamId)]);
     },
-    [ctx.layout],
+    [ctx.layout, refreshAgentHistories],
   );
 
   const selectTask = useCallback((teamId, taskId) => {
@@ -164,17 +233,28 @@ export function useAgentsController(ctx) {
   }, []);
 
   const openAgentConversation = useCallback(
-    async ({ manager = false, teamId = "", agentId = "", runtimeSessionId = "" } = {}) => {
+    async ({
+      manager = false,
+      teamId = "",
+      agentId = "",
+      runtimeSessionId = "",
+      resumeLatest = false,
+      forceNew = false,
+    } = {}) => {
       ctx.layout.closeDrawersSilently?.();
       setBusy(true);
       try {
         const client = ctx.refs.client.current;
+        const effectiveRuntimeId = forceNew ? "" : runtimeSessionId;
+        const effectiveResumeLatest = !forceNew && !effectiveRuntimeId && resumeLatest;
+
         if (ctx.refs.info.current?.methods?.includes?.(methods.agentsOpenSession) && client) {
           const opened = await client.request(methods.agentsOpenSession, {
             ...(manager ? { manager: true } : {}),
             ...(teamId ? { teamId } : {}),
             ...(agentId ? { agentId } : {}),
-            ...(runtimeSessionId ? { runtimeSessionId } : {}),
+            ...(effectiveRuntimeId ? { runtimeSessionId: effectiveRuntimeId } : {}),
+            ...(effectiveResumeLatest ? { resumeLatest: true } : {}),
           });
           let targetSessionId = String(opened?.runtimeSessionId || opened?.session?.session_id || "");
           if (!targetSessionId && ctx.refs.info.current?.methods?.includes?.(methods.agentsCreateSession)) {
@@ -201,6 +281,7 @@ export function useAgentsController(ctx) {
             await ctx.call.current.loadSession(targetSessionId, true);
             await ctx.call.current.refreshSessions(opened?.workspaceRoot);
           }
+          void refreshAgentHistories(teamId ? [teamId] : []);
           return;
         }
 
@@ -209,7 +290,8 @@ export function useAgentsController(ctx) {
           ...(manager ? { manager: true } : {}),
           ...(teamId ? { teamId } : {}),
           ...(agentId ? { agentId } : {}),
-          ...(runtimeSessionId ? { runtimeSessionId } : {}),
+          ...(effectiveRuntimeId ? { runtimeSessionId: effectiveRuntimeId } : {}),
+          ...(effectiveResumeLatest ? { resumeLatest: true } : {}),
         });
         setSurface({ kind: "chat" });
         setActiveAgentOverride(
@@ -217,31 +299,81 @@ export function useAgentsController(ctx) {
             ? { kind: "manager", agentName: "Manager", roleLabel: "Organization Coordinator" }
             : { kind: "member", teamId, agentId },
         );
+        const externalTools = opened?.externalTools || null;
         if (opened?.runtimeSessionId) {
-          await ctx.call.current.loadSession(opened.runtimeSessionId, true);
-        } else if (opened?.workspaceRoot) {
-          await ctx.call.current.selectWorkspace(opened.workspaceRoot);
-          if (!ctx.refs.info.current?.session_id && client) {
-            const created = await client.request(methods.sessionNew, { workspace_root: opened.workspaceRoot });
-            if (created?.session_id) {
-              if (opened.managementSessionId) {
-                await requestAgent("bindSession", {
-                  sessionId: opened.managementSessionId,
-                  runtimeSessionId: created.session_id,
-                }).catch(() => {});
-              }
-              await ctx.call.current.loadSession(created.session_id, true);
-              await ctx.call.current.refreshSessions(opened.workspaceRoot);
+          if (opened?.workspaceRoot) {
+            ctx.setSelectedWorkspace(opened.workspaceRoot);
+            ctx.setWorkspaceDraft(opened.workspaceRoot);
+          }
+          await ctx.call.current.loadSession(opened.runtimeSessionId, true, false, { externalTools });
+          await ctx.call.current.refreshSessions(opened?.workspaceRoot);
+        } else if (opened?.workspaceRoot && client) {
+          ctx.setSelectedWorkspace(opened.workspaceRoot);
+          ctx.setWorkspaceDraft(opened.workspaceRoot);
+          const created = await client.request(methods.sessionNew, {
+            workspace_root: opened.workspaceRoot,
+            ...(externalTools ? { external_tools: externalTools } : {}),
+          });
+          if (created?.session_id) {
+            if (opened.managementSessionId) {
+              await requestAgent("bindSession", {
+                sessionId: opened.managementSessionId,
+                runtimeSessionId: created.session_id,
+              }).catch(() => {});
             }
+            await ctx.call.current.loadSession(created.session_id, true, false, { externalTools });
+            await ctx.call.current.refreshSessions(opened.workspaceRoot);
           }
         }
+        void refreshAgentHistories(teamId ? [teamId] : []);
       } catch (error) {
-        ctx.toast?.show(`Could not open agent chat: ${errorText(error)}`, { tone: "error" });
+        ctx.toast?.show(`Could not open conversation: ${errorText(error)}`, { tone: "error" });
       } finally {
         if (mountedRef.current) setBusy(false);
       }
     },
-    [ctx, requestAgent],
+    [ctx, requestAgent, refreshAgentHistories],
+  );
+
+  const renameAgentConversation = useCallback(
+    async (runtimeSessionId, name, { teamId = "" } = {}) => {
+      const sid = String(runtimeSessionId || "").trim();
+      if (!sid) return;
+      const client = ctx.refs.client.current;
+      if (!client) return;
+      setBusy(true);
+      try {
+        const input = String(name || "").trim() ? `/rename ${String(name).trim()}` : "/rename --reset";
+        await client.request(methods.commandExecute, { session_id: sid, input });
+        await refreshAgentHistories(teamId ? [teamId] : []);
+        await ctx.call.current.refreshSessions();
+        ctx.toast?.show("Renamed conversation");
+      } catch (error) {
+        ctx.toast?.show(`Could not rename conversation: ${errorText(error)}`, { tone: "error" });
+      } finally {
+        if (mountedRef.current) setBusy(false);
+      }
+    },
+    [ctx, refreshAgentHistories],
+  );
+
+  const deleteAgentConversation = useCallback(
+    async (runtimeSessionId, { teamId = "" } = {}) => {
+      const sid = String(runtimeSessionId || "").trim();
+      if (!sid) return;
+      setBusy(true);
+      try {
+        await requestAgent("deleteSession", { runtimeSessionId: sid });
+        await refreshAgentHistories(teamId ? [teamId] : []);
+        await ctx.call.current.refreshSessions();
+        ctx.toast?.show("Deleted conversation");
+      } catch (error) {
+        ctx.toast?.show(`Could not delete conversation: ${errorText(error)}`, { tone: "error" });
+      } finally {
+        if (mountedRef.current) setBusy(false);
+      }
+    },
+    [ctx, requestAgent, refreshAgentHistories],
   );
 
   const runAction = useCallback(
@@ -250,6 +382,9 @@ export function useAgentsController(ctx) {
       try {
         const result = await requestAgent(method, params);
         if (successToast) ctx.toast?.show(successToast);
+        if (params?.teamId) {
+          void refreshAgentHistories([String(params.teamId)]);
+        }
         return result;
       } catch (error) {
         ctx.toast?.show(errorText(error), { tone: "error" });
@@ -258,7 +393,7 @@ export function useAgentsController(ctx) {
         if (mountedRef.current) setBusy(false);
       }
     },
-    [ctx.toast, requestAgent],
+    [ctx.toast, requestAgent, refreshAgentHistories],
   );
 
   const activeSessionContext = useMemo(() => {
@@ -282,7 +417,9 @@ export function useAgentsController(ctx) {
           teamName: String(team.name || team.id),
           agentId: String(agent.id),
           agentName: String(agent.name || agent.id),
-          roleLabel: String(membership?.position || (team.leaderAgentId === agent.id ? "Team Leader" : "Specialist")),
+          roleLabel: String(
+            membership?.position || (team.leaderAgentId === agent.id ? "Team Leader" : "Specialist"),
+          ),
           isLeader: team.leaderAgentId === agent.id,
           status: String(membership?.status || "Idle"),
         };
@@ -290,6 +427,19 @@ export function useAgentsController(ctx) {
     }
     return resolved;
   }, [snapshot, ctx.info?.session_id, ctx.info?.workspace_root, ctx.selectedWorkspace, activeAgentOverride]);
+
+  const teamSummaries = useMemo(
+    () =>
+      snapshot.teams
+        .map((team) => buildTeamSummary(snapshot, team.id, teamHistories[team.id] || []))
+        .filter(Boolean),
+    [snapshot, teamHistories],
+  );
+
+  const managerSummary = useMemo(
+    () => mergeManagerSessions(snapshot, managerHistory),
+    [snapshot, managerHistory],
+  );
 
   const currentTeamId =
     surface.kind === "team"
@@ -299,17 +449,27 @@ export function useAgentsController(ctx) {
         : snapshot.teams[0]?.id || "";
 
   const currentTeamSummary = useMemo(
-    () => (currentTeamId ? buildTeamSummary(snapshot, currentTeamId) : null),
-    [snapshot, currentTeamId],
+    () => teamSummaries.find((item) => item.team.id === currentTeamId) || null,
+    [teamSummaries, currentTeamId],
   );
 
   const currentTeamTasks = useMemo(
-    () => (currentTeamId ? groupTeamTasks(snapshot, currentTeamId) : { all: [], columns: { queued: [], in_progress: [], needs_attention: [], completed: [] } }),
+    () =>
+      currentTeamId
+        ? groupTeamTasks(snapshot, currentTeamId)
+        : {
+            all: [],
+            groups: { needs: [], working: [], queued: [], delegated: [], done: [], cancelled: [] },
+            sections: [],
+            columns: { queued: [], in_progress: [], needs_attention: [], completed: [] },
+          },
     [snapshot, currentTeamId],
   );
 
+  const inboxSections = useMemo(() => buildInboxSections(snapshot), [snapshot]);
   const inboxItems = useMemo(() => buildInboxItems(snapshot), [snapshot]);
   const inboxCount = useMemo(() => inboxBadgeCount(snapshot), [snapshot]);
+  const backgroundModel = useMemo(() => buildBackgroundModel(snapshot, service), [snapshot, service]);
   const bgCount = useMemo(() => activeBackgroundCount(snapshot), [snapshot]);
 
   return {
@@ -320,19 +480,29 @@ export function useAgentsController(ctx) {
     surface,
     setSurface,
     activeSessionContext,
+    teamSummaries,
+    managerSummary,
+    archiveList: archiveList.length > 0 ? archiveList : snapshot.archivedTeams || [],
     currentTeamId,
     currentTeamSummary,
     currentTeamTasks,
+    inboxSections,
     inboxItems,
     inboxCount,
+    backgroundModel,
     bgCount,
     acceptPayload,
     openChatSurface,
     openInbox,
+    openManagerView,
     openBackground,
+    openArchive,
     openTeam,
     selectTask,
     openAgentConversation,
+    renameAgentConversation,
+    deleteAgentConversation,
+    refreshAgentHistories,
     clearAgentOverride: () => setActiveAgentOverride(null),
     requestAgent,
     runAction,

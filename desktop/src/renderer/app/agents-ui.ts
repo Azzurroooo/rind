@@ -1,9 +1,14 @@
 import {
+  activeBackgroundCount,
+  inboxBadgeCount,
+  mergeManagerSessions,
+  mergeTeamSessions,
   normalizeAgentsSnapshot,
+  renderArchiveSurfaceHtml,
   renderBackgroundSurfaceHtml,
   renderHeaderAgentBreadcrumbHtml,
   renderInboxSurfaceHtml,
-  renderInspectorTeamSectionHtml,
+  renderManagerSurfaceHtml,
   renderSidebarAgentsHtml,
   renderTeamSurfaceHtml,
   resolveSessionAgentContext,
@@ -13,10 +18,14 @@ import { createConversation } from "../timeline-model.ts"
 import {
   agentsSurface,
   composerRegion,
-  inspectorTeamPanel,
   prompt,
   sessionAgentContext,
   sidebarAgents,
+  sidebarModeAgents,
+  sidebarModeAgentsBadges,
+  sidebarModeSwitcher,
+  sidebarModeWorkspaces,
+  sidebarWorkspacesPane,
   streamWrap,
 } from "./dom.ts"
 import { asRecord, asRecordText } from "./html.ts"
@@ -28,6 +37,8 @@ import { state } from "./state.ts"
 
 let lastSidebarKey = ""
 let lastSurfaceKey = ""
+let lastRefreshedSeq = -1
+let refreshInFlight = false
 
 export function currentSessionAgentContext(): SessionAgentContext {
   if (state.agentChatContext && state.agentChatContext.kind !== "independent") {
@@ -40,18 +51,89 @@ export function currentSessionAgentContext(): SessionAgentContext {
   )
 }
 
+export async function refreshAgentSessionsAndArchive() {
+  if (!window.api.agents || refreshInFlight) return
+  refreshInFlight = true
+  try {
+    const teams = state.agentsSnapshot.teams || []
+    const [managerRes, archiveRes, ...teamResults] = await Promise.all([
+      window.api.agents.request("listSessions", { manager: true }).catch(() => null),
+      window.api.agents.request("listArchive", {}).catch(() => null),
+      ...teams.map((team) =>
+        window.api.agents
+          .request("listSessions", { teamId: team.id })
+          .then((res) => ({ teamId: String(team.id), res }))
+          .catch(() => ({ teamId: String(team.id), res: null })),
+      ),
+    ])
+
+    const mgrRec = asRecord(managerRes)
+    if (Array.isArray(mgrRec.sessions)) {
+      state.managerSessions = mgrRec.sessions as Array<Record<string, any>>
+    }
+    const archRec = asRecord(archiveRes)
+    if (Array.isArray(archRec.archivedTeams)) {
+      state.archivedTeams = archRec.archivedTeams as Array<Record<string, any>>
+    }
+    const nextTeamSessions: Record<string, Array<Record<string, any>>> = { ...state.teamSessionsByTeam }
+    for (const item of teamResults) {
+      const rec = asRecord(item.res)
+      if (Array.isArray(rec.sessions)) {
+        nextTeamSessions[item.teamId] = rec.sessions as Array<Record<string, any>>
+      }
+    }
+    state.teamSessionsByTeam = nextTeamSessions
+    scheduleRender()
+  } finally {
+    refreshInFlight = false
+  }
+}
+
 export function renderAgentsUI() {
   const snapshot = state.agentsSnapshot
+  if (snapshot.seq !== lastRefreshedSeq && window.api.agents) {
+    lastRefreshedSeq = snapshot.seq
+    void refreshAgentSessionsAndArchive()
+  }
+
   const chatContext = currentSessionAgentContext()
   const isAgentSurface = state.agentSurface.kind !== "chat"
+
+  // Sidebar two-mode switcher (Workspaces | Agents & Teams)
+  const isAgentsMode = state.sidebarMode === "agents"
+  sidebarModeWorkspaces.classList.toggle("is-active", !isAgentsMode)
+  sidebarModeWorkspaces.setAttribute("aria-selected", String(!isAgentsMode))
+  sidebarModeAgents.classList.toggle("is-active", isAgentsMode)
+  sidebarModeAgents.setAttribute("aria-selected", String(isAgentsMode))
+  sidebarWorkspacesPane.hidden = isAgentsMode
+  sidebarAgents.hidden = !isAgentsMode
+
+  const inboxCount = inboxBadgeCount(snapshot)
+  const bgCount = activeBackgroundCount(snapshot)
+  sidebarModeAgentsBadges.innerHTML = [
+    inboxCount > 0 ? `<span class="sidebar-nav-badge attention" title="${inboxCount} pending in Inbox">! ${inboxCount}</span>` : "",
+    bgCount > 0 ? `<span class="sidebar-nav-badge working" title="${bgCount} active runs">● ${bgCount}</span>` : "",
+  ].join("")
 
   // Toggle center-stage surface vs conversation stream + composer
   agentsSurface.hidden = !isAgentSurface
   streamWrap.hidden = isAgentSurface
   if (composerRegion) composerRegion.hidden = isAgentSurface
 
-  // Header agent context breadcrumb
-  const breadcrumbHtml = renderHeaderAgentBreadcrumbHtml(chatContext)
+  // Header agent context breadcrumb + Sessions switcher
+  let activeAgentSessions = [] as ReturnType<typeof mergeManagerSessions>
+  if (chatContext.kind === "manager") {
+    activeAgentSessions = mergeManagerSessions(snapshot, state.managerSessions)
+  } else if (chatContext.kind === "member") {
+    const byAgent = mergeTeamSessions(snapshot, chatContext.teamId, state.teamSessionsByTeam[chatContext.teamId] || [])
+    activeAgentSessions = byAgent.get(chatContext.agentId) || []
+  }
+
+  const breadcrumbHtml = renderHeaderAgentBreadcrumbHtml(chatContext, {
+    sessions: activeAgentSessions,
+    viewedSessionId: state.viewedSessionId,
+    menuOpen: state.headerSessionsMenuOpen,
+  })
   sessionAgentContext.innerHTML = breadcrumbHtml
   sessionAgentContext.hidden = !breadcrumbHtml || isAgentSurface
 
@@ -59,10 +141,17 @@ export function renderAgentsUI() {
   const activeSidebarInput = sidebarAgents.querySelector<HTMLInputElement>("input:focus")
   const sidebarKey = JSON.stringify({
     seq: snapshot.seq,
-    surface: state.agentSurface.kind === "team" ? `team:${state.agentSurface.teamId}` : state.agentSurface.kind,
+    mode: state.sidebarMode,
+    surface: state.agentSurface.kind === "team" ? `team:${state.agentSurface.teamId}:${state.agentSurface.tab}` : state.agentSurface.kind,
     chatKind: chatContext.kind,
     chatAgent: chatContext.kind === "member" ? chatContext.agentId : "",
+    viewedSessionId: state.viewedSessionId,
     collapsed: [...state.collapsedTeams],
+    expandedMembers: [...state.expandedSidebarMembers],
+    managerExpanded: state.managerExpanded,
+    teamSessionCounts: Object.entries(state.teamSessionsByTeam).map(([k, v]) => `${k}:${v.length}`),
+    mgrSessionCount: state.managerSessions.length,
+    archiveCount: state.archivedTeams.length,
     newTeamOpen: state.newTeamOpen,
     busy: state.agentsBusy,
   })
@@ -73,6 +162,12 @@ export function renderAgentsUI() {
       surface: state.agentSurface,
       chatContext,
       collapsedTeams: state.collapsedTeams,
+      expandedSidebarMembers: state.expandedSidebarMembers,
+      managerExpanded: state.managerExpanded,
+      teamSessionsByTeam: state.teamSessionsByTeam,
+      managerSessions: state.managerSessions,
+      archivedTeams: state.archivedTeams,
+      viewedSessionId: state.viewedSessionId,
       newTeamOpen: state.newTeamOpen,
       busy: state.agentsBusy,
     })
@@ -85,6 +180,11 @@ export function renderAgentsUI() {
       seq: snapshot.seq,
       surface: state.agentSurface,
       inboxTask: state.inboxSelectedTaskId,
+      viewedSessionId: state.viewedSessionId,
+      expandedOrg: [...state.expandedOrgMembers],
+      teamSessionCounts: Object.entries(state.teamSessionsByTeam).map(([k, v]) => `${k}:${v.length}`),
+      mgrSessionCount: state.managerSessions.length,
+      archiveCount: state.archivedTeams.length,
       busy: state.agentsBusy,
       artifactPath: state.artifactPreview?.path || "",
       logTitle: state.serviceLogView?.title || "",
@@ -96,6 +196,9 @@ export function renderAgentsUI() {
         agentsSurface.innerHTML = renderTeamSurfaceHtml({
           snapshot,
           surface: state.agentSurface,
+          teamSessions: state.teamSessionsByTeam[state.agentSurface.teamId] || [],
+          expandedOrgMembers: state.expandedOrgMembers,
+          viewedSessionId: state.viewedSessionId,
           busy: state.agentsBusy,
           artifactPreview: state.artifactPreview,
         })
@@ -106,6 +209,13 @@ export function renderAgentsUI() {
           busy: state.agentsBusy,
           artifactPreview: state.artifactPreview,
         })
+      } else if (state.agentSurface.kind === "manager") {
+        agentsSurface.innerHTML = renderManagerSurfaceHtml({
+          snapshot,
+          managerSessions: state.managerSessions,
+          viewedSessionId: state.viewedSessionId,
+          busy: state.agentsBusy,
+        })
       } else if (state.agentSurface.kind === "background") {
         agentsSurface.innerHTML = renderBackgroundSurfaceHtml({
           snapshot,
@@ -113,28 +223,26 @@ export function renderAgentsUI() {
           logView: state.serviceLogView,
           busy: state.agentsBusy,
         })
+      } else if (state.agentSurface.kind === "archive") {
+        agentsSurface.innerHTML = renderArchiveSurfaceHtml({
+          snapshot,
+          archivedTeams: state.archivedTeams,
+        })
       }
     }
   } else {
     lastSurfaceKey = ""
   }
-
-  // Inspector team panel (rendered inside Activity tab)
-  const inspectorTeamHtml = renderInspectorTeamSectionHtml({
-    snapshot,
-    chatContext,
-  })
-  inspectorTeamPanel.innerHTML = inspectorTeamHtml
-  inspectorTeamPanel.hidden = !inspectorTeamHtml
 }
 
 export function openTeamSurface(teamId: string, tab: "organization" | "tasks" = "organization", selectedTaskId = "") {
+  state.sidebarMode = "agents"
   state.artifactPreview = null
+  state.headerSessionsMenuOpen = false
   state.agentSurface = {
     kind: "team",
     teamId,
     tab,
-    taskLayout: state.agentSurface.kind === "team" ? state.agentSurface.taskLayout : "board",
     assigneeFilter: "",
     selectedTaskId,
     addMemberOpen: false,
@@ -151,8 +259,11 @@ export async function openManagedAgentChat(options: {
   teamId?: string
   agentId?: string
   existingRuntimeSessionId?: string
+  resumeLatest?: boolean
 }) {
   state.agentsBusy = true
+  state.sidebarMode = "agents"
+  state.headerSessionsMenuOpen = false
   render()
   try {
     const opened = asRecord(
@@ -160,6 +271,8 @@ export async function openManagedAgentChat(options: {
         manager: Boolean(options.manager),
         teamId: options.teamId,
         agentId: options.agentId,
+        runtimeSessionId: options.existingRuntimeSessionId || undefined,
+        resumeLatest: options.resumeLatest !== undefined ? options.resumeLatest : !options.existingRuntimeSessionId,
         origin: "direct",
       }),
     )
@@ -167,10 +280,31 @@ export async function openManagedAgentChat(options: {
       state.agentsSnapshot = normalizeAgentsSnapshot(opened.snapshot)
     }
     const mgmtSession = asRecord(opened.session)
-    const managementSessionId = asRecordText(mgmtSession.id)
+    const managementSessionId = asRecordText(opened.managementSessionId) || asRecordText(mgmtSession.id)
     const workspaceRoot = asRecordText(opened.workspaceRoot) || state.chatProjectPath
-    const runtimeSessionId =
-      asRecordText(mgmtSession.runtimeSessionId) || String(options.existingRuntimeSessionId || "")
+    let runtimeSessionId =
+      asRecordText(opened.runtimeSessionId) ||
+      asRecordText(mgmtSession.runtimeSessionId) ||
+      String(options.existingRuntimeSessionId || "")
+
+    // If explicitly starting a brand-new conversation (`resumeLatest: false` and no `existingRuntimeSessionId`),
+    // create and bind a fresh runtime session immediately so it appears in the conversation list right away.
+    if (!runtimeSessionId && options.resumeLatest === false && workspaceRoot) {
+      const created = asRecord(
+        await window.api.agents.createSession({
+          managementSessionId,
+          manager: Boolean(options.manager),
+          teamId: options.teamId,
+          agentId: options.agentId,
+          workspace_root: workspaceRoot,
+        }),
+      )
+      if (created.snapshot) {
+        state.agentsSnapshot = normalizeAgentsSnapshot(created.snapshot)
+      }
+      const rt = asRecord(created.runtimeSession || created)
+      runtimeSessionId = asRecordText(rt.session_id) || asRecordText(created.runtimeSessionId)
+    }
 
     if (options.manager) {
       state.agentChatContext = {
@@ -186,6 +320,7 @@ export async function openManagedAgentChat(options: {
       const membership = state.agentsSnapshot.memberships.find(
         (m) => m.teamId === options.teamId && m.agentId === options.agentId,
       )
+      state.expandedSidebarMembers.add(`${options.teamId}:${options.agentId}`)
       state.agentChatContext = {
         kind: "member",
         managementSessionId,
@@ -221,6 +356,7 @@ export async function openManagedAgentChat(options: {
       restoreProjectDraft()
       render()
     }
+    void refreshAgentSessionsAndArchive()
     prompt.focus()
   } finally {
     state.agentsBusy = false
@@ -238,6 +374,7 @@ async function runManagementOp(op: Record<string, unknown>, toastMessage = "") {
       state.agentsSnapshot = normalizeAgentsSnapshot(res.snapshot)
     }
     if (toastMessage) showToast(toastMessage, "success")
+    void refreshAgentSessionsAndArchive()
     return res
   } finally {
     state.agentsBusy = false
@@ -246,22 +383,71 @@ async function runManagementOp(op: Record<string, unknown>, toastMessage = "") {
 }
 
 export function bindAgentsEvents(): () => void {
+  const handleModeClick = (event: MouseEvent) => {
+    const target = event.target as HTMLElement
+    const modeBtn = target.closest<HTMLElement>("[data-sidebar-mode]")
+    if (!modeBtn) return
+    const nextMode = modeBtn.dataset.sidebarMode === "agents" ? "agents" : "workspaces"
+    state.sidebarMode = nextMode
+    if (nextMode === "workspaces" && state.agentSurface.kind !== "chat") {
+      state.agentSurface = { kind: "chat" }
+    }
+    render()
+  }
+
   const handleContainerClick = (event: MouseEvent) => {
     const target = event.target as HTMLElement
+
+    if (target.closest("[data-header-toggle-sessions]")) {
+      state.headerSessionsMenuOpen = !state.headerSessionsMenuOpen
+      render()
+      return
+    }
 
     const surfaceBtn = target.closest<HTMLElement>("[data-sidebar-surface]")
     if (surfaceBtn) {
       const next = surfaceBtn.dataset.sidebarSurface
       state.artifactPreview = null
-      if (next === "inbox") state.agentSurface = { kind: "inbox" }
-      else if (next === "background") state.agentSurface = { kind: "background" }
-      else state.agentSurface = { kind: "chat" }
+      state.headerSessionsMenuOpen = false
+      if (next === "inbox") {
+        state.sidebarMode = "agents"
+        state.agentSurface = { kind: "inbox" }
+      } else if (next === "manager") {
+        state.sidebarMode = "agents"
+        state.agentSurface = { kind: "manager" }
+      } else if (next === "background") {
+        state.sidebarMode = "agents"
+        state.agentSurface = { kind: "background" }
+      } else if (next === "archive") {
+        state.sidebarMode = "agents"
+        state.agentSurface = { kind: "archive" }
+      } else {
+        state.agentSurface = { kind: "chat" }
+      }
+      render()
+      return
+    }
+
+    if (target.closest("[data-sidebar-toggle-manager]")) {
+      state.managerExpanded = !state.managerExpanded
       render()
       return
     }
 
     if (target.closest("[data-sidebar-open-manager]")) {
-      runAction(() => openManagedAgentChat({ manager: true }))
+      runAction(() => openManagedAgentChat({ manager: true, resumeLatest: true }))
+      return
+    }
+
+    if (target.closest("[data-sidebar-new-manager-session]")) {
+      runAction(() => openManagedAgentChat({ manager: true, resumeLatest: false }))
+      return
+    }
+
+    const openMgrSessBtn = target.closest<HTMLElement>("[data-sidebar-open-manager-session]")
+    if (openMgrSessBtn?.dataset.sidebarOpenManagerSession) {
+      const sid = openMgrSessBtn.dataset.sidebarOpenManagerSession
+      runAction(() => openManagedAgentChat({ manager: true, existingRuntimeSessionId: sid, resumeLatest: false }))
       return
     }
 
@@ -281,11 +467,58 @@ export function bindAgentsEvents(): () => void {
       return
     }
 
+    const toggleMemberBtn = target.closest<HTMLElement>("[data-sidebar-toggle-member]")
+    if (toggleMemberBtn?.dataset.sidebarToggleMember) {
+      const memberKey = toggleMemberBtn.dataset.sidebarToggleMember
+      if (state.expandedSidebarMembers.has(memberKey)) state.expandedSidebarMembers.delete(memberKey)
+      else state.expandedSidebarMembers.add(memberKey)
+      render()
+      return
+    }
+
+    const toggleOrgMemberSessionsBtn = target.closest<HTMLElement>("[data-org-toggle-member-sessions]")
+    if (toggleOrgMemberSessionsBtn?.dataset.orgToggleMemberSessions) {
+      const agentId = toggleOrgMemberSessionsBtn.dataset.orgToggleMemberSessions
+      if (state.expandedOrgMembers.has(agentId)) state.expandedOrgMembers.delete(agentId)
+      else state.expandedOrgMembers.add(agentId)
+      render()
+      return
+    }
+
     const openTeamBtn = target.closest<HTMLElement>("[data-sidebar-open-team]")
     if (openTeamBtn?.dataset.sidebarOpenTeam) {
       const teamId = openTeamBtn.dataset.sidebarOpenTeam
       const tab = openTeamBtn.dataset.sidebarTeamTab === "tasks" ? "tasks" : "organization"
       openTeamSurface(teamId, tab)
+      return
+    }
+
+    const newSessionBtn = target.closest<HTMLElement>("[data-agent-new-session]")
+    if (newSessionBtn?.dataset.agentNewSession) {
+      const agentId = newSessionBtn.dataset.agentNewSession
+      const teamId = newSessionBtn.dataset.agentTeam || ""
+      runAction(() =>
+        openManagedAgentChat({
+          teamId,
+          agentId,
+          resumeLatest: false,
+        }),
+      )
+      return
+    }
+
+    const deleteSessionBtn = target.closest<HTMLElement>("[data-agent-delete-session]")
+    if (deleteSessionBtn?.dataset.agentDeleteSession) {
+      const runtimeSessionId = deleteSessionBtn.dataset.agentDeleteSession
+      runAction(async () => {
+        await runManagementOp({ op: "deleteSession", runtimeSessionId }, "Conversation deleted.")
+        if (state.viewedSessionId === runtimeSessionId) {
+          state.viewedSessionId = ""
+          state.conversation = createConversation()
+          resetConversationPresentation()
+        }
+        render()
+      })
       return
     }
 
@@ -299,6 +532,7 @@ export function bindAgentsEvents(): () => void {
           teamId,
           agentId,
           existingRuntimeSessionId,
+          resumeLatest: !existingRuntimeSessionId,
         }),
       )
       return
@@ -335,14 +569,6 @@ export function bindAgentsEvents(): () => void {
     if (switchTabBtn && state.agentSurface.kind === "team") {
       const tab = switchTabBtn.dataset.teamSwitchTab === "tasks" ? "tasks" : "organization"
       state.agentSurface = { ...state.agentSurface, tab }
-      render()
-      return
-    }
-
-    const layoutBtn = target.closest<HTMLElement>("[data-team-task-layout]")
-    if (layoutBtn && state.agentSurface.kind === "team") {
-      const taskLayout = layoutBtn.dataset.teamTaskLayout === "list" ? "list" : "board"
-      state.agentSurface = { ...state.agentSurface, taskLayout }
       render()
       return
     }
@@ -419,18 +645,6 @@ export function bindAgentsEvents(): () => void {
       return
     }
 
-    const confirmDeleteBtn = target.closest<HTMLElement>("[data-team-confirm-delete]")
-    if (confirmDeleteBtn?.dataset.teamConfirmDelete) {
-      const teamId = confirmDeleteBtn.dataset.teamConfirmDelete
-      const cleanupWorkspaces = confirmDeleteBtn.dataset.cleanupWorkspaces === "1"
-      runAction(async () => {
-        await runManagementOp({ op: "deleteTeam", teamId, cleanupWorkspaces }, "Team deleted.")
-        state.agentSurface = { kind: "chat" }
-        render()
-      })
-      return
-    }
-
     const makeLeaderBtn = target.closest<HTMLElement>("[data-agent-make-leader]")
     if (makeLeaderBtn?.dataset.agentMakeLeader && makeLeaderBtn.dataset.agentTeam) {
       const agentId = makeLeaderBtn.dataset.agentMakeLeader
@@ -447,6 +661,13 @@ export function bindAgentsEvents(): () => void {
       return
     }
 
+    const startTaskBtn = target.closest<HTMLElement>("[data-task-start]")
+    if (startTaskBtn?.dataset.taskStart) {
+      const taskId = startTaskBtn.dataset.taskStart
+      runAction(() => runManagementOp({ op: "startTask", taskId }, "Task started."))
+      return
+    }
+
     const cancelTaskBtn = target.closest<HTMLElement>("[data-task-cancel]")
     if (cancelTaskBtn?.dataset.taskCancel) {
       const taskId = cancelTaskBtn.dataset.taskCancel
@@ -457,31 +678,33 @@ export function bindAgentsEvents(): () => void {
     const reviewTaskBtn = target.closest<HTMLElement>("[data-task-review]")
     if (reviewTaskBtn?.dataset.taskReview) {
       const taskId = reviewTaskBtn.dataset.taskReview
-      const decision = reviewTaskBtn.dataset.reviewDecision === "rework" ? "rework" : "accepted"
+      const decision = reviewTaskBtn.dataset.reviewDecision === "rework" ? "rework" : "accept"
       const commentEl = document.getElementById("agent-task-review-comment") as HTMLTextAreaElement | null
-      const comment = commentEl?.value.trim() || ""
+      const feedback = commentEl?.value.trim() || ""
       runAction(() =>
         runManagementOp(
-          { op: "reviewTask", taskId, decision, comment: comment || undefined },
-          decision === "accepted" ? "Delivery accepted." : "Sent back for rework.",
+          { op: "reviewTask", taskId, decision, feedback: feedback || undefined },
+          decision === "accept" ? "Delivery accepted." : "Sent back for rework.",
         ),
       )
       return
     }
 
     const readArtifactBtn = target.closest<HTMLElement>("[data-task-read-artifact]")
-    if (readArtifactBtn?.dataset.taskReadArtifact && readArtifactBtn.dataset.artifactPath) {
-      const taskId = readArtifactBtn.dataset.taskReadArtifact
-      const path = readArtifactBtn.dataset.artifactPath
-      if (state.artifactPreview?.path === path) {
+    if (readArtifactBtn?.dataset.taskReadArtifact) {
+      const artifactId = readArtifactBtn.dataset.taskReadArtifact
+      const path = readArtifactBtn.dataset.artifactPath || artifactId
+      if (state.artifactPreview?.artifactId === artifactId) {
         state.artifactPreview = null
         render()
         return
       }
       runAction(async () => {
-        const res = await runManagementOp({ op: "readTaskArtifact", taskId, path })
+        const res = await runManagementOp({ op: "readArtifact", artifactId })
+        const art = asRecord(res.artifact)
         state.artifactPreview = {
-          path: asRecordText(res.path) || path,
+          artifactId,
+          path: asRecordText(art.sourcePath) || asRecordText(art.publishedPath) || path,
           content: asRecordText(res.content),
           truncated: Boolean(res.truncated),
         }
@@ -501,21 +724,30 @@ export function bindAgentsEvents(): () => void {
     const approveBtn = target.closest<HTMLElement>("[data-inbox-approve]")
     if (approveBtn?.dataset.inboxApprove) {
       const approvalId = approveBtn.dataset.inboxApprove
-      runAction(() => runManagementOp({ op: "approve", approvalId }, "Approved."))
+      runAction(() => runManagementOp({ op: "resolveApproval", approvalId, approve: true }, "Approved."))
       return
     }
 
     const rejectBtn = target.closest<HTMLElement>("[data-inbox-reject]")
     if (rejectBtn?.dataset.inboxReject) {
       const approvalId = rejectBtn.dataset.inboxReject
-      runAction(() => runManagementOp({ op: "reject", approvalId }, "Rejected."))
+      runAction(() => runManagementOp({ op: "resolveApproval", approvalId, approve: false }, "Rejected."))
       return
     }
 
     const stopRunBtn = target.closest<HTMLElement>("[data-inbox-stop-run]")
     if (stopRunBtn?.dataset.inboxStopRun) {
       const runId = stopRunBtn.dataset.inboxStopRun
-      runAction(() => runManagementOp({ op: "stopRun", runId }, "Run stopped."))
+      runAction(() => runManagementOp({ op: "cancelRun", runId }, "Run stop requested."))
+      return
+    }
+
+    const resolveRunBtn = target.closest<HTMLElement>("[data-inbox-resolve-run]")
+    if (resolveRunBtn?.dataset.inboxResolveRun) {
+      const runId = resolveRunBtn.dataset.inboxResolveRun
+      runAction(() =>
+        runManagementOp({ op: "resolveRun", runId, confirmStopped: true }, "Unconfirmed run marked stopped."),
+      )
       return
     }
 
@@ -528,26 +760,13 @@ export function bindAgentsEvents(): () => void {
 
     const readLogBtn = target.closest<HTMLElement>("[data-bg-read-log]")
     if (readLogBtn?.dataset.bgReadLog) {
-      const which = readLogBtn.dataset.bgReadLog === "runtime" ? "runtime" : "service"
+      const logTarget = readLogBtn.dataset.bgReadLog === "runtime" ? "runtime" : "service"
       runAction(async () => {
-        const res = await runManagementOp({ op: "readServiceLog", which })
+        const res = await runManagementOp({ op: "serviceLog", target: logTarget })
+        const lines = Array.isArray(res.lines) ? res.lines.join("\n") : asRecordText(res.log)
         state.serviceLogView = {
-          title: which === "runtime" ? "Shared Python Runtime Log" : "Management Service Log",
-          content: asRecordText(res.log) || "(Log is empty)",
-        }
-        render()
-      })
-      return
-    }
-
-    const readRunLogBtn = target.closest<HTMLElement>("[data-bg-read-run-log]")
-    if (readRunLogBtn?.dataset.bgReadRunLog) {
-      const runId = readRunLogBtn.dataset.bgReadRunLog
-      runAction(async () => {
-        const res = await runManagementOp({ op: "readRunLog", runId })
-        state.serviceLogView = {
-          title: `Run Log · ${runId}`,
-          content: asRecordText(res.log) || "(No output recorded for this run)",
+          title: logTarget === "runtime" ? "Shared Python Runtime Log" : "Management Service Log",
+          content: lines || "(Log is empty)",
         }
         render()
       })
@@ -557,6 +776,15 @@ export function bindAgentsEvents(): () => void {
     if (target.closest("[data-bg-close-log]")) {
       state.serviceLogView = null
       render()
+    }
+  }
+
+  const handleContainerChange = (event: Event) => {
+    const target = event.target as HTMLElement
+    if (target instanceof HTMLSelectElement && target.dataset.taskPriority) {
+      const taskId = target.dataset.taskPriority
+      const priority = target.value
+      runAction(() => runManagementOp({ op: "setTaskPriority", taskId, priority }, "Priority updated."))
     }
   }
 
@@ -589,30 +817,60 @@ export function bindAgentsEvents(): () => void {
       return
     }
 
+    if (form.id === "agent-delete-team-form" && state.agentSurface.kind === "team") {
+      event.preventDefault()
+      const teamId = form.dataset.teamId || state.agentSurface.teamId
+      const data = new FormData(form)
+      const confirmName = String(data.get("confirmName") || "").trim()
+      if (!confirmName) return
+      runAction(async () => {
+        await runManagementOp({ op: "deleteTeam", teamId, confirmName }, "Team deleted and archived.")
+        state.agentSurface = { kind: "chat" }
+        render()
+      })
+      return
+    }
+
     if (form.id === "agent-add-member-form" && state.agentSurface.kind === "team") {
       event.preventDefault()
       const teamId = form.dataset.teamId || state.agentSurface.teamId
       const data = new FormData(form)
       const mode = state.agentSurface.memberMode
+      const name = String(data.get("name") || "").trim()
       const position = String(data.get("position") || "").trim()
       const responsibility = String(data.get("responsibility") || "").trim()
-      const reportsTo = String(data.get("reportsTo") || "").trim()
-      const payload: Record<string, unknown> = {
-        op: "addMember",
-        teamId,
-        position: position || undefined,
-        responsibility: responsibility || undefined,
-        reportsTo: reportsTo || undefined,
-      }
-      if (mode === "existing") {
-        payload.existingAgentId = String(data.get("existingAgentId") || "").trim()
+      const reportsToAgentId = String(data.get("reportsToAgentId") || "").trim()
+
+      let payload: Record<string, unknown>
+      if (mode === "worktree") {
+        payload = {
+          op: "createWorktree",
+          teamId,
+          name,
+          repository: String(data.get("repository") || "").trim() || state.chatProjectPath || undefined,
+          branch: String(data.get("branch") || "").trim() || undefined,
+          position: position || undefined,
+          responsibility: responsibility || undefined,
+          reportsToAgentId: reportsToAgentId || undefined,
+        }
+      } else if (mode === "existing") {
+        payload = {
+          op: "addMember",
+          teamId,
+          name: name || undefined,
+          workspace: String(data.get("workspace") || "").trim(),
+          position: position || undefined,
+          responsibility: responsibility || undefined,
+          reportsToAgentId: reportsToAgentId || undefined,
+        }
       } else {
-        payload.name = String(data.get("name") || "").trim()
-        if (mode === "worktree") {
-          payload.worktreeFrom = String(data.get("worktreeFrom") || "").trim() || state.chatProjectPath || undefined
-        } else {
-          const ws = String(data.get("workspace") || "").trim()
-          if (ws) payload.workspace = ws
+        payload = {
+          op: "createWorkspace",
+          teamId,
+          name,
+          position: position || undefined,
+          responsibility: responsibility || undefined,
+          reportsToAgentId: reportsToAgentId || undefined,
         }
       }
       runAction(async () => {
@@ -630,7 +888,7 @@ export function bindAgentsEvents(): () => void {
       const teamId = form.dataset.teamId || state.agentSurface.teamId
       const data = new FormData(form)
       const brief = String(data.get("brief") || "").trim()
-      const agentId = String(data.get("agentId") || "").trim()
+      const assigneeAgentId = String(data.get("assigneeAgentId") || "").trim()
       const priority = String(data.get("priority") || "normal").trim()
       if (!brief) return
       runAction(async () => {
@@ -638,9 +896,10 @@ export function bindAgentsEvents(): () => void {
           {
             op: "assignTask",
             teamId,
-            agentId: agentId || undefined,
+            assigneeAgentId: assigneeAgentId || undefined,
             brief,
             priority,
+            start: true,
           },
           "Task dispatched.",
         )
@@ -661,9 +920,11 @@ export function bindAgentsEvents(): () => void {
       event.preventDefault()
       const taskId = form.dataset.taskId || ""
       const textarea = document.getElementById("agent-task-answer-input") as HTMLTextAreaElement | null
-      const answer = textarea?.value.trim() || ""
-      if (!taskId || !answer) return
-      runAction(() => runManagementOp({ op: "answerTask", taskId, answer }, "Answer sent to agent."))
+      const text = textarea?.value.trim() || ""
+      if (!taskId || !text) return
+      runAction(() =>
+        runManagementOp({ op: "postTaskNote", taskId, text, answer: true }, "Answer sent and task resumed."),
+      )
       return
     }
 
@@ -673,16 +934,27 @@ export function bindAgentsEvents(): () => void {
       const input = document.getElementById("agent-task-note-input") as HTMLInputElement | null
       const text = input?.value.trim() || ""
       if (!taskId || !text) return
-      runAction(() => runManagementOp({ op: "addTaskNote", taskId, text }, "Note added."))
+      runAction(() => runManagementOp({ op: "postTaskNote", taskId, text, answer: false }, "Note added."))
     }
   }
 
+  const handleDocumentPointerDown = (event: MouseEvent) => {
+    if (!state.headerSessionsMenuOpen) return
+    const target = event.target as HTMLElement
+    if (!target.closest(".header-sessions-dropdown-wrap")) {
+      state.headerSessionsMenuOpen = false
+      render()
+    }
+  }
+
+  sidebarModeSwitcher.addEventListener("click", handleModeClick)
   sidebarAgents.addEventListener("click", handleContainerClick)
   sidebarAgents.addEventListener("submit", handleContainerSubmit)
   sessionAgentContext.addEventListener("click", handleContainerClick)
   agentsSurface.addEventListener("click", handleContainerClick)
+  agentsSurface.addEventListener("change", handleContainerChange)
   agentsSurface.addEventListener("submit", handleContainerSubmit)
-  inspectorTeamPanel.addEventListener("click", handleContainerClick)
+  document.addEventListener("pointerdown", handleDocumentPointerDown)
 
   let unsubscribe = () => {}
   if (window.api.agents) {
@@ -700,11 +972,13 @@ export function bindAgentsEvents(): () => void {
 
   return () => {
     unsubscribe()
+    sidebarModeSwitcher.removeEventListener("click", handleModeClick)
     sidebarAgents.removeEventListener("click", handleContainerClick)
     sidebarAgents.removeEventListener("submit", handleContainerSubmit)
     sessionAgentContext.removeEventListener("click", handleContainerClick)
     agentsSurface.removeEventListener("click", handleContainerClick)
+    agentsSurface.removeEventListener("change", handleContainerChange)
     agentsSurface.removeEventListener("submit", handleContainerSubmit)
-    inspectorTeamPanel.removeEventListener("click", handleContainerClick)
+    document.removeEventListener("pointerdown", handleDocumentPointerDown)
   }
 }

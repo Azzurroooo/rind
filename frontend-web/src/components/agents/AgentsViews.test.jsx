@@ -112,8 +112,8 @@ describe("Native Multi-Agent Views", () => {
       />,
     );
 
-    // Kanban board + TaskReportDrawer are both visible
-    expect(screen.getByRole("region", { name: "Team tasks Kanban board" })).not.toBeNull();
+    // Action-first grouped task sections + TaskReportDrawer are both visible
+    expect(screen.getByRole("region", { name: "Grouped team tasks" })).not.toBeNull();
     expect(screen.getByRole("region", { name: "Task delivery report" })).not.toBeNull();
     expect(screen.getAllByText("Implemented recursive OrgMemberNode with connector rails.").length).toBeGreaterThan(0);
 
@@ -168,13 +168,13 @@ describe("Native Multi-Agent Views", () => {
       />,
     );
 
-    expect(screen.getByText("4321")).not.toBeNull();
+    expect(screen.getByText(/4321/)).not.toBeNull();
     expect(screen.getByText("Confirm dark mode contrast")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Service Log/i }));
     await waitFor(() => expect(screen.getByText(/\[service\] ready on port 49100/)).not.toBeNull());
   });
 
-  it("integrates Multi-Agent navigation into Sidebar and TeamTab + Glide-Maximize into Inspector", () => {
+  it("integrates two-mode Multi-Agent navigation into Sidebar and keeps Inspector strictly session-scoped", () => {
     const onOpenInbox = vi.fn();
     const onOpenManager = vi.fn();
     const onOpenTeam = vi.fn();
@@ -205,33 +205,21 @@ describe("Native Multi-Agent Views", () => {
     fireEvent.click(screen.getByText("Inbox"));
     expect(onOpenInbox).toHaveBeenCalledTimes(1);
 
-    const summary = buildTeamSummary(mockSnapshot, "team-alpha");
-    const tasks = groupTeamTasks(mockSnapshot, "team-alpha");
+    // Switch to Workspaces mode so Independent Workspaces & Recent sessions get full height
+    fireEvent.click(screen.getByRole("tab", { name: /Workspaces/i }));
+    expect(screen.getByText("Session 1")).not.toBeNull();
+
     render(
       <Inspector
-        tab="team"
+        tab="context"
         maximized={false}
         onToggleMaximize={onToggleMaximize}
         info={{ session_id: "s-1" }}
-        teamProps={{
-          hasTeams: true,
-          agentContext: {
-            kind: "member",
-            teamId: "team-alpha",
-            teamName: "Alpha Squad",
-            agentId: "a-1",
-            agentName: "alpha-lead",
-            roleLabel: "Tech Lead",
-            status: "Working",
-          },
-          teamSummary: summary,
-          teamTasks: tasks,
-        }}
       />,
     );
 
-    expect(screen.getByRole("tab", { name: "Team" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getAllByText(/Team · Alpha Squad/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("tab", { name: "Team" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Context" }).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Expand inspector width" }));
     expect(onToggleMaximize).toHaveBeenCalledTimes(1);
   });

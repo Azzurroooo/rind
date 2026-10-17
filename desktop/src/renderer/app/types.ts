@@ -118,12 +118,20 @@ export type AppState = {
   agentsSnapshot: AgentsSnapshotData
   agentsService: Record<string, any> | null
   agentsBusy: boolean
+  sidebarMode: "workspaces" | "agents"
   agentSurface: DesktopAgentSurfaceState
   agentChatContext: SessionAgentContext | null
+  teamSessionsByTeam: Record<string, Array<Record<string, any>>>
+  managerSessions: Array<Record<string, any>>
+  archivedTeams: Array<Record<string, any>>
   collapsedTeams: Set<string>
+  expandedSidebarMembers: Set<string>
+  expandedOrgMembers: Set<string>
+  managerExpanded: boolean
+  headerSessionsMenuOpen: boolean
   newTeamOpen: boolean
   inboxSelectedTaskId: string
-  artifactPreview: { path: string; content: string; truncated: boolean } | null
+  artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
   serviceLogView: { title: string; content: string } | null
 }
 // ---------- keyboard map (C11): one table for every shortcut ----------

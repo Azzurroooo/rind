@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Activity,
+  AlertTriangle,
   Check,
   FileCode2,
+  MessageSquare,
   Power,
   RefreshCw,
   RotateCw,
@@ -10,9 +12,11 @@ import {
   Square,
   Terminal,
 } from "lucide-react";
+import { buildBackgroundModel } from "../../lib/agentsModel.js";
 
 export function BackgroundView({
   snapshot,
+  backgroundModel,
   connection = "connected",
   service = null,
   busy = false,
@@ -26,18 +30,13 @@ export function BackgroundView({
   onOpenSession,
 }) {
   const [logView, setLogView] = useState(null); // { target, path, lines }
-  const runs = Array.isArray(snapshot?.runs) ? snapshot.runs : [];
-  const live = Array.isArray(snapshot?.live) ? snapshot.live : [];
-  const tasks = Array.isArray(snapshot?.tasks) ? snapshot.tasks : [];
-  const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
 
-  const activeRuns = runs.filter(
-    (r) => r.status === "starting" || r.status === "running" || r.status === "unknown",
+  const model = useMemo(
+    () => backgroundModel || buildBackgroundModel(snapshot, service),
+    [backgroundModel, snapshot, service],
   );
-  const recentRuns = runs
-    .filter((r) => r.status !== "starting" && r.status !== "running" && r.status !== "unknown")
-    .slice(-10)
-    .reverse();
+  const runningNow = model.runningNow || [];
+  const unconfirmedRuns = model.unconfirmedRuns || [];
 
   async function handleOpenLog(target) {
     if (logView?.target === target) {
@@ -72,7 +71,7 @@ export function BackgroundView({
             </span>
           </div>
           <div className="agents-surface-subtitle">
-            Monitor active agent runs, shared runtime sessions, background shell jobs, and management service health.
+            Running agent turns, managed task &amp; delegation runs, background shell commands, and Shared Runtime status.
           </div>
         </div>
 
@@ -127,27 +126,150 @@ export function BackgroundView({
 
       <div className="agents-surface-main panel-scroll">
         <div className="bg-grid">
-          <section className="bg-card" aria-label="Service status">
+          <section className="bg-card" aria-label="Running now">
+            <div className="bg-card-head">
+              <Activity size={15} aria-hidden="true" />
+              <h3>Running Now ({runningNow.length})</h3>
+            </div>
+            {runningNow.length === 0 ? (
+              <p className="bg-empty-note">
+                Nothing running in the background right now. Active agent turns, delegated tasks, and background bash commands will appear here.
+              </p>
+            ) : (
+              <div className="bg-run-list">
+                {runningNow.map((item) => (
+                  <div key={item.id} className="bg-run-row">
+                    <div className="bg-run-info">
+                      <div className="bg-run-top">
+                        <span className={`agent-status-pill tone-${item.tone}`}>
+                          <span className="agent-status-dot" />
+                          <span>{item.status}</span>
+                        </span>
+                        <strong>{item.title}</strong>
+                        <span className="bg-run-scope">{item.scopeLabel}</span>
+                      </div>
+                      <div className="bg-run-meta">
+                        {item.jobSummary && <span>{item.jobSummary}</span>}
+                        {item.ageText && <span>{item.ageText}</span>}
+                      </div>
+                    </div>
+                    <div className="bg-run-actions">
+                      {item.runtimeSessionId && (
+                        <button
+                          type="button"
+                          className="agent-btn secondary sm"
+                          onClick={() => onOpenSession?.(item.runtimeSessionId, item)}
+                        >
+                          <MessageSquare size={13} aria-hidden="true" />
+                          <span>Open Conversation</span>
+                        </button>
+                      )}
+                      {item.teamId && item.taskId && (
+                        <button
+                          type="button"
+                          className="agent-btn ghost sm"
+                          onClick={() => onOpenTask?.(item.teamId, item.taskId)}
+                        >
+                          <span>Inspect Task</span>
+                        </button>
+                      )}
+                      {item.runId && (
+                        <button
+                          type="button"
+                          className="agent-btn danger sm"
+                          disabled={busy}
+                          onClick={() => void onCancelRun?.(item.runId)}
+                        >
+                          <Square size={13} aria-hidden="true" />
+                          <span>Stop Run</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {unconfirmedRuns.length > 0 && (
+            <section className="bg-card" aria-label="Unconfirmed runs">
+              <div className="bg-card-head">
+                <AlertTriangle size={15} aria-hidden="true" />
+                <h3>Unconfirmed Runs ({unconfirmedRuns.length})</h3>
+              </div>
+              <p className="bg-empty-note">
+                These runs were active before the management service lost contact with the host. Confirm whether they have stopped to unblock their member queues.
+              </p>
+              <div className="bg-run-list">
+                {unconfirmedRuns.map((run) => (
+                  <div key={run.id} className="bg-run-row">
+                    <div className="bg-run-info">
+                      <div className="bg-run-top">
+                        <span className="agent-status-pill tone-attention">Unconfirmed</span>
+                        <strong>{run.title}</strong>
+                        <span className="bg-run-scope">{run.scopeLabel}</span>
+                      </div>
+                      <div className="bg-run-meta">
+                        {run.ageText && <span>Started {run.ageText}</span>}
+                      </div>
+                    </div>
+                    <div className="bg-run-actions">
+                      {run.teamId && run.taskId && (
+                        <button
+                          type="button"
+                          className="agent-btn ghost sm"
+                          onClick={() => onOpenTask?.(run.teamId, run.taskId)}
+                        >
+                          Inspect Task
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="agent-btn primary sm"
+                        disabled={busy}
+                        onClick={() => void onResolveRun?.(run.runId)}
+                      >
+                        <Check size={13} aria-hidden="true" />
+                        <span>Confirm Stopped</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="bg-card" aria-label="Services">
             <div className="bg-card-head">
               <Server size={15} aria-hidden="true" />
-              <h3>Management &amp; Shared Runtime</h3>
+              <h3>Services</h3>
             </div>
             <dl className="bg-stat-grid">
               <div>
-                <dt>Connection</dt>
-                <dd>{connection}</dd>
+                <dt>Management Service</dt>
+                <dd>
+                  {connection === "connected"
+                    ? `Running${service?.pid ? ` · pid ${service.pid}` : ""}`
+                    : connection}
+                </dd>
               </div>
               <div>
-                <dt>Service PID</dt>
-                <dd>{service?.pid || "—"}</dd>
+                <dt>Shared Runtime</dt>
+                <dd>
+                  {service?.runtime?.status === "running"
+                    ? `Running${service.runtime.pid ? ` · pid ${service.runtime.pid}` : ""}`
+                    : service?.runtime?.status || (connection === "connected" ? "Ready on demand" : "Stopped")}
+                </dd>
               </div>
               <div>
                 <dt>Working Agents</dt>
-                <dd>{service?.working ?? activeRuns.length}</dd>
+                <dd>{service?.working ?? runningNow.length}</dd>
               </div>
               <div>
-                <dt>Shared Runtime PID</dt>
-                <dd>{service?.runtime?.pid || "—"}</dd>
+                <dt>Active Tasks / Sessions</dt>
+                <dd>
+                  {service?.tasks ?? 0} task(s) · {service?.conversations ?? 0} attached session(s)
+                </dd>
               </div>
             </dl>
           </section>
@@ -163,168 +285,6 @@ export function BackgroundView({
                 </button>
               </div>
               <pre className="bg-log-output">{logView.lines.join("\n")}</pre>
-            </section>
-          )}
-
-          <section className="bg-card" aria-label="Active agent runs">
-            <div className="bg-card-head">
-              <Activity size={15} aria-hidden="true" />
-              <h3>Active Managed Runs ({activeRuns.length})</h3>
-            </div>
-            {activeRuns.length === 0 ? (
-              <p className="bg-empty-note">No managed task or delegation runs currently executing.</p>
-            ) : (
-              <div className="bg-run-list">
-                {activeRuns.map((run) => {
-                  const task = run.taskId ? tasks.find((t) => t.id === run.taskId) : null;
-                  const assignee = task ? agents.find((a) => a.id === task.assigneeAgentId) : null;
-                  return (
-                    <div key={run.id} className="bg-run-row">
-                      <div className="bg-run-info">
-                        <div className="bg-run-top">
-                          <span
-                            className={`agent-status-pill tone-${
-                              run.status === "unknown" ? "attention" : "working"
-                            }`}
-                          >
-                            {run.status}
-                          </span>
-                          <strong>{task ? task.brief : `Delegation / Run ${run.id}`}</strong>
-                        </div>
-                        <div className="bg-run-meta">
-                          {assignee && <span>Agent: {assignee.name}</span>}
-                          {run.startedAt && <span>Started: {String(run.startedAt).slice(0, 19).replace("T", " ")}</span>}
-                        </div>
-                      </div>
-                      <div className="bg-run-actions">
-                        {task && (
-                          <button
-                            type="button"
-                            className="agent-btn ghost sm"
-                            onClick={() => onOpenTask?.(task.teamId, task.id)}
-                          >
-                            Inspect Task
-                          </button>
-                        )}
-                        {run.status === "unknown" ? (
-                          <button
-                            type="button"
-                            className="agent-btn primary sm"
-                            disabled={busy}
-                            onClick={() => void onResolveRun?.(run.id)}
-                          >
-                            <Check size={13} aria-hidden="true" />
-                            <span>Confirm Stopped</span>
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="agent-btn danger sm"
-                            disabled={busy}
-                            onClick={() => void onCancelRun?.(run.id)}
-                          >
-                            <Square size={13} aria-hidden="true" />
-                            <span>Cancel Run</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className="bg-card" aria-label="Live runtime sessions">
-            <div className="bg-card-head">
-              <Terminal size={15} aria-hidden="true" />
-              <h3>Live Sessions &amp; Background Commands ({live.length})</h3>
-            </div>
-            {live.length === 0 ? (
-              <p className="bg-empty-note">No live turns or background shell jobs running in the Shared Runtime.</p>
-            ) : (
-              <div className="bg-run-list">
-                {live.map((session) => (
-                  <div key={session.id} className="bg-run-row">
-                    <div className="bg-run-info">
-                      <div className="bg-run-top">
-                        <span
-                          className={`agent-status-pill tone-${
-                            session.turn === "question"
-                              ? "attention"
-                              : session.turn === "running"
-                                ? "working"
-                                : "idle"
-                          }`}
-                        >
-                          {session.turn}
-                        </span>
-                        <strong>{session.title || session.id}</strong>
-                      </div>
-                      <div className="bg-run-meta">
-                        {session.workspace && <code>{session.workspace}</code>}
-                        {session.background?.count > 0 && (
-                          <span>
-                            {session.background.count} background command(s):{" "}
-                            {(session.background.commands || []).join(", ")}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="bg-run-actions">
-                      <button
-                        type="button"
-                        className="agent-btn secondary sm"
-                        onClick={() => onOpenSession?.(session.id)}
-                      >
-                        Open Conversation
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {recentRuns.length > 0 && (
-            <section className="bg-card" aria-label="Recent runs">
-              <div className="bg-card-head">
-                <h3>Recent Completed Runs</h3>
-              </div>
-              <div className="bg-run-list compact">
-                {recentRuns.map((run) => {
-                  const task = run.taskId ? tasks.find((t) => t.id === run.taskId) : null;
-                  return (
-                    <div key={run.id} className="bg-run-row">
-                      <div className="bg-run-info">
-                        <div className="bg-run-top">
-                          <span
-                            className={`agent-status-pill tone-${
-                              run.status === "succeeded"
-                                ? "completed"
-                                : run.status === "failed"
-                                  ? "attention"
-                                  : "idle"
-                            }`}
-                          >
-                            {run.status}
-                          </span>
-                          <span>{task ? task.brief : `Run ${run.id}`}</span>
-                        </div>
-                      </div>
-                      {task && (
-                        <button
-                          type="button"
-                          className="agent-btn ghost xs"
-                          onClick={() => onOpenTask?.(task.teamId, task.id)}
-                        >
-                          View Task
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
             </section>
           )}
         </div>
