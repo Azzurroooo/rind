@@ -18,8 +18,78 @@ export function createConnectionActions(ctx) {
     if (!event || typeof event !== "object") return;
     const envelopeSession = String(message.session_id || event.session_id || "");
     const currentSession = String(refs.info.current.session_id || "");
-    call().trackRunning(envelopeSession || currentSession, event.type, message.turn_id || event.turn_id);
-    if (event.type === "turn_started" || event.type === "queued_input_delivered") call().touchSession(envelopeSession || currentSession);
+    const targetSession = envelopeSession || currentSession;
+
+    if (event.type === "session_renamed" && targetSession) {
+      const nextName = event.name !== undefined ? String(event.name || "") : undefined;
+      const nextTitle = String(event.title || event.name || "");
+      ctx.setSessions((sessions) => sessions.map((session) => (
+        sessionIdOf(session) === targetSession
+          ? { ...session, ...(nextName !== undefined ? { name: nextName } : {}), ...(nextTitle ? { title: nextTitle } : {}) }
+          : session
+      )));
+      if (targetSession === currentSession) {
+        refs.info.current = { ...refs.info.current, ...(nextName !== undefined ? { name: nextName } : {}), ...(nextTitle ? { title: nextTitle } : {}) };
+        ctx.setInfo((current) => ({ ...current, ...(nextName !== undefined ? { name: nextName } : {}), ...(nextTitle ? { title: nextTitle } : {}) }));
+      }
+      return;
+    }
+
+    if (event.type === "session_settings_changed" && targetSession) {
+      const nextModel = String(event.model || "").trim();
+      const nextProvider = String(event.provider || "").trim();
+      const nextEffort = String(event.reasoning_effort || "").trim();
+      ctx.setSessions((sessions) => sessions.map((session) => (
+        sessionIdOf(session) === targetSession
+          ? {
+              ...session,
+              ...(nextProvider ? { provider: nextProvider } : {}),
+              ...(nextModel ? { model: nextModel } : {}),
+              ...(nextEffort ? { reasoning_effort: nextEffort } : {}),
+            }
+          : session
+      )));
+      if (targetSession === currentSession) {
+        if (nextModel) {
+          refs.currentModel.current = nextModel;
+          ctx.setCurrentModel(nextModel);
+        }
+        if (nextProvider) {
+          refs.currentProvider.current = nextProvider;
+          ctx.setCurrentProvider(nextProvider);
+        }
+        refs.info.current = {
+          ...refs.info.current,
+          ...(nextProvider ? { provider: nextProvider } : {}),
+          ...(nextModel ? { model: nextModel } : {}),
+          ...(nextEffort ? { reasoning_effort: nextEffort } : {}),
+        };
+        ctx.setInfo((current) => ({
+          ...current,
+          ...(nextProvider ? { provider: nextProvider } : {}),
+          ...(nextModel ? { model: nextModel } : {}),
+          ...(nextEffort ? { reasoning_effort: nextEffort } : {}),
+        }));
+      }
+      return;
+    }
+
+    if ((event.type === "session_deleted" || event.type === "session_discarded") && targetSession) {
+      refs.subscribed.current.delete(targetSession);
+      ctx.setSessions((sessions) => sessions.filter((session) => sessionIdOf(session) !== targetSession));
+      if (targetSession === currentSession) {
+        call().clearActiveSession(refs.workspace.current || refs.info.current.workspace_root || "");
+      }
+      return;
+    }
+
+    if (event.type === "folder_defaults_changed") {
+      void call().refreshSessions(refs.workspace.current || refs.info.current.workspace_root);
+      return;
+    }
+
+    call().trackRunning(targetSession, event.type, message.turn_id || event.turn_id);
+    if (event.type === "turn_started" || event.type === "queued_input_delivered") call().touchSession(targetSession);
     if (refs.switching.current) { refs.loadingEvents.current.push(message); return; }
     // Events from other sessions never enter this conversation: a durable
     // event lights the unread dot instead; replay rebuilds it on open.

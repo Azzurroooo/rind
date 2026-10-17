@@ -52,7 +52,7 @@ export type PlanEntry = {
   durationMs: number
 }
 export type Entry = (
-  | { kind: "user"; id: string; content: string; inputId?: string }
+  | { kind: "user"; id: string; content: string; inputId?: string; delivery?: boolean }
   | { kind: "assistant"; id: string; content: string; turnId: string; pendingCompletion?: boolean }
   | ToolEntry
   | { kind: "file"; id: string; filePath: string }
@@ -88,9 +88,16 @@ export function boundText(value: string, limit = maxEntryChars) {
   return value.length > limit ? `${value.slice(0, limit)}\n\n[Output truncated]` : value
 }
 
-export function addUserMessage(state: ConversationState, content: string, inputId?: string, time: string | number = Date.now()): ConversationState {
+export function addUserMessage(state: ConversationState, content: string, inputId?: string, time: string | number = Date.now(), delivery = false): ConversationState {
   if (inputId && state.entries.some((entry) => entry.kind === "user" && entry.inputId === inputId)) return state
-  return appendEntry(closeAssistant(state), { kind: "user", id: "", content: boundText(content), time, ...(inputId ? { inputId } : {}) })
+  return appendEntry(closeAssistant(state), {
+    kind: "user",
+    id: "",
+    content: boundText(content),
+    time,
+    ...(inputId ? { inputId } : {}),
+    ...(delivery ? { delivery: true } : {}),
+  })
 }
 
 export function addCommandResult(
@@ -115,12 +122,16 @@ function reduceTurnEvent(state: ConversationState, envelope: RuntimeEvent): Conv
   const event = envelope.event
   const turnId = envelope.turnId
   switch (envelope.type) {
-    case "turn_started": return {
-      ...closeAssistant(asString(event.input) ? addUserMessage(state, asString(event.input), asString(event.client_input_id) || turnId, asString(event.ts) || Date.now()) : state),
-      activeTurnId: turnId,
-      operation: asString(event.operation),
-      turnStartedAt: Date.now(),
-      ...(state.plan && (state.plan.error || state.plan.status === "error") ? { plan: undefined } : {}),
+    case "turn_started": {
+      const promptInput = asString(event.input) || asString(event.delivery_text)
+      const isDelivery = event.delivery === true
+      return {
+        ...closeAssistant(promptInput ? addUserMessage(state, promptInput, asString(event.client_input_id) || turnId, asString(event.ts) || Date.now(), isDelivery) : state),
+        activeTurnId: turnId,
+        operation: asString(event.operation),
+        turnStartedAt: Date.now(),
+        ...(state.plan && (state.plan.error || state.plan.status === "error") ? { plan: undefined } : {}),
+      }
     }
     case "queued_input_delivered": return addUserMessage(state, asString(event.input), asString(event.input_id), asString(event.ts) || Date.now())
     case "turn_step_retry": return appendSystem(resetActiveStep(state), retryLine(event))
@@ -190,6 +201,12 @@ function reduceTurnEvent(state: ConversationState, envelope: RuntimeEvent): Conv
         }) : [],
       },
     }
+    case "user_question_answered": {
+      const answeredId = asString(event.tool_call_id)
+      return state.question && (!answeredId || state.question.toolCallId === answeredId)
+        ? { ...state, question: undefined }
+        : state
+    }
     case "token_stats_updated": {
       const stats = asRecord(event.stats)
       const percent = typeof stats.context_usage_percent === "number" ? stats.context_usage_percent : null
@@ -211,7 +228,9 @@ export function conversationFromReplay(messages: unknown[]): ConversationState {
     const role = asString(record.role)
     const time = asString(record.ts) || asString(record.created_at) || asString(record.timestamp) || undefined
     if (role === "user") {
-      state = appendEntry(state, { kind: "user", id: id ? `message:${id}` : "", content: boundText(asString(record.content)), time })
+      const meta = asRecord(record._rind_meta || record.meta)
+      const delivery = record.delivery === true || asString(meta.kind) === "team_delivery"
+      state = appendEntry(state, { kind: "user", id: id ? `message:${id}` : "", content: boundText(asString(record.content)), time, ...(delivery ? { delivery: true } : {}) })
       continue
     }
     if (role === "assistant") {

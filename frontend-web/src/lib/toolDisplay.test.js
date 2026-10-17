@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, parseToolArguments, parseToolResult, partialJsonStrings, summarizeChanges, taskFinishState, toolChangeStats, toolView } from "./toolDisplay.js";
+import { formatDuration, parseToolArguments, parseToolResult, partialJsonStrings, summarizeChanges, summarizeTurnFileList, taskFinishState, toolChangeStats, toolView } from "./toolDisplay.js";
 
 const ok = (data, meta) => JSON.stringify({ ok: true, data, meta });
 const tool = (name, args, result, extra = {}) => ({
@@ -168,6 +168,30 @@ describe("delegate, creation, goal, hidden and unknown tools", () => {
     expect(view.body).toMatchObject({ type: "markdown", text: "Looks good.", cap: 24 });
   });
 
+  it("delegate wait and retire and report and agent_management format cleanly", () => {
+    const waitView = toolView(tool("delegate", { wait: true, task: "t-9" }, ok({ settled: [{ taskId: "t-9" }], output: "All checks passed." })));
+    expect(waitView).toMatchObject({ verb: "Waited for", target: "task t-9" });
+    expect(metaText(waitView)).toContain("1 settled");
+    expect(waitView.body.text).toBe("All checks passed.");
+
+    const retireView = toolView(tool("delegate", { retire: "scout" }, ok({})));
+    expect(retireView).toMatchObject({ verb: "Retired", target: "scout" });
+
+    const reportDone = toolView(tool("report", { outcome: "completed", summary: "Fixed bug", evidence: ["npm test passed"], artifacts: ["/tmp/patch.diff"] }, ok({ delivered: true })));
+    expect(reportDone).toMatchObject({ verb: "Reported", target: "completed" });
+    expect(metaText(reportDone)).toContain("delivered");
+    expect(reportDone.body.text).toContain("Fixed bug");
+    expect(reportDone.body.text).toContain("patch.diff");
+
+    const reportBlocked = toolView(tool("report", { blocked: { responder: "lead", action: "Needs API key" }, summary: "Paused on auth" }, ok({})));
+    expect(reportBlocked).toMatchObject({ verb: "Reported", target: "blocked" });
+    expect(metaText(reportBlocked)).toContain("needs lead: Needs API key");
+
+    const mgmtView = toolView(tool("agent_management", { action: "create_team", name: "Core Platform" }, ok({ status: "ok", summary: "Created team Core Platform." })));
+    expect(mgmtView).toMatchObject({ verb: "Managed agents", target: "create team: Core Platform" });
+    expect(mgmtView.body.text).toBe("Created team Core Platform.");
+  });
+
   it("agent_create shows the name and role", () => {
     const agent = toolView(tool("agent_create", { name: "scout", role: "Finds files" }, ok({ agent_id: "a1", name: "scout" })));
     expect(agent).toMatchObject({ verb: "Created agent", target: "scout" });
@@ -222,6 +246,10 @@ describe("change stats and durations", () => {
     const write = tool("write_file", { path: "b.ts", content: "x" }, ok(null, {}), { tool_call_id: "w" });
     expect(toolChangeStats("write_file", write)).toEqual([{ path: "b.ts", added: 0, removed: 0 }]);
     expect(summarizeChanges([{ role: "user" }, edit, write])).toEqual({ fileCount: 2, added: 2, removed: 1, firstToolCallId: "call-edit_file" });
+    expect(summarizeTurnFileList([{ role: "user" }, edit, write])).toEqual([
+      { path: "a.ts", added: 2, removed: 1, toolCallId: "call-edit_file" },
+      { path: "b.ts", added: 0, removed: 0, toolCallId: "w" },
+    ]);
     expect(summarizeChanges([edit, { role: "user" }])).toBeNull();
   });
 

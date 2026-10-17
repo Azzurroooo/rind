@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, RefreshCw, X } from "lucide-react";
 import { FILE_LIMIT_BYTES, base64ToDataUrl, decodeBase64ToText, formatBytes, isImageMime, isTextMime } from "../lib/files.js";
+import { tokenizeCode } from "../lib/syntaxHighlight.js";
 
 const PREVIEW_TEXT_CAP = 200_000;
 
@@ -165,6 +166,7 @@ function DirLevel({ path, depth, state, expanded, dirs, selectedPath, onToggleDi
 }
 
 function PreviewPanel({ preview, onClose }) {
+  const tokens = preview.status === "text" ? tokenizeCode(preview.text, preview.path) : [];
   return (
     <div className="tree-preview" role="region" aria-label={`File preview ${preview.path}`}>
       <div className="tree-preview-head">
@@ -192,7 +194,11 @@ function PreviewPanel({ preview, onClose }) {
       {preview.status === "image" && <img className="tree-preview-image" src={preview.dataUrl} alt={preview.path} />}
       {preview.status === "text" && (
         <pre className="tree-preview-text">
-          {preview.text}
+          {tokens.map((token, idx) => (
+            token.type === "plain"
+              ? token.value
+              : <span key={idx} className={`tok-${token.type}`}>{token.value}</span>
+          ))}
           {preview.truncated ? "\n… (content too long, truncated)" : ""}
         </pre>
       )}

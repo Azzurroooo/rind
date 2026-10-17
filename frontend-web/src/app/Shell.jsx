@@ -107,12 +107,19 @@ export function Shell() {
             active={view.active}
             collapsedCount={view.collapsedCount}
             turnChanges={view.turnChanges}
+            turnFileList={view.turnFileList}
             canFork={canFork && !view.active}
             onAnswer={actions.answerQuestion}
             onExpire={actions.expireQuestion}
             onRetry={actions.retryTurn}
             onEdit={actions.editMessage}
             onFork={guardedFork}
+            onQuote={(text) => {
+              const quoted = String(text || "").trim().split("\n").map((line) => `> ${line}`).join("\n");
+              if (!quoted) return;
+              ctx.setInput((prev) => (prev && prev.trim() ? `${prev.trimEnd()}\n\n${quoted}\n\n` : `${quoted}\n\n`));
+              refs.composer.current?.focus();
+            }}
             onSuggestion={(value) => { ctx.setInput(value); refs.composer.current?.focus(); }}
             onOpenFile={openFile}
           />

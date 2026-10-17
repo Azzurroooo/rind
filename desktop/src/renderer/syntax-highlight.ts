@@ -45,6 +45,21 @@ hljs.registerLanguage("typescript", typescript)
 hljs.registerLanguage("xml", xml)
 hljs.registerLanguage("yaml", yaml)
 
+const LANGUAGE_ALIASES: Record<string, string> = {
+  ...LANGUAGE_BY_EXTENSION,
+  bash: "bash",
+  css: "css",
+  javascript: "javascript",
+  json: "json",
+  markdown: "markdown",
+  python: "python",
+  shell: "bash",
+  console: "bash",
+  typescript: "typescript",
+  xml: "xml",
+  yaml: "yaml",
+}
+
 export function highlightFile(name: string, content: string) {
   const language = languageForFile(name)
   if (!language) return { language: "text", html: escapeHtml(content) }
@@ -52,6 +67,17 @@ export function highlightFile(name: string, content: string) {
     return { language, html: hljs.highlight(content, { language, ignoreIllegals: true }).value }
   } catch {
     return { language: "text", html: escapeHtml(content) }
+  }
+}
+
+export function highlightCode(language: string, content: string) {
+  const normalized = language.trim().toLowerCase()
+  const resolved = LANGUAGE_ALIASES[normalized]
+  if (!resolved) return { language: normalized || "code", html: escapeHtml(content) }
+  try {
+    return { language: normalized || resolved, html: hljs.highlight(content, { language: resolved, ignoreIllegals: true }).value }
+  } catch {
+    return { language: normalized || "code", html: escapeHtml(content) }
   }
 }
 

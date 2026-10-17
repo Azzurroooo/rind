@@ -76,21 +76,139 @@ export function formatTaskControl(tool, args, parts) {
   };
 }
 
+function unwrapRecord(record, data) {
+  let current = record && typeof record === "object" ? record : {};
+  if (typeof data === "string") {
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) current = parsed;
+    } catch {
+      // Plain string data.
+    }
+  }
+  if (current.result && typeof current.result === "object" && !Array.isArray(current.result)) {
+    return current.result;
+  }
+  return current;
+}
+
 export function formatDelegate(tool, args, parts) {
-  const { record } = parts;
-  const agent = firstText(record.assignee, args.to, args.new?.name, args.agent, args.agent_id, args.name, record.agent_id) || "agent";
+  const record = unwrapRecord(parts.record, parts.data);
+  if (args.wait === true || Array.isArray(record.settled)) {
+    const settled = Array.isArray(record.settled) ? record.settled : [];
+    const taskId = firstText(args.task);
+    const target = taskId ? `task ${taskId}` : "delegated tasks";
+    const output = String(record.output || record.summary || "").trim();
+    return {
+      kind: "delegate",
+      verb: "Waited for",
+      target,
+      agent: target,
+      meta: [
+        ...meta(`${settled.length} settled`),
+        ...(record.timedOut ? meta("timed out", "danger") : record.released ? meta("released") : []),
+      ],
+      withDuration: true,
+      body: output ? { type: "markdown", text: output, ...CAPS.markdown } : null,
+      taskState: record.timedOut ? "error" : "",
+    };
+  }
+  if (firstText(args.retire)) {
+    const retired = firstText(args.retire);
+    return {
+      kind: "delegate",
+      verb: "Retired",
+      target: retired,
+      agent: retired,
+      meta: [],
+      withDuration: true,
+      body: null,
+      taskState: "",
+    };
+  }
+  const isNew = Boolean(args.new?.name && !record.assignee && !args.to);
+  const baseAgent = firstText(record.assignee, args.to, args.new?.name, args.agent, args.agent_id, args.name, record.agent_id) || "agent";
+  const agentLabel = isNew ? `${baseAgent} (new)` : baseAgent;
   const task = firstText(args.brief, args.message, args.task, args.prompt, args.description);
   const clipped = task.length > DELEGATE_TASK_MAX ? `${task.slice(0, DELEGATE_TASK_MAX - 1)}…` : task;
-  const answer = String(record.summary || record.answer || record.result || parts.text || "").trim();
+  const answer = String(record.summary || record.answer || (typeof record.result === "string" ? record.result : "") || parts.text || "").trim();
   const status = singleLine(record.status);
   return {
     kind: "delegate",
     verb: "Delegated to",
-    target: clipped ? `${agent}: ${clipped}` : agent,
-    agent,
+    target: clipped ? `${agentLabel}: ${clipped}` : agentLabel,
+    agent: baseAgent,
     meta: [...meta(record.taskId ? "task " + record.taskId : ""), ...meta(status && status !== "completed" ? status : "")],
     withDuration: true,
     body: answer ? { type: "markdown", text: answer, ...CAPS.markdown } : null,
     taskState: taskFinishState(status),
+  };
+}
+
+export function formatReport(tool, args, parts) {
+  const record = unwrapRecord(parts.record, parts.data);
+  const blocked = args.blocked && typeof args.blocked === "object" ? args.blocked : null;
+  if (blocked) {
+    const responder = singleLine(blocked.responder || "lead");
+    const action = singleLine(blocked.action || "");
+    const summary = String(args.summary || "").trim();
+    return {
+      kind: "report",
+      verb: "Reported",
+      target: "blocked",
+      meta: meta(action ? `needs ${responder}: ${action}` : `needs ${responder}`, "danger"),
+      body: summary ? { type: "markdown", text: summary, ...CAPS.markdown } : null,
+      taskState: "",
+    };
+  }
+  const outcome = firstText(args.outcome, record.outcome, record.status) || "completed";
+  const delivered = Boolean(record.delivered);
+  const summary = String(args.summary || record.summary || "").trim();
+  const evidence = Array.isArray(args.evidence) ? args.evidence.map((item) => singleLine(item)).filter(Boolean) : [];
+  const artifacts = Array.isArray(args.artifacts)
+    ? args.artifacts.map((item) => String(item || "").split(/[\\/]/).pop()).filter(Boolean)
+    : [];
+  const sections = [
+    summary,
+    evidence.length ? `**Evidence:** ${evidence.join(" · ")}` : "",
+    artifacts.length ? `**Files:** \`${artifacts.join("`, `")}\`` : "",
+  ].filter(Boolean);
+  return {
+    kind: "report",
+    verb: "Reported",
+    target: outcome,
+    meta: [
+      ...(delivered ? meta("delivered", "success") : []),
+      ...(artifacts.length ? meta(plural(artifacts.length, "file")) : []),
+    ],
+    body: sections.length ? { type: "markdown", text: sections.join("\n\n"), ...CAPS.markdown } : null,
+    taskState: "",
+  };
+}
+
+export function formatAgentManagement(tool, args, parts) {
+  const record = unwrapRecord(parts.record, parts.data);
+  const rawAction = firstText(args.action, args.operation, record.action) || "update";
+  const actionLabel = rawAction.replace(/[_-]+/g, " ");
+  const subject = firstText(
+    args.name,
+    args.team,
+    args.agent,
+    args.member,
+    args.taskId,
+    args.teamId,
+    args.agentId,
+    record.name,
+    record.team?.name,
+    record.agent?.name,
+  );
+  const summary = String(record.summary || args.brief || args.description || "").trim();
+  return {
+    kind: "manage",
+    verb: "Managed agents",
+    target: subject ? `${actionLabel}: ${subject}` : actionLabel,
+    meta: meta(singleLine(record.status)),
+    body: summary ? { type: "markdown", text: summary, ...CAPS.markdown } : null,
+    taskState: "",
   };
 }

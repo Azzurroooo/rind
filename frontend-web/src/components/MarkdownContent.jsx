@@ -1,3 +1,8 @@
+import { useEffect, useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
+import { copyText } from "../lib/clipboard.js";
+import { tokenizeCode } from "../lib/syntaxHighlight.js";
+
 export function MarkdownContent({ value, className = "" }) {
   const blocks = parseBlocks(value);
   return <div className={`message-content markdown-content ${className}`.trim()}>{blocks.map((block, index) => renderBlock(block, index))}</div>;
@@ -98,8 +103,46 @@ function splitTableRow(value) {
   return row.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|").trim());
 }
 
+function CodeBlock({ language, value }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef(null);
+
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+
+  async function handleCopy() {
+    const ok = await copyText(value);
+    if (ok) {
+      setCopied(true);
+      window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => setCopied(false), 1600);
+    }
+  }
+
+  const tokens = tokenizeCode(value, language);
+  return (
+    <div className="markdown-code-block">
+      <div className="markdown-code-head">
+        <span className="markdown-code-lang">{language || "code"}</span>
+        <button type="button" className="markdown-code-copy" onClick={handleCopy} aria-label={copied ? "Copied code" : "Copy code"}>
+          {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+      </div>
+      <pre className="markdown-code">
+        <code data-language={language || undefined}>
+          {tokens.map((token, idx) => (
+            token.type === "plain"
+              ? token.value
+              : <span key={idx} className={`tok-${token.type}`}>{token.value}</span>
+          ))}
+        </code>
+      </pre>
+    </div>
+  );
+}
+
 function renderBlock(block, key) {
-  if (block.type === "code") return <pre className="markdown-code" key={key}><code data-language={block.language || undefined}>{block.value}</code></pre>;
+  if (block.type === "code") return <CodeBlock key={key} language={block.language} value={block.value} />;
   if (block.type === "heading") {
     const Tag = `h${Math.min(6, block.level)}`;
     return <Tag key={key}>{renderInline(block.value)}</Tag>;

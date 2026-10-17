@@ -1,12 +1,20 @@
+import { Quote, renderIcon } from "../icons.ts"
 import { canConfirmQuestion, questionAnswer, selectQuestionOption, updateQuestionInput } from "../question-state.ts"
 import { retryLastPrompt, selectSlashCommand, setPrompt } from "./composer.ts"
-import { interrupt, jumpLatest, messageStream, requiredElement, retry } from "./dom.ts"
+import { interrupt, jumpLatest, messageStream, prompt, requiredElement, retry } from "./dom.ts"
 import { answerQuestion, cancelActiveTurn, questionSelectionFor, restartRuntime, runAction } from "./runtime.ts"
 import { openToolFile } from "./files-panel.ts"
 import { chatProject, switchSession } from "./sessions.ts"
 import { render } from "./shell.ts"
 import { state, toolOpenRequests, vars } from "./state.ts"
-import { keepToolHeaderVisible, setToolExpanded, toolHeaderOffset } from "./stream.ts"
+import { keepToolHeaderVisible, setToolExpanded, toggleChangeSummaryExpanded, toolHeaderOffset } from "./stream.ts"
+
+function insertQuotedText(raw: string) {
+  const quoted = raw.trim().split("\n").map((line) => `> ${line}`).join("\n")
+  if (!quoted) return
+  const next = prompt.value.trim() ? `${prompt.value.trimEnd()}\n\n${quoted}\n\n` : `${quoted}\n\n`
+  setPrompt(next, true)
+}
 
 export function bindConversationEvents(): void {
   messageStream.addEventListener("focusin", (event) => {
@@ -34,9 +42,80 @@ export function bindConversationEvents(): void {
     jumpLatest.hidden = true
   })
 
+  const streamWrap = messageStream.parentElement
+  let quotePill: HTMLButtonElement | null = null
+  let selectedQuoteText = ""
+
+  function hideQuotePill() {
+    if (quotePill) quotePill.hidden = true
+    selectedQuoteText = ""
+  }
+
+  function updateQuotePill() {
+    const selection = window.getSelection?.()
+    if (!selection || selection.isCollapsed || !streamWrap) {
+      hideQuotePill()
+      return
+    }
+    const text = selection.toString().trim()
+    if (!text) {
+      hideQuotePill()
+      return
+    }
+    const anchor = selection.anchorNode?.parentElement
+    const focus = selection.focusNode?.parentElement
+    const body = anchor?.closest(".turn-assistant .message-body") || focus?.closest(".turn-assistant .message-body")
+    if (!body || !messageStream.contains(body)) {
+      hideQuotePill()
+      return
+    }
+    try {
+      const range = selection.getRangeAt(0)
+      const rect = range.getBoundingClientRect()
+      const wrapRect = streamWrap.getBoundingClientRect()
+      if (!rect.width) {
+        hideQuotePill()
+        return
+      }
+      if (!quotePill) {
+        quotePill = document.createElement("button")
+        quotePill.type = "button"
+        quotePill.className = "quote-selection-pill"
+        quotePill.innerHTML = `${renderIcon(Quote, "quote-pill-icon")}<span>Quote</span>`
+        quotePill.addEventListener("mousedown", (event) => {
+          event.preventDefault()
+          if (selectedQuoteText) insertQuotedText(selectedQuoteText)
+          hideQuotePill()
+          window.getSelection?.()?.removeAllRanges?.()
+        })
+        streamWrap.append(quotePill)
+      }
+      selectedQuoteText = text
+      const top = Math.max(8, rect.top - wrapRect.top - 34)
+      const left = Math.min(wrapRect.width - 88, Math.max(12, rect.left - wrapRect.left + rect.width / 2 - 36))
+      quotePill.style.top = `${top}px`
+      quotePill.style.left = `${left}px`
+      quotePill.hidden = false
+    } catch {
+      hideQuotePill()
+    }
+  }
+
+  messageStream.addEventListener("mouseup", updateQuotePill)
+  messageStream.addEventListener("keyup", updateQuotePill)
+
+  streamWrap?.addEventListener("click", (event) => {
+    const turnJump = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-turn-jump]")?.dataset.turnJump
+    if (turnJump) {
+      const node = messageStream.querySelector<HTMLElement>(`[data-entry-id="${CSS.escape(turnJump)}"]`)
+      node?.scrollIntoView({ block: "start", behavior: "smooth" })
+    }
+  })
+
   messageStream.addEventListener("scroll", () => {
     const nearBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
     if (nearBottom) jumpLatest.hidden = true
+    hideQuotePill()
   })
 
 
@@ -49,10 +128,39 @@ export function bindConversationEvents(): void {
       if (content) runAction(() => navigator.clipboard.writeText(content))
       return
     }
+    const quoteMessage = target.closest<HTMLButtonElement>("[data-quote-message]")?.dataset.quoteMessage
+    if (quoteMessage) {
+      const entry = state.conversation.entries.find((item) => item.id === quoteMessage)
+      const content = entry && "content" in entry ? entry.content : ""
+      if (content) insertQuotedText(content)
+      return
+    }
     const editMessage = target.closest<HTMLButtonElement>("[data-edit-message]")?.dataset.editMessage
     if (editMessage) {
       const entry = state.conversation.entries.find((item) => item.id === editMessage)
       if (entry?.kind === "user") setPrompt(entry.content, true)
+      return
+    }
+    if (target.closest<HTMLButtonElement>("[data-toggle-change-summary]")) {
+      toggleChangeSummaryExpanded(state.viewedSessionId)
+      render()
+      return
+    }
+    const jumpTool = target.closest<HTMLButtonElement>("[data-jump-tool]")?.dataset.jumpTool
+    if (jumpTool) {
+      const row = messageStream.querySelector<HTMLElement>(`[data-tool-id="${CSS.escape(jumpTool)}"]`)
+        || messageStream.querySelector<HTMLElement>(`[data-entry-id="${CSS.escape(jumpTool)}"]`)
+      const segment = row?.closest<HTMLElement>(".work-segment")
+      if (segment?.dataset.entryId) {
+        state.segmentFolds = new Map([...state.segmentFolds, [segment.dataset.entryId, true]])
+      }
+      state.revealedTools.add(jumpTool)
+      state.expandedTools = new Set([...state.expandedTools, jumpTool])
+      render()
+      requestAnimationFrame(() => {
+        const targetNode = messageStream.querySelector<HTMLElement>(`[data-tool-id="${CSS.escape(jumpTool)}"]`)
+        targetNode?.scrollIntoView({ block: "center", behavior: "smooth" })
+      })
       return
     }
     if (target.closest<HTMLButtonElement>("[data-retry-turn]")) {

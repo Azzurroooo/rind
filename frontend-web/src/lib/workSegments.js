@@ -108,6 +108,8 @@ function phrase(key, calls) {
     case "task": return `checked ${plural(count, "task")}`;
     case "stop": return `stopped ${plural(count, "task")}`;
     case "delegate": return one ? `delegated to ${one.agent || "agent"}` : `delegated ${count} tasks`;
+    case "report": return one ? `reported ${one.target || "outcome"}` : `submitted ${count} reports`;
+    case "manage": return one && one.target ? `managed agents (${one.target})` : `managed agents ${count} times`;
     case "goal": return "updated goal";
     case "other": return one ? `used ${one.verb}` : `used ${count} tools`;
     default: {

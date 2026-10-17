@@ -9,7 +9,7 @@ import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigge
 import { escapeHtml } from "./html.ts"
 import { renderInspector } from "./inspector.ts"
 import { renderPalette } from "./palette-ui.ts"
-import { promoteFollowUp, recallPendingInput } from "./pending-inputs.ts"
+import { discardPendingInput, promoteFollowUp, recallPendingInput } from "./pending-inputs.ts"
 import { activeTurnIdFor, runAction, runtimeTurnActive } from "./runtime.ts"
 import { applyOverview, chatProject, currentRuntimeSnapshot } from "./sessions.ts"
 import { renderSessionHead, syncWorkingTimer } from "./session-head.ts"
@@ -52,6 +52,7 @@ export function render() {
     state.pendingInputs[state.viewedSessionId] || [],
     (inputId) => runAction(() => promoteFollowUp(inputId), state.viewedSessionId),
     (inputId) => runAction(() => recallPendingInput(inputId), state.viewedSessionId),
+    (inputId) => runAction(() => discardPendingInput(inputId), state.viewedSessionId),
   )
   renderStream()
   renderComposerState()
@@ -68,7 +69,7 @@ export function renderComposerState() {
   renderComposer(
     { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter, attachButton },
     {
-      ready: chatProject()?.available === true && state.settings.hasApiKey,
+      ready: chatProject()?.available === true && (state.settings.hasApiKey || runtime.status === "ready" || state.models.length > 0),
       active: runtimeTurnActive(),
       readOnly: false,
       starting: runtime.status === "starting",

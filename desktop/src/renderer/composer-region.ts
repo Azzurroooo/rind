@@ -145,6 +145,7 @@ export function syncPendingInputDock(
   inputs: PendingInput[],
   onPromote: (inputId: string) => void,
   onRecall: (inputId: string) => void,
+  onDiscard?: (inputId: string) => void,
 ) {
   const existing = new Map<string, HTMLElement>()
   for (const element of dock.querySelectorAll<HTMLElement>("[data-pending-input-id]")) {
@@ -179,7 +180,12 @@ export function syncPendingInputDock(
       recall.className = "ghost-button pending-input-recall"
       recall.textContent = "Recall"
       recall.addEventListener("click", () => onRecall(input.inputId))
-      actions.append(promote, recall)
+      const discard = document.createElement("button")
+      discard.type = "button"
+      discard.className = "ghost-button pending-input-discard"
+      discard.textContent = "Remove"
+      discard.addEventListener("click", () => onDiscard?.(input.inputId))
+      actions.append(promote, recall, discard)
       item.append(content, actions)
     }
 
@@ -187,6 +193,7 @@ export function syncPendingInputDock(
     const text = item.querySelector<HTMLElement>(".pending-input-text")
     const promote = item.querySelector<HTMLButtonElement>(".pending-input-promote")
     const recall = item.querySelector<HTMLButtonElement>(".pending-input-recall")
+    const discard = item.querySelector<HTMLButtonElement>(".pending-input-discard")
     if (mode) mode.textContent = input.mode === "steering" || input.promoting ? "Steering" : "Queue"
     if (text) text.textContent = input.input
     if (promote) {
@@ -202,6 +209,11 @@ export function syncPendingInputDock(
       recall.title = input.mode === "steering"
         ? "Recall this steering message"
         : "Recall this queued message"
+    }
+    if (discard) {
+      discard.hidden = !onDiscard
+      discard.disabled = input.promoting || input.recalling
+      discard.title = "Remove this queued message"
     }
     if (dock.children[index] !== item) dock.append(item)
     existing.delete(input.inputId)

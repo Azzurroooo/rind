@@ -11,17 +11,18 @@ export type SlashCommandMenu = {
 }
 
 const DESKTOP_HIDDEN_COMMANDS = new Set([
-  "config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "theme", "exit", "quit",
+  "config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "team", "theme", "exit", "quit",
 ])
 
 export const fallbackSlashCommands: SlashCommand[] = [
+  ["btw", "Ask a side question without adding to conversation history", "/btw <question>"],
   ["compact", "Compact current session context", "/compact"],
   ["help", "Show commands", "/help [command]"],
   ["import", "Choose the Claude and Codex skills this conversation reads", "/import [<source>=on|off ...]"],
   ["init", "Draft RIND.md", "/init [project|user]"],
+  ["rename", "Rename the current session", "/rename <title>"],
   ["skill", "List skills and where they come from", "/skill"],
   ["status", "Show session status", "/status"],
-  ["team", "Create a Team project", "/team create [project-id]"],
 ].map(([name, description, usage]) => ({ name, description, usage, aliases: [] }))
 
 export function parseSlashCommands(value: unknown): SlashCommand[] {

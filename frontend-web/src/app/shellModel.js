@@ -29,9 +29,10 @@ export function headerStatus({ phase, active, compacting, waitingCount = 0 }) {
   return { label: "Idle", tone: "muted" };
 }
 
-export function sessionTitle(sessions, sessionId) {
+export function sessionTitle(sessions, sessionId, infoTitle = "") {
   if (!sessionId) return "New conversation";
-  return sessions.find((session) => sessionIdOf(session) === sessionId)?.title || "New conversation";
+  const match = sessions.find((session) => sessionIdOf(session) === sessionId);
+  return match?.name || match?.title || infoTitle || "New conversation";
 }
 
 export function lastUserPrompt(messages) {

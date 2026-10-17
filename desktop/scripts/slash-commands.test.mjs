@@ -13,14 +13,18 @@ import {
 import { executeLocalSlashCommand } from "../src/renderer/local-slash-commands.ts"
 
 test("Desktop hides removed and sidebar-owned commands from fallback and Runtime catalogs", () => {
-  const removed = ["config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "theme"]
+  const removed = ["config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "team", "theme"]
   assert.deepEqual(parseSlashCommands(removed.map((name) => ({ name, aliases: ["alias_" + name] }))), [])
   assert.deepEqual(parseSlashCommands([{ name: "status", aliases: [...removed, "st"] }])[0].aliases, ["st"])
   assert.equal(fallbackSlashCommands.some((command) => command.name === "sessions"), false)
   assert.equal(fallbackSlashCommands.some((command) => command.name === "model"), false)
+  assert.equal(fallbackSlashCommands.some((command) => command.name === "team"), false)
+  assert.equal(fallbackSlashCommands.some((command) => command.name === "btw"), true)
+  assert.equal(fallbackSlashCommands.some((command) => command.name === "rename"), true)
   const parsed = parseSlashCommands([
     { name: "sessions", description: "List recent sessions", usage: "/sessions" },
     { name: "model", description: "Choose a model" },
+    { name: "team", description: "Manage team" },
     { name: "status", description: "Show status", usage: "/status" },
   ])
   assert.deepEqual(parsed.map((command) => command.name), ["status"])

@@ -34,10 +34,21 @@ export function providerStatus(provider: DesktopAuthProvider) {
 function renderProviderRow(provider: DesktopAuthProvider) {
   const busy = view.busyProviderId === provider.id
   const disabled = view.busyProviderId !== "" ? " disabled" : ""
-  const canLogin = provider.methods.length === 0 || provider.methods.includes("api_key")
+  const methods = provider.methods.length ? provider.methods : ["api_key"]
   const action = provider.configured
     ? `<button type="button" class="ghost-button" data-provider-logout="${escapeAttribute(provider.id)}"${disabled}>${busy ? "Signing out..." : "Sign out"}</button>`
-    : `<button type="button" class="secondary-button" data-provider-login="${escapeAttribute(provider.id)}"${disabled || (canLogin ? "" : " disabled")}>${busy ? "Signing in..." : "Sign in"}</button>`
+    : methods.map((method) => {
+      const label = busy
+        ? "Signing in..."
+        : methods.length === 1
+          ? "Sign in"
+          : method === "oauth"
+            ? "Sign in (OAuth)"
+            : method === "api_key"
+              ? "API key"
+              : `Sign in (${method})`
+      return `<button type="button" class="secondary-button" data-provider-login="${escapeAttribute(provider.id)}" data-provider-method="${escapeAttribute(method)}"${disabled}>${escapeHtml(label)}</button>`
+    }).join("")
   return `<div class="settings-row provider-row">
     <div class="settings-row-text">
       <span class="settings-row-label">${escapeHtml(provider.name || provider.id)}</span>
@@ -88,11 +99,11 @@ export async function loadProviders() {
   }
 }
 
-async function login(providerId: string) {
+async function login(providerId: string, method?: string) {
   setView({ busyProviderId: providerId, error: "", message: "" })
   try {
     const sessionId = await ensureSession(chatProject()?.path || state.chatProjectPath || state.fallbackProjectPath)
-    const result = await window.api.auth.login(sessionId, providerId)
+    const result = await window.api.auth.login(sessionId, providerId, method)
     const count = typeof result.models_count === "number" ? ` ${result.models_count} models available.` : ""
     setView({ busyProviderId: "", message: `Signed in.${count}` })
     await loadProviders()
@@ -148,8 +159,9 @@ export function bindProviderEvents(): void {
     const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null
     if (!target || target.disabled) return
     const loginId = target.dataset.providerLogin
+    const loginMethod = target.dataset.providerMethod
     const logoutId = target.dataset.providerLogout
-    if (loginId) void login(loginId)
+    if (loginId) void login(loginId, loginMethod)
     if (logoutId) void logout(logoutId)
   })
   authPromptForm.addEventListener("submit", (event) => {

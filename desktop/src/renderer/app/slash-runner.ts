@@ -61,13 +61,19 @@ export async function runSlash(input: string) {
     await ensureRuntime()
     const commandSessionId = await ensureSession(projectPath, requestedSessionId, selection)
     const result = asRecord(await requestForSession(runtimeMethods.commandExecute, commandSessionId, { input }))
-    const commands = parseSlashCommands(asRecord(result.display).commands)
+    const display = asRecord(result.display)
+    const commands = parseSlashCommands(display.commands)
     if (commands.length) state.slashCommands = mergeSlashCatalog(commands)
+    if (display.type === "session_renamed") {
+      const nextTitle = asRecordText(display.name || display.title)
+      if (nextTitle && isCurrentSlashView(projectPath, commandSessionId)) state.sessionTitle = nextTitle
+      await loadSessions()
+    }
     const text = asRecordText(result.text)
     if (text && canUpdateSlashSession(projectPath, commandSessionId)) {
       setConversationFor(
         commandSessionId,
-        addCommandResult(conversationFor(commandSessionId), input, text, asRecord(result.display)),
+        addCommandResult(conversationFor(commandSessionId), input, text, display),
       )
     }
     const prefill = typeof result.prompt_prefill === "string" ? result.prompt_prefill : ""

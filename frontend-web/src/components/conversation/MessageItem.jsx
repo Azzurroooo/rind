@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Check, Copy, GitFork, Info, Pencil, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, Check, Copy, GitFork, Info, Pencil, Quote, RefreshCw, X } from "lucide-react";
 import { MarkdownContent } from "../MarkdownContent.jsx";
 import { copyText } from "../../lib/clipboard.js";
 import { messageTime } from "../../lib/format.js";
@@ -8,14 +8,19 @@ import { StatusMessage } from "./StatusMessage.jsx";
 const COPY_RESET_MS = 1600;
 
 // User message (spec section 4): a right-aligned bubble with Copy and
-// Edit & resend on hover.
+// Edit & resend on hover. Team deliveries show a subtle provenance badge.
 export function UserMessage({ message, onEdit }) {
   return (
-    <article className="message user" data-message-id={message.id || ""}>
+    <article className={`message user${message.delivery ? " is-delivery" : ""}`} data-message-id={message.id || ""}>
+      {message.delivery && (
+        <div className="delivery-badge" title="Delivered from a team member or background task">
+          Team delivery
+        </div>
+      )}
       <div className="user-bubble" dir="auto">{message.content}</div>
       <div className="message-actions">
         <CopyButton text={message.content} />
-        {onEdit && (
+        {onEdit && !message.delivery && (
           <ActionButton label="Edit and resend" onClick={() => onEdit(message)}><Pencil size={14} /></ActionButton>
         )}
         <MessageTime value={message.time} />
@@ -24,15 +29,18 @@ export function UserMessage({ message, onEdit }) {
   );
 }
 
-// Assistant message: full-width prose with Copy, Fork from here and the time.
+// Assistant message: full-width prose with Copy, Quote, Fork from here and the time.
 // The action bar stays visible on the latest assistant message.
-export function AssistantMessage({ message, latest, onFork }) {
+export function AssistantMessage({ message, latest, onFork, onQuote }) {
   return (
     <article className={`message assistant${latest ? " is-latest" : ""}`} data-message-id={message.id || ""}>
       <MarkdownContent value={message.content} className="assistant-content" />
       {message.meta && <div className="message-note">{message.meta}</div>}
       <div className="message-actions">
         <CopyButton text={message.content} />
+        {onQuote && (
+          <ActionButton label="Quote in composer" onClick={() => onQuote(message.content)}><Quote size={14} /></ActionButton>
+        )}
         {onFork && (
           <ActionButton label="Fork from here" onClick={() => onFork(message)}><GitFork size={14} /></ActionButton>
         )}

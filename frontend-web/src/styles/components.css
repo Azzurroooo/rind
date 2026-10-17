@@ -20,8 +20,18 @@
 .markdown-content blockquote { margin: 12px 0; padding: 2px 14px; border-left: 2px solid var(--line-strong); color: var(--muted); }
 .markdown-content hr { margin: 17px 0; border: 0; border-top: 1px solid var(--line); }
 .markdown-content code { padding: 2px 5px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-soft); color: var(--accent); font: .88em var(--font-mono); }
-.markdown-code { margin: 13px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 5px; overflow: auto; background: var(--surface-soft); color: var(--text); font: 12px/1.6 var(--font-mono); white-space: pre; }
+.markdown-code-block { margin: 13px 0; border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; background: var(--surface-soft); }
+.markdown-code-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--fill-1); color: var(--muted); font: 11px var(--font-mono); }
+.markdown-code-lang { text-transform: lowercase; color: var(--dim); }
+.markdown-code-copy { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border: 0; border-radius: var(--radius-chip); background: transparent; color: var(--muted); font: 11px var(--font-mono); transition: background var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
+.markdown-code-copy:hover { background: var(--surface); color: var(--text); }
+.markdown-code { margin: 0; padding: 12px 14px; border: 0; border-radius: 0; overflow: auto; background: transparent; color: var(--text); font: 12px/1.6 var(--font-mono); white-space: pre; }
 .markdown-code code { padding: 0; border: 0; background: transparent; color: inherit; }
+.tok-keyword { color: var(--accent); font-weight: 600; }
+.tok-string { color: var(--success); }
+.tok-comment { color: var(--dim); font-style: italic; }
+.tok-number { color: var(--warning); }
+.tok-property { color: var(--info); }
 .markdown-content a { color: var(--info); text-decoration: none; }
 .markdown-content a:hover { text-decoration: underline; }
 .markdown-content table { width: 100%; margin: 13px 0; border-collapse: collapse; font-size: 12px; }

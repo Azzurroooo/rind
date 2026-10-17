@@ -1,6 +1,6 @@
 import { messageTime } from "../message-time.ts"
 import brandMarkUrl from "../assets/brand-mark.svg"
-import { Copy, Pencil, renderIcon, RotateCcw } from "../icons.ts"
+import { Copy, Pencil, Quote, renderIcon, RotateCcw } from "../icons.ts"
 import { renderMarkdown } from "../markdown.ts"
 import { messageActions, STARTER_PROMPTS, type MessageAction } from "../message-view.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
@@ -12,19 +12,26 @@ const actionButtons: Record<MessageAction, (id: string) => string> = {
   edit: (id) => `<button type="button" class="message-action" data-edit-message="${escapeAttribute(id)}" data-tooltip="Edit and resend" aria-label="Edit and resend">${renderIcon(Pencil)}</button>`,
 }
 
-function renderActionBar(kind: "user" | "assistant", id: string, value?: string | number): string {
+function renderActionBar(kind: "user" | "assistant", id: string, value?: string | number, delivery?: boolean): string {
   const time = messageTime(value)
   const timestamp = time ? `<time class="message-time" datetime="${escapeAttribute(time.iso)}" title="${escapeAttribute(time.full)}">${escapeHtml(time.label)}</time>` : '<span class="message-time" title="This older message has no recorded timestamp.">Time unavailable</span>'
-  const buttons = messageActions(kind).map((action) => actionButtons[action](id)).join("")
-  return `<div class="message-actions" role="toolbar" aria-label="Message actions">${buttons}${timestamp}</div>`
+  const actions = delivery ? messageActions(kind).filter((action) => action !== "edit") : messageActions(kind)
+  const buttons = actions.map((action) => actionButtons[action](id)).join("")
+  const quoteBtn = kind === "assistant"
+    ? `<button type="button" class="message-action" data-quote-message="${escapeAttribute(id)}" data-tooltip="Quote in composer" aria-label="Quote in composer">${renderIcon(Quote)}</button>`
+    : ""
+  return `<div class="message-actions" role="toolbar" aria-label="Message actions">${buttons}${quoteBtn}${timestamp}</div>`
 }
 
 export function renderMessageMeta(id: string, time?: string | number): string {
   return renderActionBar("assistant", id, time)
 }
 
-export function renderUserMessage(id: string, content: string, time?: string | number): string {
-  return `<article class="turn-user" data-entry-id="${escapeAttribute(id)}"><div class="user-bubble" dir="auto">${escapeHtml(content)}</div>${renderActionBar("user", id, time)}</article>`
+export function renderUserMessage(id: string, content: string, time?: string | number, delivery?: boolean): string {
+  const badge = delivery
+    ? `<div class="delivery-badge" title="Delivered from a team member or background task">Team delivery</div>`
+    : ""
+  return `<article class="turn-user${delivery ? " is-delivery" : ""}" data-entry-id="${escapeAttribute(id)}">${badge}<div class="user-bubble" dir="auto">${escapeHtml(content)}</div>${renderActionBar("user", id, time, delivery)}</article>`
 }
 
 export interface AssistantMessageState {
