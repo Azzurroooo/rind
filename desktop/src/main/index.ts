@@ -46,7 +46,10 @@ import {
 
 const appId = "ai.rind.desktop"
 const root = dirname(fileURLToPath(import.meta.url))
-app.setName("Rind")
+const legacyUserDataDir = join(app.getPath("appData"), "rind-desktop")
+if (existsSync(legacyUserDataDir)) {
+  app.setPath("userData", legacyUserDataDir)
+}
 if (process.platform === "win32") {
   app.setAppUserModelId(appId)
 }
@@ -163,6 +166,8 @@ function gateway() {
 }
 
 function configPath() {
+  const rindDesktopConfig = join(legacyUserDataDir, "desktop-settings.json")
+  if (existsSync(rindDesktopConfig)) return rindDesktopConfig
   return join(app.getPath("userData"), "desktop-settings.json")
 }
 
@@ -507,6 +512,9 @@ if (!hasLock) {
   app.whenReady().then(async () => {
     log.initialize()
     app.setName("Rind")
+    if (existsSync(legacyUserDataDir)) {
+      app.setPath("userData", legacyUserDataDir)
+    }
     if (process.platform === "win32") {
       app.setAppUserModelId(appId)
     }
