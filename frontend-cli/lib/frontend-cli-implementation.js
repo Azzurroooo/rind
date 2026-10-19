@@ -20,7 +20,7 @@ import {
   isRuntimeEventForTurn,
 } from "./runtime-protocol.js";
 import { executeLocalSlashCommand } from "./local-slash-commands.js";
-import { applySavedTheme, loadCliState, saveCliState } from "./cli-state-store.js";
+import { applySavedTheme, isBriefMode, loadCliState, saveCliState } from "./cli-state-store.js";
 import { loadPromptHistory, savePromptHistory } from "./prompt-history-store.js";
 import { createTurnController } from "./turn-controller.js";
 import { createCommandController } from "./command-controller.js";
@@ -52,6 +52,7 @@ import {
   modelMenuText,
   themeMenuText,
   skillImportMenuText,
+  briefMenuText,
   questionMenuFrame,
   sessionMenuText,
   promptPlaceholderText,
@@ -381,6 +382,12 @@ commandController = createCommandController({
         await commandController.handle(`/theme ${selected}`);
       }
     },
+    runBriefSelector: async () => {
+      const next = await inputActions.askBriefMenu(isBriefMode());
+      if (typeof next === "boolean") {
+        await commandController.handle(`/brief ${next ? "on" : "off"}`);
+      }
+    },
     runTour: (pageId) => enterInSessionTour(pageId),
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
@@ -398,8 +405,9 @@ commandController = createCommandController({
         interactive: Boolean(tui),
         commands: sessionState.commands,
         persistTheme: (name) => saveCliState({ theme: name }),
+        persistBrief: (enabled) => saveCliState({ brief: enabled }),
       });
-      if (result?.display?.type === "theme" && result.display.changed) {
+      if ((result?.display?.type === "theme" || result?.display?.type === "brief") && result.display.changed) {
         outputController.replayAll();
       }
       return result;
@@ -916,6 +924,15 @@ function composeFrame(width = process.stdout.columns || 80) {
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: skillImportMenuText(session.importState.items(), session.importState.selectedIndex()).trimEnd(),
+    };
+  }
+  if (session.mode === "brief") {
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
+      inputText: session.inputText,
+      cursor: { line: 0, column: session.inputText.length },
+      menuText: briefMenuText(session.briefState.items(), session.briefState.selectedIndex()).trimEnd(),
     };
   }
   if (session.mode === "question") {

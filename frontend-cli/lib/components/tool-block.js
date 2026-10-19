@@ -3,8 +3,10 @@ import {
   parseToolArguments,
   parseToolResult,
   renderToolFinished,
+  renderToolGroupBrief,
   renderToolRunning,
 } from "../tool-display.js";
+import { isBriefMode } from "../cli-state-store.js";
 
 export class ToolBlock {
   constructor({ event, onRequestRender, leading = false, animate = true, now = Date.now }) {
@@ -116,5 +118,42 @@ export class ToolBlock {
       this.cache = { width, lines: Object.freeze(lines) };
     }
     return lines;
+  }
+}
+
+export class ToolGroupBlock {
+  constructor({ leading = false } = {}) {
+    this.blocks = [];
+    this.leading = Boolean(leading);
+    this.expanded = false;
+  }
+
+  add(block) {
+    block.leading = this.blocks.length === 0 ? this.leading : true;
+    block.expanded = this.expanded;
+    this.blocks.push(block);
+    return block;
+  }
+
+  setExpanded(expanded) {
+    const next = Boolean(expanded);
+    this.expanded = next;
+    for (const block of this.blocks) {
+      block.setExpanded(next);
+    }
+  }
+
+  invalidate() {
+    for (const block of this.blocks) {
+      block.invalidate();
+    }
+  }
+
+  render(width) {
+    if (!isBriefMode() || this.expanded) {
+      return this.blocks.flatMap((block) => block.render(width));
+    }
+    const lines = renderToolGroupBrief(this.blocks, width);
+    return this.leading && lines.length ? ["", ...lines] : lines;
   }
 }

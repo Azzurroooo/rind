@@ -17,15 +17,17 @@ import { rememberDelegation, settledDelegations } from "./delegation-state.js";
 import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
-import { ToolBlock } from "./components/tool-block.js";
+import { ToolBlock, ToolGroupBlock } from "./components/tool-block.js";
 import { colorEnabled } from "./theme.js";
 
 export function createCliOutputController({ state, terminalUi, transcript, animateTools = true,
   now = Date.now, schedule = setTimeout, cancelSchedule = clearTimeout, hasColor = colorEnabled }) {
   const legacyRenderer = new AssistantRenderer((text) => writeOutput(text));
   let assistantMessage = null;
+  let activeToolGroup = null;
   let blockCount = 0;
   const toolBlocks = new Map();
+  const toolGroups = new Set();
   const legacyBegunTools = new Set();
   let questionBlock = null;
   let startupBlock = null;
@@ -158,6 +160,19 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     redraw();
   }
 
+  function appendToolBlock(block) {
+    if (!activeToolGroup) {
+      activeToolGroup = new ToolGroupBlock({ leading: blockCount > 0 });
+      activeToolGroup.setExpanded(Boolean(state.display?.toolDetailsExpanded));
+      toolGroups.add(activeToolGroup);
+      transcript.addChild(activeToolGroup);
+      blockCount += 1;
+    }
+    activeToolGroup.add(block);
+    transcript.changed();
+    redraw();
+  }
+
   function lazyLines(buildText, leading) {
     return new DynamicBlock(() => {
       const value = String(buildText() ?? "");
@@ -208,6 +223,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     if (!value.trim()) {
       return;
     }
+    activeToolGroup = null;
     if (!terminalUi) {
       const line = userInputText(value, undefined, source);
       if (!line) {
@@ -237,6 +253,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     if (!value.trim()) {
       return;
     }
+    activeToolGroup = null;
     if (!terminalUi) {
       process.stdout.write(outputBlockText(deliveryBlockText(value, 1000).join("\n"), state.display.outputStarted));
       state.display.outputStarted = true;
@@ -251,6 +268,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
 
   function writeError(text) {
     const value = String(text ?? "");
+    activeToolGroup = null;
     // Before the terminal UI starts, appending would be painted only after a
     // startup that may already be failing; a fatal start must reach the screen.
     if (!terminalUi || !terminalUi.started || state.runtime.status === "closing") {
@@ -261,6 +279,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function ensureAssistantBlocks() {
+    activeToolGroup = null;
     if (!assistantMessage) {
       const leading = blockCount > 0;
       transcript.addChild(lazyLines(() => assistantHeaderText(), leading));
@@ -287,6 +306,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function beginQuestion(event) {
+    activeToolGroup = null;
     if (!terminalUi) {
       log(() => questionText(event));
       return;
@@ -316,6 +336,9 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function assistantAppend(text) {
+    if (!String(text || "")) {
+      return;
+    }
     if (!terminalUi) {
       legacyRenderer.append(text);
       return;
@@ -373,7 +396,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     });
     toolBlocks.set(key, block);
     runningTools.add(block);
-    appendBlock(block);
+    appendToolBlock(block);
   }
 
   function updateToolProgress(callId, message) {
@@ -403,7 +426,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         leading: blockCount > 0,
       });
       toolBlocks.set(key, block);
-      appendBlock(block);
+      appendToolBlock(block);
     }
     block.finish(event, fileChange);
     runningTools.delete(block);
@@ -412,6 +435,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   // Another conversation replaces this one on screen; none of its blocks are kept.
   function clearTranscript() {
     closeAssistant();
+    activeToolGroup = null;
     legacyBegunTools.clear();
     state.display.pendingDelegations?.clear();
     if (!terminalUi) {
@@ -419,6 +443,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     }
     transcript.clear();
     toolBlocks.clear();
+    toolGroups.clear();
     runningTools.clear();
     questionBlock = null;
     startupBlock = null;
@@ -430,13 +455,15 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     if (!terminalUi) {
       return;
     }
-    for (const block of toolBlocks.values()) {
-      block.setExpanded(expanded);
+    for (const group of toolGroups) {
+      group.setExpanded(expanded);
     }
+    transcript.changed();
     redraw();
   }
 
   function setTurnContext(turnId = "") {
+    activeToolGroup = null;
     turnContext = String(turnId || "");
   }
 
@@ -487,7 +514,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       if (role === "assistant") {
         flushPendingTools();
         const content = messageText(message?.content);
-        if (content) {
+        if (content.trim()) {
           assistantAppend(content);
           closeAssistant();
         }

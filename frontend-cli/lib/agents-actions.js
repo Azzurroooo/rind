@@ -133,6 +133,14 @@ export function createActions(ui) {
     }, { description: ["Owner: " + agentName(agentId)] });
   }
 
+  function renameMember(teamId, agentId) {
+    const current = agentName(agentId);
+    ui.form("Rename member", [{ key: "name", label: "Name", hint: "How the member is called in the team." }], async ({ name }) => {
+      await ui.request("updateMember", { teamId, agentId, name });
+      ui.notify("Renamed member to " + single(name) + ".", "success");
+    }, { description: ["Now named: " + current] });
+  }
+
   function editMember(teamId, agentId) {
     const current = membership(teamId, agentId);
     ui.form("Role and responsibility", roleFields(current), async values => { await ui.request("updateMember", { teamId, agentId, ...values }); ui.notify("Updated " + agentName(agentId) + ".", "success"); }, { description: [agentName(agentId)] });
@@ -193,10 +201,10 @@ export function createActions(ui) {
       { label: "New conversation", key: "c", description: "Talk to this member directly", action: () => ui.startNew({ agentId, teamId }) },
       { label: "Assign task", key: "t", description: "Tracked work with a delivery report", action: () => assignTask(teamId, agentId) },
       { label: "Add member below", key: "a", description: "Add a member below " + agentName(agentId), action: () => addMember(teamId, agentId) },
+      { label: "Rename member", key: "r", description: agentName(agentId), action: () => renameMember(teamId, agentId) },
       { label: "Edit role and responsibility", key: "e", action: () => editMember(teamId, agentId) },
       { label: "Model and effort", key: "m", description: "What this member runs on", action: () => memberModel(teamId, agentId) },
       ...(team?.leaderAgentId !== agentId ? [{ label: "Change supervisor", key: "s", action: () => changeSupervisor(teamId, agentId) }] : []),
-      { label: "Rename team", key: "R", description: single(team?.name), action: () => review.renameTeam(teamId) },
       ...(run ? [{ label: "Resolve unconfirmed run", key: "u", description: "Confirm the old process stopped", action: () => resolveRun(run) }] : []),
       { label: "Remove from team", key: "x", danger: true, description: "Folder and history are kept", action: () => ui.confirm("Remove " + agentName(agentId) + "?", ["They leave " + single(team?.name) + ". The folder, its files and history are kept. Their unfinished tasks will need attention."], "Remove member",
         async () => { await ui.request("removeMember", { teamId, agentId }); ui.notify(agentName(agentId) + " removed from the team.", "success"); }) },
@@ -319,5 +327,5 @@ export function createActions(ui) {
     ui.choose("Show only", STATUS_FILTERS.map(status => ({ label: status, description: status === "All" ? "Everything in this view" : undefined, action() { ui.setFilter(status); } })), { selected: ui.view.filter, searchable: true });
   }
 
-  return { ...review, createTeam, addMember, assignTask, editMember, memberActions, sessionActions, taskActions, liveActions, answer, resolveRun, chooseFilter, stopAll, serviceActions };
+  return { ...review, createTeam, addMember, assignTask, renameMember, editMember, memberActions, sessionActions, taskActions, liveActions, answer, resolveRun, chooseFilter, stopAll, serviceActions };
 }

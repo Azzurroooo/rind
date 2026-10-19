@@ -172,6 +172,7 @@ test("local command catalog stays complete before the runtime starts", async () 
   assert.deepEqual(names, [
     "exit",
     "quit",
+    "brief",
     "compact",
     "context",
     "effort",

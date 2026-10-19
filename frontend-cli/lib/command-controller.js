@@ -30,6 +30,10 @@ export function createCommandController({
       await input.runThemeSelector();
       return true;
     }
+    if (name === "brief" && !arg && input.isTerminal && input.runBriefSelector) {
+      await input.runBriefSelector();
+      return true;
+    }
     if (name === "tour") {
       if (input.isTerminal && input.runTour) {
         await input.runTour(arg);

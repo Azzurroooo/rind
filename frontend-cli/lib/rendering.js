@@ -1,6 +1,7 @@
 import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells, wrapTextWithAnsi } from "./text-width.js";
 import { formatDuration } from "./tool-display.js";
 import { DEFAULT_THEME, paint, paintRaw, flavorSwatch, themeNames, breathingAccent } from "./theme.js";
+import { isBriefMode } from "./cli-state-store.js";
 import { homedir } from "node:os";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
@@ -514,6 +515,10 @@ export function delegatedWaitingLine(names = []) {
 export function deliveryBlockText(text, width = 80) {
   const room = Math.max(8, width - 2);
   const content = String(text || "").replace(/\r\n?/g, "\n").trimEnd();
+  if (isBriefMode()) {
+    const summary = clipSingleLine(content, Math.max(8, width - 14));
+    return [summary ? `${dim("─")} ${bold("Delivery")} ${dim(`· ${summary}`)}` : `${dim("─")} ${bold("Delivery")}`];
+  }
   const lines = content ? wrapTextWithAnsi(content, room).map(line => "  " + line) : [];
   return [`${dim("─")} ${bold("Delivery")}`, ...lines];
 }
@@ -594,6 +599,11 @@ export function slashDisplayText(display, commands = []) {
       return slashSkillsText(display);
     case "theme":
       return slashThemeText(display);
+    case "brief":
+      return commandResultText(
+        display.enabled ? "Brief output enabled." : "Brief output disabled.",
+        "applies globally across live turns and replayed sessions",
+      );
     default:
       return "";
   }
@@ -697,6 +707,22 @@ export function skillImportMenuText(items, selectedIndex = 0) {
     const count = Number(item.count) || 0;
     const found = count ? `${count} ${count === 1 ? "skill" : "skills"}` : "—";
     lines.push(`  ${marker} ${box} ${active ? bold(label) : label}  ${dim(padRight(clipSingleLine(paths, pathWidth), pathWidth))}  ${dim(found)}`);
+  }
+  lines.push(dim("    ↑↓ select · space toggle · enter apply · esc cancel"));
+  return `${lines.join("\n")}\n`;
+}
+
+export function briefMenuText(items, selectedIndex = 0) {
+  const labelWidth = Math.max(16, ...items.map((item) => visibleLength(item.label)));
+  const lines = [dim("  Global output display mode")];
+  const descWidth = Math.max(18, slashContentWidth() - labelWidth - 12);
+  for (const [index, item] of items.entries()) {
+    const active = index === selectedIndex;
+    const marker = active ? accent("›") : dim("·");
+    const box = item.chosen ? accent("[x]") : dim("[ ]");
+    const label = padRight(item.label, labelWidth);
+    const description = item.description ? `  ${dim(clipSingleLine(item.description, descWidth))}` : "";
+    lines.push(`  ${marker} ${box} ${active ? bold(label) : label}${description}`);
   }
   lines.push(dim("    ↑↓ select · space toggle · enter apply · esc cancel"));
   return `${lines.join("\n")}\n`;
@@ -1205,6 +1231,9 @@ function indentToolText(value) {
 }
 
 export function planUpdatedLine(plan) {
+  if (isBriefMode()) {
+    return "";
+  }
   const items = Array.isArray(plan) ? plan : [];
   if (!items.length) {
     return `  ${green("◉")} ${bold("Plan cleared")}`;

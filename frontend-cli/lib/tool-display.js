@@ -215,6 +215,78 @@ function indentToolLines(lines, width) {
   return lines.map((line) => clipCells(`  ${line}`, limit));
 }
 
+export function renderToolGroupBrief(blocks, width) {
+  if (!Array.isArray(blocks) || !blocks.length) {
+    return [];
+  }
+  const limit = Math.max(1, Number(width) || 80);
+  const focus = blocks.findLast((block) => block.isRunning) || blocks.at(-1);
+  const count = blocks.length;
+  const failedCount = blocks.reduce((sum, block) => sum + (isToolBlockError(block) ? 1 : 0), 0);
+  const suffixParts = [];
+  let suffixCols = 0;
+  if (count > 1) {
+    const label = ` · ${count} tools`;
+    suffixParts.push(dim(label));
+    suffixCols += label.length;
+  }
+  if (failedCount > 0 && (count > 1 || focus.isRunning)) {
+    const label = ` · ${failedCount} failed`;
+    suffixParts.push(`${dim(" · ")}${red(`${failedCount} failed`)}`);
+    suffixCols += label.length;
+  }
+  const mainBudget = Math.max(12, limit - 2 - suffixCols);
+  const renderer = TOOL_RENDERERS[focus.name] || GENERIC_RENDERER;
+  let mainLine;
+  if (focus.isRunning) {
+    const context = {
+      name: focus.name,
+      args: focus.args,
+      phase: "running",
+      elapsedMs: focus.animate ? focus.now() - focus.startedAt : 0,
+      progressMessage: focus.progressMessage,
+    };
+    const elapsedSeconds = Math.floor((context.elapsedMs || 0) / 1000);
+    const elapsed = ELAPSED_TITLE_TOOLS.has(focus.name) ? dim(` · ${elapsedSeconds}s`) : "";
+    const progress = context.progressMessage
+      ? dim(` · ${clipText(context.progressMessage, Math.max(12, Math.floor(mainBudget / 3)), 0)}`)
+      : "";
+    mainLine = `${runningGlyph()} ${renderer.runningMain(context, mainBudget)}${elapsed}${progress}`;
+  } else {
+    const context = {
+      name: focus.name,
+      args: focus.args,
+      phase: "done",
+      expanded: false,
+      event: focus.resultEvent,
+      fileChange: focus.fileChange,
+      payload: parseToolResult(focus.resultEvent?.result),
+    };
+    mainLine = renderer.finished(context, mainBudget, finishState(context.event));
+  }
+  const clippedMain = clipCells(mainLine, Math.max(1, limit - 2 - suffixCols));
+  return [clipCells(`  ${clippedMain}${suffixParts.join("")}`, limit)];
+}
+
+function isToolBlockError(block) {
+  if (!block || block.isRunning) {
+    return false;
+  }
+  const state = finishState(block.resultEvent);
+  if (state.kind === "error") {
+    return true;
+  }
+  if (state.kind === "cancelled") {
+    return false;
+  }
+  const { data } = resultDataFromRaw(block.resultEvent?.result);
+  if (taskFinishState(state, data).kind === "error") {
+    return true;
+  }
+  const exitCode = Number(data.exit_code);
+  return block.name === "bash" && Number.isInteger(exitCode) && exitCode !== 0;
+}
+
 function normalizeBody(produced) {
   if (Array.isArray(produced)) {
     return { lines: produced, total: produced.length };

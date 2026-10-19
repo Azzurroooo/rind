@@ -662,6 +662,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       }
       case "updateMember": {
         coordinate(state, actor, p.teamId, p.agentId); requireMember(state, p.teamId, p.agentId);
+        if (p.name !== undefined) state.agents[p.agentId].name = text(p.name, "Name", 200);
         const member = state.memberships[memberKey(p.teamId, p.agentId)];
         for (const field of ["position", "responsibility"] as const) {
           if (p[field] === undefined) continue;

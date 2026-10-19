@@ -133,3 +133,149 @@ test("replayed history preserves tool failure status, duration, and terminal dif
   assert.match(rendered, /◉ \$ npm test · 1\.20s/);
 });
 
+test("brief mode collapses consecutive tool calls into one live line, applies to history replay, and toggles via /brief checkbox menu", async (t) => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { applySavedTheme, isBriefMode, loadCliState, saveCliState, setBriefMode } = await import("../lib/cli-state-store.js");
+  const { executeLocalSlashCommand } = await import("../lib/local-slash-commands.js");
+  const { createCliInputActions } = await import("../lib/cli-input-actions.js");
+  const { briefMenuText, planUpdatedLine } = await import("../lib/rendering.js");
+
+  const tempHome = mkdtempSync(path.join(os.tmpdir(), "rind-brief-mode-"));
+  t.after(() => {
+    setBriefMode(false);
+    rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  // 1. Checkbox menu (/brief) toggles state with space and applies with enter.
+  const state = createCliState();
+  const transcript = createTranscript();
+  const output = createCliOutputController({ state, transcript, terminalUi: { requestRender() {} }, animateTools: false });
+  const actions = createCliInputActions({
+    state,
+    request: async () => ({}),
+    output,
+    promptHistory: [],
+    onPromptHistory: () => {},
+    getTurnController: () => ({}),
+    getCommandController: () => ({ handle: async () => true }),
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    getEffortLevels: async () => [],
+    pausePrompt: () => {},
+    resumePrompt: () => {},
+    handleSigint: () => {},
+  });
+
+  const menuPromise = actions.askBriefMenu(false);
+  assert.equal(state.input.session.mode, "brief");
+  const initialMenu = stripAnsi(briefMenuText(state.input.session.briefState.items(), state.input.session.briefState.selectedIndex()));
+  assert.match(initialMenu, /\[ \] Brief output/);
+  assert.match(initialMenu, /space toggle · enter apply · esc cancel/);
+  actions.handleTerminalInput(" ");
+  const toggledMenu = stripAnsi(briefMenuText(state.input.session.briefState.items(), state.input.session.briefState.selectedIndex()));
+  assert.match(toggledMenu, /\[x\] Brief output/);
+  actions.handleTerminalInput("\r");
+  const chosen = await menuPromise;
+  assert.equal(chosen, true);
+  assert.deepEqual(transcript.render(90).map(stripAnsi), ["▷ You", "  /brief"]);
+  output.clearTranscript();
+
+  // 2. /brief command persists globally and updates active brief mode.
+  const cmdRes = await executeLocalSlashCommand("/brief on", {
+    persistBrief: (enabled) => saveCliState({ brief: enabled }, tempHome),
+  });
+  assert.equal(cmdRes.display.type, "brief");
+  assert.equal(cmdRes.display.enabled, true);
+  assert.equal(isBriefMode(), true);
+  assert.equal(loadCliState(tempHome).brief, true);
+  setBriefMode(false);
+  applySavedTheme(tempHome);
+  assert.equal(isBriefMode(), true, "applySavedTheme restores persisted global brief mode");
+
+  // 3. Live turn without assistant content: consecutive tools update in place on a single line with count.
+  output.writeUserInput("Fix the build");
+  output.beginTool({ tool_call_id: "t1", tool_name: "read_file", args_preview: '{"path":"package.json"}' });
+  let lines = transcript.render(90).map(stripAnsi);
+  assert.deepEqual(lines, ["▷ You", "  Fix the build", "", "  ◌ read package.json"]);
+
+  output.finishTool({ tool_call_id: "t1", tool_name: "read_file", status: "completed", result: JSON.stringify({ ok: true, data: "{\n  \"name\": \"app\"\n}" }) });
+  output.beginTool({ tool_call_id: "t2", tool_name: "grep", args_preview: '{"pattern":"build","path":"src"}' });
+  lines = transcript.render(90).map(stripAnsi);
+  assert.deepEqual(lines, ["▷ You", "  Fix the build", "", "  ◌ grep /build/ in src · 2 tools"]);
+
+  output.finishTool({ tool_call_id: "t2", tool_name: "grep", status: "completed", result: JSON.stringify({ ok: true, data: [{ file: "src/a.js", line: 1, text: "build" }], meta: { count: 1 } }) });
+  output.beginTool({ tool_call_id: "t3", tool_name: "edit_file", args_preview: '{"path":"src/a.js"}' });
+  output.finishTool(
+    { tool_call_id: "t3", tool_name: "edit_file", status: "completed", result: JSON.stringify({ ok: true, data: "edited" }) },
+    { lines: [{ kind: "removed", text: "old" }, { kind: "added", text: "new" }] },
+  );
+  assert.equal(planUpdatedLine([{ step: "Step 1", status: "completed" }]), "", "plan step body is suppressed in brief mode");
+  lines = transcript.render(90).map(stripAnsi);
+  assert.deepEqual(lines, ["▷ You", "  Fix the build", "", "  ◉ edit src/a.js (+1 -1) · 3 tools"]);
+
+  // Assistant text breaks the streak; subsequent tools form a new single-line streak.
+  output.assistantAppend("Updated src/a.js, running tests now.");
+  output.closeAssistant();
+  output.beginTool({ tool_call_id: "t4", tool_name: "bash", args_preview: '{"command":"npm test"}' });
+  output.finishTool({ tool_call_id: "t4", tool_name: "bash", status: "completed", duration_ms: 800, result: JSON.stringify({ ok: true, data: { stdout: "PASS\nline 2\n", stderr: "", exit_code: 0 } }) });
+  lines = transcript.render(90).map(stripAnsi);
+  assert.deepEqual(lines, [
+    "▷ You",
+    "  Fix the build",
+    "",
+    "  ◉ edit src/a.js (+1 -1) · 3 tools",
+    "",
+    "◁ Assistant",
+    "  Updated src/a.js, running tests now.",
+    "",
+    "  ◉ $ npm test · 800ms",
+  ]);
+
+  // ctrl+o expands all grouped tools even in brief mode, and collapses back to 1 line.
+  output.setToolsExpanded(true);
+  const expandedText = stripAnsi(transcript.render(90).join("\n"));
+  assert.match(expandedText, /◉ read package\.json/);
+  assert.match(expandedText, /◉ grep \/build\/ in src/);
+  assert.match(expandedText, /\+ new/);
+  output.setToolsExpanded(false);
+  assert.equal(transcript.render(90).map(stripAnsi).filter(line => line.includes("3 tools")).length, 1);
+
+  // 4. Replaying an existing session in brief mode renders consecutive tool calls and deliveries concisely.
+  output.clearTranscript();
+  output.renderHistory([
+    { role: "user", content: "Inspect repo" },
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        { id: "h1", function: { name: "glob", arguments: '{"pattern":"**/*.js"}' } },
+        { id: "h2", function: { name: "bash", arguments: '{"command":"npm run lint"}' } },
+      ],
+    },
+    { role: "tool", tool_call_id: "h1", content: JSON.stringify({ ok: true, data: [{ path: "a.js" }], meta: { count: 1 } }), status: "completed" },
+    { role: "tool", tool_call_id: "h2", content: JSON.stringify({ ok: true, data: { stdout: "lint error\n", stderr: "", exit_code: 1 } }), status: "completed", duration_ms: 350 },
+    { role: "user", content: "Delegated work settled:\n- worker · task 123 · delivered: done\n  Summary: All checks complete.", _rind_meta: { kind: "team_delivery" } },
+  ]);
+  const replayedLines = transcript.render(100).map(stripAnsi);
+  assert.deepEqual(replayedLines, [
+    "▷ You",
+    "  Inspect repo",
+    "",
+    "  ◉ $ npm run lint exit 1 · 350ms · 2 tools · 1 failed",
+    "",
+    "─ Delivery · Delegated work settled: - worker · task 123 · delivered: done Summary: All checks c...",
+  ]);
+
+  // Switching brief mode off and invalidating transcript restores full multi-block rendering in place.
+  await executeLocalSlashCommand("/brief off", {
+    persistBrief: (enabled) => saveCliState({ brief: enabled }, tempHome),
+  });
+  transcript.invalidate();
+  const fullReplayed = stripAnsi(transcript.render(100).join("\n"));
+  assert.match(fullReplayed, /◉ glob \*\*\/\*\.js · 1 matches/);
+  assert.match(fullReplayed, /lint error/);
+  assert.match(fullReplayed, /Summary: All checks complete\./);
+});
+

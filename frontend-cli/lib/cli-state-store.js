@@ -6,6 +6,16 @@ import { setTheme } from "./theme.js";
 let cachedPath = "";
 let cachedMtimeMs = -1;
 let cachedState = null;
+let briefMode = false;
+
+export function isBriefMode() {
+  return briefMode;
+}
+
+export function setBriefMode(enabled) {
+  briefMode = Boolean(enabled);
+  return briefMode;
+}
 
 // CLI-owned runtime preferences, separate from the shared ~/.rind/settings.json
 // that the Python runtime manages (apiKey/model/baseUrl).
@@ -38,6 +48,9 @@ export function loadCliState(rindHome) {
 
 export function saveCliState(patch, rindHome) {
   const file = cliStatePath(rindHome);
+  if (patch && typeof patch === "object" && "brief" in patch) {
+    setBriefMode(patch.brief);
+  }
   try {
     const next = { ...loadCliState(rindHome), ...patch };
     mkdirSync(path.dirname(file), { recursive: true });
@@ -53,8 +66,9 @@ export function saveCliState(patch, rindHome) {
   }
 }
 
-// Every surface (chat and `rind agents`) draws with the theme chosen by /theme.
+// Every surface (chat and `rind agents`) draws with the preferences chosen in cli-state.json.
 export function applySavedTheme(rindHome) {
-  const { theme } = loadCliState(rindHome);
+  const { theme, brief } = loadCliState(rindHome);
   if (theme) setTheme(theme);
+  setBriefMode(brief === true);
 }

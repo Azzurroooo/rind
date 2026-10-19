@@ -130,7 +130,12 @@ test("team page edits members, nests team conversations and drives tasks from th
   key("G"); await visible("Reviewer");
   key(" "); await visible("Change supervisor");
   assert.doesNotMatch(h.screen(), /Make team leader/, "interactive member menu never offers Make team leader");
-  key("\x1b"); await settle();
+  assert.doesNotMatch(h.screen(), /Rename team/, "member menu never offers Rename team");
+  assert.match(h.screen(), /Rename member/, "member menu offers Rename member");
+  key("r"); await visible("Rename member");
+  key("\x15"); paste("Security Reviewer"); key("\r");
+  await visible("Renamed member to Security Reviewer.");
+  assert.equal((await h.client.request("snapshot")).agents.find(a => a.id !== lead.id).name, "Security Reviewer");
   key("g"); key("j"); await visible("Leader · Coordinator");
   key(" "); await visible("Add member below"); key("c");
   await waitFor(() => chats.length === 3, "conversation from the member menu");

@@ -1,6 +1,8 @@
 import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
+import { isBriefMode, setBriefMode } from "./cli-state-store.js";
 
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
+  { name: "brief", description: "Toggle ultra-concise output mode globally", usage: "/brief [on | off]" },
   { name: "compact", description: "Compact current session context", usage: "/compact" },
   { name: "context", description: "Show context composition and token usage", usage: "/context" },
   { name: "effort", description: "Show or change reasoning effort", usage: "/effort [low | medium | high | xhigh | max]" },
@@ -32,6 +34,7 @@ export async function executeLocalSlashCommand(input, context = {}) {
   }
   if (name === "help") return helpResult(argument, context.commands || []);
   if (name === "theme") return themeResult(argument, context);
+  if (name === "brief") return briefResult(argument, context);
   if (name === "model" && !argument && !context.interactive) return { text: `Model: ${currentModelLabel(context)}` };
   return null;
 }
@@ -109,6 +112,31 @@ function themeResult(argument, context = {}) {
       changed: false,
       current: current.name,
       flavors: themeOptions(),
+    },
+  };
+}
+
+function briefResult(argument, context = {}) {
+  const requested = argument.replace(/^\//, "").trim().toLowerCase();
+  if (!requested) {
+    const enabled = isBriefMode();
+    return {
+      text: `Brief output: ${enabled ? "on" : "off"}`,
+      display: { type: "brief", changed: false, enabled },
+    };
+  }
+  if (requested !== "on" && requested !== "off") {
+    return usageResult("/brief [on | off]");
+  }
+  const previous = isBriefMode();
+  const enabled = setBriefMode(requested === "on");
+  context.persistBrief?.(enabled);
+  return {
+    text: `Brief output: ${enabled ? "on" : "off"}`,
+    display: {
+      type: "brief",
+      changed: previous !== enabled,
+      enabled,
     },
   };
 }

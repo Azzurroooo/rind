@@ -355,6 +355,10 @@ export function createCliInputActions({
       handleImportInput(session, event);
       return;
     }
+    if (session.mode === "brief") {
+      handleBriefInput(session, event);
+      return;
+    }
     if (session.mode === "question") {
       handleQuestionInput(session, event);
       return;
@@ -419,7 +423,7 @@ export function createCliInputActions({
       return;
     }
     const session = state.input.session;
-    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "import" || session.mode === "sessions" || session.mode === "fork" || session.mode === "context-board") {
+    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "import" || session.mode === "brief" || session.mode === "sessions" || session.mode === "fork" || session.mode === "context-board") {
       return;
     }
     if (session.mode === "question" && !session.questionState.isEditing()) {
@@ -500,6 +504,39 @@ export function createCliInputActions({
       return;
     }
     if (!modified && session.importState.handleKey(key)) output.redraw();
+  }
+
+  function askBriefMenu(enabled) {
+    return new Promise((resolve) => {
+      const briefState = createSkillImportMenuState([
+        {
+          id: "brief",
+          label: "Brief output",
+          description: "Collapse consecutive tool calls into one live line",
+          enabled: Boolean(enabled),
+        },
+      ]);
+      const session = { mode: "brief", inputText: "/brief", briefState, resolve };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, null, false);
+      output.redraw(true);
+    });
+  }
+
+  function handleBriefInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (!modified && (key.name === "enter" || key.name === "return")) {
+      const changed = session.briefState.changed();
+      const choices = session.briefState.choices();
+      completeTtyInput(session, changed ? Boolean(choices.brief) : null, changed, "", "/brief");
+      return;
+    }
+    if (!modified && key.name === "escape") {
+      completeTtyInput(session, null, false);
+      return;
+    }
+    if (!modified && session.briefState.handleKey(key)) output.redraw();
   }
 
   function submitTtyInput(session) {
@@ -805,6 +842,7 @@ export function createCliInputActions({
     askEffortMenu,
     askThemeMenu,
     askSkillImportMenu,
+    askBriefMenu,
     askSessionMenu,
     askForkPointMenu,
     askContextBoard,

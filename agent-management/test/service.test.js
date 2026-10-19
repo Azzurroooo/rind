@@ -244,13 +244,15 @@ test("priority affects only queued work, cancellation is durable and status come
   assert.ok(Object.values(f.store.state.notes).some(note => note.taskId === normal.id && note.text === "Cancelled task."));
 });
 
-test("member responsibility edits respect team authority and apply to the next run", async t => {
+test("member name and responsibility edits respect team authority and apply to the next run", async t => {
   const f = await fixture(t), specialist = await f.member("reviewer");
   const direct = await f.call("attachSession", { teamId: f.team.id, agentId: specialist.id });
   await assert.rejects(f.call("updateMember", { teamId: f.team.id, agentId: f.leader.id, responsibility: "Bad" }, { kind: "agent", sessionId: direct.id }), { code: "FORBIDDEN" });
-  await f.call("updateMember", { teamId: f.team.id, agentId: specialist.id, position: "Reviewer", responsibility: "Review tests and report evidence" });
+  await f.call("updateMember", { teamId: f.team.id, agentId: specialist.id, name: "Security Reviewer", position: "Reviewer", responsibility: "Review tests and report evidence" });
+  assert.equal((await f.call("snapshot")).agents.find(a => a.id === specialist.id).name, "Security Reviewer");
   await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: specialist.id, brief: "Review" });
   await eventually(() => f.starts.length === 1);
+  assert.match(f.starts[0].input.instructions, /You are Security Reviewer/);
   assert.match(f.starts[0].input.instructions, /Review tests and report evidence/);
 });
 test("leader resumes after children return without a human polling every agent", async t => {
