@@ -4,6 +4,7 @@ import { projectRelativePath } from "../tool-display.ts"
 import { filePreview, filesUnavailable, fileTree } from "./dom.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
 import { showToast } from "./overlays.ts"
+import { animateCollapse, animateExpand } from "./accordion.ts"
 import { runAction } from "./runtime.ts"
 import { openInspector } from "./inspector.ts"
 import { viewedProject } from "./sessions.ts"
@@ -72,11 +73,19 @@ export async function loadDirectory(path: string) {
   render()
 }
 
+function findDirectoryBranchElement(path: string): HTMLElement | null {
+  const trigger = [...fileTree.querySelectorAll<HTMLButtonElement>("[data-toggle-directory]")]
+    .find((item) => item.dataset.toggleDirectory === path)
+  return trigger?.closest<HTMLElement>(".file-directory")?.querySelector<HTMLElement>(":scope > .file-branch") || null
+}
+
 export async function toggleDirectory(path: string) {
   const projectPath = activeWorkspacePath()
   if (!projectPath) return
   const expanded = new Set(state.expandedDirectories)
-  if (expanded.has(path)) {
+  const wasExpanded = expanded.has(path)
+  if (wasExpanded) {
+    await animateCollapse(findDirectoryBranchElement(path))
     expanded.delete(path)
   } else {
     expanded.add(path)
@@ -85,6 +94,9 @@ export async function toggleDirectory(path: string) {
   if (!samePath(activeWorkspacePath(), projectPath)) return
   state.expandedDirectories = expanded
   render()
+  if (!wasExpanded) {
+    animateExpand(findDirectoryBranchElement(path))
+  }
 }
 
 export async function previewFile(path: string) {

@@ -1,6 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification } from "electron"
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, type NativeImage } from "electron"
 import log from "electron-log/main"
 import windowState from "electron-window-state"
+import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -45,6 +46,76 @@ import {
 
 const appId = "ai.rind.desktop"
 const root = dirname(fileURLToPath(import.meta.url))
+app.setName("Rind")
+if (process.platform === "win32") {
+  app.setAppUserModelId(appId)
+}
+
+const RIND_LOGO_DATA_URL =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect x="16" y="16" width="224" height="224" rx="52" fill="#21563c"/><rect x="84" y="84" width="88" height="88" rx="18" fill="#f7f6f0"/></svg>',
+  )
+
+let cachedWindowIcon: NativeImage | null = null
+let cachedDockIcon: NativeImage | null = null
+
+function resourceDirs(): string[] {
+  const dirs = [
+    join(root, "../../resources"),
+    join( process.cwd(), "resources"),
+  ]
+  try {
+    dirs.unshift(join(app.getAppPath(), "resources"))
+  } catch {
+    // app.getAppPath() may not be ready in all contexts
+  }
+  if (typeof process.resourcesPath === "string" && process.resourcesPath) {
+    dirs.unshift(join(process.resourcesPath, "resources"), process.resourcesPath)
+  }
+  return Array.from(new Set(dirs))
+}
+
+function resolveWindowIcon(purpose: "window" | "dock" = "window"): NativeImage | undefined {
+  if (purpose === "window" && cachedWindowIcon && !cachedWindowIcon.isEmpty()) return cachedWindowIcon
+  if (purpose === "dock" && cachedDockIcon && !cachedDockIcon.isEmpty()) return cachedDockIcon
+
+  const filenames =
+    process.platform === "win32" && purpose === "window"
+      ? ["icon.ico", "icon.png"]
+      : ["icon.png", "icon.ico"]
+
+  for (const dir of resourceDirs()) {
+    for (const name of filenames) {
+      const candidate = join(dir, name)
+      if (!existsSync(candidate)) continue
+      const img = nativeImage.createFromPath(candidate)
+      if (img.isEmpty()) continue
+      if (name.endsWith(".png") && purpose === "window") {
+        const size = img.getSize()
+        if (size.width > 256 || size.height > 256) {
+          const resized = img.resize({ width: 256, height: 256, quality: "best" })
+          if (!resized.isEmpty()) {
+            cachedWindowIcon = resized
+            return resized
+          }
+        }
+      }
+      if (purpose === "dock") cachedDockIcon = img
+      else cachedWindowIcon = img
+      return img
+    }
+  }
+
+  const fallback = nativeImage.createFromDataURL(RIND_LOGO_DATA_URL)
+  if (!fallback.isEmpty()) {
+    if (purpose === "dock") cachedDockIcon = fallback
+    else cachedWindowIcon = fallback
+    return fallback
+  }
+  return undefined
+}
+
 const themes: DesktopTheme[] = ["system", "dark", "light"]
 const themeSurfaces = {
   dark: { background: "#151d18", overlay: { color: "#151d18", symbolColor: "#a5b0a4" } },
@@ -319,6 +390,7 @@ function createMainWindow() {
   const isWin = process.platform === "win32"
   const resolved = resolvedTheme(nativeTheme.themeSource)
   const surfaces = themeSurfaces[resolved]
+  const windowIcon = resolveWindowIcon("window")
   const win = new BrowserWindow({
     x: state.x,
     y: state.y,
@@ -328,7 +400,7 @@ function createMainWindow() {
     title: "Rind",
     autoHideMenuBar: true,
     backgroundColor: surfaces.background,
-    icon: join(root, "../../resources/icon.png"),
+    ...(windowIcon && { icon: windowIcon }),
     ...(isMac && {
       titleBarStyle: "hidden",
       trafficLightPosition: { x: 14, y: 15 },
@@ -344,6 +416,13 @@ function createMainWindow() {
       sandbox: true,
     },
   })
+  if (!isMac && windowIcon && !windowIcon.isEmpty()) {
+    try {
+      win.setIcon(windowIcon)
+    } catch {
+      // Ignore platform-specific setIcon errors
+    }
+  }
   state.manage(win)
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
   if (rendererUrl) void win.loadURL(new URL("index.html", rendererUrl).toString())
@@ -396,7 +475,13 @@ function showDesktopNotification(payload: { title?: unknown; body?: unknown; ses
   if (!Notification.isSupported()) return false
   // Never interrupt a focused window; notifications are for background turns.
   if (mainWindow && !mainWindow.isDestroyed() && (mainWindow.isFocused() || windowFocused)) return false
-  const notification = new Notification({ title, body: body.slice(0, 200), silent: false })
+  const icon = resolveWindowIcon("window")
+  const notification = new Notification({
+    title,
+    body: body.slice(0, 200),
+    silent: false,
+    ...(icon && !icon.isEmpty() ? { icon } : {}),
+  })
   notification.on("click", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore()
@@ -422,7 +507,19 @@ if (!hasLock) {
   app.whenReady().then(async () => {
     log.initialize()
     app.setName("Rind")
-    app.setAppUserModelId(appId)
+    if (process.platform === "win32") {
+      app.setAppUserModelId(appId)
+    }
+    if (process.platform === "darwin" && app.dock) {
+      const dockIcon = resolveWindowIcon("dock")
+      if (dockIcon && !dockIcon.isEmpty()) {
+        try {
+          app.dock.setIcon(dockIcon)
+        } catch {
+          // Ignore dock icon errors in headless environments
+        }
+      }
+    }
     subscribeRuntime(notifyRuntime)
     subscribeRuntimeEvents(notifyRuntimeEvent)
     subscribeSharedRuntimeEvents(notifyRuntimeEvent)

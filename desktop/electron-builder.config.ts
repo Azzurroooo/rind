@@ -13,10 +13,15 @@ const config: Configuration = {
     buildResources: "resources",
   },
   files: ["out/**/*"],
-  extraResources: [{ from: "resources/runtime", to: "runtime" }, { from: "../frontend-web/dist", to: "web" }],
+  extraResources: [
+    { from: "resources/runtime", to: "runtime" },
+    { from: "resources/icon.ico", to: "icon.ico" },
+    { from: "resources/icon.png", to: "icon.png" },
+    { from: "../frontend-web/dist", to: "web" },
+  ],
   win: {
     target: ["nsis"],
-    icon: "resources/icon.png",
+    icon: "resources/icon.ico",
   },
   nsis: {
     oneClick: true,

@@ -214,11 +214,28 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
   assert.match(sidebarHtml, /session-item-row/)
   assert.match(sidebarHtml, /session-menu-trigger/)
   assert.match(sidebarHtml, /View more sessions/)
+  assert.match(sidebarHtml, /team-trigger-meta">3 members</)
+  assert.doesNotMatch(sidebarHtml, /Organization coordinator ·/)
+  assert.doesNotMatch(sidebarHtml, /3 tasks/)
   assert.doesNotMatch(sidebarHtml, /Session 6/)
   assert.doesNotMatch(sidebarHtml, />Board</)
   assert.doesNotMatch(sidebarHtml, />Coord</)
   assert.doesNotMatch(sidebarHtml, />Overview</)
   assert.doesNotMatch(sidebarHtml, /project-action-pill/)
+
+  const collapsedSidebarHtml = renderSidebarAgentsHtml({
+    snapshot: sampleSnapshot,
+    surface: { kind: "chat" },
+    chatContext: { kind: "independent" },
+    collapsedTeams: new Set(["team-1"]),
+    expandedSidebarMembers: new Set(),
+    managerExpanded: false,
+    teamSessionsByTeam: {},
+    newTeamOpen: false,
+    busy: false,
+  })
+  assert.doesNotMatch(collapsedSidebarHtml, /team-trigger-meta/)
+  assert.doesNotMatch(collapsedSidebarHtml, /3 members/)
 
   const teamOrgHtml = renderTeamSurfaceHtml({
     snapshot: sampleSnapshot,

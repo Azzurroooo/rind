@@ -156,6 +156,20 @@
   min-width: 0;
 }
 
+.sidebar-agents .team-trigger-meta-wrap {
+  display: block;
+  overflow: hidden;
+}
+
+.sidebar-agents .team-trigger-meta {
+  display: block;
+  padding-top: 2px;
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
 .sidebar-agents .member-project-item > .project-row .project-name {
   font-size: 13px;
 }
@@ -474,6 +488,35 @@
 .agent-surface-actions .project-menu-wrap,
 .org-member-actions .project-menu-wrap {
   position: relative;
+  top: auto;
+  right: auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.agent-surface-actions .project-menu-trigger,
+.org-member-actions .project-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.agent-surface-actions .project-menu-trigger:hover:not(:disabled),
+.org-member-actions .project-menu-trigger:hover:not(:disabled),
+.agent-surface-actions .project-menu-trigger[aria-expanded="true"],
+.org-member-actions .project-menu-trigger[aria-expanded="true"] {
+  border-color: var(--line-strong);
+  background: var(--fill-2);
+  color: var(--text);
 }
 
 .agent-surface-actions .project-menu,
@@ -714,7 +757,7 @@
 
 .org-member-top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
@@ -896,10 +939,18 @@
 }
 
 .org-member-actions {
-  display: flex;
+  display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+}
+
+.org-member-actions .agent-btn.sm {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  margin: 0;
+  line-height: 1;
 }
 
 /* ---------- Action-First Task Sections ---------- */

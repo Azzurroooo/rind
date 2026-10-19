@@ -13,6 +13,7 @@ import { resetGoal } from "./inspector-goal.ts"
 import { resetTasks, stopTaskPolling } from "./inspector-tasks.ts"
 import { activeTurnIdFor, loadReplay, requestForSession, resetConversationPresentation, runtimeTurnActive } from "./runtime.ts"
 import { showToast } from "./overlays.ts"
+import { animateCollapse, animateExpand } from "./accordion.ts"
 import { render } from "./shell.ts"
 import { state, vars } from "./state.ts"
 
@@ -206,36 +207,26 @@ export async function addProject() {
   await refreshInspector()
 }
 
+function findProjectSessionsElement(path: string): HTMLElement | null {
+  const trigger = [...projectList.querySelectorAll<HTMLButtonElement>("[data-project-path]")]
+    .find((item) => item.dataset.projectPath === path)
+  return trigger?.closest<HTMLElement>(".project-item")?.querySelector<HTMLElement>(".project-sessions") || null
+}
+
 export async function toggleProject(path: string) {
   const project = state.projects.find((item) => item.path === path)
   if (!project) return
-  if (state.expandedProjects.has(path)) {
-    const trigger = [...projectList.querySelectorAll<HTMLButtonElement>("[data-project-path]")]
-      .find((item) => item.dataset.projectPath === path)
-    const sessions = trigger?.closest<HTMLElement>(".project-item")?.querySelector<HTMLElement>(".project-sessions")
-    if (sessions && !sessions.classList.contains("collapsing") && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      await new Promise<void>((resolve) => {
-        const finish = () => {
-          window.clearTimeout(timeoutId)
-          sessions.removeEventListener("animationend", finish)
-          resolve()
-        }
-        sessions.style.height = `${sessions.offsetHeight}px`
-        sessions.classList.add("collapsing")
-        sessions.addEventListener("animationend", finish, { once: true })
-        requestAnimationFrame(() => { sessions.style.height = "0px" })
-        const timeoutId = window.setTimeout(finish, 260)
-      })
-    }
+  const wasExpanded = state.expandedProjects.has(path)
+  if (wasExpanded) {
+    await animateCollapse(findProjectSessionsElement(path))
     state.expandedProjects.delete(path)
-    projectList.classList.add("skip-project-animation")
   } else {
     state.expandedProjects.add(path)
   }
   state.notice = ""
   render()
-  if (projectList.classList.contains("skip-project-animation")) {
-    requestAnimationFrame(() => projectList.classList.remove("skip-project-animation"))
+  if (!wasExpanded) {
+    animateExpand(findProjectSessionsElement(path))
   }
 }
 

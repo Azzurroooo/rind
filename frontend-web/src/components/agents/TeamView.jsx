@@ -298,129 +298,135 @@ function OrgMemberNode({
           </div>
         </div>
 
-        {sessionsExpanded && (
-          <div className="org-member-session-list">
-            {memberSessions.length === 0 ? (
-              <div className="org-member-session-empty">
-                <span>No conversations yet.</span>
-                <button
-                  type="button"
-                  className="agent-btn secondary xs"
-                  disabled={busy}
-                  onClick={() =>
-                    onOpenChat?.({
-                      teamId: node.teamId,
-                      agentId: node.agentId,
-                      forceNew: true,
-                    })
-                  }
-                >
-                  <Plus size={11} aria-hidden="true" />
-                  <span>Start conversation</span>
-                </button>
-              </div>
-            ) : (
-              <>
-                {visibleSessions.map((sess) => (
-                  <div key={sess.runtimeSessionId} className="org-member-session-row">
-                    {renamingSessionId === sess.runtimeSessionId ? (
-                      <form
-                        className="org-session-rename-form"
-                        onSubmit={async (e) => {
-                          e.preventDefault();
-                          await onRenameSession?.(sess.runtimeSessionId, renameDraft, {
-                            teamId: node.teamId,
-                          });
-                          setRenamingSessionId("");
-                        }}
-                      >
-                        <input
-                          type="text"
-                          value={renameDraft}
-                          onChange={(e) => setRenameDraft(e.target.value)}
-                          placeholder="Conversation title"
-                          autoFocus
-                        />
-                        <button type="submit" className="agent-btn primary xs" disabled={busy}>
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          className="agent-btn ghost xs"
-                          onClick={() => setRenamingSessionId("")}
-                        >
-                          Cancel
-                        </button>
-                      </form>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          className="org-member-session-main"
-                          onClick={() =>
-                            onOpenChat?.({
-                              teamId: node.teamId,
-                              agentId: node.agentId,
-                              runtimeSessionId: sess.runtimeSessionId,
-                            })
-                          }
-                        >
-                          <span className={`agent-status-dot tone-${sess.tone}`} />
-                          <span className="org-member-session-title">{sess.title}</span>
-                          {sess.origin === "task" && (
-                            <span className="org-member-session-badge">Task</span>
-                          )}
-                          {sess.status && sess.status !== "Idle" && (
-                            <span className={`org-member-session-status tone-${sess.tone}`}>
-                              {sess.status}
-                            </span>
-                          )}
-                          {sess.ageText && (
-                            <span className="org-member-session-age">{sess.ageText}</span>
-                          )}
-                        </button>
-                        <div className="org-member-session-actions">
-                          <button
-                            type="button"
-                            className="icon-button xs"
-                            title="Rename conversation"
-                            aria-label={`Rename ${sess.title}`}
-                            onClick={() => {
-                              setRenamingSessionId(sess.runtimeSessionId);
-                              setRenameDraft(sess.title);
-                            }}
-                          >
-                            <Pencil size={11} aria-hidden="true" />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-button xs"
-                            title="Delete conversation"
-                            aria-label={`Delete ${sess.title}`}
-                            onClick={() =>
-                              onDeleteSession?.(sess.runtimeSessionId, { teamId: node.teamId })
-                            }
-                          >
-                            <Trash2 size={11} aria-hidden="true" />
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))}
-                {moreSessionsCount > 0 && (
+        <div
+          className={`sidebar-collapse-wrap ${sessionsExpanded ? "is-open" : ""}`}
+          aria-hidden={!sessionsExpanded}
+          inert={!sessionsExpanded ? "" : undefined}
+        >
+          <div className="sidebar-collapse-inner">
+            <div className="org-member-session-list">
+              {memberSessions.length === 0 ? (
+                <div className="org-member-session-empty">
+                  <span>No conversations yet.</span>
                   <button
                     type="button"
-                    className="sidebar-load-more"
-                    onClick={() => setSessionLimit((prev) => prev + 5)}
+                    className="agent-btn secondary xs"
+                    disabled={busy}
+                    onClick={() =>
+                      onOpenChat?.({
+                        teamId: node.teamId,
+                        agentId: node.agentId,
+                        forceNew: true,
+                      })
+                    }
                   >
-                    <span>Show {moreSessionsCount} more</span>
+                    <Plus size={11} aria-hidden="true" />
+                    <span>Start conversation</span>
                   </button>
-                )}
-              </>
-            )}
+                </div>
+              ) : (
+                <>
+                  {visibleSessions.map((sess) => (
+                    <div key={sess.runtimeSessionId} className="org-member-session-row">
+                      {renamingSessionId === sess.runtimeSessionId ? (
+                        <form
+                          className="org-session-rename-form"
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            await onRenameSession?.(sess.runtimeSessionId, renameDraft, {
+                              teamId: node.teamId,
+                            });
+                            setRenamingSessionId("");
+                          }}
+                        >
+                          <input
+                            type="text"
+                            value={renameDraft}
+                            onChange={(e) => setRenameDraft(e.target.value)}
+                            placeholder="Conversation title"
+                            autoFocus
+                          />
+                          <button type="submit" className="agent-btn primary xs" disabled={busy}>
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            className="agent-btn ghost xs"
+                            onClick={() => setRenamingSessionId("")}
+                          >
+                            Cancel
+                          </button>
+                        </form>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="org-member-session-main"
+                            onClick={() =>
+                              onOpenChat?.({
+                                teamId: node.teamId,
+                                agentId: node.agentId,
+                                runtimeSessionId: sess.runtimeSessionId,
+                              })
+                            }
+                          >
+                            <span className={`agent-status-dot tone-${sess.tone}`} />
+                            <span className="org-member-session-title">{sess.title}</span>
+                            {sess.origin === "task" && (
+                              <span className="org-member-session-badge">Task</span>
+                            )}
+                            {sess.status && sess.status !== "Idle" && (
+                              <span className={`org-member-session-status tone-${sess.tone}`}>
+                                {sess.status}
+                              </span>
+                            )}
+                            {sess.ageText && (
+                              <span className="org-member-session-age">{sess.ageText}</span>
+                            )}
+                          </button>
+                          <div className="org-member-session-actions">
+                            <button
+                              type="button"
+                              className="icon-button xs"
+                              title="Rename conversation"
+                              aria-label={`Rename ${sess.title}`}
+                              onClick={() => {
+                                setRenamingSessionId(sess.runtimeSessionId);
+                                setRenameDraft(sess.title);
+                              }}
+                            >
+                              <Pencil size={11} aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-button xs"
+                              title="Delete conversation"
+                              aria-label={`Delete ${sess.title}`}
+                              onClick={() =>
+                                onDeleteSession?.(sess.runtimeSessionId, { teamId: node.teamId })
+                              }
+                            >
+                              <Trash2 size={11} aria-hidden="true" />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {moreSessionsCount > 0 && (
+                    <button
+                      type="button"
+                      className="sidebar-load-more"
+                      onClick={() => setSessionLimit((prev) => prev + 5)}
+                    >
+                      <span>Show {moreSessionsCount} more</span>
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
-        )}
+        </div>
 
         {modelOpen && (
           <form className="org-member-edit-form" onSubmit={saveModelConfig}>

@@ -1282,14 +1282,7 @@ export function renderSidebarAgentsHtml(options: {
       const tasksCount = summary?.counts.tasksTotal ?? 0
       const teamMenuKey = `team:${team.id}`
       const teamMenuOpen = itemMenuKey === teamMenuKey
-      const teamSubtitle = [
-        `${membersCount} ${membersCount === 1 ? "member" : "members"}`,
-        `${tasksCount} ${tasksCount === 1 ? "task" : "tasks"}`,
-        workingCount > 0 ? `${workingCount} active` : "",
-        attentionCount > 0 ? `${attentionCount} review` : "",
-      ]
-        .filter(Boolean)
-        .join(" · ")
+      const membersCountLabel = `${membersCount} ${membersCount === 1 ? "member" : "members"}`
 
       const membersHtml =
         !isCollapsed && summary
@@ -1377,7 +1370,7 @@ export function renderSidebarAgentsHtml(options: {
           : ""
 
       return `
-        <section class="project-item${!isCollapsed ? " expanded" : ""}${isSelectedTeam ? " is-selected-team" : ""}">
+        <section class="project-item team-project-item${!isCollapsed ? " expanded" : ""}${isSelectedTeam ? " is-selected-team" : ""}">
           <div class="project-row">
             <button type="button" class="project-trigger" data-sidebar-toggle-team="${escapeAttribute(team.id)}" aria-expanded="${!isCollapsed}" title="${escapeAttribute(team.createRoot || team.name)}">
               <span class="project-name-row">
@@ -1385,7 +1378,11 @@ export function renderSidebarAgentsHtml(options: {
                 ${workingCount > 0 ? `<span class="sidebar-mini-dot working" title="Working"></span>` : ""}
                 ${attentionCount > 0 ? `<span class="sidebar-nav-badge attention">${attentionCount}</span>` : ""}
               </span>
-              <span class="project-path">${escapeHtml(teamSubtitle)}</span>
+              ${
+                !isCollapsed
+                  ? `<span class="team-trigger-meta-wrap"><span class="team-trigger-meta">${escapeHtml(membersCountLabel)}</span></span>`
+                  : ""
+              }
             </button>
             <div class="project-menu-wrap">
               <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(teamMenuKey)}" title="Team actions" aria-label="Team actions for ${escapeAttribute(team.name)}" aria-haspopup="menu" aria-expanded="${String(teamMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
@@ -1443,7 +1440,6 @@ export function renderSidebarAgentsHtml(options: {
             <div class="project-row">
               <button type="button" class="project-trigger" data-sidebar-toggle-manager="1" aria-expanded="${Boolean(options.managerExpanded)}" title="Organization coordinator">
                 <span class="project-name">Manager</span>
-                <span class="project-path">Organization coordinator · ${managerSessionsList.length} ${managerSessionsList.length === 1 ? "session" : "sessions"}</span>
               </button>
               <div class="project-menu-wrap">
                 <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="manager" title="Manager actions" aria-label="Manager actions" aria-haspopup="menu" aria-expanded="${String(managerMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>

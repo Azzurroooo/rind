@@ -34,6 +34,7 @@ import {
 import { loadDirectory } from "./files-panel.ts"
 import { asRecord, asRecordText } from "./html.ts"
 import { showToast } from "./overlays.ts"
+import { animateCollapse, animateExpand } from "./accordion.ts"
 import { loadReplay, resetConversationPresentation, runAction } from "./runtime.ts"
 import { exportSessionReplay, forkSession, loadSessions, restoreProjectDraft } from "./sessions.ts"
 import { render, scheduleRender } from "./shell.ts"
@@ -483,6 +484,39 @@ function resetAgentSessionDeleteConfirm() {
   }
 }
 
+function findManagerSessionsElement(): HTMLElement | null {
+  const trigger = sidebarAgents.querySelector<HTMLElement>("[data-sidebar-toggle-manager]")
+  return trigger?.closest<HTMLElement>(".project-item")?.querySelector<HTMLElement>(":scope > .project-sessions") || null
+}
+
+function findTeamElements(teamId: string): {
+  sessions: HTMLElement | null
+  metaWrap: HTMLElement | null
+} {
+  const trigger = [...sidebarAgents.querySelectorAll<HTMLElement>("[data-sidebar-toggle-team]")].find(
+    (el) => el.dataset.sidebarToggleTeam === teamId,
+  )
+  const item = trigger?.closest<HTMLElement>(".project-item")
+  return {
+    sessions: item?.querySelector<HTMLElement>(":scope > .project-sessions") || null,
+    metaWrap: trigger?.querySelector<HTMLElement>(".team-trigger-meta-wrap") || null,
+  }
+}
+
+function findMemberSessionsElement(memberKey: string): HTMLElement | null {
+  const trigger = [...sidebarAgents.querySelectorAll<HTMLElement>("[data-sidebar-toggle-member]")].find(
+    (el) => el.dataset.sidebarToggleMember === memberKey,
+  )
+  return trigger?.closest<HTMLElement>(".project-item")?.querySelector<HTMLElement>(":scope > .project-sessions") || null
+}
+
+function findOrgMemberSessionsElement(agentId: string): HTMLElement | null {
+  const trigger = [...agentsSurface.querySelectorAll<HTMLElement>("[data-org-toggle-member-sessions]")].find(
+    (el) => el.dataset.orgToggleMemberSessions === agentId,
+  )
+  return trigger?.closest<HTMLElement>(".org-member-card")?.querySelector<HTMLElement>(".org-member-sessions") || null
+}
+
 export function bindAgentsEvents(): () => void {
   const handleModeClick = (event: MouseEvent) => {
     const target = event.target as HTMLElement
@@ -628,12 +662,18 @@ export function bindAgentsEvents(): () => void {
       if (!state.managerExpanded) {
         state.managerExpanded = true
         state.agentSurface = { kind: "manager" }
+        render()
+        animateExpand(findManagerSessionsElement())
       } else if (state.agentSurface.kind !== "manager") {
         state.agentSurface = { kind: "manager" }
+        render()
       } else {
-        state.managerExpanded = false
+        void (async () => {
+          await animateCollapse(findManagerSessionsElement())
+          state.managerExpanded = false
+          render()
+        })()
       }
-      render()
       return
     }
 
@@ -676,11 +716,18 @@ export function bindAgentsEvents(): () => void {
       if (isCollapsed) {
         state.collapsedTeams.delete(teamId)
         openTeamSurface(teamId, "organization")
+        const { sessions, metaWrap } = findTeamElements(teamId)
+        animateExpand(metaWrap)
+        animateExpand(sessions)
       } else if (!isShowingTeam) {
         openTeamSurface(teamId, "organization")
       } else {
-        state.collapsedTeams.add(teamId)
-        render()
+        void (async () => {
+          const { sessions, metaWrap } = findTeamElements(teamId)
+          await Promise.all([animateCollapse(metaWrap), animateCollapse(sessions)])
+          state.collapsedTeams.add(teamId)
+          render()
+        })()
       }
       return
     }
@@ -689,6 +736,7 @@ export function bindAgentsEvents(): () => void {
     if (teamMenuActionBtn?.dataset.sidebarTeamAction && teamMenuActionBtn.dataset.teamId) {
       const action = teamMenuActionBtn.dataset.sidebarTeamAction
       const teamId = teamMenuActionBtn.dataset.teamId
+      const wasCollapsed = state.collapsedTeams.has(teamId)
       state.agentItemMenuKey = ""
       state.collapsedTeams.delete(teamId)
       state.agentSurface = {
@@ -704,6 +752,11 @@ export function bindAgentsEvents(): () => void {
         deleteConfirmOpen: action === "delete",
       }
       render()
+      if (wasCollapsed) {
+        const { sessions, metaWrap } = findTeamElements(teamId)
+        animateExpand(metaWrap)
+        animateExpand(sessions)
+      }
       return
     }
 
@@ -734,18 +787,36 @@ export function bindAgentsEvents(): () => void {
       const memberKey = toggleMemberBtn.dataset.sidebarToggleMember
       state.agentItemMenuKey = ""
       state.sessionMenuId = ""
-      if (state.expandedSidebarMembers.has(memberKey)) state.expandedSidebarMembers.delete(memberKey)
-      else state.expandedSidebarMembers.add(memberKey)
-      render()
+      const wasExpanded = state.expandedSidebarMembers.has(memberKey)
+      if (wasExpanded) {
+        void (async () => {
+          await animateCollapse(findMemberSessionsElement(memberKey))
+          state.expandedSidebarMembers.delete(memberKey)
+          render()
+        })()
+      } else {
+        state.expandedSidebarMembers.add(memberKey)
+        render()
+        animateExpand(findMemberSessionsElement(memberKey))
+      }
       return
     }
 
     const toggleOrgMemberSessionsBtn = target.closest<HTMLElement>("[data-org-toggle-member-sessions]")
     if (toggleOrgMemberSessionsBtn?.dataset.orgToggleMemberSessions) {
       const agentId = toggleOrgMemberSessionsBtn.dataset.orgToggleMemberSessions
-      if (state.expandedOrgMembers.has(agentId)) state.expandedOrgMembers.delete(agentId)
-      else state.expandedOrgMembers.add(agentId)
-      render()
+      const wasExpanded = state.expandedOrgMembers.has(agentId)
+      if (wasExpanded) {
+        void (async () => {
+          await animateCollapse(findOrgMemberSessionsElement(agentId))
+          state.expandedOrgMembers.delete(agentId)
+          render()
+        })()
+      } else {
+        state.expandedOrgMembers.add(agentId)
+        render()
+        animateExpand(findOrgMemberSessionsElement(agentId))
+      }
       return
     }
 
