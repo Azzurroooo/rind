@@ -163,36 +163,38 @@ appRoot.innerHTML = `
             <p class="settings-group-desc">Global defaults applied to new conversations across all workspaces. Click Edit to unlock changes, then Save changes to apply.</p>
             <div class="settings-row">
               <div class="settings-row-text">
-                <span class="settings-row-label"><label for="settings-provider">Default provider</label></span>
+                <span id="settings-provider-label" class="settings-row-label">Default provider</span>
                 <span class="settings-row-desc">Connected provider (grouped by OAuth, Custom, or Built-in) used for new conversations.</span>
               </div>
               <div class="settings-row-control">
-                <select id="settings-provider" disabled></select>
+                <div class="settings-select" data-settings-select="provider">
+                  <button id="settings-provider" type="button" class="settings-select-trigger" aria-labelledby="settings-provider-label" aria-haspopup="listbox" aria-expanded="false" disabled></button>
+                  <div id="settings-provider-menu" class="settings-select-menu panel-scroll" role="listbox" aria-labelledby="settings-provider-label" hidden></div>
+                </div>
               </div>
             </div>
             <div id="settings-model-row" class="settings-row">
               <div class="settings-row-text">
-                <span class="settings-row-label"><label for="settings-model">Default model</label></span>
+                <span id="settings-model-label" class="settings-row-label">Default model</span>
                 <span class="settings-row-desc">Default model for the selected provider.</span>
               </div>
               <div class="settings-row-control">
-                <select id="settings-model" disabled></select>
+                <div class="settings-select" data-settings-select="model">
+                  <button id="settings-model" type="button" class="settings-select-trigger" aria-labelledby="settings-model-label" aria-haspopup="listbox" aria-expanded="false" disabled></button>
+                  <div id="settings-model-menu" class="settings-select-menu panel-scroll" role="listbox" aria-labelledby="settings-model-label" hidden></div>
+                </div>
               </div>
             </div>
             <div id="settings-reasoning-row" class="settings-row">
               <div class="settings-row-text">
-                <span class="settings-row-label"><label for="settings-reasoning">Reasoning effort</label></span>
+                <span id="settings-reasoning-label" class="settings-row-label">Reasoning effort</span>
                 <span class="settings-row-desc">Thinking budget for reasoning-capable models.</span>
               </div>
               <div class="settings-row-control">
-                <select id="settings-reasoning" disabled>
-                  <option value="">Default</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="xhigh">Extra high</option>
-                  <option value="max">Maximum</option>
-                </select>
+                <div class="settings-select" data-settings-select="reasoning">
+                  <button id="settings-reasoning" type="button" class="settings-select-trigger" aria-labelledby="settings-reasoning-label" aria-haspopup="listbox" aria-expanded="false" disabled></button>
+                  <div id="settings-reasoning-menu" class="settings-select-menu panel-scroll" role="listbox" aria-labelledby="settings-reasoning-label" hidden></div>
+                </div>
               </div>
             </div>
           </div>
@@ -334,9 +336,12 @@ export const sidebarToggle = requiredElement<HTMLButtonElement>("toggle-sidebar"
 export const settingsDialog = requiredElement<HTMLDialogElement>("settings-dialog")
 export const settingsForm = requiredElement<HTMLFormElement>("settings-form")
 export const settingsGeneralEdit = requiredElement<HTMLButtonElement>("settings-general-edit")
-export const settingsProvider = requiredElement<HTMLSelectElement>("settings-provider")
-export const settingsModel = requiredElement<HTMLSelectElement>("settings-model")
-export const settingsReasoning = requiredElement<HTMLSelectElement>("settings-reasoning")
+export const settingsProvider = requiredElement<HTMLButtonElement>("settings-provider")
+export const settingsProviderMenu = requiredElement("settings-provider-menu")
+export const settingsModel = requiredElement<HTMLButtonElement>("settings-model")
+export const settingsModelMenu = requiredElement("settings-model-menu")
+export const settingsReasoning = requiredElement<HTMLButtonElement>("settings-reasoning")
+export const settingsReasoningMenu = requiredElement("settings-reasoning-menu")
 export const settingsNotifications = requiredElement<HTMLInputElement>("settings-notifications")
 export const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
 export const settingsProviders = requiredElement("settings-providers")

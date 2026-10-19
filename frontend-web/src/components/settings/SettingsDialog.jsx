@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bell, KeyRound, LogOut, SlidersHorizontal } from "lucide-react";
+import { Bell, Check, ChevronDown, KeyRound, LogOut, SlidersHorizontal } from "lucide-react";
 import { Dialog } from "../overlays/Dialog.jsx";
 import { methods } from "../../methods.js";
 
@@ -308,6 +308,134 @@ function formatProviderSectionStatus(provider, section) {
   return "Not connected";
 }
 
+function SettingsSelect({
+  id,
+  ariaLabel,
+  value,
+  disabled = false,
+  mono = false,
+  groups,
+  options,
+  isOpen = false,
+  onToggle,
+  onChange,
+}) {
+  const flatOptions = useMemo(() => {
+    if (Array.isArray(groups)) {
+      return groups.flatMap((g) => g.options || []);
+    }
+    return Array.isArray(options) ? options : [];
+  }, [groups, options]);
+
+  const selectedOption = flatOptions.find((o) => o.value === value) ||
+    flatOptions[0] || {
+      value,
+      label: value || "Default",
+    };
+
+  return (
+    <div className={`settings-select${isOpen ? " is-open" : ""}`}>
+      <button
+        id={id}
+        type="button"
+        className="settings-select-trigger"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        data-value={value}
+        disabled={disabled}
+        onClick={onToggle}
+      >
+        <span className="settings-select-trigger-content">
+          <span className={`settings-select-trigger-label${mono ? " is-mono" : ""}`}>
+            {selectedOption.label}
+          </span>
+          {selectedOption.badge && (
+            <span className="settings-select-badge">{selectedOption.badge}</span>
+          )}
+        </span>
+        <ChevronDown size={14} className="settings-select-chevron" aria-hidden="true" />
+      </button>
+
+      {isOpen && !disabled && (
+        <div
+          className="settings-select-menu panel-scroll"
+          role="listbox"
+          aria-label={`${ariaLabel} options`}
+        >
+          {Array.isArray(groups)
+            ? groups.map((group) => (
+                <div
+                  key={group.key}
+                  className="settings-select-group"
+                  role="group"
+                  aria-label={group.label}
+                >
+                  <div className="settings-select-group-title">{group.label}</div>
+                  {group.options.map((opt) => {
+                    const selected = opt.value === value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        data-value={opt.value}
+                        className={`settings-select-option${selected ? " is-selected" : ""}`}
+                        onClick={() => onChange(opt.value)}
+                      >
+                        <span className="settings-select-option-content">
+                          <span
+                            className={`settings-select-option-label${mono ? " is-mono" : ""}`}
+                          >
+                            {opt.label}
+                          </span>
+                          {opt.badge && (
+                            <span className="settings-select-badge">{opt.badge}</span>
+                          )}
+                        </span>
+                        <span className="settings-select-check" aria-hidden="true">
+                          {selected ? <Check size={13} /> : null}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))
+            : flatOptions.map((opt) => {
+                const selected = opt.value === value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    data-value={opt.value}
+                    className={`settings-select-option${selected ? " is-selected" : ""}`}
+                    onClick={() => onChange(opt.value)}
+                  >
+                    <span className="settings-select-option-content">
+                      <span
+                        className={`settings-select-option-label${mono ? " is-mono" : ""}`}
+                      >
+                        {opt.label}
+                      </span>
+                      {opt.badge && (
+                        <span className="settings-select-badge">{opt.badge}</span>
+                      )}
+                    </span>
+                    <span className="settings-select-check" aria-hidden="true">
+                      {selected ? <Check size={13} /> : null}
+                    </span>
+                  </button>
+                );
+              })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsDialog({
   open,
   onClose,
@@ -336,6 +464,7 @@ export function SettingsDialog({
   const [generalModel, setGeneralModel] = useState("gpt-4o-mini");
   const [generalEffort, setGeneralEffort] = useState("");
   const [generalEditing, setGeneralEditing] = useState(false);
+  const [openGeneralSelectId, setOpenGeneralSelectId] = useState("");
   const [savingGeneral, setSavingGeneral] = useState(false);
   const [generalStatus, setGeneralStatus] = useState({ tone: "", text: "" });
 
@@ -424,6 +553,7 @@ export function SettingsDialog({
     if (!open) return;
     let cancelled = false;
     setGeneralEditing(false);
+    setOpenGeneralSelectId("");
     setGeneralStatus({ tone: "", text: "" });
     setProviderNotice({ tone: "", text: "" });
     setOpenMenuId("");
@@ -635,6 +765,7 @@ export function SettingsDialog({
     const reasoningEffort = supportedEfforts.length > 0 ? generalEffort.trim() : "";
 
     setSavingGeneral(true);
+    setOpenGeneralSelectId("");
     setGeneralStatus({ tone: "", text: "" });
     try {
       await postLocalSettings({
@@ -1024,6 +1155,7 @@ export function SettingsDialog({
                 if (id !== "general") {
                   setGeneralEditing(false);
                 }
+                setOpenGeneralSelectId("");
                 setTab(id);
                 setOpenMenuId("");
               }}
@@ -1047,6 +1179,9 @@ export function SettingsDialog({
             onClick={(e) => {
               if (openMenuId && !e.target.closest?.(".provider-menu-wrap")) {
                 setOpenMenuId("");
+              }
+              if (openGeneralSelectId && !e.target.closest?.(".settings-select")) {
+                setOpenGeneralSelectId("");
               }
             }}
           >
@@ -1099,6 +1234,7 @@ export function SettingsDialog({
                         onClick={() => {
                           if (generalEditing) {
                             setGeneralEditing(false);
+                            setOpenGeneralSelectId("");
                             setGeneralProvider(localSettings.provider || "openai");
                             setGeneralModel(localSettings.model || "gpt-4o-mini");
                             setGeneralEffort(localSettings.reasoningEffort || "");
@@ -1116,92 +1252,108 @@ export function SettingsDialog({
 
                     <div className="settings-row">
                       <div className="settings-row-text">
-                        <label htmlFor="web-settings-provider" className="settings-row-label">
-                          Default provider
-                        </label>
+                        <span className="settings-row-label">Default provider</span>
                         <span className="settings-row-desc">
                           Connected provider (grouped by OAuth, Custom, or Built-in) used for new conversations.
                         </span>
                       </div>
                       <div className="settings-row-control">
-                        <select
+                        <SettingsSelect
                           id="web-settings-provider"
-                          aria-label="Default provider"
+                          ariaLabel="Default provider"
                           value={generalProvider}
                           disabled={!generalEditing || savingGeneral}
-                          onChange={(e) => {
-                            const nextProvider = e.target.value;
+                          isOpen={openGeneralSelectId === "provider"}
+                          onToggle={() =>
+                            setOpenGeneralSelectId((prev) =>
+                              prev === "provider" ? "" : "provider",
+                            )
+                          }
+                          groups={configuredProviderGroups.map((group) => ({
+                            key: group.key,
+                            label: group.label,
+                            options: group.providers.map((p) => ({
+                              value: p.id,
+                              label: p.name,
+                              badge: group.key,
+                            })),
+                          }))}
+                          onChange={(nextProvider) => {
                             setGeneralProvider(nextProvider);
                             const nextModels = getModelsForProvider(nextProvider);
                             if (nextModels.length > 0 && !nextModels.includes(generalModel)) {
                               setGeneralModel(nextModels[0]);
                             }
+                            setOpenGeneralSelectId("");
                           }}
-                        >
-                          {configuredProviderGroups.map((group) => (
-                            <optgroup key={group.key} label={group.label}>
-                              {group.providers.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {`${p.name} · ${group.key}`}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </select>
+                        />
                       </div>
                     </div>
 
                     <div className="settings-row">
                       <div className="settings-row-text">
-                        <label htmlFor="web-settings-model" className="settings-row-label">
-                          Default model
-                        </label>
+                        <span className="settings-row-label">Default model</span>
                         <span className="settings-row-desc">
                           Default model for the selected provider.
                         </span>
                       </div>
                       <div className="settings-row-control">
-                        <select
+                        <SettingsSelect
                           id="web-settings-model"
-                          aria-label="Default model"
+                          ariaLabel="Default model"
                           value={generalModel}
+                          mono
                           disabled={!generalEditing || savingGeneral}
-                          onChange={(e) => setGeneralModel(e.target.value)}
-                        >
-                          {providerModels.map((m) => (
-                            <option key={m} value={m}>
-                              {m}
-                            </option>
-                          ))}
-                        </select>
+                          isOpen={openGeneralSelectId === "model"}
+                          onToggle={() =>
+                            setOpenGeneralSelectId((prev) =>
+                              prev === "model" ? "" : "model",
+                            )
+                          }
+                          options={providerModels.map((m) => ({
+                            value: m,
+                            label: m,
+                          }))}
+                          onChange={(nextModel) => {
+                            setGeneralModel(nextModel);
+                            setOpenGeneralSelectId("");
+                          }}
+                        />
                       </div>
                     </div>
 
                     {supportedEfforts.length > 0 && (
                       <div className="settings-row">
                         <div className="settings-row-text">
-                          <label htmlFor="web-settings-effort" className="settings-row-label">
-                            Reasoning effort
-                          </label>
+                          <span className="settings-row-label">Reasoning effort</span>
                           <span className="settings-row-desc">
                             Thinking budget for reasoning-capable models.
                           </span>
                         </div>
                         <div className="settings-row-control">
-                          <select
+                          <SettingsSelect
                             id="web-settings-effort"
-                            aria-label="Reasoning effort"
+                            ariaLabel="Reasoning effort"
                             value={supportedEfforts.includes(generalEffort) ? generalEffort : ""}
                             disabled={!generalEditing || savingGeneral}
-                            onChange={(e) => setGeneralEffort(e.target.value)}
-                          >
-                            <option value="">Default</option>
-                            {supportedEfforts.map((effort) => (
-                              <option key={effort} value={effort}>
-                                {EFFORT_LABELS[effort] || effort}
-                              </option>
-                            ))}
-                          </select>
+                            isOpen={openGeneralSelectId === "effort"}
+                            onToggle={() =>
+                              setOpenGeneralSelectId((prev) =>
+                                prev === "effort" ? "" : "effort",
+                              )
+                            }
+                            options={[
+                              { value: "", label: "Default" },
+                              ...supportedEfforts.map((effort) => ({
+                                value: effort,
+                                label: EFFORT_LABELS[effort] || effort,
+                              })),
+                            ]}
+                            onChange={(nextEffort) => {
+                              setGeneralEffort(nextEffort);
+                              setOpenGeneralSelectId("");
+                            }}
+                          />
                         </div>
                       </div>
                     )}

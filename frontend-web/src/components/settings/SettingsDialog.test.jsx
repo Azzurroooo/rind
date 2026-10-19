@@ -86,54 +86,32 @@ describe("SettingsDialog", () => {
     expect(document.querySelector(".settings-dialog")).toBeNull();
   });
 
-  it("opens on General with Global Default Configuration locked by default, groups Default provider by OAuth/Custom/Built-in, keeps Default model clean, unlocks on Edit, and saves on Save changes", async () => {
+  it("opens on General with Global Default Configuration locked by default, groups Default provider by OAuth/Custom/Built-in in minimalist custom dropdowns, keeps Default model clean, unlocks on Edit, and saves on Save changes", async () => {
     const handlers = renderSettings();
     expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
     await waitFor(() => {
-      expect(screen.getByLabelText("Default provider").value).toBe("deepseek");
+      expect(screen.getByLabelText("Default provider").getAttribute("data-value")).toBe("deepseek");
     });
 
     // Explicitly labeled as Global Default Configuration
     expect(document.querySelector(".settings-dialog").textContent).toContain("Global Default Configuration");
     expect(document.querySelector(".settings-dialog").textContent).toContain("~/.rind/settings.json");
 
-    const providerSelect = screen.getByLabelText("Default provider");
-    const modelSelect = screen.getByLabelText("Default model");
-    const effortSelect = screen.getByLabelText("Reasoning effort");
+    const providerTrigger = screen.getByLabelText("Default provider");
+    const modelTrigger = screen.getByLabelText("Default model");
+    const effortTrigger = screen.getByLabelText("Reasoning effort");
     const saveBtn = screen.getByRole("button", { name: "Save changes" });
 
+    // Trigger displays provider name + subtle source badge
+    expect(providerTrigger.textContent).toContain("DeepSeek");
+    expect(providerTrigger.textContent).toContain("Built-in");
+    expect(modelTrigger.textContent).toBe("deepseek-flash");
+
     // All fields and Save changes are disabled by default (foolproof lock)
-    expect(providerSelect.disabled).toBe(true);
-    expect(modelSelect.disabled).toBe(true);
-    expect(effortSelect.disabled).toBe(true);
+    expect(providerTrigger.disabled).toBe(true);
+    expect(modelTrigger.disabled).toBe(true);
+    expect(effortTrigger.disabled).toBe(true);
     expect(saveBtn.disabled).toBe(true);
-
-    // Default provider separates configured providers into distinct optgroups (OAuth & Accounts, Custom APIs, Built-in Providers)
-    const optgroups = [...providerSelect.querySelectorAll("optgroup")].map((g) => ({
-      label: g.getAttribute("label"),
-      options: [...g.querySelectorAll("option")].map((o) => ({ value: o.value, text: o.textContent })),
-    }));
-    expect(optgroups).toEqual([
-      {
-        label: "OAuth & Accounts",
-        options: [{ value: "openai", text: "OpenAI · OAuth" }],
-      },
-      {
-        label: "Custom APIs",
-        options: [{ value: "xiaomi", text: "Xiaomi · Custom" }],
-      },
-      {
-        label: "Built-in Providers",
-        options: [{ value: "deepseek", text: "DeepSeek · Built-in" }],
-      },
-    ]);
-
-    // Default model dropdown shows clean model IDs without redundant Built-in / OAuth / Custom suffixes
-    const modelOptionTexts = [...modelSelect.querySelectorAll("option")].map((o) => o.textContent);
-    expect(modelOptionTexts).toContain("deepseek-flash");
-    expect(modelOptionTexts.some((t) => t.includes("Built-in") || t.includes("OAuth") || t.includes("Custom"))).toBe(
-      false,
-    );
 
     // Workspace Override is not shown in General
     expect(document.querySelector(".settings-dialog").textContent).not.toContain("Workspace Override");
@@ -148,23 +126,63 @@ describe("SettingsDialog", () => {
 
     // Clicking Edit unlocks the fields and enables Save changes
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    expect(providerSelect.disabled).toBe(false);
-    expect(modelSelect.disabled).toBe(false);
-    expect(effortSelect.disabled).toBe(false);
+    expect(providerTrigger.disabled).toBe(false);
+    expect(modelTrigger.disabled).toBe(false);
+    expect(effortTrigger.disabled).toBe(false);
     expect(saveBtn.disabled).toBe(false);
 
-    // Selecting OpenAI updates Default model cleanly; selecting a non-reasoning model hides Reasoning effort
-    fireEvent.change(providerSelect, { target: { value: "openai" } });
-    const openaiModelTexts = [...screen.getByLabelText("Default model").querySelectorAll("option")].map(
-      (o) => o.textContent,
+    // Opening Default provider dropdown shows custom grouped sections (OAuth & Accounts, Custom APIs, Built-in Providers)
+    fireEvent.click(providerTrigger);
+    const providerMenu = screen.getByRole("listbox", { name: "Default provider options" });
+    const groups = [...providerMenu.querySelectorAll(".settings-select-group")].map((g) => ({
+      label: g.querySelector(".settings-select-group-title")?.textContent,
+      options: [...g.querySelectorAll('[role="option"]')].map((o) => ({
+        value: o.getAttribute("data-value"),
+        label: o.querySelector(".settings-select-option-label")?.textContent,
+        badge: o.querySelector(".settings-select-badge")?.textContent,
+      })),
+    }));
+    expect(groups).toEqual([
+      {
+        label: "OAuth & Accounts",
+        options: [{ value: "openai", label: "OpenAI", badge: "OAuth" }],
+      },
+      {
+        label: "Custom APIs",
+        options: [{ value: "xiaomi", label: "Xiaomi", badge: "Custom" }],
+      },
+      {
+        label: "Built-in Providers",
+        options: [{ value: "deepseek", label: "DeepSeek", badge: "Built-in" }],
+      },
+    ]);
+
+    // Selecting OpenAI from the custom dropdown closes the menu and updates Default model cleanly
+    fireEvent.click(providerMenu.querySelector('[data-value="openai"]'));
+    expect(screen.getByLabelText("Default provider").getAttribute("data-value")).toBe("openai");
+
+    // Open Default model custom dropdown and verify clean model IDs without Built-in / OAuth / Custom suffixes
+    fireEvent.click(screen.getByLabelText("Default model"));
+    const modelMenu = screen.getByRole("listbox", { name: "Default model options" });
+    const modelOptionTexts = [...modelMenu.querySelectorAll('[role="option"]')].map((o) => o.textContent);
+    expect(modelOptionTexts).toContain("gpt-5");
+    expect(modelOptionTexts.some((t) => t.includes("Built-in") || t.includes("OAuth") || t.includes("Custom"))).toBe(
+      false,
     );
-    expect(openaiModelTexts).toContain("gpt-5");
-    fireEvent.change(screen.getByLabelText("Default model"), { target: { value: "gpt-4o-mini" } });
+
+    // Selecting a non-reasoning model hides Reasoning effort
+    fireEvent.click(modelMenu.querySelector('[data-value="gpt-4o-mini"]'));
     expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
 
     // Selecting a reasoning model reveals Reasoning effort
-    fireEvent.change(screen.getByLabelText("Default model"), { target: { value: "gpt-5" } });
-    fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "xhigh" } });
+    fireEvent.click(screen.getByLabelText("Default model"));
+    fireEvent.click(
+      screen.getByRole("listbox", { name: "Default model options" }).querySelector('[data-value="gpt-5"]'),
+    );
+    fireEvent.click(screen.getByLabelText("Reasoning effort"));
+    fireEvent.click(
+      screen.getByRole("listbox", { name: "Reasoning effort options" }).querySelector('[data-value="xhigh"]'),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
@@ -185,7 +203,7 @@ describe("SettingsDialog", () => {
   it("separates OAuth & Accounts, Custom APIs, and Built-in Providers in Providers tab with Manage/Connect buttons without ▾", async () => {
     renderSettings();
     await waitFor(() => {
-      expect(screen.getByLabelText("Default provider").value).toBe("deepseek");
+      expect(screen.getByLabelText("Default provider").getAttribute("data-value")).toBe("deepseek");
     });
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
     expect(screen.getByRole("button", { name: "Providers" }).getAttribute("aria-current")).toBe("page");
@@ -221,7 +239,7 @@ describe("SettingsDialog", () => {
   it("navigates to Preferences and Account to switch theme, view keyboard shortcuts, and sign out", async () => {
     const handlers = renderSettings();
     await waitFor(() => {
-      expect(screen.getByLabelText("Default provider").value).toBe("deepseek");
+      expect(screen.getByLabelText("Default provider").getAttribute("data-value")).toBe("deepseek");
     });
     fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
     expect(screen.getByRole("button", { name: "Preferences" }).getAttribute("aria-current")).toBe("page");

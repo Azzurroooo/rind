@@ -168,18 +168,27 @@ test("desktop settings close button is pinned, General locks Global Default Conf
   assert.ok(
     domSource.includes("Global Default Configuration") &&
       domSource.includes('id="settings-general-edit"') &&
-      domSource.includes('<select id="settings-provider" disabled>') &&
-      domSource.includes('<select id="settings-model" disabled>') &&
-      domSource.includes('<select id="settings-reasoning" disabled>') &&
+      domSource.includes('id="settings-provider"') &&
+      domSource.includes('id="settings-provider-menu"') &&
+      domSource.includes('id="settings-model"') &&
+      domSource.includes('id="settings-model-menu"') &&
+      domSource.includes('id="settings-reasoning"') &&
+      domSource.includes('id="settings-reasoning-menu"') &&
+      !domSource.includes('<select id="settings-provider"') &&
+      !domSource.includes('<select id="settings-model"') &&
+      !domSource.includes('<select id="settings-reasoning"') &&
       settingsSource.includes("syncGeneralEditingState"),
-    "General settings must explicitly state Global Default Configuration and lock controls until Edit is clicked",
+    "General settings must explicitly state Global Default Configuration, use custom .settings-select dropdown controls, and lock them until Edit is clicked",
   )
   assert.ok(
     providersSource.includes("groupConfiguredProviders") &&
       settingsSource.includes("groupConfiguredProviders(getMergedProviders())") &&
-      settingsSource.includes("<optgroup label=") &&
+      settingsSource.includes("settings-select-group-title") &&
+      settingsSource.includes("renderSelectTriggerHtml") &&
+      settingsSource.includes("renderSelectOptionHtml") &&
+      cssSource.includes(".settings-select-menu") &&
       !settingsSource.includes("getProviderSourceLabelById"),
-    "General Default provider must group configured providers by OAuth / Custom / Built-in optgroups while Default model stays clean without redundant source tags",
+    "General Default provider must group configured providers by OAuth / Custom / Built-in in the custom dropdown while Default model stays clean without redundant source tags",
   )
   assert.ok(
     providersSource.includes("OAuth &amp; Accounts") &&
