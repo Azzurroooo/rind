@@ -8,6 +8,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-concurrency=1 scripts/*.test.mjs",
+    "predev": "node scripts/ensure-dev-icon.mjs",
     "dev": "electron-vite dev",
     "build:web": "npm --prefix ../frontend-web run build",
     "prebuild": "npm run build:web",

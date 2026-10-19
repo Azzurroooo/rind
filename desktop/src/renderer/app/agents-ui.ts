@@ -36,7 +36,7 @@ import { asRecord, asRecordText } from "./html.ts"
 import { showToast } from "./overlays.ts"
 import { animateCollapse, animateExpand } from "./accordion.ts"
 import { loadReplay, resetConversationPresentation, runAction } from "./runtime.ts"
-import { exportSessionReplay, forkSession, loadSessions, restoreProjectDraft } from "./sessions.ts"
+import { exportSessionReplay, forkSession, loadSessions, prepareNewSessionState, restoreProjectDraft } from "./sessions.ts"
 import { render, scheduleRender } from "./shell.ts"
 import { state, vars } from "./state.ts"
 
@@ -76,7 +76,28 @@ let taskDrawerExpanded = false
 
 export function currentSessionAgentContext(): SessionAgentContext {
   if (state.agentChatContext && state.agentChatContext.kind !== "independent") {
-    return state.agentChatContext
+    if (state.agentChatContext.workspaceRoot) return state.agentChatContext
+    const fallbackWs =
+      state.agentChatContext.kind === "manager"
+        ? String(
+            state.agentsSnapshot.agents.find((a) => String(a.name).toLowerCase() === "manager")?.canonicalWorkspace ||
+              state.managerSessions[0]?.workspaceRoot ||
+              state.viewedProjectPath ||
+              state.chatProjectPath ||
+              "",
+          )
+        : String(
+            state.agentsSnapshot.agents.find(
+              (a) => state.agentChatContext?.kind === "member" && a.id === state.agentChatContext.agentId,
+            )?.canonicalWorkspace ||
+              state.viewedProjectPath ||
+              state.chatProjectPath ||
+              "",
+          )
+    return { ...state.agentChatContext, workspaceRoot: fallbackWs }
+  }
+  if (!state.viewedSessionId) {
+    return { kind: "independent" }
   }
   return resolveSessionAgentContext(
     state.agentsSnapshot,
@@ -366,35 +387,26 @@ export async function openManagedAgentChat(options: {
     }
     const mgmtSession = asRecord(opened.session)
     const managementSessionId = asRecordText(opened.managementSessionId) || asRecordText(mgmtSession.id)
-    const workspaceRoot = asRecordText(opened.workspaceRoot) || state.chatProjectPath
-    let runtimeSessionId =
+    const fallbackAgentWorkspace = options.manager
+      ? String(
+          state.agentsSnapshot.agents.find((a) => String(a.name).toLowerCase() === "manager")?.canonicalWorkspace ||
+            state.managerSessions[0]?.workspaceRoot ||
+            "",
+        )
+      : options.agentId
+        ? String(state.agentsSnapshot.agents.find((a) => a.id === options.agentId)?.canonicalWorkspace || "")
+        : ""
+    const workspaceRoot = asRecordText(opened.workspaceRoot) || fallbackAgentWorkspace || state.chatProjectPath
+    const runtimeSessionId =
       asRecordText(opened.runtimeSessionId) ||
       asRecordText(mgmtSession.runtimeSessionId) ||
       asRecordText(mgmtSession.session_id) ||
       String(options.existingRuntimeSessionId || "")
 
-    // If no existing runtime session was resolved (either starting a brand-new conversation
-    // or opening an agent that has no conversations yet), create and bind a fresh runtime session immediately.
-    if (!runtimeSessionId && workspaceRoot) {
-      const created = asRecord(
-        await window.api.agents.createSession({
-          managementSessionId,
-          manager: Boolean(options.manager),
-          teamId: options.teamId,
-          agentId: options.agentId,
-          workspace_root: workspaceRoot,
-        }),
-      )
-      if (created.snapshot) {
-        state.agentsSnapshot = normalizeAgentsSnapshot(created.snapshot)
-      }
-      const rt = asRecord(created.runtimeSession || created)
-      runtimeSessionId = asRecordText(rt.session_id) || asRecordText(created.runtimeSessionId)
-    }
-
+    let nextAgentContext: SessionAgentContext | null = null
     if (options.manager) {
       state.managerExpanded = true
-      state.agentChatContext = {
+      nextAgentContext = {
         kind: "manager",
         managementSessionId,
         workspaceRoot,
@@ -409,7 +421,7 @@ export async function openManagedAgentChat(options: {
       )
       state.collapsedTeams.delete(options.teamId)
       state.expandedSidebarMembers.add(`${options.teamId}:${options.agentId}`)
-      state.agentChatContext = {
+      nextAgentContext = {
         kind: "member",
         managementSessionId,
         workspaceRoot,
@@ -425,20 +437,20 @@ export async function openManagedAgentChat(options: {
       }
     }
 
-    const folderChanged = state.viewedProjectPath !== workspaceRoot
-    state.agentSurface = { kind: "chat" }
-    state.chatProjectPath = workspaceRoot
-    state.viewedProjectPath = workspaceRoot
-    if (folderChanged) {
-      state.fileListings = {}
-      state.expandedDirectories = new Set()
-      state.filePreview = undefined
-      if (state.inspectorOpen && state.inspectorTab === "files") {
-        void loadDirectory("").catch(() => {})
-      }
-    }
-
     if (runtimeSessionId) {
+      const folderChanged = state.viewedProjectPath !== workspaceRoot
+      state.agentChatContext = nextAgentContext
+      state.agentSurface = { kind: "chat" }
+      state.chatProjectPath = workspaceRoot
+      state.viewedProjectPath = workspaceRoot
+      if (folderChanged) {
+        state.fileListings = {}
+        state.expandedDirectories = new Set()
+        state.filePreview = undefined
+        if (state.inspectorOpen && state.inspectorTab === "files") {
+          void loadDirectory("").catch(() => {})
+        }
+      }
       state.viewedSessionId = runtimeSessionId
       state.conversation = state.conversationCache[runtimeSessionId] || createConversation()
       resetConversationPresentation()
@@ -446,10 +458,13 @@ export async function openManagedAgentChat(options: {
       await loadSessions().catch(() => {})
       await loadReplay(runtimeSessionId)
     } else {
-      state.viewedSessionId = ""
-      state.conversation = createConversation()
-      resetConversationPresentation()
-      restoreProjectDraft()
+      prepareNewSessionState({
+        workspacePath: workspaceRoot,
+        agentContext: nextAgentContext,
+      })
+      if (state.inspectorOpen && state.inspectorTab === "files") {
+        void loadDirectory("").catch(() => {})
+      }
     }
     scheduleRefreshAgentSessionsAndArchive()
     prompt.focus()

@@ -1,6 +1,7 @@
 import { runtimeMethods } from "../../preload/types.ts"
 import { findModelOption, formatContextWindow, groupModelOptions, modelChoices, modelSelectionTarget, type ModelOption } from "../composer-select.ts"
 import { sameProjectPath as samePath, workingDirectorySelectionEnabled } from "../project-selection.ts"
+import { currentSessionAgentContext } from "./agents-ui.ts"
 import { closeSlashCommandMenu } from "./composer.ts"
 import { effortMenu, effortMenuLabel, effortMenuTrigger, modelMenu, modelMenuLabel, modelMenuTrigger, projectMenu, projectMenuLabel, projectMenuTrigger } from "./dom.ts"
 import { asRecord, asRecordText, escapeAttribute, escapeHtml } from "./html.ts"
@@ -35,12 +36,39 @@ modelMenu.addEventListener("input", (event) => {
 
 export function renderProjectControl() {
   const active = chatProject()
-  const canOpen = workingDirectorySelectionEnabled(state.projects.length, state.viewedSessionId)
+  const agentCtx = currentSessionAgentContext()
+  const isAgentScoped = agentCtx.kind === "member" || agentCtx.kind === "manager"
+  const displayPath =
+    (isAgentScoped && agentCtx.workspaceRoot) ||
+    active?.path ||
+    state.viewedProjectPath ||
+    state.chatProjectPath ||
+    ""
+  const canOpen = workingDirectorySelectionEnabled(state.projects.length, state.viewedSessionId, isAgentScoped)
   if (!canOpen) state.projectMenuOpen = false
-  projectMenuLabel.textContent = active?.path || "Working folder"
-  projectMenuTrigger.title = state.viewedSessionId
-    ? `Session working directory: ${active?.path || "Unavailable"}`
-    : active?.path || "Choose working directory"
+
+  const projectMenuScope = document.getElementById("project-menu-scope")
+  if (projectMenuScope) {
+    if (isAgentScoped) {
+      projectMenuScope.textContent =
+        agentCtx.kind === "manager" ? "Manager" : `${agentCtx.teamName} / ${agentCtx.agentName}`
+      projectMenuScope.hidden = false
+    } else {
+      projectMenuScope.textContent = ""
+      projectMenuScope.hidden = true
+    }
+  }
+
+  projectMenuLabel.textContent = displayPath || "Working folder"
+  projectMenuTrigger.classList.toggle("is-agent-locked", isAgentScoped)
+  projectMenuTrigger.classList.toggle("is-selectable", canOpen)
+  projectMenuTrigger.title = isAgentScoped
+    ? `Locked to ${agentCtx.kind === "manager" ? "Manager" : agentCtx.agentName} workspace: ${displayPath || "Unavailable"}`
+    : state.viewedSessionId
+      ? `Session working directory: ${displayPath || "Unavailable"}`
+      : displayPath
+        ? `Choose working directory (current: ${displayPath})`
+        : "Choose working directory"
   projectMenuTrigger.disabled = !canOpen
   projectMenuTrigger.setAttribute("aria-expanded", String(state.projectMenuOpen))
   projectMenu.hidden = !state.projectMenuOpen

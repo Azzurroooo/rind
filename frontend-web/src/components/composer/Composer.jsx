@@ -27,6 +27,7 @@ export const Composer = forwardRef(function Composer({
   loading = false,
   compacting = false,
   workspace = "",
+  agentContext = null,
   awaitingAnswer = false,
   interruptArmed = false,
   commands = [],
@@ -140,16 +141,22 @@ export const Composer = forwardRef(function Composer({
     },
   };
 
+  const targetLabel =
+    agentContext?.kind === "manager"
+      ? "Manager"
+      : agentContext?.kind === "member"
+        ? `${agentContext.agentName} (${agentContext.teamName})`
+        : "Rind";
   const placeholder = compacting ? "Compacting context… You can prepare your next message."
     : loading
     ? "Opening conversation…"
-    : active ? "Queue a follow-up (Enter) or steer (Alt+Enter)…" : "Message Rind…";
+    : active ? "Queue a follow-up (Enter) or steer (Alt+Enter)…" : `Message ${targetLabel}…`;
 
   return (
     <div className="composer-wrap">
       {attachments.notice && <div className="upload-notice" role="status">{attachments.notice}</div>}
       <QueueTray entries={queued} onPromote={onPromote} onEdit={onEditQueued} onRemove={onRemoveQueued} />
-      <ComposerContext workspace={workspace} active={active} compacting={compacting} awaitingAnswer={awaitingAnswer} interruptArmed={interruptArmed} />
+      <ComposerContext workspace={workspace} agentContext={agentContext} active={active} compacting={compacting} awaitingAnswer={awaitingAnswer} interruptArmed={interruptArmed} />
       <div className={`composer-shell${dragging ? " is-dragging" : ""}`} {...dropHandlers}>
         {menuOpen && <SlashMenu id={menuId} commands={suggestions} activeIndex={activeIndex} onPick={acceptCommand} onHover={setMenuIndex} />}
         {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={18} />{" "}Drop files</div>}

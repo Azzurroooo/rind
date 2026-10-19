@@ -1016,6 +1016,7 @@ export function resolveSessionAgentContext(rawSnapshot, sessionId, workspaceRoot
       if (team && agent) {
         return {
           kind: "member",
+          workspaceRoot: String(managedSession.workspaceRoot || agent.canonicalWorkspace || workspaceRoot || ""),
           teamId: String(team.id),
           teamName: String(team.name || team.id),
           agentId: String(agent.id),
@@ -1028,6 +1029,7 @@ export function resolveSessionAgentContext(rawSnapshot, sessionId, workspaceRoot
       if (!managedSession.teamId && agent && String(agent.name).toLowerCase() === "manager") {
         return {
           kind: "manager",
+          workspaceRoot: String(managedSession.workspaceRoot || agent.canonicalWorkspace || workspaceRoot || ""),
           agentId: String(agent.id),
           agentName: "Manager",
           roleLabel: "Organization Coordinator",
@@ -1040,6 +1042,7 @@ export function resolveSessionAgentContext(rawSnapshot, sessionId, workspaceRoot
     if (wsKey.endsWith("/agents-management/manager") || wsKey.endsWith("/agents/manager")) {
       return {
         kind: "manager",
+        workspaceRoot: String(workspaceRoot || ""),
         agentId: "",
         agentName: "Manager",
         roleLabel: "Organization Coordinator",
@@ -1054,6 +1057,7 @@ export function resolveSessionAgentContext(rawSnapshot, sessionId, workspaceRoot
       if (team) {
         return {
           kind: "member",
+          workspaceRoot: String(matchingAgent.canonicalWorkspace || workspaceRoot || ""),
           teamId: String(team.id),
           teamName: String(team.name || team.id),
           agentId: String(matchingAgent.id),

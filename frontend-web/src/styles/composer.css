@@ -13,11 +13,13 @@
 .composer-activity.interrupt-hint { color: var(--danger); }
 
 .composer-context { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 26px; min-width: 0; padding-inline: 4px; }
-.workspace-hint { position: relative; flex: 0 1 auto; min-width: 0; }
+.workspace-hint { position: relative; flex: 0 1 auto; min-width: 0; max-width: calc(100% - 110px); }
 .workspace-hint summary { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; cursor: pointer; list-style: none; }
+.workspace-hint.is-agent-locked summary { padding: 2px 8px 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--fill-1); color: var(--text); }
+.composer-project-scope { display: inline-flex; align-items: center; flex: none; height: 18px; padding: 0 6px; border-radius: 4px; background: var(--accent-soft); color: var(--text); font-size: 10.5px; font-weight: 600; white-space: nowrap; }
 .workspace-hint summary::-webkit-details-marker { display: none; }
 .workspace-hint summary svg { flex: none; }
-.workspace-hint summary span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-hint summary span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-detail { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 25; width: min(320px, calc(100vw - 40px)); padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-popover); }
 .workspace-detail > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
 .workspace-detail code { font: 11px/1.6 var(--font-mono); overflow-wrap: anywhere; }

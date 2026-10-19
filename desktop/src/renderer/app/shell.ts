@@ -2,7 +2,7 @@ import { type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
 import { type IconNode } from "lucide"
 import { Moon, renderIcon, Sun, SunMoon } from "../icons.ts"
 import { renderComposer, syncPendingInputDock } from "../composer-region.ts"
-import { renderAgentsUI } from "./agents-ui.ts"
+import { currentSessionAgentContext, renderAgentsUI } from "./agents-ui.ts"
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
 import { renderSlashCommandMenu } from "./composer.ts"
@@ -68,9 +68,17 @@ export function render() {
 
 export function renderComposerState() {
   const runtime = currentRuntimeSnapshot()
+  const agentCtx = currentSessionAgentContext()
+  const isAgentScoped = agentCtx.kind === "member" || agentCtx.kind === "manager"
   const hasWorkspace =
     chatProject()?.available === true ||
-    Boolean(state.agentChatContext && state.agentChatContext.kind !== "independent" && state.agentChatContext.workspaceRoot)
+    Boolean(isAgentScoped && agentCtx.workspaceRoot)
+  const agentLabel =
+    agentCtx.kind === "manager"
+      ? "Manager"
+      : agentCtx.kind === "member"
+        ? `${agentCtx.agentName} (${agentCtx.teamName})`
+        : ""
   renderComposer(
     { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter, attachButton },
     {
@@ -85,6 +93,7 @@ export function renderComposerState() {
       slashCommandPending: state.slashCommandPending,
       slashCommandInput: state.slashCommandInput,
       contextUsagePercent: state.conversation.contextUsagePercent,
+      agentLabel,
     },
   )
   renderSendMenu()

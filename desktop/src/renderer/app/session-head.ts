@@ -1,5 +1,6 @@
 // Conversation header (spec section 2): truncated session title, a running or
 // idle status chip, and the tasks, inspector and overflow icon buttons.
+import { currentSessionAgentContext } from "./agents-ui.ts"
 import { requiredElement, sessionTitle } from "./dom.ts"
 import { runAction, runtimeTurnActive } from "./runtime.ts"
 import { exportSession, forkCurrentSession, knownSessions } from "./sessions.ts"
@@ -14,9 +15,28 @@ const menu = requiredElement("session-head-menu")
 const exportButton = requiredElement<HTMLButtonElement>("export-session")
 const forkButton = requiredElement<HTMLButtonElement>("fork-session")
 
+function resolveCurrentSessionTitle(): string {
+  const sid = state.viewedSessionId
+  const agentCtx = currentSessionAgentContext()
+  const isAgentScoped = agentCtx.kind === "member" || agentCtx.kind === "manager"
+  if (!sid) {
+    return isAgentScoped ? `New session · ${agentCtx.agentName}` : "New chat"
+  }
+  const known = knownSessions().find((item) => item.id === sid)
+  if (known?.title) return known.title
+  const mgrMatch = state.managerSessions.find(
+    (s) => String(s.runtimeSessionId || s.session_id || s.id || "") === sid,
+  )
+  if (mgrMatch?.title) return String(mgrMatch.title)
+  for (const list of Object.values(state.teamSessionsByTeam)) {
+    const match = list.find((s) => String(s.runtimeSessionId || s.session_id || s.id || "") === sid)
+    if (match?.title) return String(match.title)
+  }
+  return "Session"
+}
+
 export function renderSessionHead() {
-  const current = knownSessions().find((item) => item.id === state.viewedSessionId)
-  const title = current?.title || (state.viewedSessionId ? "Session" : "New session")
+  const title = resolveCurrentSessionTitle()
   sessionTitle.textContent = title
   sessionTitle.title = title
   const running = runtimeTurnActive()

@@ -65,8 +65,27 @@
 
 .composer-context { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 26px; min-width: 0; margin-bottom: 6px; padding-inline: 4px; }
 .composer-context .project-control { width: max-content; max-width: calc(100% - 110px); flex: 0 1 auto; min-width: 0; }
-.composer-context .composer-select-trigger { height: 26px; min-height: 26px; padding: 0 8px; border-radius: 6px; font-size: 11px; }
-.composer-context .composer-select-trigger:disabled { opacity: 1; }
+.composer-context .composer-select-trigger { height: 26px; min-height: 26px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; font-size: 11px; gap: 5px; }
+.composer-context .composer-select-trigger:disabled { opacity: 1; cursor: default; }
+.composer-context .composer-select-trigger.is-selectable { border-color: var(--line); background: var(--fill-1); color: var(--text); }
+.composer-context .composer-select-trigger.is-selectable:hover:not(:disabled) { border-color: var(--line-strong); background: var(--fill-2); }
+.composer-context .composer-select-trigger.is-agent-locked { padding-left: 6px; border-color: var(--line); background: var(--fill-1); color: var(--text); }
+.composer-context .composer-select-trigger:disabled .project-select-chevron { display: none; }
+.composer-project-scope {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.composer-project-scope[hidden] { display: none; }
 .composer-activity { display: inline-flex; flex: none; align-items: center; justify-content: flex-end; gap: 7px; min-width: 98px; color: var(--dim); font-size: 11px; white-space: nowrap; }
 .composer-activity.is-active { color: var(--accent); }
 .activity-motion { display: inline-flex; align-items: center; justify-content: center; gap: 2px; width: 16px; height: 14px; }

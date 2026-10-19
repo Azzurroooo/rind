@@ -271,6 +271,17 @@ export function useAgentsController(ctx) {
         const effectiveRuntimeId = forceNew ? "" : runtimeSessionId;
         const effectiveResumeLatest = !forceNew && !effectiveRuntimeId && resumeLatest;
 
+        const applyAgentWorkspace = (ws) => {
+          const resolvedWs = String(ws || "").trim();
+          if (!resolvedWs) return;
+          ctx.setSelectedWorkspace(resolvedWs);
+          ctx.setWorkspaceDraft(resolvedWs);
+          ctx.setInfo((curr) => ({ ...curr, workspace_root: resolvedWs }));
+          if (ctx.refs.info.current) {
+            ctx.refs.info.current = { ...ctx.refs.info.current, workspace_root: resolvedWs };
+          }
+        };
+
         if (ctx.refs.info.current?.methods?.includes?.(methods.agentsOpenSession) && client) {
           const opened = await client.request(methods.agentsOpenSession, {
             ...(manager ? { manager: true } : {}),
@@ -279,6 +290,7 @@ export function useAgentsController(ctx) {
             ...(effectiveRuntimeId ? { runtimeSessionId: effectiveRuntimeId } : {}),
             ...(effectiveResumeLatest ? { resumeLatest: true } : {}),
           });
+          const resolvedWs = String(opened?.workspaceRoot || "");
           let targetSessionId = String(opened?.runtimeSessionId || opened?.session?.session_id || "");
           if (!targetSessionId && ctx.refs.info.current?.methods?.includes?.(methods.agentsCreateSession)) {
             const created = await client.request(methods.agentsCreateSession, {
@@ -286,23 +298,21 @@ export function useAgentsController(ctx) {
               manager,
               teamId,
               agentId,
-              workspace_root: opened?.workspaceRoot,
+              workspace_root: resolvedWs,
             });
             targetSessionId = String(created?.session_id || created?.runtimeSessionId || "");
           }
           setSurface({ kind: "chat" });
           setActiveAgentOverride(
             manager
-              ? { kind: "manager", agentName: "Manager", roleLabel: "Organization Coordinator" }
-              : { kind: "member", teamId, agentId },
+              ? { kind: "manager", agentName: "Manager", roleLabel: "Organization Coordinator", workspaceRoot: resolvedWs }
+              : { kind: "member", teamId, agentId, workspaceRoot: resolvedWs },
           );
-          if (opened?.workspaceRoot) {
-            ctx.setSelectedWorkspace(opened.workspaceRoot);
-            ctx.setWorkspaceDraft(opened.workspaceRoot);
-          }
+          applyAgentWorkspace(resolvedWs);
           if (targetSessionId) {
             await ctx.call.current.loadSession(targetSessionId, true);
-            await ctx.call.current.refreshSessions(opened?.workspaceRoot);
+            applyAgentWorkspace(resolvedWs);
+            await ctx.call.current.refreshSessions(resolvedWs);
           }
           void refreshAgentHistories(teamId ? [teamId] : []);
           return;
@@ -316,25 +326,22 @@ export function useAgentsController(ctx) {
           ...(effectiveRuntimeId ? { runtimeSessionId: effectiveRuntimeId } : {}),
           ...(effectiveResumeLatest ? { resumeLatest: true } : {}),
         });
+        const resolvedWs = String(opened?.workspaceRoot || "");
         setSurface({ kind: "chat" });
         setActiveAgentOverride(
           manager
-            ? { kind: "manager", agentName: "Manager", roleLabel: "Organization Coordinator" }
-            : { kind: "member", teamId, agentId },
+            ? { kind: "manager", agentName: "Manager", roleLabel: "Organization Coordinator", workspaceRoot: resolvedWs }
+            : { kind: "member", teamId, agentId, workspaceRoot: resolvedWs },
         );
+        applyAgentWorkspace(resolvedWs);
         const externalTools = opened?.externalTools || null;
         if (opened?.runtimeSessionId) {
-          if (opened?.workspaceRoot) {
-            ctx.setSelectedWorkspace(opened.workspaceRoot);
-            ctx.setWorkspaceDraft(opened.workspaceRoot);
-          }
           await ctx.call.current.loadSession(opened.runtimeSessionId, true, false, { externalTools });
-          await ctx.call.current.refreshSessions(opened?.workspaceRoot);
-        } else if (opened?.workspaceRoot && client) {
-          ctx.setSelectedWorkspace(opened.workspaceRoot);
-          ctx.setWorkspaceDraft(opened.workspaceRoot);
+          applyAgentWorkspace(resolvedWs);
+          await ctx.call.current.refreshSessions(resolvedWs);
+        } else if (resolvedWs && client) {
           const created = await client.request(methods.sessionNew, {
-            workspace_root: opened.workspaceRoot,
+            workspace_root: resolvedWs,
             ...(externalTools ? { external_tools: externalTools } : {}),
           });
           if (created?.session_id) {
@@ -345,7 +352,8 @@ export function useAgentsController(ctx) {
               }).catch(() => {});
             }
             await ctx.call.current.loadSession(created.session_id, true, false, { externalTools });
-            await ctx.call.current.refreshSessions(opened.workspaceRoot);
+            applyAgentWorkspace(resolvedWs);
+            await ctx.call.current.refreshSessions(resolvedWs);
           }
         }
         void refreshAgentHistories(teamId ? [teamId] : []);
@@ -426,13 +434,19 @@ export function useAgentsController(ctx) {
   );
 
   const activeSessionContext = useMemo(() => {
-    const resolved = resolveSessionAgentContext(
-      snapshot,
-      ctx.info?.session_id,
-      ctx.info?.workspace_root || ctx.selectedWorkspace,
-    );
-    if (resolved.kind !== "independent") return resolved;
-    if (activeAgentOverride?.kind === "manager") return activeAgentOverride;
+    if (activeAgentOverride?.kind === "manager") {
+      const mgrAgent = snapshot.agents.find((a) => String(a.name).toLowerCase() === "manager");
+      return {
+        ...activeAgentOverride,
+        workspaceRoot: String(
+          activeAgentOverride.workspaceRoot ||
+            mgrAgent?.canonicalWorkspace ||
+            ctx.selectedWorkspace ||
+            ctx.info?.workspace_root ||
+            "",
+        ),
+      };
+    }
     if (activeAgentOverride?.kind === "member" && activeAgentOverride.teamId) {
       const team = snapshot.teams.find((t) => t.id === activeAgentOverride.teamId);
       const agent = snapshot.agents.find((a) => a.id === activeAgentOverride.agentId);
@@ -442,6 +456,13 @@ export function useAgentsController(ctx) {
       if (team && agent) {
         return {
           kind: "member",
+          workspaceRoot: String(
+            activeAgentOverride.workspaceRoot ||
+              agent.canonicalWorkspace ||
+              ctx.selectedWorkspace ||
+              ctx.info?.workspace_root ||
+              "",
+          ),
           teamId: String(team.id),
           teamName: String(team.name || team.id),
           agentId: String(agent.id),
@@ -454,7 +475,11 @@ export function useAgentsController(ctx) {
         };
       }
     }
-    return resolved;
+    return resolveSessionAgentContext(
+      snapshot,
+      ctx.info?.session_id,
+      ctx.info?.workspace_root || ctx.selectedWorkspace,
+    );
   }, [snapshot, ctx.info?.session_id, ctx.info?.workspace_root, ctx.selectedWorkspace, activeAgentOverride]);
 
   const teamSummaries = useMemo(

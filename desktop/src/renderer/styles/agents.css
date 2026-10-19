@@ -96,10 +96,45 @@
 
 .sidebar-global-nav {
   display: grid;
-  gap: 2px;
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
+  gap: 1px;
+  margin-bottom: 1px;
+}
+
+.sidebar-global-nav .session-item,
+.sidebar-agents .manager-project-item > .project-row > .project-trigger {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 32px 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: left;
+}
+
+.sidebar-agents .manager-project-item > .project-row > .project-trigger .project-name {
+  font: inherit;
+  color: inherit;
+  line-height: inherit;
+}
+
+.sidebar-global-nav .session-item:hover,
+.sidebar-agents .manager-project-item > .project-row > .project-trigger:hover {
+  background: var(--fill-1);
+  color: var(--text);
+}
+
+.sidebar-global-nav .session-item.selected,
+.sidebar-agents .manager-project-item.is-selected-team > .project-row > .project-trigger {
+  background: var(--fill-2);
+  color: var(--text);
+  font-weight: 600;
 }
 
 .sidebar-agents .sidebar-projects {
@@ -107,8 +142,8 @@
 }
 
 .sidebar-agents .sidebar-projects + .sidebar-projects {
-  margin-top: 10px;
-  padding-top: 12px;
+  margin-top: 8px;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
 }
 
@@ -151,7 +186,7 @@
 .sidebar-new-team-form {
   display: grid;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -162,6 +197,21 @@
   display: flex;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.sidebar-teams-list {
+  gap: 1px;
+}
+
+.sidebar-agents .team-project-item > .project-row > .project-trigger {
+  min-height: 28px;
+  padding: 3px 32px 3px 8px;
+}
+
+.sidebar-agents .team-project-item > .project-row .project-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
 }
 
 .sidebar-agents .project-name-row {
@@ -178,29 +228,32 @@
 
 .sidebar-agents .team-trigger-meta {
   display: block;
-  padding-top: 2px;
+  padding-top: 1px;
   color: var(--dim);
   font-family: var(--font-mono);
   font-size: 10.5px;
-  line-height: 1.3;
+  line-height: 1.2;
 }
 
 .sidebar-agents .team-members-group {
   display: grid;
-  gap: 2px;
+  gap: 0;
+  margin: 1px 0 3px 10px;
+  padding-left: 6px;
 }
 
 .sidebar-org-branch {
   display: flex;
   flex-direction: column;
+  gap: 0;
   min-width: 0;
 }
 
 .sidebar-org-children {
   display: grid;
-  gap: 2px;
-  margin: 2px 0 2px 11px;
-  padding-left: 8px;
+  gap: 0;
+  margin: 0 0 0 10px;
+  padding-left: 7px;
   border-left: 1px solid var(--line);
 }
 
@@ -208,26 +261,37 @@
   content: "";
   position: absolute;
   top: 50%;
-  left: -8px;
-  width: 6px;
+  left: -7px;
+  width: 5px;
   height: 1px;
   background: var(--line);
   pointer-events: none;
 }
 
 .sidebar-agents .member-project-item > .project-row .project-trigger {
-  padding-block: 5px;
+  min-height: 25px;
+  padding: 2px 28px 2px 6px;
 }
 
 .sidebar-agents .member-project-item > .project-row .project-name {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
+  line-height: 1.25;
 }
 
 .sidebar-agents .member-sessions-group {
-  margin: 2px 0 6px 14px;
-  padding-left: 7px;
+  margin: 1px 0 3px 12px;
+  padding-left: 6px;
   border-left: 1px dashed var(--line-strong);
+}
+
+.sidebar-agents .project-sessions .session-item {
+  height: 26px;
+  font-size: 12px;
+}
+
+.sidebar-agents .project-sessions .session-menu-wrap {
+  top: 1px;
 }
 
 .sidebar-agents .project-item.is-selected-team > .project-row > .project-trigger,

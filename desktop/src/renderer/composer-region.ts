@@ -34,6 +34,7 @@ export type ComposerView = {
   slashCommandPending: boolean
   slashCommandInput: string
   contextUsagePercent: number | null
+  agentLabel?: string
 }
 
 export function composerRegionMarkup() {
@@ -44,7 +45,7 @@ export function composerRegionMarkup() {
       <form id="composer" class="composer">
         <div class="composer-context">
           <div class="composer-select-wrap project-control">
-            <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Working folder" aria-label="Working folder" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false">${renderIcon(Folder)}<span id="project-menu-label" class="composer-select-label">Working folder</span></button>
+            <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Working folder" aria-label="Working folder" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false">${renderIcon(Folder)}<span id="project-menu-scope" class="composer-project-scope" hidden></span><span id="project-menu-label" class="composer-select-label">Working folder</span>${renderIcon(ChevronDown, "select-chevron project-select-chevron")}</button>
             <div id="project-menu" class="composer-select-menu" role="listbox" aria-label="Working directories" hidden></div>
           </div>
           <span id="composer-activity" class="composer-activity" role="status"><span class="activity-motion" aria-hidden="true"><i></i><i></i><i></i></span><span id="composer-activity-text">Ready</span></span>
@@ -94,6 +95,7 @@ function paperclipIcon() {
 
 export function renderComposer(elements: ComposerElements, view: ComposerView) {
   const unavailable = !view.ready || view.readOnly || view.compacting || view.slashCommandPending
+  const targetName = view.agentLabel ? view.agentLabel : "Rind"
   elements.prompt.disabled = !view.ready || view.readOnly
   elements.prompt.placeholder = view.slashCommandPending
     ? `Running ${view.slashCommandInput || "command"}...`
@@ -103,7 +105,7 @@ export function renderComposer(elements: ComposerElements, view: ComposerView) {
     ? "Return to the current task to send a message"
     : view.controllingTurn
     ? "Enter to queue a follow-up, Alt+Enter to steer"
-    : "Message Rind — Enter to send, Shift+Enter for a new line"
+    : `Message ${targetName} — Enter to send, Shift+Enter for a new line`
   const hasContent = view.hasContent ?? Boolean(elements.prompt.value.trim())
   const stopping = view.active && (!hasContent || view.compacting)
   elements.send.disabled = stopping ? !view.controllingTurn || view.readOnly : unavailable || view.starting || !hasContent

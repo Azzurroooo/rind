@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, type NativeImage } from "electron"
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, shell, type NativeImage } from "electron"
 import log from "electron-log/main"
 import windowState from "electron-window-state"
 import { existsSync } from "node:fs"
@@ -77,6 +77,39 @@ function resourceDirs(): string[] {
     dirs.unshift(join(process.resourcesPath, "resources"), process.resourcesPath)
   }
   return Array.from(new Set(dirs))
+}
+
+function resolveWindowIconPath(): string | undefined {
+  const filenames = process.platform === "win32" ? ["icon.ico", "icon.png"] : ["icon.png", "icon.ico"]
+  for (const dir of resourceDirs()) {
+    for (const name of filenames) {
+      const candidate = join(dir, name)
+      if (existsSync(candidate)) return candidate
+    }
+  }
+  return undefined
+}
+
+function ensureWindowsStartMenuShortcut() {
+  if (process.platform !== "win32" || typeof shell?.writeShortcutLink !== "function") return
+  const iconPath = resolveWindowIconPath()
+  if (!iconPath) return
+  try {
+    const programsDir = join(app.getPath("appData"), "Microsoft", "Windows", "Start Menu", "Programs")
+    if (!existsSync(programsDir)) return
+    const shortcutPath = join(programsDir, "Rind.lnk")
+    shell.writeShortcutLink(shortcutPath, "create", {
+      target: process.execPath,
+      args: app.isPackaged ? "" : app.getAppPath(),
+      cwd: app.isPackaged ? dirname(process.execPath) : app.getAppPath(),
+      description: "Rind Desktop",
+      appUserModelId: appId,
+      icon: iconPath,
+      iconIndex: 0,
+    })
+  } catch {
+    // Non-fatal if Start Menu folder is read-only.
+  }
 }
 
 function resolveWindowIcon(purpose: "window" | "dock" = "window"): NativeImage | undefined {
@@ -395,7 +428,9 @@ function createMainWindow() {
   const isWin = process.platform === "win32"
   const resolved = resolvedTheme(nativeTheme.themeSource)
   const surfaces = themeSurfaces[resolved]
+  const windowIconPath = resolveWindowIconPath()
   const windowIcon = resolveWindowIcon("window")
+  const effectiveIcon = (isWin && windowIconPath) ? windowIconPath : (windowIcon || windowIconPath)
   const win = new BrowserWindow({
     x: state.x,
     y: state.y,
@@ -405,7 +440,7 @@ function createMainWindow() {
     title: "Rind",
     autoHideMenuBar: true,
     backgroundColor: surfaces.background,
-    ...(windowIcon && { icon: windowIcon }),
+    ...(effectiveIcon && { icon: effectiveIcon }),
     ...(isMac && {
       titleBarStyle: "hidden",
       trafficLightPosition: { x: 14, y: 15 },
@@ -421,19 +456,30 @@ function createMainWindow() {
       sandbox: true,
     },
   })
-  if (!isMac && windowIcon && !windowIcon.isEmpty()) {
+  const applyWinIcon = () => {
+    if (isMac || win.isDestroyed()) return
     try {
-      win.setIcon(windowIcon)
+      if (isWin && windowIconPath) {
+        win.setIcon(windowIconPath)
+      } else if (windowIcon && !windowIcon.isEmpty()) {
+        win.setIcon(windowIcon)
+      }
     } catch {
       // Ignore platform-specific setIcon errors
     }
   }
+  applyWinIcon()
   state.manage(win)
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
   if (rendererUrl) void win.loadURL(new URL("index.html", rendererUrl).toString())
   else void win.loadFile(join(root, "../renderer/index.html"))
-  win.once("ready-to-show", () => win.show())
+  win.once("ready-to-show", () => {
+    win.show()
+    applyWinIcon()
+  })
+  win.on("show", applyWinIcon)
   win.webContents.once("did-finish-load", () => {
+    applyWinIcon()
     const snapshot = getRuntimeSnapshot()
     if (snapshot) notifyRuntime(snapshot)
     notifyAgentsState(getManagementState())
@@ -517,6 +563,7 @@ if (!hasLock) {
     }
     if (process.platform === "win32") {
       app.setAppUserModelId(appId)
+      ensureWindowsStartMenuShortcut()
     }
     if (process.platform === "darwin" && app.dock) {
       const dockIcon = resolveWindowIcon("dock")

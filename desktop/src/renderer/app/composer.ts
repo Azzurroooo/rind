@@ -175,7 +175,7 @@ export async function submitPrompt(draftKey: string, mode: RunningSendMode = "qu
   state.drafts[currentDraftKey()] = ""
   autoGrowPrompt()
   closeSlashCommandMenu()
-  const projectPath = project?.available ? project.path : managedWorkspaceRoot
+  const projectPath = managedWorkspaceRoot || (project?.available ? project.path : "")
   const requestedSessionId = state.viewedSessionId
   const selection = draftModelSelection()
   let sessionId = requestedSessionId

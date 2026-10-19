@@ -1440,7 +1440,7 @@ export function renderSidebarAgentsHtml(options: {
           }
         </div>
         <div class="project-list">
-          <section class="project-item${options.managerExpanded ? " expanded" : ""}${isManagerActive ? " is-selected-team" : ""}">
+          <section class="project-item manager-project-item${options.managerExpanded ? " expanded" : ""}${isManagerActive ? " is-selected-team" : ""}">
             <div class="project-row">
               <button type="button" class="project-trigger" data-sidebar-toggle-manager="1" aria-expanded="${Boolean(options.managerExpanded)}" title="Organization coordinator">
                 <span class="project-name">Manager</span>

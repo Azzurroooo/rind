@@ -134,25 +134,8 @@ export function Shell() {
           canExport
           notificationPermission={ctx.notificationPermission}
           onNew={() => {
-            agents.openChatSurface();
-            const wsCtx = resolveSessionAgentContext(
-              agents.snapshot,
-              "",
-              ctx.selectedWorkspace || ctx.info?.workspace_root,
-            );
-            if (wsCtx.kind === "member") {
-              void agents.openAgentConversation({
-                teamId: wsCtx.teamId,
-                agentId: wsCtx.agentId,
-                forceNew: true,
-              });
-              return;
-            }
-            if (wsCtx.kind === "manager") {
-              void agents.openAgentConversation({ manager: true, forceNew: true });
-              return;
-            }
             agents.clearAgentOverride();
+            agents.openChatSurface();
             void actions.createSession();
           }}
           onSelect={(id) => {
@@ -518,7 +501,13 @@ export function Shell() {
                 active={view.active}
                 loading={ctx.busySession}
                 compacting={compacting}
-                workspace={info.workspace_root || ctx.selectedWorkspace}
+                workspace={
+                  (agents.activeSessionContext?.kind !== "independent" &&
+                    agents.activeSessionContext?.workspaceRoot) ||
+                  info.workspace_root ||
+                  ctx.selectedWorkspace
+                }
+                agentContext={agents.activeSessionContext}
                 awaitingAnswer={Boolean(ctx.conversation.question)}
                 interruptArmed={ctx.interruptArmed}
                 commands={ctx.commandList}
