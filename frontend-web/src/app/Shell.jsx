@@ -562,6 +562,15 @@ export function Shell() {
           ctx.setSettingsOpen(false);
           void actions.logout();
         }}
+        request={request}
+        info={info}
+        workspace={info.workspace_root || ctx.selectedWorkspace}
+        notificationPermission={ctx.notificationPermission}
+        onEnableNotifications={actions.enableNotifications}
+        onSettingsChanged={() => {
+          void actions.refreshProviders?.();
+          void actions.refreshModels?.(sessionId);
+        }}
       />
       <UsageDialog
         open={usageOpen}

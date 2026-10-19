@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { open, readFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { defineConfig } from "vite";
@@ -12,6 +14,232 @@ try {
   fsAllow.push(realpathSync(resolve(currentDir, "node_modules")));
 } catch {
   // Ignore if node_modules does not exist yet
+}
+
+const VALID_EFFORTS = new Set(["", "low", "medium", "high", "xhigh", "max"]);
+const VALID_APIS = new Set([
+  "openai-chat",
+  "openai-responses",
+  "anthropic-messages",
+  "google-generative-ai",
+]);
+
+function maskSecret(raw) {
+  const clean = typeof raw === "string" ? raw.trim() : "";
+  if (!clean) return "";
+  if (clean.length <= 8) return "••••••••";
+  const prefix = clean.slice(0, Math.min(4, clean.indexOf("-") > 0 ? clean.indexOf("-") + 1 : 3));
+  return `${prefix}••••${clean.slice(-4)}`;
+}
+
+async function readJsonSafe(filePath) {
+  try {
+    const parsed = JSON.parse(await readFile(filePath, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeJsonSafe(filePath, data, secret = false) {
+  await mkdir(dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: secret ? 0o600 : 0o666,
+    });
+    if (secret && process.platform !== "win32") {
+      await chmod(tmp, 0o600).catch(() => {});
+    }
+    await rename(tmp, filePath);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+async function loadLocalSettings(rindHome) {
+  const settingsPath = join(rindHome, "settings.json");
+  const authPath = join(rindHome, "auth.json");
+  const providersPath = join(rindHome, "providers.json");
+  const [settingsData, authData, providersData] = await Promise.all([
+    readJsonSafe(settingsPath),
+    readJsonSafe(authPath),
+    readJsonSafe(providersPath),
+  ]);
+  const provider = String(settingsData.provider || "").trim() || "openai";
+  const model = String(settingsData.model || "").trim() || "gpt-4o-mini";
+  const rawEffort = String(settingsData.reasoningEffort || "").trim().toLowerCase();
+  const reasoningEffort = VALID_EFFORTS.has(rawEffort) ? rawEffort : "";
+
+  const authDetails = {};
+  for (const [id, entry] of Object.entries(authData)) {
+    if (!id.trim() || !entry || typeof entry !== "object") continue;
+    const type = String(entry.type || "").trim();
+    if (type === "oauth" && (entry.access || entry.refresh)) {
+      authDetails[id.trim()] = {
+        type: "oauth",
+        expiresAt: typeof entry.expires_at === "number" ? entry.expires_at : null,
+      };
+    } else if ((type === "api_key" || !type) && String(entry.key || "").trim()) {
+      authDetails[id.trim()] = {
+        type: "api_key",
+        maskedKey: maskSecret(String(entry.key)),
+      };
+    }
+  }
+
+  const rawProviders =
+    providersData.providers && typeof providersData.providers === "object"
+      ? providersData.providers
+      : providersData;
+  const customProviders = [];
+  for (const [id, entry] of Object.entries(rawProviders)) {
+    if (!id.trim() || !entry || typeof entry !== "object") continue;
+    const baseUrl = String(entry.baseUrl || "").trim().replace(/\/+$/, "");
+    if (!baseUrl) continue;
+    const modelsObj = entry.models && typeof entry.models === "object" ? entry.models : {};
+    customProviders.push({
+      id: id.trim(),
+      name: String(entry.name || id).trim(),
+      api: String(entry.api || "openai-chat").trim(),
+      baseUrl,
+      ...(entry.envKey ? { envKey: String(entry.envKey).trim() } : {}),
+      models: Object.keys(modelsObj).map((m) => m.trim()).filter(Boolean),
+    });
+  }
+
+  const matchingCustom = customProviders.find((item) => item.id === provider);
+  const baseUrl = matchingCustom?.baseUrl || String(settingsData.baseUrl || "").trim();
+  const hasApiKey = Boolean(
+    settingsData.provider ||
+      settingsData.model ||
+      settingsData.apiKey ||
+      Object.keys(authDetails).length > 0 ||
+      customProviders.length > 0,
+  );
+  return {
+    provider,
+    model,
+    baseUrl,
+    reasoningEffort,
+    hasApiKey,
+    authDetails,
+    customProviders,
+  };
+}
+
+async function saveLocalSettings(rindHome, patch = {}) {
+  const settingsPath = join(rindHome, "settings.json");
+  const authPath = join(rindHome, "auth.json");
+  const providersPath = join(rindHome, "providers.json");
+
+  if (
+    patch.provider !== undefined ||
+    patch.model !== undefined ||
+    patch.reasoningEffort !== undefined
+  ) {
+    const settingsData = await readJsonSafe(settingsPath);
+    if (typeof patch.provider === "string" && patch.provider.trim()) {
+      settingsData.provider = patch.provider.trim();
+    } else if (!settingsData.provider) {
+      settingsData.provider = "openai";
+    }
+    if (typeof patch.model === "string" && patch.model.trim()) {
+      settingsData.model = patch.model.trim();
+    } else if (!settingsData.model) {
+      settingsData.model = "gpt-4o-mini";
+    }
+    if (typeof patch.reasoningEffort === "string") {
+      const eff = patch.reasoningEffort.trim().toLowerCase();
+      if (!VALID_EFFORTS.has(eff)) throw new Error(`Invalid reasoning effort: ${patch.reasoningEffort}`);
+      settingsData.reasoningEffort = eff;
+    }
+    await writeJsonSafe(settingsPath, settingsData, false);
+  }
+
+  if (patch.customProvider && typeof patch.customProvider === "object") {
+    const cp = patch.customProvider;
+    const name = String(cp.name || "").trim();
+    if (!name) throw new Error("Connection name is required.");
+    const rawId = String(cp.id || name).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+    if (!rawId) throw new Error("Connection name needs at least one letter or digit.");
+    const api = String(cp.api || "openai-chat").trim();
+    if (!VALID_APIS.has(api)) throw new Error(`Unsupported protocol: ${api}`);
+    const baseUrl = String(cp.baseUrl || "").trim().replace(/\/+$/, "");
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(baseUrl);
+    } catch {
+      throw new Error("Base URL must be a valid HTTP(S) URL.");
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      throw new Error("Base URL must be a valid HTTP(S) URL.");
+    }
+    const root = await readJsonSafe(providersPath);
+    const providersMap =
+      root.providers && typeof root.providers === "object"
+        ? { ...root.providers }
+        : { ...root };
+    delete providersMap.providers;
+    const existing = providersMap[rawId] && typeof providersMap[rawId] === "object" ? providersMap[rawId] : {};
+    const entry = { name, api, baseUrl };
+    const envKey = String(cp.envKey || existing.envKey || "").trim();
+    if (envKey) entry.envKey = envKey;
+    const models = existing.models && typeof existing.models === "object" ? { ...existing.models } : {};
+    const defaultModel = String(cp.defaultModel || "").trim();
+    if (defaultModel) models[defaultModel] = models[defaultModel] || {};
+    if (Object.keys(models).length > 0) entry.models = models;
+    providersMap[rawId] = entry;
+    await writeJsonSafe(providersPath, { providers: providersMap }, false);
+
+    const apiKey = String(cp.apiKey || "").trim();
+    if (apiKey) {
+      const authData = await readJsonSafe(authPath);
+      authData[rawId] = { type: "api_key", key: apiKey };
+      await writeJsonSafe(authPath, authData, true);
+    }
+  }
+
+  if (typeof patch.deleteCustomProviderId === "string" && patch.deleteCustomProviderId.trim()) {
+    const targetId = patch.deleteCustomProviderId.trim();
+    const root = await readJsonSafe(providersPath);
+    const providersMap =
+      root.providers && typeof root.providers === "object"
+        ? { ...root.providers }
+        : { ...root };
+    delete providersMap.providers;
+    if (Object.hasOwn(providersMap, targetId)) {
+      delete providersMap[targetId];
+      await writeJsonSafe(providersPath, { providers: providersMap }, false);
+    }
+    const authData = await readJsonSafe(authPath);
+    if (Object.hasOwn(authData, targetId)) {
+      delete authData[targetId];
+      await writeJsonSafe(authPath, authData, true);
+    }
+  }
+
+  if (patch.providerCredential && typeof patch.providerCredential === "object") {
+    const providerId = String(patch.providerCredential.providerId || "").trim();
+    const apiKey = String(patch.providerCredential.apiKey || "").trim();
+    if (!providerId || !apiKey) throw new Error("Provider ID and API key are required.");
+    const authData = await readJsonSafe(authPath);
+    authData[providerId] = { type: "api_key", key: apiKey };
+    await writeJsonSafe(authPath, authData, true);
+  }
+
+  if (typeof patch.removeProviderCredentialId === "string" && patch.removeProviderCredentialId.trim()) {
+    const targetId = patch.removeProviderCredentialId.trim();
+    const authData = await readJsonSafe(authPath);
+    if (Object.hasOwn(authData, targetId)) {
+      delete authData[targetId];
+      await writeJsonSafe(authPath, authData, true);
+    }
+  }
+
+  return loadLocalSettings(rindHome);
 }
 
 function rindAgentsDevPlugin() {
@@ -260,6 +488,30 @@ function rindAgentsDevPlugin() {
 
       server.middlewares.use(async (req, res, next) => {
         if (!req.url) return next();
+        if (req.url === "/api/settings" && (req.method === "GET" || req.method === "POST")) {
+          try {
+            const { resolveRindHome } = await loadManagement().catch(() => ({
+              resolveRindHome: (h) => h || join(homedir(), ".rind"),
+            }));
+            const rindHome = resolveRindHome(process.env.RIND_HOME);
+            if (req.method === "GET") {
+              const result = await loadLocalSettings(rindHome);
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ result }));
+              return;
+            }
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+            const result = await saveLocalSettings(rindHome, body);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ result }));
+          } catch (error) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: { message: error?.message || String(error) } }));
+          }
+          return;
+        }
         if (req.url.startsWith("/api/agents/stream") && req.method === "GET") {
           res.writeHead(200, {
             "Content-Type": "text/event-stream",

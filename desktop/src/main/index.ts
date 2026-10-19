@@ -4,11 +4,12 @@ import windowState from "electron-window-state"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopSettings, DesktopSettingsPatch, DesktopTheme, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
-import { asObject, readJsonObject, writeJsonObject } from "./json-store"
+import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopTheme, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
+import { asObject, readJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
 import { DesktopProjectStore, samePath } from "./projects"
+import { loadRuntimeSettings as loadSharedRuntimeSettings, resolveRindPaths, saveRuntimeSettings as saveSharedRuntimeSettings } from "./runtime-settings"
 import { readRindVersion } from "./version"
 import { wrapRuntimeIpcError } from "../shared/ipc-error"
 import { DesktopGateway } from "./gateway/server"
@@ -55,7 +56,6 @@ let desktopProjectStore: DesktopProjectStore | undefined
 let quitting = false
 let runtimeShutdownComplete = false
 let windowFocused = false
-const maxSettingLength = 4096
 let remoteGateway: DesktopGateway | undefined
 
 function gateway() {
@@ -124,12 +124,16 @@ function notifyThemeChanged(theme: DesktopTheme) {
   mainWindow?.webContents.send("theme-changed", theme)
 }
 
+function rindHomeDir() {
+  return resolveRindPaths(process.env.RIND_HOME ? undefined : join(app.getPath("home"), ".rind")).rindHome
+}
+
 function runtimeSettingsPath() {
-  return join(app.getPath("home"), ".rind", "settings.json")
+  return join(rindHomeDir(), "settings.json")
 }
 
 function sessionIndexPath() {
-  return join(app.getPath("home"), ".rind", "session_index.json")
+  return join(rindHomeDir(), "session_index.json")
 }
 
 function appVersion() {
@@ -137,62 +141,15 @@ function appVersion() {
 }
 
 function legacyRecentSessionsPath() {
-  return join(app.getPath("home"), ".rind", "desktop", "recent-sessions.json")
-}
-
-function asTrimmedString(value: unknown) {
-  return typeof value === "string" ? value.trim() : ""
-}
-
-function publicSettings(data: Record<string, unknown>): DesktopSettings {
-  return {
-    model: asTrimmedString(data.model),
-    baseUrl: asTrimmedString(data.baseUrl),
-    reasoningEffort: asTrimmedString(data.reasoningEffort),
-    hasApiKey: Boolean(asTrimmedString(data.apiKey)),
-  }
-}
-
-function validateSettingsPatch(value: unknown): DesktopSettingsPatch {
-  const input = asObject(value)
-  if (!input) throw new Error("Settings must be an object.")
-  const patch: DesktopSettingsPatch = {}
-  const keys: Array<keyof DesktopSettingsPatch> = ["apiKey", "model", "baseUrl", "reasoningEffort"]
-  for (const key of keys) {
-    if (!Object.hasOwn(input, key)) continue
-    if (typeof input[key] !== "string") throw new Error(`${key} must be a string.`)
-    const setting = input[key].trim()
-    if (setting.length > maxSettingLength) throw new Error(`${key} is too long.`)
-    patch[key] = setting
-  }
-  if (patch.baseUrl) {
-    let url: URL
-    try {
-      url = new URL(patch.baseUrl)
-    } catch {
-      throw new Error("baseUrl must be a valid HTTP URL.")
-    }
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error("baseUrl must be a valid HTTP URL.")
-    }
-  }
-  return patch
+  return join(rindHomeDir(), "desktop", "recent-sessions.json")
 }
 
 async function loadRuntimeSettings() {
-  return publicSettings(await readJsonObject(runtimeSettingsPath()))
+  return loadSharedRuntimeSettings(rindHomeDir())
 }
 
 async function saveRuntimeSettings(value: unknown) {
-  const patch = validateSettingsPatch(value)
-  const path = runtimeSettingsPath()
-  const data = await readJsonObject(path)
-  for (const [key, setting] of Object.entries(patch)) {
-    if (key === "apiKey" && !setting) continue
-    data[key] = setting
-  }
-  await writeJsonObject(path, data)
-  return loadRuntimeSettings()
+  return saveSharedRuntimeSettings(value, rindHomeDir())
 }
 
 function projectStore() {

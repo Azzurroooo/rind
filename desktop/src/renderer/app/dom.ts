@@ -137,31 +137,117 @@ appRoot.innerHTML = `
         </div>
       </nav>
       <div class="settings-content">
-        <button id="close-settings" type="button" class="icon-button settings-close" aria-label="Close settings" data-tooltip="Close">${renderIcon(X)}</button>
+        <header class="settings-content-head">
+          <div class="settings-content-head-meta">
+            <h3 id="settings-active-title" class="settings-section-title">General</h3>
+            <p id="settings-active-desc" class="settings-section-desc">Global runtime defaults in ~/.rind/settings.json and workspace overrides.</p>
+          </div>
+          <button id="close-settings" type="button" class="icon-button settings-close" aria-label="Close settings" data-tooltip="Close">${renderIcon(X)}</button>
+        </header>
         <section id="settings-panel-general" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-general" data-settings-panel="general">
-          <h3 class="settings-section-title">Model provider</h3>
-          <p class="settings-section-desc">Shared ~/.rind/settings.json used when no provider sign-in is configured.</p>
-          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-api-key">API key</label></span><span class="settings-row-desc"><span id="settings-key-status"></span></span></div><div class="settings-row-control"><input id="settings-api-key" type="password" autocomplete="new-password" placeholder="Leave blank to keep" /></div></div>
-          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-base-url">Base URL</label></span></div><div class="settings-row-control"><input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" /></div></div>
-          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-model">Model</label></span></div><div class="settings-row-control"><input id="settings-model" type="text" placeholder="Default model" /></div></div>
-          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-reasoning">Reasoning effort</label></span></div><div class="settings-row-control"><select id="settings-reasoning"><option value="">Provider default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Maximum</option></select></div></div>
+          <div class="settings-group-card">
+            <div class="settings-group-head">
+              <span class="settings-group-title">Global Runtime Defaults</span>
+              <span class="settings-group-badge">~/.rind/settings.json</span>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <span class="settings-row-label"><label for="settings-provider">Default provider</label></span>
+                <span class="settings-row-desc">Primary model provider for new sessions across all workspaces.</span>
+              </div>
+              <div class="settings-row-control">
+                <select id="settings-provider"></select>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <span class="settings-row-label"><label for="settings-model">Default model</label></span>
+                <span class="settings-row-desc">Model identifier used by default for the selected provider.</span>
+              </div>
+              <div class="settings-row-control">
+                <input id="settings-model" type="text" list="settings-model-datalist" placeholder="e.g. deepseek-flash, gpt-5" autocomplete="off" />
+                <datalist id="settings-model-datalist"></datalist>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <span class="settings-row-label"><label for="settings-reasoning">Reasoning effort</label></span>
+                <span class="settings-row-desc">Default thinking budget for reasoning-capable models.</span>
+              </div>
+              <div class="settings-row-control">
+                <select id="settings-reasoning">
+                  <option value="">Provider default</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="xhigh">Extra high (xhigh)</option>
+                  <option value="max">Maximum (max)</option>
+                </select>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <span class="settings-row-label"><label for="settings-api-key">Provider credentials</label></span>
+                <span class="settings-row-desc"><span id="settings-key-status"></span></span>
+              </div>
+              <div class="settings-row-control settings-row-control-stack">
+                <input id="settings-api-key" type="password" autocomplete="new-password" placeholder="Optional API key for selected provider" />
+                <input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" hidden />
+                <button id="settings-go-providers" type="button" class="ghost-button settings-link-btn">Manage subscriptions &amp; keys →</button>
+              </div>
+            </div>
+          </div>
+          <div id="settings-workspace-defaults" class="settings-group-card"></div>
         </section>
         <section id="settings-panel-providers" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-providers" data-settings-panel="providers" hidden>
-          <h3 class="settings-section-title">Providers</h3>
-          <p class="settings-section-desc">Sign in to model providers. Keys are stored by the runtime on this computer and never shared with remote devices.</p>
           <div id="settings-providers" class="provider-list" aria-live="polite"></div>
         </section>
         <section id="settings-panel-preferences" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-preferences" data-settings-panel="preferences" hidden>
-          <h3 class="settings-section-title">Preferences</h3>
-          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-notifications">Desktop notifications</label></span><span class="settings-row-desc"><span>Notify when a turn finishes while the window is not focused.</span></span></div><div class="settings-row-control"><input id="settings-notifications" type="checkbox" class="settings-switch" /></div></div>
+          <div class="settings-group-card">
+            <div class="settings-group-head">
+              <span class="settings-group-title">Appearance &amp; Behavior</span>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <span class="settings-row-label">Color theme</span>
+                <span class="settings-row-desc">Follow system appearance or lock to light/dark mode.</span>
+              </div>
+              <div class="settings-row-control">
+                <div id="settings-theme-group" class="settings-segmented" role="radiogroup" aria-label="Color theme">
+                  <button type="button" role="radio" class="settings-segment" data-theme-option="system" aria-checked="true">System</button>
+                  <button type="button" role="radio" class="settings-segment" data-theme-option="light" aria-checked="false">Light</button>
+                  <button type="button" role="radio" class="settings-segment" data-theme-option="dark" aria-checked="false">Dark</button>
+                </div>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <span class="settings-row-label"><label for="settings-notifications">Desktop notifications</label></span>
+                <span class="settings-row-desc"><span>Notify when a turn finishes while the window is not focused.</span></span>
+              </div>
+              <div class="settings-row-control">
+                <input id="settings-notifications" type="checkbox" class="settings-switch" />
+              </div>
+            </div>
+          </div>
+          <div class="settings-group-card">
+            <div class="settings-group-head">
+              <span class="settings-group-title">Keyboard Shortcuts</span>
+            </div>
+            <div id="settings-shortcuts-list" class="shortcut-table settings-shortcut-table"></div>
+          </div>
         </section>
-        <div class="settings-actions"><button id="cancel-settings" type="button" class="ghost-button">Cancel</button><button id="save-settings" type="submit" class="primary-button">Save</button></div>
+        <footer id="settings-footer" class="settings-actions">
+          <button id="cancel-settings" type="button" class="ghost-button">Close</button>
+          <button id="save-settings" type="submit" class="primary-button">Save changes</button>
+        </footer>
       </div>
       </form>
     </dialog>
     <dialog id="auth-prompt-dialog" class="settings-dialog auth-prompt-dialog" aria-labelledby="auth-prompt-title">
       <form id="auth-prompt-form" method="dialog">
-        <div class="settings-heading"><h2 id="auth-prompt-title">Provider sign-in</h2></div>
+        <div class="settings-heading"><h2 id="auth-prompt-title">Provider sign-in</h2><button id="auth-prompt-close" type="button" class="icon-button" aria-label="Close sign-in">${renderIcon(X)}</button></div>
+        <div id="auth-prompt-oauth-box" class="auth-prompt-oauth-box" hidden></div>
         <label id="auth-prompt-label" class="auth-prompt-label"><span id="auth-prompt-message"></span><span id="auth-prompt-field" class="auth-prompt-field"></span></label>
         <div class="settings-actions"><button id="auth-prompt-cancel" type="button" class="ghost-button">Cancel</button><button id="auth-prompt-submit" type="submit" class="primary-button">Continue</button></div>
       </form>
@@ -249,6 +335,7 @@ export const newSessionButton = requiredElement<HTMLButtonElement>("new-session"
 export const sidebarToggle = requiredElement<HTMLButtonElement>("toggle-sidebar")
 export const settingsDialog = requiredElement<HTMLDialogElement>("settings-dialog")
 export const settingsForm = requiredElement<HTMLFormElement>("settings-form")
+export const settingsProvider = requiredElement<HTMLSelectElement>("settings-provider")
 export const settingsApiKey = requiredElement<HTMLInputElement>("settings-api-key")
 export const settingsBaseUrl = requiredElement<HTMLInputElement>("settings-base-url")
 export const settingsModel = requiredElement<HTMLInputElement>("settings-model")

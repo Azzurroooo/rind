@@ -145,18 +145,52 @@ export type RuntimeEventEnvelope = {
   event: Record<string, unknown>
 }
 
+export type DesktopProviderAuthDetail = {
+  type: "oauth" | "api_key"
+  maskedKey?: string
+  expiresAt?: number | null
+}
+
+export type DesktopCustomProvider = {
+  id: string
+  name: string
+  api: string
+  baseUrl: string
+  envKey?: string
+  models: string[]
+}
+
 export type DesktopSettings = {
+  provider?: string
   model: string
   baseUrl: string
   reasoningEffort: string
   hasApiKey: boolean
+  authDetails?: Record<string, DesktopProviderAuthDetail>
+  customProviders?: DesktopCustomProvider[]
 }
 
 export type DesktopSettingsPatch = {
+  provider?: string
   apiKey?: string
   model?: string
   baseUrl?: string
   reasoningEffort?: string
+  customProvider?: {
+    id?: string
+    name: string
+    api: string
+    baseUrl: string
+    defaultModel?: string
+    apiKey?: string
+    envKey?: string
+  }
+  deleteCustomProviderId?: string
+  providerCredential?: {
+    providerId: string
+    apiKey: string
+  }
+  removeProviderCredentialId?: string
 }
 
 export type DesktopTheme = "system" | "dark" | "light"

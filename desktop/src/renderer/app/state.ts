@@ -14,7 +14,7 @@ export function emptyLoad<T>(): InspectorLoad<T> {
 
 export const state: AppState = {
   runtime: { status: "stopped" },
-  settings: { model: "", baseUrl: "", reasoningEffort: "", hasApiKey: false },
+  settings: { provider: "openai", model: "", baseUrl: "", reasoningEffort: "", hasApiKey: true, authDetails: {}, customProviders: [] },
   settingsOpen: false,
   settingsSaving: false,
   settingsAutoOpened: false,
