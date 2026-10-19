@@ -293,9 +293,6 @@ export function Shell() {
               onRemoveMember={({ teamId, agentId }) =>
                 agents.runAction("removeMember", { teamId, agentId }, "Removed member from team")
               }
-              onSetLeader={({ teamId, agentId }) =>
-                agents.runAction("setLeader", { teamId, agentId }, "Updated team leader")
-              }
               onSetSupervisor={({ teamId, agentId, reportsToAgentId }) =>
                 agents.runAction(
                   "setSupervisor",

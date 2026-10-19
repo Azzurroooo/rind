@@ -45,6 +45,7 @@ function clearInlineAccordionStyles(element: HTMLElement): void {
   element.style.boxSizing = ""
   element.style.overflow = ""
   element.style.height = ""
+  element.style.minHeight = ""
   element.style.marginTop = ""
   element.style.marginBottom = ""
   element.style.paddingTop = ""
@@ -75,6 +76,7 @@ export function animateExpand(element: HTMLElement | null | undefined): void {
 
   element.style.boxSizing = "border-box"
   element.style.overflow = "hidden"
+  element.style.minHeight = "0px"
   element.style.height = "0px"
   element.style.marginTop = collapsedMarginTop
   element.style.marginBottom = "0px"
@@ -131,6 +133,7 @@ export function animateCollapse(element: HTMLElement | null | undefined): Promis
   return new Promise<void>((resolve) => {
     element.style.boxSizing = "border-box"
     element.style.overflow = "hidden"
+    element.style.minHeight = "0px"
     element.style.height = `${startHeight}px`
     element.style.marginTop = startMarginTop
     element.style.marginBottom = startMarginBottom

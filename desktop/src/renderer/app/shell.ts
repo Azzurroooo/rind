@@ -28,8 +28,10 @@ export function render() {
   connectionText.textContent = runtimeStatusLabel(runtime.status)
   connection.className = `connection connection-${runtime.status}`
   connection.hidden = runtime.status === "starting"
+  const maxSidebar = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, window.innerWidth - 420))
+  const effectiveSidebarWidth = state.sidebarOpen ? Math.min(state.sidebarWidth, maxSidebar) : 0
   appRoot.classList.toggle("sidebar-open", state.sidebarOpen)
-  appRoot.style.setProperty("--sidebar-panel-width", `${state.sidebarOpen ? state.sidebarWidth : 0}px`)
+  appRoot.style.setProperty("--sidebar-panel-width", `${effectiveSidebarWidth}px`)
   sidebar.setAttribute("aria-hidden", String(!state.sidebarOpen))
   sidebar.inert = !state.sidebarOpen
   newSessionButton.title = chatProject()?.available ? `Start a new chat in ${chatProject()?.name}` : "Choose a project for a new chat"
@@ -209,7 +211,8 @@ export function bindSidebarResize(handle: HTMLElement) {
     if (!start || start.target !== "sidebar" || start.pointerId !== event.pointerId) return
     const width = Math.round(start.width + event.clientX - start.x)
     vars.resizeStart = { ...start, lastWidth: width }
-    state.sidebarWidth = Math.max(0, Math.min(SIDEBAR_MAX, width))
+    const maxSidebar = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, window.innerWidth - 420))
+    state.sidebarWidth = Math.max(0, Math.min(maxSidebar, width))
     render()
   })
   handle.addEventListener("pointerup", (event) => finishSidebarResize(handle, event))

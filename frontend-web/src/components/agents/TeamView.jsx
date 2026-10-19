@@ -34,7 +34,6 @@ function OrgMemberNode({
   onQuickAssign,
   onQuickAddReport,
   onSelectTask,
-  onSetLeader,
   onSetSupervisor,
   onUpdateMember,
   onRemoveMember,
@@ -161,16 +160,6 @@ function OrgMemberNode({
             label: "Model defaults",
             icon: <Cpu size={13} />,
             onSelect: () => void toggleModelConfig(),
-          },
-        ]
-      : []),
-    ...(!node.isLeader
-      ? [
-          {
-            id: "make-leader",
-            label: "Make team leader",
-            icon: <Crown size={13} />,
-            onSelect: () => onSetLeader?.({ teamId: node.teamId, agentId: node.agentId }),
           },
         ]
       : []),
@@ -538,7 +527,6 @@ function OrgMemberNode({
               onQuickAssign={onQuickAssign}
               onQuickAddReport={onQuickAddReport}
               onSelectTask={onSelectTask}
-              onSetLeader={onSetLeader}
               onSetSupervisor={onSetSupervisor}
               onUpdateMember={onUpdateMember}
               onRemoveMember={onRemoveMember}
@@ -568,7 +556,6 @@ export function TeamView({
   onCreateMember,
   onUpdateMember,
   onRemoveMember,
-  onSetLeader,
   onSetSupervisor,
   onGetMemberModel,
   onSetMemberModel,
@@ -1042,7 +1029,6 @@ export function TeamView({
                       onQuickAssign={handleQuickAssign}
                       onQuickAddReport={handleQuickAddReport}
                       onSelectTask={onSelectTask}
-                      onSetLeader={onSetLeader}
                       onSetSupervisor={onSetSupervisor}
                       onUpdateMember={onUpdateMember}
                       onRemoveMember={onRemoveMember}

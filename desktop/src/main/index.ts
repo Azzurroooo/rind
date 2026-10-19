@@ -1,7 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, shell, type NativeImage } from "electron"
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, type NativeImage } from "electron"
 import log from "electron-log/main"
 import windowState from "electron-window-state"
-import { existsSync } from "node:fs"
+import { existsSync, rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -44,7 +44,7 @@ import {
   type ManagementStatePayload,
 } from "./management"
 
-const appId = "ai.rind.desktop"
+const appId = app.isPackaged ? "ai.rind.desktop" : "ai.rind.desktop.dev"
 const root = dirname(fileURLToPath(import.meta.url))
 const legacyUserDataDir = join(app.getPath("appData"), "rind-desktop")
 if (existsSync(legacyUserDataDir)) {
@@ -90,23 +90,13 @@ function resolveWindowIconPath(): string | undefined {
   return undefined
 }
 
-function ensureWindowsStartMenuShortcut() {
-  if (process.platform !== "win32" || typeof shell?.writeShortcutLink !== "function") return
-  const iconPath = resolveWindowIconPath()
-  if (!iconPath) return
+function cleanupStaleDevStartMenuShortcut() {
+  if (process.platform !== "win32" || app.isPackaged) return
   try {
-    const programsDir = join(app.getPath("appData"), "Microsoft", "Windows", "Start Menu", "Programs")
-    if (!existsSync(programsDir)) return
-    const shortcutPath = join(programsDir, "Rind.lnk")
-    shell.writeShortcutLink(shortcutPath, "create", {
-      target: process.execPath,
-      args: app.isPackaged ? "" : app.getAppPath(),
-      cwd: app.isPackaged ? dirname(process.execPath) : app.getAppPath(),
-      description: "Rind Desktop",
-      appUserModelId: appId,
-      icon: iconPath,
-      iconIndex: 0,
-    })
+    const shortcutPath = join(app.getPath("appData"), "Microsoft", "Windows", "Start Menu", "Programs", "Rind.lnk")
+    if (existsSync(shortcutPath)) {
+      rmSync(shortcutPath, { force: true })
+    }
   } catch {
     // Non-fatal if Start Menu folder is read-only.
   }
@@ -434,8 +424,10 @@ function createMainWindow() {
   const win = new BrowserWindow({
     x: state.x,
     y: state.y,
-    width: state.width,
-    height: state.height,
+    width: Math.max(860, state.width || 1320),
+    height: Math.max(560, state.height || 860),
+    minWidth: 860,
+    minHeight: 560,
     show: false,
     title: "Rind",
     autoHideMenuBar: true,
@@ -459,10 +451,13 @@ function createMainWindow() {
   const applyWinIcon = () => {
     if (isMac || win.isDestroyed()) return
     try {
-      if (isWin && windowIconPath) {
-        win.setIcon(windowIconPath)
-      } else if (windowIcon && !windowIcon.isEmpty()) {
+      if (windowIcon && !windowIcon.isEmpty()) {
         win.setIcon(windowIcon)
+      } else if (isWin && windowIconPath) {
+        win.setIcon(windowIconPath)
+      }
+      if (isWin && typeof win.setOverlayIcon === "function") {
+        win.setOverlayIcon(null, "")
       }
     } catch {
       // Ignore platform-specific setIcon errors
@@ -562,8 +557,8 @@ if (!hasLock) {
       app.setPath("userData", legacyUserDataDir)
     }
     if (process.platform === "win32") {
+      cleanupStaleDevStartMenuShortcut()
       app.setAppUserModelId(appId)
-      ensureWindowsStartMenuShortcut()
     }
     if (process.platform === "darwin" && app.dock) {
       const dockIcon = resolveWindowIcon("dock")

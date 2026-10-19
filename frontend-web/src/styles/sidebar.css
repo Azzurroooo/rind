@@ -61,6 +61,7 @@
   position: relative; display: flex; align-items: center; min-width: 0;
   border-radius: var(--radius-control); color: var(--muted);
 }
+.session-item.menu-open, .session-item:has(.menu-root[data-open="true"]) { z-index: 60; }
 .session-item:hover, .session-item.menu-open { background: var(--fill-1); color: var(--text); }
 .session-item.selected { background: var(--fill-2); color: var(--text); }
 .session-main {

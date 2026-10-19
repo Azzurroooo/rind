@@ -54,3 +54,16 @@ test("sidebar structure keys separate running state from structure", () => {
   assert.notEqual(projectListStructureKey(first), projectListStructureKey(paged))
   assert.notEqual(projectListStructureKey(first), projectListStructureKey(menu))
 })
+
+test("sidebar structure keys isolate project session menus from recent session menus", () => {
+  const base = state()
+  const projectMenuOpen = { ...base, sessionMenuId: "project:C:/work/project:session-1" }
+  const recentMenuOpen = { ...base, sessionMenuId: "recent:session-1" }
+
+  assert.notEqual(projectListStructureKey(base), projectListStructureKey(projectMenuOpen))
+  assert.equal(recentListStructureKey(base), recentListStructureKey(projectMenuOpen))
+
+  assert.notEqual(recentListStructureKey(base), recentListStructureKey(recentMenuOpen))
+  assert.equal(projectListStructureKey(base), projectListStructureKey(recentMenuOpen))
+})
+

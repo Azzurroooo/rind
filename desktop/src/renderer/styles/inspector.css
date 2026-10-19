@@ -104,23 +104,6 @@
 .activity-empty .activity-empty-hint { margin-top: 12px; color: var(--dim); }
 .activity-empty-hint code { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 
-/* narrow windows: the inspector becomes a drawer over the conversation */
-@media (max-width: 760px) {
-  .inspector {
-    position: fixed;
-    top: 44px;
-    right: 0;
-    bottom: 0;
-    z-index: 11;
-    width: min(88vw, 320px);
-    box-shadow: 0 0 0 100vmax var(--drawer-scrim), var(--shadow-dialog);
-    transform: translateX(0);
-    transition: transform 220ms var(--ease), opacity 160ms var(--ease);
-  }
-  #app:not(.inspector-open) .inspector { box-shadow: none; transform: translateX(100%); }
-  .inspector-resize-handle { display: none; }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .inspector, .inspector-tab { transition: none; }
 }

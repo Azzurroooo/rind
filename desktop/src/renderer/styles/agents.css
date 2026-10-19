@@ -546,6 +546,8 @@
 }
 
 .agent-surface-header {
+  position: relative;
+  z-index: 10;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -554,6 +556,12 @@
   padding: 12px 20px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+}
+
+.agent-surface-header.menu-open,
+.agent-surface-header:has(.project-menu-wrap.menu-open),
+.agent-surface-header:has([aria-expanded="true"]) {
+  z-index: 60;
 }
 
 .agent-surface-headline-row {
@@ -609,9 +617,12 @@
 .org-member-actions .project-menu-wrap {
   position: relative;
   top: auto;
+  bottom: auto;
   right: auto;
+  transform: none;
   display: inline-flex;
   align-items: center;
+  height: 28px;
 }
 
 .agent-surface-actions .project-menu-trigger,
@@ -628,6 +639,7 @@
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--muted);
+  box-sizing: border-box;
 }
 
 .agent-surface-actions .project-menu-trigger:hover:not(:disabled),
@@ -643,6 +655,9 @@
 .org-member-actions .project-menu {
   right: 0;
   left: auto;
+  z-index: 100;
+  isolation: isolate;
+  pointer-events: auto;
 }
 
 /* ---------- Buttons & Inputs ---------- */
@@ -838,18 +853,32 @@
 }
 
 .org-tree-root {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   max-width: 880px;
 }
 
 .org-tree-branch {
-  display: grid;
+  position: relative;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
+.sidebar-org-branch.menu-open,
+.sidebar-org-branch:has(.menu-open),
+.sidebar-org-branch:has([aria-expanded="true"]),
+.org-tree-branch.menu-open,
+.org-tree-branch:has(.menu-open),
+.org-tree-branch:has([aria-expanded="true"]) {
+  position: relative;
+  z-index: 60;
+}
+
 .org-tree-children {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   margin-left: 20px;
   padding-left: 14px;
@@ -857,13 +886,21 @@
 }
 
 .org-member-card {
-  display: grid;
+  position: relative;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
   transition: border-color var(--dur-hover) var(--ease);
+}
+
+.org-member-card.menu-open,
+.org-member-card:has(.menu-open),
+.org-member-card:has([aria-expanded="true"]) {
+  z-index: 60;
 }
 
 .org-member-card:hover {
@@ -969,6 +1006,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-height: 28px;
   padding-top: 6px;
   border-top: 1px solid var(--line);
 }
@@ -977,6 +1015,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  min-height: 20px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1049,8 +1088,17 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 20px;
   color: var(--dim);
   font-size: 11.5px;
+}
+
+.org-member-stats .agent-btn.sm {
+  height: 20px;
+  min-height: 20px;
+  padding: 0 7px;
+  font-size: 11px;
+  line-height: 1;
 }
 
 .org-stat-attention {
@@ -1066,11 +1114,15 @@
 }
 
 .org-member-actions .agent-btn.sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 28px;
   min-height: 28px;
   padding: 0 10px;
   margin: 0;
   line-height: 1;
+  box-sizing: border-box;
 }
 
 /* ---------- Action-First Task Sections ---------- */

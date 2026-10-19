@@ -8,7 +8,7 @@
   height: 100vh; height: 100dvh; min-width: 320px; overflow: hidden; background: var(--bg);
 }
 .shell-grid { flex: 1; min-height: 0; display: flex; }
-.main-column { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.main-column { flex: 1; min-width: 360px; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 .is-collapsed { display: none !important; }
 
 /* Resize handles: a 6px hit area over a 1px line; keyboard adjustable. */

@@ -1052,6 +1052,7 @@ export const DEFAULT_SIDEBAR_SESSIONS_LIMIT = 5
 
 function renderAgentSidebarSessionRow(options: {
   sess: MemberSessionSummary
+  menuKey?: string
   isCurrent: boolean
   menuOpen: boolean
   confirmingDelete: boolean
@@ -1060,6 +1061,7 @@ function renderAgentSidebarSessionRow(options: {
 }): string {
   const { sess, isCurrent, menuOpen, confirmingDelete, deleting, openAttrs } = options
   const id = sess.runtimeSessionId
+  const menuKey = options.menuKey || id
   const title = sess.title || "Untitled"
   const running = sess.tone === "working"
   const when = relativeTimeLabel(sess.updatedAt)
@@ -1076,8 +1078,8 @@ function renderAgentSidebarSessionRow(options: {
       <button type="button" class="session-item${running ? " running" : ""}${isCurrent ? " selected" : ""}" ${openAttrs} title="${escapeAttribute(when ? `${title} - ${when}` : title)}"${isCurrent ? ' aria-current="page"' : ""}>
         <span class="session-item-title">${running ? SESSION_SPINNER_SVG : ""}<span class="session-item-title-text">${escapeHtml(title)}</span></span>
       </button>
-      <div class="session-menu-wrap">
-        <button type="button" class="session-menu-trigger" data-agent-session-menu="${escapeAttribute(id)}" aria-label="Actions for ${escapeAttribute(title)}" aria-haspopup="menu" aria-expanded="${String(menuOpen)}">${SESSION_MENU_ICON_SVG}</button>
+      <div class="session-menu-wrap${menuOpen ? " menu-open" : ""}">
+        <button type="button" class="session-menu-trigger" data-agent-session-menu="${escapeAttribute(menuKey)}" aria-label="Actions for ${escapeAttribute(title)}" aria-haspopup="menu" aria-expanded="${String(menuOpen)}">${SESSION_MENU_ICON_SVG}</button>
         ${
           menuOpen
             ? `<div class="session-menu menu" role="menu" aria-label="Actions for ${escapeAttribute(title)}">
@@ -1119,8 +1121,8 @@ export function renderOrgNodeHtml(
   if (node.responsibility) metaItems.push(escapeHtml(node.responsibility))
 
   return `
-    <div class="org-tree-branch depth-${Math.min(depth, 4)}" data-agent-id="${escapeAttribute(node.agentId)}">
-      <div class="org-member-card${node.isLeader ? " is-leader" : ""}">
+    <div class="org-tree-branch depth-${Math.min(depth, 4)}${memberMenuOpen ? " menu-open" : ""}" data-agent-id="${escapeAttribute(node.agentId)}">
+      <div class="org-member-card${node.isLeader ? " is-leader" : ""}${memberMenuOpen ? " menu-open" : ""}">
         <div class="org-member-top">
           <div class="org-member-identity">
             <div class="org-member-name-row">
@@ -1135,14 +1137,13 @@ export function renderOrgNodeHtml(
           </div>
           <div class="org-member-actions">
             <button type="button" class="agent-btn primary sm" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(node.latestRuntimeSessionId)}">Chat</button>
-            <div class="project-menu-wrap">
+            <div class="project-menu-wrap${memberMenuOpen ? " menu-open" : ""}">
               <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(memberMenuKey)}" title="Member actions" aria-label="Actions for ${escapeAttribute(node.name)}" aria-haspopup="menu" aria-expanded="${String(memberMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
               ${
                 memberMenuOpen
                   ? `<div class="project-menu" role="menu">
                       <button type="button" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">New chat</button>
                       <button type="button" data-agent-quick-assign="${escapeAttribute(node.agentId)}" role="menuitem">Assign task</button>
-                      ${!node.isLeader ? `<button type="button" data-agent-make-leader="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">Make leader</button>` : ""}
                       <button type="button" data-agent-remove="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">Remove</button>
                     </div>`
                   : ""
@@ -1252,10 +1253,12 @@ export function renderSidebarAgentsHtml(options: {
                     options.surface.kind === "chat" &&
                     options.chatContext.kind === "manager" &&
                     sess.runtimeSessionId === options.viewedSessionId
+                  const sessMenuKey = `manager:${sess.runtimeSessionId}`
                   return renderAgentSidebarSessionRow({
                     sess,
+                    menuKey: sessMenuKey,
                     isCurrent,
-                    menuOpen: sessionMenuId === sess.runtimeSessionId,
+                    menuOpen: sessionMenuId === sessMenuKey || sessionMenuId === sess.runtimeSessionId,
                     confirmingDelete: sessionDeleteConfirmId === sess.runtimeSessionId,
                     deleting: sessionDeleteBusyId === sess.runtimeSessionId,
                     openAttrs: `data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}"`,
@@ -1304,23 +1307,22 @@ export function renderSidebarAgentsHtml(options: {
             : ""
 
         return `
-          <div class="sidebar-org-branch" data-org-depth="${depth}" data-agent-id="${escapeAttribute(member.agentId)}">
-            <section class="project-item member-project-item${isMemberExpanded ? " expanded" : ""}${isMemberActive ? " is-selected-member" : ""}">
-              <div class="project-row">
+          <div class="sidebar-org-branch${memberMenuOpen ? " menu-open" : ""}" data-org-depth="${depth}" data-agent-id="${escapeAttribute(member.agentId)}">
+            <section class="project-item member-project-item${isMemberExpanded ? " expanded" : ""}${isMemberActive ? " is-selected-member" : ""}${memberMenuOpen ? " menu-open" : ""}">
+              <div class="project-row${memberMenuOpen ? " menu-open" : ""}">
                 <button type="button" class="project-trigger" data-sidebar-toggle-member="${escapeAttribute(memberKey)}" aria-expanded="${isMemberExpanded}" title="${escapeAttribute(member.name)}">
                   <span class="project-name-row">
                     <span class="agent-status-dot tone-${member.tone}"></span>
                     <span class="project-name">${escapeHtml(member.name)}</span>
                   </span>
                 </button>
-                <div class="project-menu-wrap">
+                <div class="project-menu-wrap${memberMenuOpen ? " menu-open" : ""}">
                   <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(memberMenuKey)}" title="Member actions" aria-label="Actions for ${escapeAttribute(member.name)}" aria-haspopup="menu" aria-expanded="${String(memberMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
                   ${
                     memberMenuOpen
                       ? `<div class="project-menu" role="menu">
                           <button type="button" data-agent-new-session="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">New chat</button>
                           <button type="button" data-sidebar-member-assign="${escapeAttribute(member.agentId)}" data-team-id="${escapeAttribute(team.id)}" role="menuitem">Assign task</button>
-                          ${!member.isLeader ? `<button type="button" data-agent-make-leader="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">Make leader</button>` : ""}
                           <button type="button" data-agent-remove="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">Remove</button>
                         </div>`
                       : ""
@@ -1338,10 +1340,12 @@ export function renderSidebarAgentsHtml(options: {
                                 const isCurrent =
                                   options.surface.kind === "chat" &&
                                   sess.runtimeSessionId === options.viewedSessionId
+                                const sessMenuKey = `member:${memberKey}:${sess.runtimeSessionId}`
                                 return renderAgentSidebarSessionRow({
                                   sess,
+                                  menuKey: sessMenuKey,
                                   isCurrent,
-                                  menuOpen: sessionMenuId === sess.runtimeSessionId,
+                                  menuOpen: sessionMenuId === sessMenuKey || sessionMenuId === sess.runtimeSessionId,
                                   confirmingDelete: sessionDeleteConfirmId === sess.runtimeSessionId,
                                   deleting: sessionDeleteBusyId === sess.runtimeSessionId,
                                   openAttrs: `data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}"`,
@@ -1374,8 +1378,8 @@ export function renderSidebarAgentsHtml(options: {
           : ""
 
       return `
-        <section class="project-item team-project-item${!isCollapsed ? " expanded" : ""}${isSelectedTeam ? " is-selected-team" : ""}">
-          <div class="project-row">
+        <section class="project-item team-project-item${!isCollapsed ? " expanded" : ""}${isSelectedTeam ? " is-selected-team" : ""}${teamMenuOpen ? " menu-open" : ""}">
+          <div class="project-row${teamMenuOpen ? " menu-open" : ""}">
             <button type="button" class="project-trigger" data-sidebar-toggle-team="${escapeAttribute(team.id)}" aria-expanded="${!isCollapsed}" title="${escapeAttribute(team.createRoot || team.name)}">
               <span class="project-name-row">
                 <span class="project-name">${escapeHtml(String(team.name || team.id))}</span>
@@ -1388,7 +1392,7 @@ export function renderSidebarAgentsHtml(options: {
                   : ""
               }
             </button>
-            <div class="project-menu-wrap">
+            <div class="project-menu-wrap${teamMenuOpen ? " menu-open" : ""}">
               <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(teamMenuKey)}" title="Team actions" aria-label="Team actions for ${escapeAttribute(team.name)}" aria-haspopup="menu" aria-expanded="${String(teamMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
               ${
                 teamMenuOpen
@@ -1440,12 +1444,12 @@ export function renderSidebarAgentsHtml(options: {
           }
         </div>
         <div class="project-list">
-          <section class="project-item manager-project-item${options.managerExpanded ? " expanded" : ""}${isManagerActive ? " is-selected-team" : ""}">
-            <div class="project-row">
+          <section class="project-item manager-project-item${options.managerExpanded ? " expanded" : ""}${isManagerActive ? " is-selected-team" : ""}${managerMenuOpen ? " menu-open" : ""}">
+            <div class="project-row${managerMenuOpen ? " menu-open" : ""}">
               <button type="button" class="project-trigger" data-sidebar-toggle-manager="1" aria-expanded="${Boolean(options.managerExpanded)}" title="Organization coordinator">
                 <span class="project-name">Manager</span>
               </button>
-              <div class="project-menu-wrap">
+              <div class="project-menu-wrap${managerMenuOpen ? " menu-open" : ""}">
                 <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="manager" title="Manager actions" aria-label="Manager actions" aria-haspopup="menu" aria-expanded="${String(managerMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
                 ${
                   managerMenuOpen
@@ -1905,7 +1909,7 @@ export function renderTeamSurfaceHtml(options: {
   return `
     <div class="agent-surface team-surface">
       <div class="agent-surface-main">
-        <header class="agent-surface-header">
+        <header class="agent-surface-header${headerMenuOpen ? " menu-open" : ""}">
           <div class="agent-surface-headline-row">
             <h2 class="agent-surface-title">${escapeHtml(team.name)}</h2>
             <div class="agent-segmented" role="tablist" aria-label="Team surface views">
@@ -1918,7 +1922,7 @@ export function renderTeamSurfaceHtml(options: {
           <div class="agent-surface-actions">
             <button type="button" class="agent-btn secondary sm" data-team-toggle-add-member="1">+ Member</button>
             <button type="button" class="agent-btn primary sm" data-team-toggle-assign="1">+ Task</button>
-            <div class="project-menu-wrap">
+            <div class="project-menu-wrap${headerMenuOpen ? " menu-open" : ""}">
               <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(headerMenuKey)}" title="Team actions" aria-label="Team actions" aria-haspopup="menu" aria-expanded="${String(headerMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
               ${
                 headerMenuOpen

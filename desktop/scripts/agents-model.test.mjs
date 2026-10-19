@@ -415,5 +415,46 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
   })
   assert.match(expandedDrawerHtml, /agent-task-drawer is-expanded/)
   assert.match(expandedDrawerHtml, /Restore panel width/)
+
+  const memberMenuOpenOrgHtml = renderTeamSurfaceHtml({
+    snapshot: sampleSnapshot,
+    surface: {
+      kind: "team",
+      teamId: "team-1",
+      tab: "organization",
+      assigneeFilter: "",
+      selectedTaskId: "",
+      addMemberOpen: false,
+      memberMode: "workspace",
+      assignOpen: false,
+      assignAgentId: "",
+      deleteConfirmOpen: false,
+    },
+    itemMenuKey: "org-member:agent-fe",
+    busy: false,
+    artifactPreview: null,
+  })
+  assert.match(memberMenuOpenOrgHtml, /org-member-card menu-open/)
+  assert.match(memberMenuOpenOrgHtml, /project-menu-wrap menu-open/)
+  assert.doesNotMatch(memberMenuOpenOrgHtml, /Make leader/)
+  assert.doesNotMatch(memberMenuOpenOrgHtml, /data-agent-make-leader/)
+
+  const sidebarMemberMenuOpenHtml = renderSidebarAgentsHtml({
+    snapshot: sampleSnapshot,
+    surface: { kind: "chat" },
+    chatContext: { kind: "independent" },
+    collapsedTeams: new Set(),
+    expandedSidebarMembers: new Set(["team-1:agent-fe"]),
+    managerExpanded: false,
+    teamSessionsByTeam: { "team-1": sixLeadSessions },
+    itemMenuKey: "member:team-1:agent-fe",
+    sessionMenuId: "member:team-1:agent-lead:rt-lead-1",
+    busy: false,
+  })
+  assert.match(sidebarMemberMenuOpenHtml, /sidebar-org-branch menu-open/)
+  assert.match(sidebarMemberMenuOpenHtml, /member-project-item expanded menu-open|member-project-item menu-open/)
+  assert.doesNotMatch(sidebarMemberMenuOpenHtml, /Make leader/)
+  assert.doesNotMatch(sidebarMemberMenuOpenHtml, /data-agent-make-leader/)
 })
+
 

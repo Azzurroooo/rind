@@ -1029,15 +1029,6 @@ export function bindAgentsEvents(): () => void {
       return
     }
 
-    const makeLeaderBtn = target.closest<HTMLElement>("[data-agent-make-leader]")
-    if (makeLeaderBtn?.dataset.agentMakeLeader && makeLeaderBtn.dataset.agentTeam) {
-      state.agentItemMenuKey = ""
-      const agentId = makeLeaderBtn.dataset.agentMakeLeader
-      const teamId = makeLeaderBtn.dataset.agentTeam
-      runAction(() => runManagementOp({ op: "setLeader", teamId, agentId }, "Team leader updated."))
-      return
-    }
-
     const removeMemberBtn = target.closest<HTMLElement>("[data-agent-remove]")
     if (removeMemberBtn?.dataset.agentRemove && removeMemberBtn.dataset.agentTeam) {
       state.agentItemMenuKey = ""

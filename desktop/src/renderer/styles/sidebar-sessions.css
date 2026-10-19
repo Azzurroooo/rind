@@ -24,6 +24,10 @@
 .session-search-empty { margin: 2px 0 4px; color: var(--dim); font-size: var(--text-meta); }
 
 .session-item-row { position: relative; min-width: 0; }
+.session-item-row.menu-open,
+.session-item-row:has([aria-expanded="true"]) {
+  z-index: 60;
+}
 .session-item {
   display: flex;
   align-items: center;
@@ -44,7 +48,11 @@
 .session-item-title-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-spinner { width: 12px; height: 12px; flex: none; color: var(--accent); animation: tool-spin 900ms linear infinite; }
 
-.session-menu-wrap { position: absolute; top: 4px; right: 4px; }
+.session-menu-wrap { position: absolute; top: 4px; right: 4px; z-index: 2; }
+.session-menu-wrap.menu-open,
+.session-menu-wrap:has([aria-expanded="true"]) {
+  z-index: 60;
+}
 .session-menu-trigger {
   display: grid;
   place-items: center;
@@ -63,7 +71,7 @@
 .session-item-row:focus-within .session-menu-trigger,
 .session-item-row.menu-open .session-menu-trigger { opacity: 1; }
 .session-menu-trigger:hover, .session-menu-trigger[aria-expanded="true"] { color: var(--text); background: var(--fill-2); }
-.session-menu { top: calc(100% + 4px); right: 0; }
+.session-menu { top: calc(100% + 4px); right: 0; z-index: 100; isolation: isolate; pointer-events: auto; }
 
 @media (hover: none) {
   .session-menu-trigger { opacity: 1; }

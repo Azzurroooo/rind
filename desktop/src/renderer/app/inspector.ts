@@ -19,14 +19,11 @@ import { render } from "./shell.ts"
 import { emptyLoad, state, vars } from "./state.ts"
 import { type InspectorLoad } from "./types.ts"
 
-/** Matches the 760px drawer breakpoint used by the stylesheets. */
-const MOBILE_MAX_WIDTH = 760
 const USAGE_DAYS = 7
 
-/** Open, and either on a mobile drawer or with room left for the conversation. */
+/** Open when there is room left for the conversation. */
 export function inspectorShown() {
   if (!state.inspectorOpen || state.agentSurface.kind !== "chat") return false
-  if (window.innerWidth <= MOBILE_MAX_WIDTH) return true
   return inspectorFits(window.innerWidth, state.sidebarOpen ? state.sidebarWidth : 0, state.inspectorWidth)
 }
 
