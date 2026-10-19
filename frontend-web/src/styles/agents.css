@@ -590,14 +590,6 @@ button.header-agent-pill:hover {
   color: var(--muted);
   font-size: var(--text-meta);
 }
-.agents-surface-subtitle {
-  color: var(--muted);
-  font-size: var(--text-meta);
-}
-.agents-surface-subtitle code {
-  font-size: 11px;
-  color: var(--dim);
-}
 .agents-surface-actions {
   display: flex;
   flex-wrap: wrap;
@@ -807,13 +799,6 @@ button.header-agent-pill:hover {
   color: var(--dim);
   font-size: var(--text-meta);
 }
-.org-workspace-path {
-  padding: 1px 6px;
-  border-radius: var(--radius-chip);
-  background: var(--fill-1);
-  color: var(--muted);
-  font-size: 11px;
-}
 .org-member-responsibility {
   margin: 0;
   color: var(--text);
@@ -852,19 +837,14 @@ button.header-agent-pill:hover {
 }
 
 /* Member Conversations inside Org Card & Manager Card */
-.org-member-sessions {
-  display: grid;
-  gap: 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--panel);
-}
-.org-member-sessions-head {
+.org-member-meta-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
 }
 .org-member-sessions-toggle {
   display: inline-flex;
@@ -975,15 +955,6 @@ button.header-agent-pill:hover {
   font-size: var(--text-meta);
 }
 
-.org-member-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--line);
-}
 .org-member-stats {
   display: flex;
   gap: 10px;
@@ -995,8 +966,7 @@ button.header-agent-pill:hover {
   font-weight: 600;
 }
 .org-member-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
 }
@@ -1568,11 +1538,6 @@ button.header-agent-pill:hover {
   font-size: var(--text-meta);
   line-height: 1.5;
 }
-.task-notes-empty {
-  margin: 0;
-  color: var(--dim);
-  font-size: var(--text-meta);
-}
 
 /* --- Inbox Triage View --- */
 .inbox-card-list {
@@ -1632,6 +1597,26 @@ button.header-agent-pill:hover {
   gap: var(--space-4);
   max-width: 920px;
 }
+.bg-health-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+.bg-health-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-meta);
+}
+.bg-health-item + .bg-health-item {
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--line);
+}
 .bg-card {
   display: grid;
   gap: var(--space-3);
@@ -1657,22 +1642,6 @@ button.header-agent-pill:hover {
   margin-left: auto;
   color: var(--dim);
   font-size: 11px;
-}
-.bg-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--space-3);
-  margin: 0;
-}
-.bg-stat-grid dt {
-  color: var(--dim);
-  font-size: var(--text-meta);
-}
-.bg-stat-grid dd {
-  margin: 2px 0 0;
-  color: var(--text);
-  font-size: var(--text-ui);
-  font-weight: 600;
 }
 .bg-log-output {
   max-height: 260px;

@@ -255,6 +255,7 @@ export function renderAgentsUI() {
           expandedOrgMembers: state.expandedOrgMembers,
           viewedSessionId: state.viewedSessionId,
           sessionLimits: state.agentSessionLimits,
+          itemMenuKey: state.agentItemMenuKey,
           busy: state.agentsBusy,
           artifactPreview: state.artifactPreview,
           drawerWidth: taskDrawerWidth,
@@ -916,6 +917,7 @@ export function bindAgentsEvents(): () => void {
 
     const quickAssignBtn = target.closest<HTMLElement>("[data-agent-quick-assign]")
     if (quickAssignBtn && state.agentSurface.kind === "team") {
+      state.agentItemMenuKey = ""
       state.agentSurface = {
         ...state.agentSurface,
         assignOpen: true,
@@ -929,6 +931,7 @@ export function bindAgentsEvents(): () => void {
 
     const toggleDeleteBtn = target.closest<HTMLElement>("[data-team-toggle-delete]")
     if (toggleDeleteBtn && state.agentSurface.kind === "team") {
+      state.agentItemMenuKey = ""
       const open = toggleDeleteBtn.dataset.teamToggleDelete === "1"
       state.agentSurface = {
         ...state.agentSurface,
@@ -942,6 +945,7 @@ export function bindAgentsEvents(): () => void {
 
     const makeLeaderBtn = target.closest<HTMLElement>("[data-agent-make-leader]")
     if (makeLeaderBtn?.dataset.agentMakeLeader && makeLeaderBtn.dataset.agentTeam) {
+      state.agentItemMenuKey = ""
       const agentId = makeLeaderBtn.dataset.agentMakeLeader
       const teamId = makeLeaderBtn.dataset.agentTeam
       runAction(() => runManagementOp({ op: "setLeader", teamId, agentId }, "Team leader updated."))
@@ -950,6 +954,7 @@ export function bindAgentsEvents(): () => void {
 
     const removeMemberBtn = target.closest<HTMLElement>("[data-agent-remove]")
     if (removeMemberBtn?.dataset.agentRemove && removeMemberBtn.dataset.agentTeam) {
+      state.agentItemMenuKey = ""
       const agentId = removeMemberBtn.dataset.agentRemove
       const teamId = removeMemberBtn.dataset.agentTeam
       runAction(() => runManagementOp({ op: "removeMember", teamId, agentId }, "Member removed from team."))

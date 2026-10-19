@@ -10,6 +10,7 @@ import {
   GitBranch,
   ListChecks,
   MessageSquare,
+  MoreHorizontal,
   Network,
   Pencil,
   Play,
@@ -19,6 +20,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { TASK_SECTION_DEFS } from "../../lib/agentsModel.js";
+import { Menu } from "../overlays/Menu.jsx";
 import { TaskReportDrawer } from "./TaskReportDrawer.jsx";
 
 function OrgMemberNode({
@@ -52,7 +54,7 @@ function OrgMemberNode({
   const [effortInput, setEffortInput] = useState("");
   const [modelSource, setModelSource] = useState("");
 
-  const [sessionsExpanded, setSessionsExpanded] = useState(true);
+  const [sessionsExpanded, setSessionsExpanded] = useState(false);
   const [sessionLimit, setSessionLimit] = useState(5);
   const [renamingSessionId, setRenamingSessionId] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
@@ -117,16 +119,82 @@ function OrgMemberNode({
     setModelOpen(false);
   }
 
+  const memberMenuItems = [
+    {
+      id: "new-chat",
+      label: "New conversation",
+      icon: <MessageSquare size={13} />,
+      onSelect: () =>
+        onOpenChat?.({
+          teamId: node.teamId,
+          agentId: node.agentId,
+          forceNew: true,
+        }),
+    },
+    {
+      id: "assign-task",
+      label: "Assign task",
+      icon: <Plus size={13} />,
+      onSelect: () => onQuickAssign?.(node.agentId),
+    },
+    {
+      id: "add-report",
+      label: "Add direct report",
+      icon: <UserPlus size={13} />,
+      onSelect: () => onQuickAddReport?.(node.agentId),
+    },
+    {
+      id: "edit-role",
+      label: "Edit role & reporting",
+      icon: <Pencil size={13} />,
+      onSelect: () => {
+        setPosition(node.position || "");
+        setResponsibility(node.responsibility || "");
+        setReportsTo(node.reportsToAgentId || "");
+        setEditing((prev) => !prev);
+      },
+    },
+    ...(onGetMemberModel
+      ? [
+          {
+            id: "model-defaults",
+            label: "Model defaults",
+            icon: <Cpu size={13} />,
+            onSelect: () => void toggleModelConfig(),
+          },
+        ]
+      : []),
+    ...(!node.isLeader
+      ? [
+          {
+            id: "make-leader",
+            label: "Make team leader",
+            icon: <Crown size={13} />,
+            onSelect: () => onSetLeader?.({ teamId: node.teamId, agentId: node.agentId }),
+          },
+        ]
+      : []),
+    { separator: true },
+    {
+      id: "remove-member",
+      label: "Remove from team",
+      icon: <Trash2 size={13} />,
+      danger: true,
+      onSelect: () => onRemoveMember?.({ teamId: node.teamId, agentId: node.agentId }),
+    },
+  ];
+
   return (
     <div className={`org-tree-branch depth-${Math.min(depth, 4)}`} data-agent-id={node.agentId}>
       <div className={`org-member-card ${node.isLeader ? "is-leader" : ""}`}>
         <div className="org-member-top">
           <div className="org-member-identity">
             <div className="org-member-name-row">
+              <span className={`agent-status-dot tone-${node.tone}`} />
               <strong className="org-member-name">{node.name}</strong>
               {node.isLeader && (
                 <span className="org-leader-badge" title="Team Leader">
-                  <Crown size={12} aria-hidden="true" />
+                  <Crown size={11} aria-hidden="true" />
                   <span>Leader</span>
                 </span>
               )}
@@ -137,203 +205,17 @@ function OrgMemberNode({
                   <span>Worktree</span>
                 </span>
               )}
-            </div>
-            <div className="org-member-sub">
-              {node.reportsToName ? (
-                <span>Reports to {node.reportsToName}</span>
-              ) : node.isLeader ? (
-                <span>Coordinates team &amp; delegates work</span>
-              ) : (
-                <span>Direct team member</span>
-              )}
-              {node.canonicalWorkspace && (
-                <code className="org-workspace-path" title={node.canonicalWorkspace}>
-                  {node.canonicalWorkspace}
-                </code>
+              {node.status && node.status !== "Idle" && (
+                <span className={`agent-status-pill tone-${node.tone}`}>{node.status}</span>
               )}
             </div>
-          </div>
-          <span className={`agent-status-pill tone-${node.tone}`}>
-            <span className="agent-status-dot" />
-            <span>{node.status}</span>
-          </span>
-        </div>
-
-        {node.responsibility && <p className="org-member-responsibility">{node.responsibility}</p>}
-
-        {node.activeTask && (
-          <button
-            type="button"
-            className="org-active-task"
-            onClick={() => onSelectTask?.(node.teamId, node.activeTask.id)}
-          >
-            <span className="org-active-task-kicker">Current Task</span>
-            <span className="org-active-task-brief">{node.activeTask.brief}</span>
-          </button>
-        )}
-
-        {/* Member Conversations (Sessions) Section */}
-        <div className="org-member-sessions">
-          <div className="org-member-sessions-head">
-            <button
-              type="button"
-              className="org-member-sessions-toggle"
-              onClick={() => setSessionsExpanded((prev) => !prev)}
-            >
-              {sessionsExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              <MessageSquare size={12} aria-hidden="true" />
-              <span>Conversations ({memberSessions.length})</span>
-            </button>
-            <button
-              type="button"
-              className="agent-btn ghost xs"
-              disabled={busy}
-              onClick={() =>
-                onOpenChat?.({
-                  teamId: node.teamId,
-                  agentId: node.agentId,
-                  forceNew: true,
-                })
-              }
-            >
-              <Plus size={11} aria-hidden="true" />
-              <span>New conversation</span>
-            </button>
-          </div>
-
-          {sessionsExpanded && (
-            <div className="org-member-session-list">
-              {memberSessions.length === 0 ? (
-                <div className="org-member-session-empty">
-                  <span>No conversations yet with {node.name}.</span>
-                  <button
-                    type="button"
-                    className="agent-btn secondary xs"
-                    disabled={busy}
-                    onClick={() =>
-                      onOpenChat?.({
-                        teamId: node.teamId,
-                        agentId: node.agentId,
-                        forceNew: true,
-                      })
-                    }
-                  >
-                    <Plus size={11} aria-hidden="true" />
-                    <span>Start first conversation</span>
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {visibleSessions.map((sess) => (
-                    <div key={sess.runtimeSessionId} className="org-member-session-row">
-                      {renamingSessionId === sess.runtimeSessionId ? (
-                        <form
-                          className="org-session-rename-form"
-                          onSubmit={async (e) => {
-                            e.preventDefault();
-                            await onRenameSession?.(sess.runtimeSessionId, renameDraft, {
-                              teamId: node.teamId,
-                            });
-                            setRenamingSessionId("");
-                          }}
-                        >
-                          <input
-                            type="text"
-                            value={renameDraft}
-                            onChange={(e) => setRenameDraft(e.target.value)}
-                            placeholder="Conversation title"
-                            autoFocus
-                          />
-                          <button type="submit" className="agent-btn primary xs" disabled={busy}>
-                            Save
-                          </button>
-                          <button
-                            type="button"
-                            className="agent-btn ghost xs"
-                            onClick={() => setRenamingSessionId("")}
-                          >
-                            Cancel
-                          </button>
-                        </form>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="org-member-session-main"
-                            onClick={() =>
-                              onOpenChat?.({
-                                teamId: node.teamId,
-                                agentId: node.agentId,
-                                runtimeSessionId: sess.runtimeSessionId,
-                              })
-                            }
-                          >
-                            <span className={`agent-status-dot tone-${sess.tone}`} />
-                            <span className="org-member-session-title">{sess.title}</span>
-                            {sess.origin === "task" && (
-                              <span className="org-member-session-badge">Task</span>
-                            )}
-                            <span className={`org-member-session-status tone-${sess.tone}`}>
-                              {sess.status}
-                            </span>
-                            {sess.model && (
-                              <span className="org-member-session-meta">{sess.model}</span>
-                            )}
-                            {sess.ageText && (
-                              <span className="org-member-session-age">{sess.ageText}</span>
-                            )}
-                          </button>
-                          <div className="org-member-session-actions">
-                            <button
-                              type="button"
-                              className="icon-button xs"
-                              title="Rename conversation"
-                              aria-label={`Rename ${sess.title}`}
-                              onClick={() => {
-                                setRenamingSessionId(sess.runtimeSessionId);
-                                setRenameDraft(sess.title);
-                              }}
-                            >
-                              <Pencil size={11} aria-hidden="true" />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-button xs"
-                              title="Delete conversation"
-                              aria-label={`Delete ${sess.title}`}
-                              onClick={() =>
-                                onDeleteSession?.(sess.runtimeSessionId, { teamId: node.teamId })
-                              }
-                            >
-                              <Trash2 size={11} aria-hidden="true" />
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ))}
-                  {moreSessionsCount > 0 && (
-                    <button
-                      type="button"
-                      className="sidebar-load-more"
-                      onClick={() => setSessionLimit((prev) => prev + 5)}
-                    >
-                      <span>View more sessions</span>
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="org-member-footer">
-          <div className="org-member-stats">
-            <span>{node.taskCounts.active} active task(s)</span>
-            {node.taskCounts.attention > 0 && (
-              <span className="org-stat-attention">{node.taskCounts.attention} need review</span>
+            {(node.reportsToName || node.responsibility) && (
+              <div className="org-member-sub">
+                {node.reportsToName && <span>Reports to {node.reportsToName}</span>}
+                {node.reportsToName && node.responsibility && <span>·</span>}
+                {node.responsibility && <span>{node.responsibility}</span>}
+              </div>
             )}
-            <span>{node.taskCounts.done} delivered</span>
           </div>
           <div className="org-member-actions">
             <button
@@ -350,76 +232,195 @@ function OrgMemberNode({
               }
             >
               <MessageSquare size={13} aria-hidden="true" />
-              <span>{memberSessions.length > 0 ? "Open chat" : "New chat"}</span>
+              <span>Chat</span>
             </button>
-            <button
-              type="button"
-              className="agent-btn secondary sm"
-              disabled={busy}
-              onClick={() => onQuickAssign?.(node.agentId)}
-            >
-              <Plus size={13} aria-hidden="true" />
-              <span>Assign task</span>
-            </button>
-            <button
-              type="button"
-              className="agent-btn ghost sm"
-              disabled={busy}
-              title={`Add a direct report under ${node.name}`}
-              onClick={() => onQuickAddReport?.(node.agentId)}
-            >
-              <UserPlus size={13} aria-hidden="true" />
-              <span>Add report</span>
-            </button>
-            {!node.isLeader && (
-              <button
-                type="button"
-                className="agent-btn ghost sm"
-                disabled={busy}
-                title="Promote to Team Leader"
-                onClick={() => onSetLeader?.({ teamId: node.teamId, agentId: node.agentId })}
-              >
-                <Crown size={13} aria-hidden="true" />
-                <span>Make leader</span>
-              </button>
-            )}
-            {onGetMemberModel && (
-              <button
-                type="button"
-                className="icon-button small"
-                aria-label={`Model settings for ${node.name}`}
-                title="Configure member default model & reasoning effort"
-                onClick={() => void toggleModelConfig()}
-              >
-                <Cpu size={13} aria-hidden="true" />
-              </button>
-            )}
-            <button
-              type="button"
-              className="icon-button small"
-              aria-label={`Edit ${node.name}`}
-              title="Edit role & reporting line"
-              onClick={() => {
-                setPosition(node.position || "");
-                setResponsibility(node.responsibility || "");
-                setReportsTo(node.reportsToAgentId || "");
-                setEditing((prev) => !prev);
-              }}
-            >
-              <Pencil size={13} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="icon-button small"
-              aria-label={`Remove ${node.name}`}
-              title="Remove from team"
-              disabled={busy}
-              onClick={() => onRemoveMember?.({ teamId: node.teamId, agentId: node.agentId })}
-            >
-              <Trash2 size={13} aria-hidden="true" />
-            </button>
+            <Menu
+              label={`Actions for ${node.name}`}
+              items={memberMenuItems}
+              trigger={(props) => (
+                <button
+                  type="button"
+                  className="icon-button small"
+                  aria-label={`Actions for ${node.name}`}
+                  title="Member actions"
+                  {...props}
+                >
+                  <MoreHorizontal size={14} aria-hidden="true" />
+                </button>
+              )}
+            />
           </div>
         </div>
+
+        {node.activeTask && (
+          <button
+            type="button"
+            className="org-active-task"
+            onClick={() => onSelectTask?.(node.teamId, node.activeTask.id)}
+          >
+            <span className="org-active-task-kicker">Working on</span>
+            <span className="org-active-task-brief">{node.activeTask.brief}</span>
+          </button>
+        )}
+
+        <div className="org-member-meta-bar">
+          <button
+            type="button"
+            className="org-member-sessions-toggle"
+            aria-expanded={sessionsExpanded}
+            onClick={() => setSessionsExpanded((prev) => !prev)}
+          >
+            {sessionsExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            <span>Conversations ({memberSessions.length})</span>
+          </button>
+          <div className="org-member-stats">
+            {node.taskCounts.active > 0 && <span>{node.taskCounts.active} active</span>}
+            {node.taskCounts.attention > 0 && (
+              <span className="org-stat-attention">{node.taskCounts.attention} need review</span>
+            )}
+            {sessionsExpanded && (
+              <button
+                type="button"
+                className="agent-btn ghost xs"
+                disabled={busy}
+                onClick={() =>
+                  onOpenChat?.({
+                    teamId: node.teamId,
+                    agentId: node.agentId,
+                    forceNew: true,
+                  })
+                }
+              >
+                <Plus size={11} aria-hidden="true" />
+                <span>New</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {sessionsExpanded && (
+          <div className="org-member-session-list">
+            {memberSessions.length === 0 ? (
+              <div className="org-member-session-empty">
+                <span>No conversations yet.</span>
+                <button
+                  type="button"
+                  className="agent-btn secondary xs"
+                  disabled={busy}
+                  onClick={() =>
+                    onOpenChat?.({
+                      teamId: node.teamId,
+                      agentId: node.agentId,
+                      forceNew: true,
+                    })
+                  }
+                >
+                  <Plus size={11} aria-hidden="true" />
+                  <span>Start conversation</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                {visibleSessions.map((sess) => (
+                  <div key={sess.runtimeSessionId} className="org-member-session-row">
+                    {renamingSessionId === sess.runtimeSessionId ? (
+                      <form
+                        className="org-session-rename-form"
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          await onRenameSession?.(sess.runtimeSessionId, renameDraft, {
+                            teamId: node.teamId,
+                          });
+                          setRenamingSessionId("");
+                        }}
+                      >
+                        <input
+                          type="text"
+                          value={renameDraft}
+                          onChange={(e) => setRenameDraft(e.target.value)}
+                          placeholder="Conversation title"
+                          autoFocus
+                        />
+                        <button type="submit" className="agent-btn primary xs" disabled={busy}>
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-btn ghost xs"
+                          onClick={() => setRenamingSessionId("")}
+                        >
+                          Cancel
+                        </button>
+                      </form>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="org-member-session-main"
+                          onClick={() =>
+                            onOpenChat?.({
+                              teamId: node.teamId,
+                              agentId: node.agentId,
+                              runtimeSessionId: sess.runtimeSessionId,
+                            })
+                          }
+                        >
+                          <span className={`agent-status-dot tone-${sess.tone}`} />
+                          <span className="org-member-session-title">{sess.title}</span>
+                          {sess.origin === "task" && (
+                            <span className="org-member-session-badge">Task</span>
+                          )}
+                          {sess.status && sess.status !== "Idle" && (
+                            <span className={`org-member-session-status tone-${sess.tone}`}>
+                              {sess.status}
+                            </span>
+                          )}
+                          {sess.ageText && (
+                            <span className="org-member-session-age">{sess.ageText}</span>
+                          )}
+                        </button>
+                        <div className="org-member-session-actions">
+                          <button
+                            type="button"
+                            className="icon-button xs"
+                            title="Rename conversation"
+                            aria-label={`Rename ${sess.title}`}
+                            onClick={() => {
+                              setRenamingSessionId(sess.runtimeSessionId);
+                              setRenameDraft(sess.title);
+                            }}
+                          >
+                            <Pencil size={11} aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button xs"
+                            title="Delete conversation"
+                            aria-label={`Delete ${sess.title}`}
+                            onClick={() =>
+                              onDeleteSession?.(sess.runtimeSessionId, { teamId: node.teamId })
+                            }
+                          >
+                            <Trash2 size={11} aria-hidden="true" />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+                {moreSessionsCount > 0 && (
+                  <button
+                    type="button"
+                    className="sidebar-load-more"
+                    onClick={() => setSessionLimit((prev) => prev + 5)}
+                  >
+                    <span>Show {moreSessionsCount} more</span>
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {modelOpen && (
           <form className="org-member-edit-form" onSubmit={saveModelConfig}>
@@ -615,14 +616,17 @@ export function TeamView({
     );
     const defs = TASK_SECTION_DEFS.filter((def) => {
       if (sectionFilter === "needs") return def.id === "needs";
-      if (sectionFilter === "active") return def.id === "needs" || def.id === "working" || def.id === "queued" || def.id === "delegated";
+      if (sectionFilter === "active")
+        return def.id === "needs" || def.id === "working" || def.id === "queued" || def.id === "delegated";
       if (sectionFilter === "done") return def.id === "done" || def.id === "cancelled";
       return true;
     });
-    return defs.map((def) => ({
-      ...def,
-      tasks: allTasks.filter((t) => t.group === def.id),
-    }));
+    return defs
+      .map((def) => ({
+        ...def,
+        tasks: allTasks.filter((t) => t.group === def.id),
+      }))
+      .filter((section) => section.tasks.length > 0);
   }, [teamTasks, assigneeFilter, sectionFilter]);
 
   const selectedTask = useMemo(() => {
@@ -653,12 +657,14 @@ export function TeamView({
     setAssignAgentId(agentId || teamSummary?.leader?.agentId || members[0]?.agentId || "");
     setAssignOpen(true);
     setAddMemberOpen(false);
+    setDeleteOpen(false);
   }
 
   function handleQuickAddReport(supervisorAgentId) {
     setMemberSupervisor(supervisorAgentId || "");
     setAddMemberOpen(true);
     setAssignOpen(false);
+    setDeleteOpen(false);
   }
 
   async function submitNewMember(event) {
@@ -699,32 +705,41 @@ export function TeamView({
     onTabChange?.("tasks");
   }
 
+  const teamHeaderMenuItems = [
+    ...(teamSummary.leader
+      ? [
+          {
+            id: "chat-leader",
+            label: `Chat with Leader (${teamSummary.leader.name})`,
+            icon: <MessageSquare size={13} />,
+            onSelect: () =>
+              onOpenChat?.({
+                teamId: team.id,
+                agentId: teamSummary.leader.agentId,
+                runtimeSessionId: teamSummary.leader.latestRuntimeSessionId,
+                resumeLatest: true,
+              }),
+          },
+        ]
+      : []),
+    {
+      id: "delete-team",
+      label: "Delete team…",
+      icon: <Trash2 size={13} />,
+      danger: true,
+      onSelect: () => {
+        setDeleteOpen(true);
+        setAddMemberOpen(false);
+        setAssignOpen(false);
+      },
+    },
+  ];
+
   return (
     <div className="agents-surface">
       <div className="agents-surface-header">
-        <div className="agents-surface-title-block">
-          <div className="agents-surface-title-row">
-            <h2 className="agents-surface-title">{team.name}</h2>
-            {teamSummary.leader && (
-              <span className="agents-header-badge">
-                <Crown size={12} aria-hidden="true" />
-                <span>Lead: {teamSummary.leader.name}</span>
-              </span>
-            )}
-            <span className="agents-header-meta">
-              {counts.members} {counts.members === 1 ? "member" : "members"} · {counts.sessions || 0}{" "}
-              {counts.sessions === 1 ? "conversation" : "conversations"} · {counts.tasksTotal}{" "}
-              {counts.tasksTotal === 1 ? "task" : "tasks"}
-            </span>
-          </div>
-          {team.createRoot && (
-            <div className="agents-surface-subtitle">
-              <span>Workspace root:</span> <code>{team.createRoot}</code>
-            </div>
-          )}
-        </div>
-
-        <div className="agents-surface-actions">
+        <div className="agents-surface-title-row">
+          <h2 className="agents-surface-title">{team.name}</h2>
           <div className="agents-segmented" role="tablist" aria-label="Team view mode">
             <button
               type="button"
@@ -733,8 +748,8 @@ export function TeamView({
               className={`agents-seg-btn ${activeTab === "organization" ? "active" : ""}`}
               onClick={() => onTabChange?.("organization")}
             >
-              <Network size={14} aria-hidden="true" />
-              <span>Organization</span>
+              <span>Members</span>
+              <span className="agents-seg-count">{counts.members}</span>
             </button>
             <button
               type="button"
@@ -743,56 +758,98 @@ export function TeamView({
               className={`agents-seg-btn ${activeTab === "tasks" ? "active" : ""}`}
               onClick={() => onTabChange?.("tasks")}
             >
-              <ListChecks size={14} aria-hidden="true" />
-              <span>Tasks &amp; Deliveries</span>
-              {counts.tasksTotal > 0 && <span className="agents-seg-count">{counts.tasksTotal}</span>}
+              <span>Tasks</span>
+              <span className="agents-seg-count">{counts.tasksTotal}</span>
             </button>
           </div>
-
-          {teamSummary.leader && (
-            <button
-              type="button"
-              className="agent-btn secondary"
-              onClick={() =>
-                onOpenChat?.({
-                  teamId: team.id,
-                  agentId: teamSummary.leader.agentId,
-                  runtimeSessionId: teamSummary.leader.latestRuntimeSessionId,
-                  resumeLatest: true,
-                })
-              }
-            >
-              <MessageSquare size={14} aria-hidden="true" />
-              <span>Chat with Leader</span>
-            </button>
+          {counts.working > 0 && (
+            <span className="agent-status-pill tone-working">{counts.working} active</span>
           )}
+          {counts.tasksAttention > 0 && (
+            <span className="agent-status-pill tone-attention">{counts.tasksAttention} need review</span>
+          )}
+        </div>
+
+        <div className="agents-surface-actions">
           <button
             type="button"
-            className="agent-btn secondary"
+            className="agent-btn secondary sm"
             onClick={() => {
               setMemberSupervisor(teamSummary.leader?.agentId || "");
               setAddMemberOpen((prev) => !prev);
               setAssignOpen(false);
+              setDeleteOpen(false);
             }}
           >
-            <UserPlus size={14} aria-hidden="true" />
+            <UserPlus size={13} aria-hidden="true" />
             <span>Add Member</span>
           </button>
           <button
             type="button"
-            className="agent-btn primary"
+            className="agent-btn primary sm"
             disabled={members.length === 0}
             onClick={() => {
               setAssignAgentId(teamSummary.leader?.agentId || members[0]?.agentId || "");
               setAssignOpen((prev) => !prev);
               setAddMemberOpen(false);
+              setDeleteOpen(false);
             }}
           >
-            <Plus size={14} aria-hidden="true" />
+            <Plus size={13} aria-hidden="true" />
             <span>Assign Task</span>
           </button>
+          <Menu
+            label="Team actions"
+            items={teamHeaderMenuItems}
+            trigger={(props) => (
+              <button
+                type="button"
+                className="icon-button small"
+                aria-label="Team actions"
+                title="Team actions"
+                {...props}
+              >
+                <MoreHorizontal size={15} aria-hidden="true" />
+              </button>
+            )}
+          />
         </div>
       </div>
+
+      {deleteOpen && (
+        <form
+          className="agents-inline-panel"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (deleteConfirm.trim() !== team.name) return;
+            await onDeleteTeam?.({ teamId: team.id, confirmName: deleteConfirm.trim() });
+            setDeleteOpen(false);
+          }}
+        >
+          <div className="team-delete-confirm">
+            <span>
+              Type <strong>{team.name}</strong> to archive and delete this team:
+            </span>
+            <input
+              type="text"
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              placeholder={team.name}
+              aria-label="Confirm team name"
+            />
+            <button
+              type="submit"
+              className="agent-btn danger sm"
+              disabled={busy || deleteConfirm.trim() !== team.name}
+            >
+              Confirm Delete
+            </button>
+            <button type="button" className="agent-btn ghost sm" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
 
       {addMemberOpen && (
         <form className="agents-inline-panel" onSubmit={submitNewMember} aria-label="Add team member">
@@ -892,7 +949,7 @@ export function TeamView({
               Cancel
             </button>
             <button type="submit" className="agent-btn primary sm" disabled={busy}>
-              Create &amp; Join Team
+              Add Member
             </button>
           </div>
         </form>
@@ -901,7 +958,7 @@ export function TeamView({
       {assignOpen && (
         <form className="agents-inline-panel" onSubmit={submitAssignTask} aria-label="Assign task to member">
           <div className="agents-inline-panel-head">
-            <strong>Assign New Task</strong>
+            <strong>Assign Task</strong>
           </div>
           <div className="org-form-grid">
             <label>
@@ -913,7 +970,7 @@ export function TeamView({
               >
                 {members.map((m) => (
                   <option key={m.agentId} value={m.agentId}>
-                    {m.name} — {m.position} ({m.status})
+                    {m.name} — {m.position}
                   </option>
                 ))}
               </select>
@@ -924,17 +981,17 @@ export function TeamView({
                 checked={assignStartNow}
                 onChange={(e) => setAssignStartNow(e.target.checked)}
               />
-              <span>Start task run immediately</span>
+              <span>Start immediately</span>
             </label>
           </div>
           <label>
-            <span>Task Brief &amp; Deliverable Expectations</span>
+            <span>Task Brief</span>
             <textarea
               rows={3}
               required
               value={assignBrief}
               onChange={(e) => setAssignBrief(e.target.value)}
-              placeholder="Describe the objective, constraints, and expected verification evidence…"
+              placeholder="Describe the objective and expected deliverables…"
               aria-label="Task brief"
             />
           </label>
@@ -960,8 +1017,8 @@ export function TeamView({
                   <p>
                     Add a specialist workspace or git worktree to build this team&apos;s reporting structure.
                   </p>
-                  <button type="button" className="agent-btn primary" onClick={() => setAddMemberOpen(true)}>
-                    <UserPlus size={14} aria-hidden="true" />
+                  <button type="button" className="agent-btn primary sm" onClick={() => setAddMemberOpen(true)}>
+                    <UserPlus size={13} aria-hidden="true" />
                     <span>Add First Member</span>
                   </button>
                 </div>
@@ -990,232 +1047,165 @@ export function TeamView({
                   ))}
                 </div>
               )}
-
-              <div className="team-danger-zone">
-                {!deleteOpen ? (
-                  <button type="button" className="agent-btn ghost sm danger-text" onClick={() => setDeleteOpen(true)}>
-                    <Trash2 size={13} aria-hidden="true" />
-                    <span>Archive / Delete Team…</span>
-                  </button>
-                ) : (
-                  <form
-                    className="team-delete-confirm"
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (deleteConfirm.trim() !== team.name) return;
-                      await onDeleteTeam?.({ teamId: team.id, confirmName: deleteConfirm.trim() });
-                      setDeleteOpen(false);
-                    }}
-                  >
-                    <span>
-                      Type <strong>{team.name}</strong> to confirm deleting this team:
-                    </span>
-                    <input
-                      type="text"
-                      value={deleteConfirm}
-                      onChange={(e) => setDeleteConfirm(e.target.value)}
-                      placeholder={team.name}
-                      aria-label="Confirm team name"
-                    />
-                    <button
-                      type="submit"
-                      className="agent-btn danger sm"
-                      disabled={busy || deleteConfirm.trim() !== team.name}
-                    >
-                      Delete Team
-                    </button>
-                    <button type="button" className="agent-btn ghost sm" onClick={() => setDeleteOpen(false)}>
-                      Cancel
-                    </button>
-                  </form>
-                )}
-              </div>
             </div>
           ) : (
             <div className="tasks-view-container">
-              <div className="tasks-toolbar">
-                <div className="tasks-filter-group">
-                  <label className="tasks-filter-select">
-                    <span>Member:</span>
-                    <select
-                      value={assigneeFilter}
-                      onChange={(e) => setAssigneeFilter(e.target.value)}
-                      aria-label="Filter tasks by member"
+              {(teamTasks?.all?.length || 0) > 0 && (
+                <div className="tasks-toolbar">
+                  {members.length > 1 && (
+                    <label className="tasks-filter-select">
+                      <span>Member:</span>
+                      <select
+                        value={assigneeFilter}
+                        onChange={(e) => setAssigneeFilter(e.target.value)}
+                        aria-label="Filter tasks by member"
+                      >
+                        <option value="">All ({teamTasks?.all?.length || 0})</option>
+                        {members.map((m) => (
+                          <option key={m.agentId} value={m.agentId}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <div className="agents-segmented" role="group" aria-label="Filter tasks by stage">
+                    <button
+                      type="button"
+                      className={`agents-seg-btn ${sectionFilter === "all" ? "active" : ""}`}
+                      onClick={() => setSectionFilter("all")}
                     >
-                      <option value="">All members ({teamTasks?.all?.length || 0})</option>
-                      {members.map((m) => (
-                        <option key={m.agentId} value={m.agentId}>
-                          {m.name} ({m.position})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      <span>All</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`agents-seg-btn ${sectionFilter === "needs" ? "active" : ""}`}
+                      onClick={() => setSectionFilter("needs")}
+                    >
+                      <span>Needs You</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`agents-seg-btn ${sectionFilter === "active" ? "active" : ""}`}
+                      onClick={() => setSectionFilter("active")}
+                    >
+                      <span>Active</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`agents-seg-btn ${sectionFilter === "done" ? "active" : ""}`}
+                      onClick={() => setSectionFilter("done")}
+                    >
+                      <span>Delivered</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="agents-segmented" role="group" aria-label="Filter tasks by stage">
-                  <button
-                    type="button"
-                    className={`agents-seg-btn ${sectionFilter === "all" ? "active" : ""}`}
-                    onClick={() => setSectionFilter("all")}
-                  >
-                    <span>All</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`agents-seg-btn ${sectionFilter === "needs" ? "active" : ""}`}
-                    onClick={() => setSectionFilter("needs")}
-                  >
-                    <span>Needs You</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`agents-seg-btn ${sectionFilter === "active" ? "active" : ""}`}
-                    onClick={() => setSectionFilter("active")}
-                  >
-                    <span>Active &amp; Queued</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`agents-seg-btn ${sectionFilter === "done" ? "active" : ""}`}
-                    onClick={() => setSectionFilter("done")}
-                  >
-                    <span>Delivered</span>
-                  </button>
-                </div>
-              </div>
+              )}
 
-              {(teamTasks?.all?.length || 0) === 0 ? (
+              {filteredSections.length === 0 ? (
                 <div className="agents-empty-hero">
                   <ListChecks size={26} aria-hidden="true" />
-                  <h3>No tasks assigned in {team.name} yet</h3>
-                  <p>
-                    Assign a task to the team leader or a specialist member to track execution, sub-delegations, and delivery reports.
-                  </p>
+                  <h3>No tasks found</h3>
+                  <p>Assign a task to the team leader or any specialist member.</p>
                   <button
                     type="button"
-                    className="agent-btn primary"
+                    className="agent-btn primary sm"
                     disabled={members.length === 0}
                     onClick={() => handleQuickAssign(teamSummary.leader?.agentId)}
                   >
-                    <Plus size={14} aria-hidden="true" />
-                    <span>Assign First Task</span>
+                    <Plus size={13} aria-hidden="true" />
+                    <span>Assign Task</span>
                   </button>
                 </div>
               ) : (
                 <div className="task-sections-stack" role="region" aria-label="Grouped team tasks">
-                  {filteredSections.map((section) => {
-                    if (section.tasks.length === 0 && sectionFilter === "all" && section.id === "cancelled") {
-                      return null;
-                    }
-                    return (
-                      <section key={section.id} className="task-group-section" data-section={section.id}>
-                        <div className="task-group-head">
-                          <h3 className="task-group-title">{section.label}</h3>
-                          <span className="task-group-count">{section.tasks.length}</span>
-                        </div>
-                        {section.tasks.length === 0 ? (
-                          <div className="task-group-empty">{section.emptyText}</div>
-                        ) : (
-                          <div className="task-list-table" role="list">
-                            {section.tasks.map((task) => (
-                              <div
-                                key={task.id}
-                                role="listitem"
-                                tabIndex={0}
-                                className={`task-list-row ${selectedTask?.id === task.id ? "selected" : ""}`}
-                                onClick={() => onSelectTask?.(team.id, task.id)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" || e.key === " ") {
-                                    e.preventDefault();
-                                    onSelectTask?.(team.id, task.id);
-                                  }
-                                }}
-                              >
-                                <div className="task-list-main">
-                                  <div className="task-list-title-line">
-                                    <span className={`agent-status-pill tone-${task.tone}`}>
-                                      {task.statusLabel}
-                                    </span>
-                                    {task.priority !== "normal" && (
-                                      <span className={`task-priority-chip ${task.priority}`}>
-                                        {task.priority}
-                                      </span>
-                                    )}
-                                    <strong className="task-list-brief">{task.brief}</strong>
-                                  </div>
-
-                                  {task.blockedSummary && (
-                                    <div className="task-list-callout attention">
-                                      {task.blockedSummary}
-                                    </div>
-                                  )}
-
-                                  {task.report?.summary && (
-                                    <div className="task-list-callout report">
-                                      {task.report.outcome && (
-                                        <span className="task-outcome-inline">{task.report.outcome}: </span>
-                                      )}
-                                      {task.report.summary}
-                                    </div>
-                                  )}
-                                </div>
-
-                                <div className="task-list-meta" onClick={(e) => e.stopPropagation()}>
-                                  <span className="task-list-assignee">
-                                    {task.assigneeName} · {task.assigneePosition}
+                  {filteredSections.map((section) => (
+                    <section key={section.id} className="task-group-section" data-section={section.id}>
+                      <div className="task-group-head">
+                        <h3 className="task-group-title">{section.label}</h3>
+                        <span className="task-group-count">{section.tasks.length}</span>
+                      </div>
+                      <div className="task-list-table" role="list">
+                        {section.tasks.map((task) => (
+                          <div
+                            key={task.id}
+                            role="listitem"
+                            tabIndex={0}
+                            className={`task-list-row ${selectedTask?.id === task.id ? "selected" : ""}`}
+                            onClick={() => onSelectTask?.(team.id, task.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                onSelectTask?.(team.id, task.id);
+                              }
+                            }}
+                          >
+                            <div className="task-list-main">
+                              <div className="task-list-title-line">
+                                <span className={`agent-status-pill tone-${task.tone}`}>
+                                  {task.statusLabel}
+                                </span>
+                                {task.priority !== "normal" && (
+                                  <span className={`task-priority-chip ${task.priority}`}>
+                                    {task.priority}
                                   </span>
-                                  {task.artifactRecords?.length > 0 && (
-                                    <span className="task-list-badge" title="Published artifacts">
-                                      <FileText size={11} aria-hidden="true" />
-                                      <span>{task.artifactRecords.length}</span>
-                                    </span>
-                                  )}
-                                  {task.ageText && <span className="task-list-age">{task.ageText}</span>}
-                                  {task.status === "queued" && (
-                                    <button
-                                      type="button"
-                                      className="agent-btn ghost xs"
-                                      disabled={busy}
-                                      onClick={() => void onStartTask?.(task.id)}
-                                    >
-                                      <Play size={11} aria-hidden="true" />
-                                      <span>Start</span>
-                                    </button>
-                                  )}
-                                  {task.unreviewed && (
-                                    <button
-                                      type="button"
-                                      className="agent-btn primary xs"
-                                      disabled={busy}
-                                      onClick={() => void onReviewTask?.(task.id, "accept")}
-                                    >
-                                      <CheckCircle2 size={11} aria-hidden="true" />
-                                      <span>Accept</span>
-                                    </button>
-                                  )}
-                                  {task.runtimeSessionId && (
-                                    <button
-                                      type="button"
-                                      className="agent-btn ghost xs"
-                                      onClick={() =>
-                                        onOpenChat?.({
-                                          teamId: task.teamId,
-                                          agentId: task.assigneeAgentId,
-                                          runtimeSessionId: task.runtimeSessionId,
-                                        })
-                                      }
-                                    >
-                                      <MessageSquare size={11} aria-hidden="true" />
-                                      <span>Session</span>
-                                    </button>
-                                  )}
-                                </div>
+                                )}
+                                <strong className="task-list-brief">{task.brief}</strong>
                               </div>
-                            ))}
+
+                              {task.blockedSummary && (
+                                <div className="task-list-callout attention">
+                                  {task.blockedSummary}
+                                </div>
+                              )}
+
+                              {task.report?.summary && (
+                                <div className="task-list-callout report">
+                                  {task.report.outcome && (
+                                    <span className="task-outcome-inline">{task.report.outcome}: </span>
+                                  )}
+                                  {task.report.summary}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="task-list-meta" onClick={(e) => e.stopPropagation()}>
+                              <span className="task-list-assignee">{task.assigneeName}</span>
+                              {task.artifactRecords?.length > 0 && (
+                                <span className="task-list-badge" title="Published artifacts">
+                                  <FileText size={11} aria-hidden="true" />
+                                  <span>{task.artifactRecords.length}</span>
+                                </span>
+                              )}
+                              {task.ageText && <span className="task-list-age">{task.ageText}</span>}
+                              {task.status === "queued" && (
+                                <button
+                                  type="button"
+                                  className="agent-btn ghost xs"
+                                  disabled={busy}
+                                  onClick={() => void onStartTask?.(task.id)}
+                                >
+                                  <Play size={11} aria-hidden="true" />
+                                  <span>Start</span>
+                                </button>
+                              )}
+                              {task.unreviewed && (
+                                <button
+                                  type="button"
+                                  className="agent-btn primary xs"
+                                  disabled={busy}
+                                  onClick={() => void onReviewTask?.(task.id, "accept")}
+                                >
+                                  <CheckCircle2 size={11} aria-hidden="true" />
+                                  <span>Accept</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        )}
-                      </section>
-                    );
-                  })}
+                        ))}
+                      </div>
+                    </section>
+                  ))}
                 </div>
               )}
             </div>
@@ -1240,3 +1230,4 @@ export function TeamView({
     </div>
   );
 }
+

@@ -173,7 +173,7 @@ export function TaskReportDrawer({
           <span className={`agent-status-pill tone-${task.tone}`}>{task.statusLabel}</span>
           <span className="task-drawer-meta">
             {task.teamName ? `${task.teamName} › ` : ""}
-            {task.assigneeName} ({task.assigneePosition})
+            {task.assigneeName}
           </span>
         </div>
         <div className="task-drawer-head-actions">
@@ -217,11 +217,11 @@ export function TaskReportDrawer({
                   <option value="low">Low</option>
                 </select>
               </label>
-            ) : (
-              <span className={`task-priority-chip ${task.priority || "normal"}`}>
-                Priority: {task.priority || "normal"}
+            ) : task.priority && task.priority !== "normal" ? (
+              <span className={`task-priority-chip ${task.priority}`}>
+                {task.priority}
               </span>
-            )}
+            ) : null}
             <div className="task-drawer-action-row">
               {canStart && (
                 <button
@@ -469,8 +469,10 @@ export function TaskReportDrawer({
         )}
 
         <div className="task-drawer-section">
-          <span className="task-section-kicker">Notes &amp; Guidance ({task.notes?.length || 0})</span>
-          {task.notes?.length > 0 ? (
+          <span className="task-section-kicker">
+            Notes{task.notes?.length ? ` (${task.notes.length})` : ""}
+          </span>
+          {task.notes?.length > 0 && (
             <ul className="task-notes-list">
               {task.notes.map((note) => (
                 <li key={note.id} className="task-note-item">
@@ -482,8 +484,6 @@ export function TaskReportDrawer({
                 </li>
               ))}
             </ul>
-          ) : (
-            <p className="task-notes-empty">No task notes yet.</p>
           )}
           <form
             className="task-inline-form"

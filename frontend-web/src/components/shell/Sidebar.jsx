@@ -667,6 +667,7 @@ export function Sidebar({
                                       type="button"
                                       className="sidebar-member-main"
                                       aria-expanded={isExpanded}
+                                      title={member.position ? `${member.name} · ${member.position}` : member.name}
                                       onClick={() =>
                                         setExpandedMembers((prev) => ({
                                           ...prev,
@@ -676,10 +677,11 @@ export function Sidebar({
                                     >
                                       <span className={`agent-status-dot tone-${member.tone}`} />
                                       <span className="sidebar-member-name">{member.name}</span>
-                                      {member.isLeader && (
+                                      {member.isLeader ? (
                                         <span className="sidebar-leader-tag">Lead</span>
+                                      ) : (
+                                        <span className="sidebar-member-role">{member.position}</span>
                                       )}
-                                      <span className="sidebar-member-role">{member.position}</span>
                                     </button>
                                     {memberSessions.length > 0 && (
                                       <span className="sidebar-nav-hint">{memberSessions.length}</span>

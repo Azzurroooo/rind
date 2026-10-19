@@ -31,7 +31,9 @@ export function ManagerView({
   const [renamingId, setRenamingId] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
 
+  const [showAllSessions, setShowAllSessions] = useState(false);
   const sessions = Array.isArray(managerSummary?.sessions) ? managerSummary.sessions : [];
+  const visibleSessions = showAllSessions ? sessions : sessions.slice(0, 5);
 
   async function handleCreateTeam(event) {
     event.preventDefault();
@@ -49,11 +51,8 @@ export function ManagerView({
         <div className="agents-surface-header">
           <div className="agents-surface-title-block">
             <div className="agents-surface-title-row">
-              <h2 className="agents-surface-title">Archived Teams</h2>
-              <span className="agents-header-meta">{archiveList.length} archived team(s)</span>
-            </div>
-            <div className="agents-surface-subtitle">
-              Completed teams that were deleted after delivering tasks retain their task history and reports here.
+              <h2 className="agents-surface-title">Archive</h2>
+              <span className="agents-header-meta">{archiveList.length} archived</span>
             </div>
           </div>
           <div className="agents-surface-actions">
@@ -63,7 +62,7 @@ export function ManagerView({
               onClick={() => onSwitchMode?.("manager")}
             >
               <Sparkles size={13} aria-hidden="true" />
-              <span>Manager Overview</span>
+              <span>Manager</span>
             </button>
           </div>
         </div>
@@ -73,7 +72,7 @@ export function ManagerView({
             <div className="agents-empty-hero">
               <Archive size={28} aria-hidden="true" />
               <h3>No archived teams</h3>
-              <p>Teams deleted after completing tasks are preserved here with their delivery reports.</p>
+              <p>Deleted teams that completed tasks preserve their delivery reports here.</p>
             </div>
           ) : (
             <div className="bg-grid">
@@ -86,12 +85,12 @@ export function ManagerView({
                       <h3>{archived.name || archived.id}</h3>
                       {archived.archivedAt && (
                         <span className="agents-header-meta">
-                          Archived {String(archived.archivedAt).slice(0, 10)}
+                          {String(archived.archivedAt).slice(0, 10)}
                         </span>
                       )}
                     </div>
                     {tasks.length === 0 ? (
-                      <p className="bg-empty-note">Archived team summary ({archived.taskCount || 0} task(s)).</p>
+                      <p className="bg-empty-note">{archived.taskCount || 0} completed task(s)</p>
                     ) : (
                       <div className="task-list-table">
                         {tasks.map((task) => (
@@ -129,7 +128,7 @@ export function ManagerView({
       <div className="agents-surface-header">
         <div className="agents-surface-title-block">
           <div className="agents-surface-title-row">
-            <h2 className="agents-surface-title">Manager · Coordinator</h2>
+            <h2 className="agents-surface-title">Manager</h2>
             <span className={`agent-status-pill tone-${managerSummary?.tone || "idle"}`}>
               <span className="agent-status-dot" />
               <span>{managerSummary?.status || "Idle"}</span>
@@ -139,16 +138,13 @@ export function ManagerView({
               {teamSummaries.length} {teamSummaries.length === 1 ? "team" : "teams"}
             </span>
           </div>
-          <div className="agents-surface-subtitle">
-            The Manager coordinates teams, creates specialist workspaces or git worktrees, assigns tasks, and reviews organization structure.
-          </div>
         </div>
 
         <div className="agents-surface-actions">
           {sessions.length > 0 && (
             <button
               type="button"
-              className="agent-btn secondary"
+              className="agent-btn secondary sm"
               disabled={busy}
               onClick={() =>
                 onOpenManagerChat?.({
@@ -157,18 +153,18 @@ export function ManagerView({
                 })
               }
             >
-              <MessageSquare size={14} aria-hidden="true" />
-              <span>Open Latest Conversation</span>
+              <MessageSquare size={13} aria-hidden="true" />
+              <span>Resume Latest</span>
             </button>
           )}
           <button
             type="button"
-            className="agent-btn primary"
+            className="agent-btn primary sm"
             disabled={busy}
             onClick={() => onOpenManagerChat?.({ forceNew: true })}
           >
-            <Plus size={14} aria-hidden="true" />
-            <span>New Conversation with Manager</span>
+            <Plus size={13} aria-hidden="true" />
+            <span>New Conversation</span>
           </button>
         </div>
       </div>
@@ -178,23 +174,21 @@ export function ManagerView({
           <section className="bg-card" aria-label="Manager conversations">
             <div className="bg-card-head">
               <MessageSquare size={15} aria-hidden="true" />
-              <h3>Manager Conversations ({sessions.length})</h3>
-              <button
-                type="button"
-                className="agent-btn ghost xs"
-                disabled={busy}
-                onClick={() => onOpenManagerChat?.({ forceNew: true })}
-              >
-                <Plus size={12} aria-hidden="true" />
-                <span>New conversation</span>
-              </button>
+              <h3>Conversations ({sessions.length})</h3>
+              {sessions.length > 5 && (
+                <button
+                  type="button"
+                  className="agent-btn ghost xs"
+                  onClick={() => setShowAllSessions((prev) => !prev)}
+                >
+                  {showAllSessions ? "Show recent" : `Show all (${sessions.length})`}
+                </button>
+              )}
             </div>
 
             {sessions.length === 0 ? (
               <div className="org-member-session-empty">
-                <span>
-                  No conversations with the Manager yet. Start a conversation to design a team, add members, or coordinate work across workspaces.
-                </span>
+                <span>Start a conversation to design a team, add specialists, or coordinate tasks.</span>
                 <button
                   type="button"
                   className="agent-btn primary sm"
@@ -202,12 +196,12 @@ export function ManagerView({
                   onClick={() => onOpenManagerChat?.({ forceNew: true })}
                 >
                   <Sparkles size={13} aria-hidden="true" />
-                  <span>Start Manager Conversation</span>
+                  <span>Start Conversation</span>
                 </button>
               </div>
             ) : (
               <div className="org-member-session-list">
-                {sessions.map((sess) => (
+                {visibleSessions.map((sess) => (
                   <div key={sess.runtimeSessionId} className="org-member-session-row">
                     {renamingId === sess.runtimeSessionId ? (
                       <form
@@ -247,11 +241,10 @@ export function ManagerView({
                         >
                           <span className={`agent-status-dot tone-${sess.tone}`} />
                           <span className="org-member-session-title">{sess.title}</span>
-                          <span className={`org-member-session-status tone-${sess.tone}`}>
-                            {sess.status}
-                          </span>
-                          {sess.model && (
-                            <span className="org-member-session-meta">{sess.model}</span>
+                          {sess.tone !== "idle" && (
+                            <span className={`org-member-session-status tone-${sess.tone}`}>
+                              {sess.status}
+                            </span>
                           )}
                           {sess.ageText && (
                             <span className="org-member-session-age">{sess.ageText}</span>
@@ -291,14 +284,14 @@ export function ManagerView({
           <section className="bg-card" aria-label="Teams overview">
             <div className="bg-card-head">
               <Users size={15} aria-hidden="true" />
-              <h3>Active Teams ({teamSummaries.length})</h3>
+              <h3>Teams ({teamSummaries.length})</h3>
               <button
                 type="button"
                 className="agent-btn secondary xs"
                 onClick={() => setNewTeamOpen((prev) => !prev)}
               >
                 <Plus size={12} aria-hidden="true" />
-                <span>Create Team</span>
+                <span>New Team</span>
               </button>
             </div>
 
@@ -346,19 +339,14 @@ export function ManagerView({
             )}
 
             {teamSummaries.length === 0 ? (
-              <p className="bg-empty-note">
-                No teams created yet. Click &ldquo;Create Team&rdquo; above or ask the Manager to set one up.
-              </p>
+              <p className="bg-empty-note">No teams created yet.</p>
             ) : (
               <div className="bg-run-list">
                 {teamSummaries.map(({ team, leader, counts }) => (
                   <div key={team.id} className="bg-run-row">
                     <div className="bg-run-info">
                       <div className="bg-run-top">
-                        <span className={`agent-status-pill tone-${team.tone || "idle"}`}>
-                          <span className="agent-status-dot" />
-                          <span>{team.status || "Idle"}</span>
-                        </span>
+                        <span className={`agent-status-dot tone-${team.tone || "idle"}`} />
                         <strong>{team.name}</strong>
                         {leader && (
                           <span className="agents-header-badge">
@@ -366,11 +354,10 @@ export function ManagerView({
                             <span>{leader.name}</span>
                           </span>
                         )}
-                      </div>
-                      <div className="bg-run-meta">
-                        <span>{counts.members} member(s)</span>
-                        <span>{counts.sessions || 0} conversation(s)</span>
-                        <span>{counts.tasksTotal} task(s)</span>
+                        <span className="agents-header-meta">
+                          {counts.members} {counts.members === 1 ? "member" : "members"} ·{" "}
+                          {counts.tasksTotal} {counts.tasksTotal === 1 ? "task" : "tasks"}
+                        </span>
                       </div>
                     </div>
                     <div className="bg-run-actions">
@@ -380,7 +367,7 @@ export function ManagerView({
                         onClick={() => onOpenTeam?.(team.id, "organization")}
                       >
                         <Network size={13} aria-hidden="true" />
-                        <span>Organization</span>
+                        <span>Members</span>
                       </button>
                       <button
                         type="button"
@@ -388,7 +375,7 @@ export function ManagerView({
                         onClick={() => onOpenTeam?.(team.id, "tasks")}
                       >
                         <ListChecks size={13} aria-hidden="true" />
-                        <span>Tasks ({counts.tasksTotal})</span>
+                        <span>Tasks</span>
                       </button>
                     </div>
                   </div>

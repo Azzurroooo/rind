@@ -5,13 +5,14 @@ import {
   Check,
   FileCode2,
   MessageSquare,
+  MoreHorizontal,
   Power,
   RefreshCw,
   RotateCw,
-  Server,
   Square,
   Terminal,
 } from "lucide-react";
+import { Menu } from "../overlays/Menu.jsx";
 import { buildBackgroundModel } from "../../lib/agentsModel.js";
 
 export function BackgroundView({
@@ -64,14 +65,11 @@ export function BackgroundView({
       <div className="agents-surface-header">
         <div className="agents-surface-title-block">
           <div className="agents-surface-title-row">
-            <h2 className="agents-surface-title">Background &amp; Runtime</h2>
+            <h2 className="agents-surface-title">Background</h2>
             <span className={`agent-status-pill tone-${connection === "connected" ? "completed" : "attention"}`}>
               <span className="agent-status-dot" />
               <span>{connection}</span>
             </span>
-          </div>
-          <div className="agents-surface-subtitle">
-            Running agent turns, managed task &amp; delegation runs, background shell commands, and Shared Runtime status.
           </div>
         </div>
 
@@ -103,38 +101,75 @@ export function BackgroundView({
             <Terminal size={13} aria-hidden="true" />
             <span>Runtime Log</span>
           </button>
-          <button
-            type="button"
-            className="agent-btn secondary sm"
-            disabled={busy}
-            onClick={() => void onRestartService?.()}
-          >
-            <RotateCw size={13} aria-hidden="true" />
-            <span>Restart Service</span>
-          </button>
-          <button
-            type="button"
-            className="agent-btn danger sm"
-            disabled={busy || connection === "stopped"}
-            onClick={() => void onStopServices?.(true)}
-          >
-            <Power size={13} aria-hidden="true" />
-            <span>Stop Background</span>
-          </button>
+          <Menu
+            label="Service actions"
+            items={[
+              {
+                id: "bg-restart",
+                label: "Restart Service",
+                icon: <RotateCw size={14} />,
+                onSelect: () => void onRestartService?.(),
+              },
+              {
+                id: "bg-stop",
+                label: "Stop Background",
+                icon: <Power size={14} />,
+                danger: true,
+                disabled: busy || connection === "stopped",
+                onSelect: () => void onStopServices?.(true),
+              },
+            ]}
+            trigger={(props) => (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Service actions"
+                title="Service actions"
+                disabled={busy}
+                {...props}
+              >
+                <MoreHorizontal size={15} aria-hidden="true" />
+              </button>
+            )}
+          />
         </div>
       </div>
 
       <div className="agents-surface-main panel-scroll">
         <div className="bg-grid">
+          <div className="bg-health-strip" role="region" aria-label="Services">
+            <div className="bg-health-item">
+              <span className={`agent-status-dot tone-${connection === "connected" ? "completed" : "attention"}`} />
+              <strong>Management Service</strong>
+              <span className="agents-header-meta">
+                {connection === "connected"
+                  ? `Running${service?.pid ? ` · pid ${service.pid}` : ""}`
+                  : connection}
+              </span>
+            </div>
+            <div className="bg-health-item">
+              <span className={`agent-status-dot tone-${service?.runtime?.status === "running" ? "completed" : "idle"}`} />
+              <strong>Shared Runtime</strong>
+              <span className="agents-header-meta">
+                {service?.runtime?.status === "running"
+                  ? `Running${service.runtime.pid ? ` · pid ${service.runtime.pid}` : ""}`
+                  : service?.runtime?.status || (connection === "connected" ? "Ready on demand" : "Stopped")}
+              </span>
+            </div>
+            <div className="bg-health-item">
+              <span className="agents-header-meta">
+                {service?.working ?? runningNow.length} working · {service?.tasks ?? 0} tasks · {service?.conversations ?? 0} sessions
+              </span>
+            </div>
+          </div>
+
           <section className="bg-card" aria-label="Running now">
             <div className="bg-card-head">
               <Activity size={15} aria-hidden="true" />
               <h3>Running Now ({runningNow.length})</h3>
             </div>
             {runningNow.length === 0 ? (
-              <p className="bg-empty-note">
-                Nothing running in the background right now. Active agent turns, delegated tasks, and background bash commands will appear here.
-              </p>
+              <p className="bg-empty-note">Nothing running in the background right now.</p>
             ) : (
               <div className="bg-run-list">
                 {runningNow.map((item) => (
@@ -161,7 +196,7 @@ export function BackgroundView({
                           onClick={() => onOpenSession?.(item.runtimeSessionId, item)}
                         >
                           <MessageSquare size={13} aria-hidden="true" />
-                          <span>Open Conversation</span>
+                          <span>Chat</span>
                         </button>
                       )}
                       {item.teamId && item.taskId && (
@@ -170,7 +205,7 @@ export function BackgroundView({
                           className="agent-btn ghost sm"
                           onClick={() => onOpenTask?.(item.teamId, item.taskId)}
                         >
-                          <span>Inspect Task</span>
+                          <span>Inspect</span>
                         </button>
                       )}
                       {item.runId && (
@@ -181,7 +216,7 @@ export function BackgroundView({
                           onClick={() => void onCancelRun?.(item.runId)}
                         >
                           <Square size={13} aria-hidden="true" />
-                          <span>Stop Run</span>
+                          <span>Stop</span>
                         </button>
                       )}
                     </div>
@@ -197,9 +232,6 @@ export function BackgroundView({
                 <AlertTriangle size={15} aria-hidden="true" />
                 <h3>Unconfirmed Runs ({unconfirmedRuns.length})</h3>
               </div>
-              <p className="bg-empty-note">
-                These runs were active before the management service lost contact with the host. Confirm whether they have stopped to unblock their member queues.
-              </p>
               <div className="bg-run-list">
                 {unconfirmedRuns.map((run) => (
                   <div key={run.id} className="bg-run-row">
@@ -220,7 +252,7 @@ export function BackgroundView({
                           className="agent-btn ghost sm"
                           onClick={() => onOpenTask?.(run.teamId, run.taskId)}
                         >
-                          Inspect Task
+                          Inspect
                         </button>
                       )}
                       <button
@@ -238,41 +270,6 @@ export function BackgroundView({
               </div>
             </section>
           )}
-
-          <section className="bg-card" aria-label="Services">
-            <div className="bg-card-head">
-              <Server size={15} aria-hidden="true" />
-              <h3>Services</h3>
-            </div>
-            <dl className="bg-stat-grid">
-              <div>
-                <dt>Management Service</dt>
-                <dd>
-                  {connection === "connected"
-                    ? `Running${service?.pid ? ` · pid ${service.pid}` : ""}`
-                    : connection}
-                </dd>
-              </div>
-              <div>
-                <dt>Shared Runtime</dt>
-                <dd>
-                  {service?.runtime?.status === "running"
-                    ? `Running${service.runtime.pid ? ` · pid ${service.runtime.pid}` : ""}`
-                    : service?.runtime?.status || (connection === "connected" ? "Ready on demand" : "Stopped")}
-                </dd>
-              </div>
-              <div>
-                <dt>Working Agents</dt>
-                <dd>{service?.working ?? runningNow.length}</dd>
-              </div>
-              <div>
-                <dt>Active Tasks / Sessions</dt>
-                <dd>
-                  {service?.tasks ?? 0} task(s) · {service?.conversations ?? 0} attached session(s)
-                </dd>
-              </div>
-            </dl>
-          </section>
 
           {logView && (
             <section className="bg-card" aria-label="Diagnostic log">

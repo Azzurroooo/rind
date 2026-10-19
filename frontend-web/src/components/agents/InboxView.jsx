@@ -66,20 +66,17 @@ export function InboxView({
     const groups = [
       {
         id: "needs",
-        title: "Needs you",
-        subtitle: "Approvals, blockers waiting on your answer, unconfirmed runs, and sessions waiting on input.",
+        title: "Needs You",
         items: normalizedSections.needsYou,
       },
       {
         id: "notices",
-        title: "Changed by the Manager",
-        subtitle: "Recent team and organization updates performed by the Coordinator.",
+        title: "Updates",
         items: normalizedSections.notices,
       },
       {
         id: "delivered",
-        title: "Recently delivered",
-        subtitle: "Completed task reports ready for acceptance or rework.",
+        title: "Delivered",
         items: normalizedSections.delivered,
       },
     ];
@@ -146,7 +143,7 @@ export function InboxView({
               type="text"
               value={answers[item.taskId] || ""}
               onChange={(e) => setAnswers((prev) => ({ ...prev, [item.taskId]: e.target.value }))}
-              placeholder="Reply to unblock this agent and resume work…"
+              placeholder="Reply to unblock this agent…"
               aria-label={`Answer blocker for ${item.title}`}
             />
             <button
@@ -163,7 +160,7 @@ export function InboxView({
               onClick={() => onOpenTask?.(item.teamId, item.taskId)}
             >
               <ExternalLink size={13} aria-hidden="true" />
-              <span>Inspect Task</span>
+              <span>Inspect</span>
             </button>
           </form>
         )}
@@ -177,7 +174,7 @@ export function InboxView({
               onClick={() => void onStartTask?.(item.taskId)}
             >
               <Play size={13} aria-hidden="true" />
-              <span>Resume Task</span>
+              <span>Resume</span>
             </button>
             <button
               type="button"
@@ -185,7 +182,7 @@ export function InboxView({
               onClick={() => onOpenTask?.(item.teamId, item.taskId)}
             >
               <ExternalLink size={13} aria-hidden="true" />
-              <span>Inspect Task</span>
+              <span>Inspect</span>
             </button>
             {item.agentId && (
               <button
@@ -196,7 +193,7 @@ export function InboxView({
                 }
               >
                 <MessageSquare size={13} aria-hidden="true" />
-                <span>Open Conversation</span>
+                <span>Chat</span>
               </button>
             )}
           </div>
@@ -234,7 +231,7 @@ export function InboxView({
                     onClick={() => void onReviewTask?.(item.taskId, "accept")}
                   >
                     <CheckCircle2 size={13} aria-hidden="true" />
-                    <span>Accept Delivery</span>
+                    <span>Accept</span>
                   </button>
                   <button
                     type="button"
@@ -245,7 +242,7 @@ export function InboxView({
                     }
                   >
                     <RotateCcw size={13} aria-hidden="true" />
-                    <span>Request Rework</span>
+                    <span>Rework</span>
                   </button>
                 </>
               )}
@@ -255,7 +252,7 @@ export function InboxView({
                 onClick={() => onOpenTask?.(item.teamId, item.taskId)}
               >
                 <ExternalLink size={13} aria-hidden="true" />
-                <span>Full Report</span>
+                <span>Report</span>
               </button>
               {item.agentId && (
                 <button
@@ -271,7 +268,7 @@ export function InboxView({
                   }
                 >
                   <MessageSquare size={13} aria-hidden="true" />
-                  <span>Conversation</span>
+                  <span>Chat</span>
                 </button>
               )}
             </div>
@@ -324,7 +321,7 @@ export function InboxView({
                 onClick={() => onOpenTask?.(item.teamId, item.taskId)}
               >
                 <ExternalLink size={13} aria-hidden="true" />
-                <span>Inspect Task</span>
+                <span>Inspect</span>
               </button>
             )}
           </div>
@@ -366,11 +363,8 @@ export function InboxView({
             <span className="agents-header-meta">
               {actionableCount === 0
                 ? "All caught up"
-                : `${actionableCount} ${actionableCount === 1 ? "item requires" : "items require"} your attention`}
+                : `${actionableCount} ${actionableCount === 1 ? "item" : "items"} pending`}
             </span>
-          </div>
-          <div className="agents-surface-subtitle">
-            Needs you, changes by the Manager, and recently delivered task reports.
           </div>
         </div>
 
@@ -405,7 +399,7 @@ export function InboxView({
               className={`agents-seg-btn ${filter === "notices" ? "active" : ""}`}
               onClick={() => setFilter("notices")}
             >
-              <span>Manager Changes</span>
+              <span>Updates</span>
               {normalizedSections.notices.length > 0 && (
                 <span className="agents-seg-count">{normalizedSections.notices.length}</span>
               )}
@@ -417,7 +411,7 @@ export function InboxView({
               className={`agents-seg-btn ${filter === "delivered" ? "active" : ""}`}
               onClick={() => setFilter("delivered")}
             >
-              <span>Recently Delivered</span>
+              <span>Delivered</span>
               {normalizedSections.delivered.length > 0 && (
                 <span className="agents-seg-count">{normalizedSections.delivered.length}</span>
               )}
@@ -431,7 +425,7 @@ export function InboxView({
           <div className="agents-empty-hero">
             <Inbox size={28} aria-hidden="true" />
             <h3>Nothing waiting on you</h3>
-            <p>No pending approvals, blocked tasks, Manager notices, or unreviewed deliveries right now.</p>
+            <p>No pending approvals, blocked tasks, or unreviewed deliveries right now.</p>
           </div>
         ) : (
           <div className="task-sections-stack">

@@ -1099,17 +1099,24 @@ export function renderOrgNodeHtml(
   expandedOrgMembers: ReadonlySet<string> = new Set(),
   viewedSessionId = "",
   sessionLimits: Record<string, number> = {},
+  itemMenuKey = "",
 ): string {
   const isSessionsOpen = expandedOrgMembers.has(node.agentId)
   const sessions = node.sessions || []
   const limitKey = `org:${node.agentId}`
   const limit = sessionLimits[limitKey] || DEFAULT_SIDEBAR_SESSIONS_LIMIT
   const visibleSessions = sessions.slice(0, limit)
+  const memberMenuKey = `org-member:${node.agentId}`
+  const memberMenuOpen = itemMenuKey === memberMenuKey
   const childrenHtml = node.children.length
     ? `<div class="org-tree-children" role="group" aria-label="Direct reports of ${escapeAttribute(node.name)}">${node.children
-        .map((c) => renderOrgNodeHtml(c, depth + 1, expandedOrgMembers, viewedSessionId, sessionLimits))
+        .map((c) => renderOrgNodeHtml(c, depth + 1, expandedOrgMembers, viewedSessionId, sessionLimits, itemMenuKey))
         .join("")}</div>`
     : ""
+
+  const metaItems: string[] = []
+  if (node.reportsToName) metaItems.push(`Reports to ${escapeHtml(node.reportsToName)}`)
+  if (node.responsibility) metaItems.push(escapeHtml(node.responsibility))
 
   return `
     <div class="org-tree-branch depth-${Math.min(depth, 4)}" data-agent-id="${escapeAttribute(node.agentId)}">
@@ -1117,75 +1124,76 @@ export function renderOrgNodeHtml(
         <div class="org-member-top">
           <div class="org-member-identity">
             <div class="org-member-name-row">
+              <span class="agent-status-dot tone-${node.tone}"></span>
               <strong class="org-member-name">${escapeHtml(node.name)}</strong>
               ${node.isLeader ? `<span class="org-leader-badge">Leader</span>` : ""}
               <span class="org-role-pill">${escapeHtml(node.position)}</span>
               ${node.worktreeOf ? `<span class="org-worktree-pill" title="${escapeAttribute(node.worktreeOf)}">Worktree</span>` : ""}
+              ${node.status && node.status !== "Idle" ? `<span class="agent-status-pill tone-${node.tone}">${escapeHtml(node.status)}</span>` : ""}
             </div>
-            <div class="org-member-sub">
-              <span>${node.reportsToName ? `Reports to ${escapeHtml(node.reportsToName)}` : node.isLeader ? "Coordinates team & delegates work" : "Direct team member"}</span>
-              ${node.canonicalWorkspace ? `<code class="org-workspace-path">${escapeHtml(node.canonicalWorkspace)}</code>` : ""}
-            </div>
-          </div>
-          <span class="agent-status-pill tone-${node.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(node.status)}</span></span>
-        </div>
-        ${node.responsibility ? `<p class="org-member-responsibility">${escapeHtml(node.responsibility)}</p>` : ""}
-        ${
-          node.activeTask
-            ? `<button type="button" class="org-active-task" data-agent-select-task="${escapeAttribute(node.activeTask.id)}" data-agent-team="${escapeAttribute(node.teamId)}"><span class="org-active-task-kicker">Current Task</span><span class="org-active-task-brief">${escapeHtml(String(node.activeTask.brief || ""))}</span></button>`
-            : ""
-        }
-        <div class="org-member-sessions-box">
-          <div class="org-member-sessions-head">
-            <button type="button" class="org-sessions-toggle" data-org-toggle-member-sessions="${escapeAttribute(node.agentId)}">
-              <span>${isSessionsOpen ? "▾" : "▸"}</span>
-              <span>Conversations (${sessions.length})</span>
-            </button>
-            <button type="button" class="agent-btn ghost sm" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">New chat</button>
-          </div>
-          ${
-            isSessionsOpen
-              ? `<div class="org-member-sessions-list">
-                  ${
-                    sessions.length === 0
-                      ? `<div class="org-sessions-empty">No saved conversations yet.</div>`
-                      : visibleSessions
-                          .map((sess) => {
-                            const isCurrent = sess.runtimeSessionId === viewedSessionId
-                            return `
-                              <div class="org-session-item${isCurrent ? " is-active" : ""}">
-                                <button type="button" class="org-session-open" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}">
-                                  <span class="agent-status-dot tone-${sess.tone}"></span>
-                                  <span class="org-session-title">${escapeHtml(sess.title || "Conversation")}</span>
-                                  ${sess.origin === "task" ? `<span class="org-role-pill">Task</span>` : ""}
-                                  <span class="org-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
-                                </button>
-                              </div>
-                            `
-                          })
-                          .join("") +
-                        (sessions.length > limit
-                          ? `<button type="button" class="sidebar-load-more" data-agent-more-sessions="${escapeAttribute(limitKey)}">View more sessions (${sessions.length - limit} more)</button>`
-                          : "")
-                  }
-                </div>`
-              : ""
-          }
-        </div>
-        <div class="org-member-footer">
-          <div class="org-member-stats">
-            <span>${sessions.length} ${sessions.length === 1 ? "session" : "sessions"}</span>
-            <span>${node.taskCounts.active} active</span>
-            ${node.taskCounts.attention > 0 ? `<span class="org-stat-attention">${node.taskCounts.attention} need review</span>` : ""}
-            <span>${node.taskCounts.done} delivered</span>
+            ${metaItems.length > 0 ? `<div class="org-member-sub">${metaItems.join(" · ")}</div>` : ""}
           </div>
           <div class="org-member-actions">
-            <button type="button" class="agent-btn primary sm" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(node.latestRuntimeSessionId)}">${node.latestRuntimeSessionId ? "Open Chat" : "Start Chat"}</button>
-            <button type="button" class="agent-btn secondary sm" data-agent-quick-assign="${escapeAttribute(node.agentId)}">Assign task</button>
-            ${!node.isLeader ? `<button type="button" class="agent-btn ghost sm" data-agent-make-leader="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">Make leader</button>` : ""}
-            <button type="button" class="agent-btn ghost sm danger-text" data-agent-remove="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">Remove</button>
+            <button type="button" class="agent-btn primary sm" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(node.latestRuntimeSessionId)}">Chat</button>
+            <div class="project-menu-wrap">
+              <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(memberMenuKey)}" title="Member actions" aria-label="Actions for ${escapeAttribute(node.name)}" aria-haspopup="menu" aria-expanded="${String(memberMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
+              ${
+                memberMenuOpen
+                  ? `<div class="project-menu" role="menu">
+                      <button type="button" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">New chat</button>
+                      <button type="button" data-agent-quick-assign="${escapeAttribute(node.agentId)}" role="menuitem">Assign task</button>
+                      ${!node.isLeader ? `<button type="button" data-agent-make-leader="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">Make leader</button>` : ""}
+                      <button type="button" data-agent-remove="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">Remove</button>
+                    </div>`
+                  : ""
+              }
+            </div>
           </div>
         </div>
+        ${
+          node.activeTask
+            ? `<button type="button" class="org-active-task" data-agent-select-task="${escapeAttribute(node.activeTask.id)}" data-agent-team="${escapeAttribute(node.teamId)}"><span class="org-active-task-kicker">Working on</span><span class="org-active-task-brief">${escapeHtml(String(node.activeTask.brief || ""))}</span></button>`
+            : ""
+        }
+        <div class="org-member-meta-bar">
+          <button type="button" class="org-sessions-toggle" data-org-toggle-member-sessions="${escapeAttribute(node.agentId)}" aria-expanded="${String(isSessionsOpen)}">
+            <span>${isSessionsOpen ? "▾" : "▸"}</span>
+            <span>Conversations (${sessions.length})</span>
+          </button>
+          <div class="org-member-stats">
+            ${node.taskCounts.active > 0 ? `<span>${node.taskCounts.active} active</span>` : ""}
+            ${node.taskCounts.attention > 0 ? `<span class="org-stat-attention">${node.taskCounts.attention} need review</span>` : ""}
+            ${isSessionsOpen ? `<button type="button" class="agent-btn ghost sm" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">+ New</button>` : ""}
+          </div>
+        </div>
+        ${
+          isSessionsOpen
+            ? `<div class="org-member-sessions-list">
+                ${
+                  sessions.length === 0
+                    ? `<div class="org-sessions-empty">No conversations yet.</div>`
+                    : visibleSessions
+                        .map((sess) => {
+                          const isCurrent = sess.runtimeSessionId === viewedSessionId
+                          return `
+                            <div class="org-session-item${isCurrent ? " is-active" : ""}">
+                              <button type="button" class="org-session-open" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}">
+                                <span class="agent-status-dot tone-${sess.tone}"></span>
+                                <span class="org-session-title">${escapeHtml(sess.title || "Conversation")}</span>
+                                ${sess.origin === "task" ? `<span class="org-role-pill">Task</span>` : ""}
+                                <span class="org-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+                              </button>
+                            </div>
+                          `
+                        })
+                        .join("") +
+                      (sessions.length > limit
+                        ? `<button type="button" class="sidebar-load-more" data-agent-more-sessions="${escapeAttribute(limitKey)}">Show ${sessions.length - limit} more</button>`
+                        : "")
+                }
+              </div>`
+            : ""
+        }
       </div>
       ${childrenHtml}
     </div>
@@ -1592,19 +1600,20 @@ export function renderTaskDrawerHtml(options: {
         <div class="agent-drawer-title-group">
           <div class="agent-drawer-meta-row">
             <span class="agent-status-pill tone-${task.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(task.statusLabel)}</span></span>
-            <select class="agent-select sm" data-task-priority="${escapeAttribute(task.id)}" aria-label="Task priority" ${busy ? "disabled" : ""}>
-              <option value="high" ${task.priority === "high" ? "selected" : ""}>High priority</option>
-              <option value="normal" ${task.priority === "normal" ? "selected" : ""}>Normal priority</option>
-              <option value="low" ${task.priority === "low" ? "selected" : ""}>Low priority</option>
-            </select>
-            <code class="agent-id-chip">${escapeHtml(task.id)}</code>
+            <span class="agent-drawer-subtitle">${escapeHtml(task.teamName)} › <strong>${escapeHtml(task.assigneeName)}</strong></span>
+            ${
+              task.status === "queued"
+                ? `<select class="agent-select sm" data-task-priority="${escapeAttribute(task.id)}" aria-label="Task priority" ${busy ? "disabled" : ""}>
+                    <option value="high" ${task.priority === "high" ? "selected" : ""}>High</option>
+                    <option value="normal" ${task.priority === "normal" ? "selected" : ""}>Normal</option>
+                    <option value="low" ${task.priority === "low" ? "selected" : ""}>Low</option>
+                  </select>`
+                : task.priority !== "normal"
+                  ? `<span class="agent-priority-pill priority-${task.priority}">${escapeHtml(task.priority)}</span>`
+                  : ""
+            }
           </div>
           <h3 class="agent-drawer-title">${escapeHtml(task.brief)}</h3>
-          <div class="agent-drawer-subtitle">
-            <span>Team <strong>${escapeHtml(task.teamName)}</strong></span>
-            <span>·</span>
-            <span>Assignee <strong>${escapeHtml(task.assigneeName)}</strong> (${escapeHtml(task.assigneePosition)})</span>
-          </div>
         </div>
         <div class="agent-drawer-head-actions">
           <button type="button" class="icon-button" data-task-drawer-expand="1" aria-pressed="${expanded}" aria-label="${expanded ? "Restore panel width" : "Expand for wide reading"}" title="${expanded ? "Restore panel width" : "Expand for wide reading"}">${expanded ? "❐" : "⤢"}</button>
@@ -1613,20 +1622,20 @@ export function renderTaskDrawerHtml(options: {
       </header>
       <div class="agent-drawer-body panel-scroll">
         <div class="agent-drawer-actions-bar">
-          <button type="button" class="agent-btn secondary" data-agent-chat="${escapeAttribute(task.assigneeAgentId)}" data-agent-team="${escapeAttribute(task.teamId)}" data-agent-session="${escapeAttribute(task.runtimeSessionId)}">${task.runtimeSessionId ? "Open Task Session" : `Chat with ${escapeHtml(task.assigneeName)}`}</button>
-          ${canStartNow ? `<button type="button" class="agent-btn primary" data-task-start="${escapeAttribute(task.id)}" ${busy ? "disabled" : ""}>Start Now</button>` : ""}
-          ${canStopRun && task.activeRun ? `<button type="button" class="agent-btn warning" data-inbox-stop-run="${escapeAttribute(String(task.activeRun.id))}" ${busy ? "disabled" : ""}>Stop Run</button>` : ""}
-          ${canCancel ? `<button type="button" class="agent-btn danger-ghost" data-task-cancel="${escapeAttribute(task.id)}" ${busy ? "disabled" : ""}>Cancel Task</button>` : ""}
+          ${canStartNow ? `<button type="button" class="agent-btn primary sm" data-task-start="${escapeAttribute(task.id)}" ${busy ? "disabled" : ""}>Start Now</button>` : ""}
+          <button type="button" class="agent-btn secondary sm" data-agent-chat="${escapeAttribute(task.assigneeAgentId)}" data-agent-team="${escapeAttribute(task.teamId)}" data-agent-session="${escapeAttribute(task.runtimeSessionId)}">${task.runtimeSessionId ? "Open Session" : `Chat with ${escapeHtml(task.assigneeName)}`}</button>
+          ${canStopRun && task.activeRun ? `<button type="button" class="agent-btn warning sm" data-inbox-stop-run="${escapeAttribute(String(task.activeRun.id))}" ${busy ? "disabled" : ""}>Stop Run</button>` : ""}
+          ${canCancel ? `<button type="button" class="agent-btn ghost sm danger-text" data-task-cancel="${escapeAttribute(task.id)}" ${busy ? "disabled" : ""}>Cancel</button>` : ""}
         </div>
         ${
           needsUserAnswer
             ? `<section class="agent-drawer-card attention-card">
-                <div class="agent-card-kicker">Blocker · Waiting on your input</div>
+                <div class="agent-card-kicker">Waiting on your answer</div>
                 <p class="agent-blocker-question">${escapeHtml(String(task.blockedOn?.action || "The agent needs your clarification to proceed."))}</p>
                 <form id="agent-task-answer-form" class="agent-inline-form" data-task-id="${escapeAttribute(task.id)}">
-                  <textarea id="agent-task-answer-input" class="agent-textarea" rows="3" placeholder="Write your answer to resume the task..." required></textarea>
+                  <textarea id="agent-task-answer-input" class="agent-textarea" rows="2" placeholder="Write your answer to resume..." required></textarea>
                   <div class="agent-form-actions">
-                    <button type="submit" class="agent-btn primary" ${busy ? "disabled" : ""}>Send Answer &amp; Resume</button>
+                    <button type="submit" class="agent-btn primary sm" ${busy ? "disabled" : ""}>Send Answer &amp; Resume</button>
                   </div>
                 </form>
               </section>`
@@ -1634,7 +1643,7 @@ export function renderTaskDrawerHtml(options: {
         }
         ${
           task.error
-            ? `<section class="agent-drawer-card danger-card"><div class="agent-card-kicker">Execution Issue</div><p class="agent-report-text">${escapeHtml(String(task.error))}</p></section>`
+            ? `<section class="agent-drawer-card danger-card"><div class="agent-card-kicker">Issue</div><p class="agent-report-text">${escapeHtml(String(task.error))}</p></section>`
             : ""
         }
         ${
@@ -1645,13 +1654,12 @@ export function renderTaskDrawerHtml(options: {
                   ${task.deliveredAt ? `<span class="agent-timestamp">${escapeHtml(relativeTimeLabel(task.deliveredAt))}</span>` : ""}
                 </div>
                 <div class="agent-report-section">
-                  <h4>Summary</h4>
                   <p class="agent-report-text">${escapeHtml(String(task.report.summary || ""))}</p>
                 </div>
                 ${
                   reportEvidence.length > 0
                     ? `<div class="agent-report-section">
-                        <h4>Evidence &amp; Verification</h4>
+                        <h4>Verification</h4>
                         <ul class="agent-evidence-list">
                           ${reportEvidence.map((item) => `<li>${escapeHtml(String(item))}</li>`).join("")}
                         </ul>
@@ -1661,7 +1669,7 @@ export function renderTaskDrawerHtml(options: {
                 ${
                   publishedFiles.length > 0
                     ? `<div class="agent-report-section">
-                        <h4>Published Files &amp; Artifacts (${publishedFiles.length})</h4>
+                        <h4>Artifacts (${publishedFiles.length})</h4>
                         <div class="agent-artifact-list">
                           ${publishedFiles
                             .map((art) => {
@@ -1674,7 +1682,6 @@ export function renderTaskDrawerHtml(options: {
                                 <div class="agent-artifact-item">
                                   <div class="agent-artifact-meta">
                                     <strong>${escapeHtml(String(art.label || filePath))}</strong>
-                                    <code class="agent-artifact-path">${escapeHtml(filePath)}</code>
                                   </div>
                                   ${
                                     artId
@@ -1696,18 +1703,17 @@ export function renderTaskDrawerHtml(options: {
                 }
                 ${
                   task.report.next
-                    ? `<div class="agent-report-section"><h4>Recommended Next Step</h4><p class="agent-report-text">${escapeHtml(String(task.report.next))}</p></div>`
+                    ? `<div class="agent-report-section"><h4>Next Step</h4><p class="agent-report-text">${escapeHtml(String(task.report.next))}</p></div>`
                     : ""
                 }
                 ${
                   canReviewReport
                     ? `<div class="agent-review-box">
-                        <div class="agent-card-kicker">${task.review ? `Reviewed · ${task.review.decision === "accepted" ? "Accepted" : "Rework requested"}` : "Review Delivery"}</div>
                         ${task.review?.feedback ? `<p class="agent-review-existing">Feedback: ${escapeHtml(String(task.review.feedback))}</p>` : ""}
                         <textarea id="agent-task-review-comment" class="agent-textarea" rows="2" placeholder="Optional review feedback or rework instructions..."></textarea>
                         <div class="agent-form-actions">
-                          <button type="button" class="agent-btn primary" data-task-review="${escapeAttribute(task.id)}" data-review-decision="accept" ${busy ? "disabled" : ""}>Accept Delivery</button>
-                          <button type="button" class="agent-btn warning" data-task-review="${escapeAttribute(task.id)}" data-review-decision="rework" ${busy ? "disabled" : ""}>Send for Rework</button>
+                          <button type="button" class="agent-btn primary sm" data-task-review="${escapeAttribute(task.id)}" data-review-decision="accept" ${busy ? "disabled" : ""}>Accept Delivery</button>
+                          <button type="button" class="agent-btn warning sm" data-task-review="${escapeAttribute(task.id)}" data-review-decision="rework" ${busy ? "disabled" : ""}>Send for Rework</button>
                         </div>
                       </div>`
                     : ""
@@ -1715,31 +1721,8 @@ export function renderTaskDrawerHtml(options: {
               </section>`
             : ""
         }
-        ${
-          task.runs.length > 0
-            ? `<section class="agent-drawer-card">
-                <div class="agent-card-kicker">Execution Runs (${task.runs.length})</div>
-                <div class="agent-notes-list">
-                  ${task.runs
-                    .map(
-                      (r) => `
-                        <div class="agent-note-item">
-                          <div class="agent-note-meta">
-                            <strong>${escapeHtml(String(r.status))}</strong>
-                            <span>${escapeHtml(relativeTimeLabel(r.startedAt))}</span>
-                          </div>
-                          ${r.summary ? `<p>${escapeHtml(String(r.summary))}</p>` : ""}
-                          ${r.error ? `<p class="danger-text">${escapeHtml(String(r.error))}</p>` : ""}
-                        </div>
-                      `,
-                    )
-                    .join("")}
-                </div>
-              </section>`
-            : ""
-        }
         <section class="agent-drawer-card">
-          <div class="agent-card-kicker">Notes &amp; Guidance (${task.notes.length})</div>
+          <div class="agent-card-kicker">Notes${task.notes.length > 0 ? ` (${task.notes.length})` : ""}</div>
           ${
             task.notes.length > 0
               ? `<div class="agent-notes-list">${task.notes
@@ -1747,10 +1730,10 @@ export function renderTaskDrawerHtml(options: {
                     (note) => `<div class="agent-note-item"><div class="agent-note-meta"><strong>${escapeHtml(String(note.author || "user"))}</strong><span>${escapeHtml(relativeTimeLabel(note.createdAt))}</span></div><p>${escapeHtml(String(note.text || ""))}</p></div>`,
                   )
                   .join("")}</div>`
-              : `<p class="agent-empty-hint">No notes recorded on this task yet.</p>`
+              : ""
           }
-          <form id="agent-task-note-form" class="agent-inline-form" data-task-id="${escapeAttribute(task.id)}">
-            <input id="agent-task-note-input" type="text" class="agent-input" placeholder="Add guidance or a coordination note..." />
+          <form id="agent-task-note-form" class="agent-inline-form-row" data-task-id="${escapeAttribute(task.id)}">
+            <input id="agent-task-note-input" type="text" class="agent-input sm" placeholder="Add guidance or a note..." />
             <button type="submit" class="agent-btn secondary sm" ${busy ? "disabled" : ""}>Add Note</button>
           </form>
         </section>
@@ -1766,6 +1749,7 @@ export function renderTeamSurfaceHtml(options: {
   expandedOrgMembers?: ReadonlySet<string>
   viewedSessionId?: string
   sessionLimits?: Record<string, number>
+  itemMenuKey?: string
   busy: boolean
   artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
   drawerWidth?: number
@@ -1775,18 +1759,21 @@ export function renderTeamSurfaceHtml(options: {
   const { surface, busy, artifactPreview } = options
   const summary = buildTeamSummary(snapshot, surface.teamId, options.teamSessions || [])
   if (!summary) {
-    return `<div class="agent-surface-empty"><h2>Team not found</h2><p>Select another team or return to the conversation.</p><button type="button" class="agent-btn secondary" data-sidebar-surface="chat">Back to Chat</button></div>`
+    return `<div class="agent-surface-empty"><h2>Team not found</h2><p>Select another team from the sidebar.</p></div>`
   }
   const { team, leader, members, orgRoots, counts } = summary
   const groupedTasks = groupTeamTasks(snapshot, team.id)
   const selectedTask = surface.selectedTaskId ? groupedTasks.all.find((t) => t.id === surface.selectedTaskId) || null : null
+  const itemMenuKey = options.itemMenuKey || ""
+  const headerMenuKey = `team-surface:${team.id}`
+  const headerMenuOpen = itemMenuKey === headerMenuKey
 
   const addMemberFormHtml = surface.addMemberOpen
     ? `<form id="agent-add-member-form" class="agent-inline-panel" data-team-id="${escapeAttribute(team.id)}">
         <div class="agent-panel-head">
-          <h3>Add Member to ${escapeHtml(team.name)}</h3>
+          <h3>Add Member</h3>
           <div class="agent-segmented" role="group" aria-label="Member source">
-            <button type="button" class="agent-seg-btn${surface.memberMode === "workspace" ? " is-active" : ""}" data-member-mode="workspace">New Managed Workspace</button>
+            <button type="button" class="agent-seg-btn${surface.memberMode === "workspace" ? " is-active" : ""}" data-member-mode="workspace">Managed Workspace</button>
             <button type="button" class="agent-seg-btn${surface.memberMode === "worktree" ? " is-active" : ""}" data-member-mode="worktree">Git Worktree</button>
             <button type="button" class="agent-seg-btn${surface.memberMode === "existing" ? " is-active" : ""}" data-member-mode="existing">Existing Folder</button>
           </div>
@@ -1801,28 +1788,28 @@ export function renderTeamSurfaceHtml(options: {
                 ? `<label class="agent-field"><span>Existing Workspace Folder</span><input name="workspace" type="text" class="agent-input" placeholder="Absolute path to folder" required /></label>`
                 : ""
           }
-          <label class="agent-field"><span>Role / Position</span><input name="position" type="text" class="agent-input" placeholder="e.g. UI Architecture Specialist" /></label>
-          <label class="agent-field"><span>Reports To</span><select name="reportsToAgentId" class="agent-select"><option value="">${leader ? `${escapeHtml(leader.name)} (Team Leader)` : "Team Leader"}</option>${members.map((m) => `<option value="${escapeAttribute(m.agentId)}">${escapeHtml(m.name)} (${escapeHtml(m.position)})</option>`).join("")}</select></label>
-          <label class="agent-field span-2"><span>Responsibility</span><input name="responsibility" type="text" class="agent-input" placeholder="What is this member responsible for?" /></label>
+          <label class="agent-field"><span>Role / Position</span><input name="position" type="text" class="agent-input" placeholder="e.g. UI Specialist" /></label>
+          <label class="agent-field"><span>Reports To</span><select name="reportsToAgentId" class="agent-select"><option value="">${leader ? `${escapeHtml(leader.name)} (Leader)` : "Team Leader"}</option>${members.map((m) => `<option value="${escapeAttribute(m.agentId)}">${escapeHtml(m.name)} (${escapeHtml(m.position)})</option>`).join("")}</select></label>
+          <label class="agent-field span-2"><span>Responsibility</span><input name="responsibility" type="text" class="agent-input" placeholder="Primary area of ownership" /></label>
         </div>
         <div class="agent-form-actions">
-          <button type="button" class="agent-btn ghost" data-team-toggle-add-member="0">Cancel</button>
-          <button type="submit" class="agent-btn primary" ${busy ? "disabled" : ""}>Add Member</button>
+          <button type="button" class="agent-btn ghost sm" data-team-toggle-add-member="0">Cancel</button>
+          <button type="submit" class="agent-btn primary sm" ${busy ? "disabled" : ""}>Add Member</button>
         </div>
       </form>`
     : ""
 
   const assignFormHtml = surface.assignOpen
     ? `<form id="agent-assign-task-form" class="agent-inline-panel" data-team-id="${escapeAttribute(team.id)}">
-        <div class="agent-panel-head"><h3>Assign Delegated Task</h3></div>
+        <div class="agent-panel-head"><h3>Assign Task</h3></div>
         <div class="agent-form-grid">
-          <label class="agent-field"><span>Assignee</span><select name="assigneeAgentId" class="agent-select"><option value="">${leader ? `${escapeHtml(leader.name)} (Team Leader - default)` : "Select member..."}</option>${members.map((m) => `<option value="${escapeAttribute(m.agentId)}" ${surface.assignAgentId === m.agentId ? "selected" : ""}>${escapeHtml(m.name)} · ${escapeHtml(m.position)} (${escapeHtml(m.status)})</option>`).join("")}</select></label>
+          <label class="agent-field"><span>Assignee</span><select name="assigneeAgentId" class="agent-select"><option value="">${leader ? `${escapeHtml(leader.name)} (Leader)` : "Select member..."}</option>${members.map((m) => `<option value="${escapeAttribute(m.agentId)}" ${surface.assignAgentId === m.agentId ? "selected" : ""}>${escapeHtml(m.name)} · ${escapeHtml(m.position)}</option>`).join("")}</select></label>
           <label class="agent-field"><span>Priority</span><select name="priority" class="agent-select"><option value="high">High</option><option value="normal" selected>Normal</option><option value="low">Low</option></select></label>
-          <label class="agent-field span-2"><span>Task Brief</span><textarea name="brief" class="agent-textarea" rows="3" placeholder="Describe the objective, deliverables, and constraints..." required></textarea></label>
+          <label class="agent-field span-2"><span>Task Brief</span><textarea name="brief" class="agent-textarea" rows="3" placeholder="Describe the objective and expected deliverables..." required></textarea></label>
         </div>
         <div class="agent-form-actions">
-          <button type="button" class="agent-btn ghost" data-team-toggle-assign="0">Cancel</button>
-          <button type="submit" class="agent-btn primary" ${busy ? "disabled" : ""}>Dispatch Task</button>
+          <button type="button" class="agent-btn ghost sm" data-team-toggle-assign="0">Cancel</button>
+          <button type="submit" class="agent-btn primary sm" ${busy ? "disabled" : ""}>Dispatch Task</button>
         </div>
       </form>`
     : ""
@@ -1830,23 +1817,30 @@ export function renderTeamSurfaceHtml(options: {
   const deleteConfirmHtml = surface.deleteConfirmOpen
     ? `<form id="agent-delete-team-form" class="agent-inline-panel danger-panel" data-team-id="${escapeAttribute(team.id)}">
         <div class="agent-panel-head"><h3>Delete Team "${escapeHtml(team.name)}"?</h3></div>
-        <p class="agent-empty-hint">Deleting a team archives its structure and stops active runs. Type <strong>${escapeHtml(team.name)}</strong> to confirm:</p>
+        <p class="agent-empty-hint">Type <strong>${escapeHtml(team.name)}</strong> to archive this team and stop active runs:</p>
         <div class="agent-form-grid">
           <input id="agent-delete-confirm-name" name="confirmName" type="text" class="agent-input" placeholder="${escapeAttribute(team.name)}" required />
         </div>
         <div class="agent-form-actions">
-          <button type="button" class="agent-btn ghost" data-team-toggle-delete="0">Cancel</button>
-          <button type="submit" class="agent-btn danger-ghost" ${busy ? "disabled" : ""}>Confirm Delete Team</button>
+          <button type="button" class="agent-btn ghost sm" data-team-toggle-delete="0">Cancel</button>
+          <button type="submit" class="agent-btn danger-ghost sm" ${busy ? "disabled" : ""}>Confirm Delete</button>
         </div>
       </form>`
     : ""
+
+  const nonEmptyTaskSections = TASK_SECTION_DEFS.map((sec) => ({
+    ...sec,
+    items: groupedTasks.sections[sec.id].filter(
+      (t) => !surface.assigneeFilter || t.assigneeAgentId === surface.assigneeFilter,
+    ),
+  })).filter((sec) => sec.items.length > 0)
 
   const bodyHtml =
     surface.tab === "organization"
       ? `<div class="agent-org-canvas">
           ${
             orgRoots.length === 0
-              ? `<div class="agent-empty-box"><h3>No members in ${escapeHtml(team.name)} yet</h3><p>Add a team leader and specialists to build your reporting hierarchy and start delegating tasks.</p><button type="button" class="agent-btn primary" data-team-toggle-add-member="1">+ Add First Member</button></div>`
+              ? `<div class="agent-empty-box"><h3>No members yet</h3><p>Add a team leader and specialists to start collaborating.</p><button type="button" class="agent-btn primary sm" data-team-toggle-add-member="1">+ Add Member</button></div>`
               : `<div class="org-tree-root" role="tree" aria-label="${escapeAttribute(team.name)} organization hierarchy">${orgRoots
                   .map((rootNode) =>
                     renderOrgNodeHtml(
@@ -1855,84 +1849,88 @@ export function renderTeamSurfaceHtml(options: {
                       options.expandedOrgMembers || new Set(),
                       options.viewedSessionId || "",
                       options.sessionLimits || {},
+                      itemMenuKey,
                     ),
                   )
                   .join("")}</div>`
           }
         </div>`
       : `<div class="agent-tasks-canvas">
-          <div class="agent-tasks-toolbar">
-            <div class="agent-filter-chips">
-              <button type="button" class="agent-filter-chip${!surface.assigneeFilter ? " is-active" : ""}" data-team-filter-assignee="">All members (${groupedTasks.all.length})</button>
-              ${members.map((m) => `<button type="button" class="agent-filter-chip${surface.assigneeFilter === m.agentId ? " is-active" : ""}" data-team-filter-assignee="${escapeAttribute(m.agentId)}"><span class="agent-status-dot tone-${m.tone}"></span><span>${escapeHtml(m.name)}</span></button>`).join("")}
-            </div>
-          </div>
-          <div class="agent-task-sections">
-            ${TASK_SECTION_DEFS.map((sec) => {
-              const secTasks = groupedTasks.sections[sec.id].filter(
-                (t) => !surface.assigneeFilter || t.assigneeAgentId === surface.assigneeFilter,
-              )
-              if (secTasks.length === 0 && sec.id === "cancelled") return ""
-              return `
-                <section class="agent-task-section">
-                  <header class="agent-task-section-head">
-                    <h4>${escapeHtml(sec.label)}</h4>
-                    <span class="agent-tab-count">${secTasks.length}</span>
-                  </header>
-                  ${
-                    secTasks.length === 0
-                      ? `<div class="agent-section-empty">${escapeHtml(sec.emptyText)}</div>`
-                      : `<div class="agent-task-list-table">
-                          ${secTasks
-                            .map(
-                              (task) => `
-                                <button type="button" class="agent-task-list-row${surface.selectedTaskId === task.id ? " is-selected" : ""}" data-agent-select-task="${escapeAttribute(task.id)}" data-agent-team="${escapeAttribute(team.id)}">
-                                  <span class="agent-status-pill tone-${task.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(task.statusLabel)}</span></span>
-                                  <span class="agent-priority-pill priority-${task.priority}">${escapeHtml(task.priority)}</span>
-                                  <span class="agent-task-row-brief">${escapeHtml(task.brief)}${task.report?.summary ? ` <em class="agent-task-row-summary">— ${escapeHtml(String(task.report.summary))}</em>` : ""}</span>
-                                  <span class="agent-task-row-assignee">${escapeHtml(task.assigneeName)}</span>
-                                  <code class="agent-id-chip">${escapeHtml(task.id)}</code>
-                                </button>
-                              `,
-                            )
-                            .join("")}
-                        </div>`
-                  }
-                </section>
-              `
-            }).join("")}
-          </div>
+          ${
+            members.length > 1
+              ? `<div class="agent-tasks-toolbar">
+                  <div class="agent-filter-chips">
+                    <button type="button" class="agent-filter-chip${!surface.assigneeFilter ? " is-active" : ""}" data-team-filter-assignee="">All (${groupedTasks.all.length})</button>
+                    ${members.map((m) => `<button type="button" class="agent-filter-chip${surface.assigneeFilter === m.agentId ? " is-active" : ""}" data-team-filter-assignee="${escapeAttribute(m.agentId)}"><span class="agent-status-dot tone-${m.tone}"></span><span>${escapeHtml(m.name)}</span></button>`).join("")}
+                  </div>
+                </div>`
+              : ""
+          }
+          ${
+            nonEmptyTaskSections.length === 0
+              ? `<div class="agent-empty-box"><h3>No tasks found</h3><p>Dispatch a task to the team leader or any specialist.</p><button type="button" class="agent-btn primary sm" data-team-toggle-assign="1">+ Assign Task</button></div>`
+              : `<div class="agent-task-sections">
+                  ${nonEmptyTaskSections
+                    .map(
+                      (sec) => `
+                        <section class="agent-task-section">
+                          <header class="agent-task-section-head">
+                            <h4>${escapeHtml(sec.label)}</h4>
+                            <span class="agent-tab-count">${sec.items.length}</span>
+                          </header>
+                          <div class="agent-task-list-table">
+                            ${sec.items
+                              .map(
+                                (task) => `
+                                  <button type="button" class="agent-task-list-row${surface.selectedTaskId === task.id ? " is-selected" : ""}" data-agent-select-task="${escapeAttribute(task.id)}" data-agent-team="${escapeAttribute(team.id)}">
+                                    <span class="agent-status-pill tone-${task.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(task.statusLabel)}</span></span>
+                                    <span class="agent-task-row-brief">${escapeHtml(task.brief)}${task.report?.summary ? ` <em class="agent-task-row-summary">— ${escapeHtml(String(task.report.summary))}</em>` : ""}</span>
+                                    <span class="agent-task-row-meta">
+                                      ${task.priority !== "normal" ? `<span class="agent-priority-pill priority-${task.priority}">${escapeHtml(task.priority)}</span>` : ""}
+                                      <span class="agent-task-row-assignee">${escapeHtml(task.assigneeName)}</span>
+                                    </span>
+                                  </button>
+                                `,
+                              )
+                              .join("")}
+                          </div>
+                        </section>
+                      `,
+                    )
+                    .join("")}
+                </div>`
+          }
         </div>`
 
   return `
     <div class="agent-surface team-surface">
       <div class="agent-surface-main">
         <header class="agent-surface-header">
-          <div class="agent-surface-title-block">
-            <div class="agent-surface-kicker">Team Workspace</div>
-            <div class="agent-surface-headline-row">
-              <h2 class="agent-surface-title">${escapeHtml(team.name)}</h2>
-              <div class="agent-metric-pills">
-                <span class="agent-metric-pill">${counts.members} ${counts.members === 1 ? "member" : "members"}</span>
-                ${counts.working > 0 ? `<span class="agent-metric-pill tone-working">${counts.working} active</span>` : ""}
-                ${counts.tasksAttention > 0 ? `<span class="agent-metric-pill tone-attention">${counts.tasksAttention} need review</span>` : ""}
-              </div>
+          <div class="agent-surface-headline-row">
+            <h2 class="agent-surface-title">${escapeHtml(team.name)}</h2>
+            <div class="agent-segmented" role="tablist" aria-label="Team surface views">
+              <button type="button" role="tab" aria-selected="${surface.tab === "organization"}" class="agent-seg-btn${surface.tab === "organization" ? " is-active" : ""}" data-team-switch-tab="organization">Members <span class="agent-tab-count">${counts.members}</span></button>
+              <button type="button" role="tab" aria-selected="${surface.tab === "tasks"}" class="agent-seg-btn${surface.tab === "tasks" ? " is-active" : ""}" data-team-switch-tab="tasks">Tasks <span class="agent-tab-count">${counts.tasksTotal}</span></button>
             </div>
-            ${team.createRoot ? `<div class="agent-surface-sub"><code class="org-workspace-path">${escapeHtml(team.createRoot)}</code></div>` : ""}
+            ${counts.working > 0 ? `<span class="agent-metric-pill tone-working">${counts.working} active</span>` : ""}
+            ${counts.tasksAttention > 0 ? `<span class="agent-metric-pill tone-attention">${counts.tasksAttention} need review</span>` : ""}
           </div>
           <div class="agent-surface-actions">
-            ${leader ? `<button type="button" class="agent-btn secondary" data-agent-chat="${escapeAttribute(leader.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(leader.latestRuntimeSessionId)}">Chat with Leader (${escapeHtml(leader.name)})</button>` : ""}
-            <button type="button" class="agent-btn secondary" data-team-toggle-add-member="1">+ Add Member</button>
-            <button type="button" class="agent-btn primary" data-team-toggle-assign="1">+ Assign Task</button>
-            <button type="button" class="agent-btn ghost danger-text" data-team-toggle-delete="1">Delete Team</button>
+            <button type="button" class="agent-btn secondary sm" data-team-toggle-add-member="1">+ Member</button>
+            <button type="button" class="agent-btn primary sm" data-team-toggle-assign="1">+ Task</button>
+            <div class="project-menu-wrap">
+              <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(headerMenuKey)}" title="Team actions" aria-label="Team actions" aria-haspopup="menu" aria-expanded="${String(headerMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
+              ${
+                headerMenuOpen
+                  ? `<div class="project-menu" role="menu">
+                      ${leader ? `<button type="button" data-agent-chat="${escapeAttribute(leader.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(leader.latestRuntimeSessionId)}" role="menuitem">Chat with Leader (${escapeHtml(leader.name)})</button>` : ""}
+                      <button type="button" data-team-toggle-delete="1" role="menuitem">Delete team…</button>
+                    </div>`
+                  : ""
+              }
+            </div>
           </div>
         </header>
-        <div class="agent-subnav-bar">
-          <div class="agent-subnav-tabs" role="tablist" aria-label="Team surface views">
-            <button type="button" role="tab" aria-selected="${surface.tab === "organization"}" class="agent-subnav-tab${surface.tab === "organization" ? " is-active" : ""}" data-team-switch-tab="organization">Organization &amp; Sessions <span class="agent-tab-count">${counts.members}</span></button>
-            <button type="button" role="tab" aria-selected="${surface.tab === "tasks"}" class="agent-subnav-tab${surface.tab === "tasks" ? " is-active" : ""}" data-team-switch-tab="tasks">Tasks &amp; Deliveries <span class="agent-tab-count">${counts.tasksTotal}</span></button>
-          </div>
-        </div>
         ${deleteConfirmHtml}
         ${addMemberFormHtml}
         ${assignFormHtml}
@@ -1963,18 +1961,13 @@ export function renderManagerSurfaceHtml(options: {
     <div class="agent-surface manager-surface">
       <div class="agent-surface-main">
         <header class="agent-surface-header">
-          <div class="agent-surface-title-block">
-            <div class="agent-surface-kicker">Organization Coordinator</div>
-            <div class="agent-surface-headline-row">
-              <h2 class="agent-surface-title">Manager Agent</h2>
-              <span class="agent-metric-pill">${sessions.length} ${sessions.length === 1 ? "conversation" : "conversations"}</span>
-              <span class="agent-metric-pill">${snapshot.teams.length} ${snapshot.teams.length === 1 ? "team" : "teams"}</span>
-            </div>
-            <p class="agent-surface-desc">Manager creates teams, organizes member reporting hierarchies, and coordinates cross-team work. Browse past Manager conversations or start a new one.</p>
+          <div class="agent-surface-headline-row">
+            <h2 class="agent-surface-title">Manager</h2>
+            <span class="agent-surface-meta">Organization Coordinator · ${snapshot.teams.length} ${snapshot.teams.length === 1 ? "team" : "teams"}</span>
           </div>
           <div class="agent-surface-actions">
-            <button type="button" class="agent-btn secondary" data-sidebar-new-manager-session="1" ${options.busy ? "disabled" : ""}>+ New Conversation</button>
-            <button type="button" class="agent-btn primary" data-sidebar-open-manager="1" ${options.busy ? "disabled" : ""}>Resume Latest Chat</button>
+            <button type="button" class="agent-btn secondary sm" data-sidebar-new-manager-session="1" ${options.busy ? "disabled" : ""}>+ New Chat</button>
+            <button type="button" class="agent-btn primary sm" data-sidebar-open-manager="1" ${options.busy ? "disabled" : ""}>Resume Chat</button>
           </div>
         </header>
         <div class="agent-surface-body panel-scroll">
@@ -1982,7 +1975,7 @@ export function renderManagerSurfaceHtml(options: {
             <h3 class="agent-section-heading">Manager Conversations (${sessions.length})</h3>
             ${
               sessions.length === 0
-                ? `<div class="agent-empty-box compact"><p>No Manager conversations yet. Start a conversation to create or reorganize teams.</p></div>`
+                ? `<div class="agent-empty-box compact"><p>No Manager conversations yet. Start a chat to create or organize teams.</p></div>`
                 : `<div class="agent-runs-list">
                     ${sessions
                       .map((sess) => {
@@ -1990,12 +1983,13 @@ export function renderManagerSurfaceHtml(options: {
                         return `
                           <div class="agent-run-row${isCurrent ? " is-selected" : ""}">
                             <div class="agent-run-main">
-                              <span class="agent-status-pill tone-${sess.tone}"><span class="agent-status-dot"></span><span>${escapeHtml(sess.status)}</span></span>
+                              <span class="agent-status-dot tone-${sess.tone}"></span>
                               <strong>${escapeHtml(sess.title || "Manager conversation")}</strong>
+                              ${sess.status !== "Idle" ? `<span class="agent-status-pill tone-${sess.tone}">${escapeHtml(sess.status)}</span>` : ""}
                               <span class="agent-timestamp">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
                             </div>
                             <div class="agent-run-actions">
-                              <button type="button" class="agent-btn primary sm" data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}">Open Chat</button>
+                              <button type="button" class="agent-btn secondary sm" data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}">Open</button>
                               <button type="button" class="agent-btn ghost sm danger-text" data-agent-delete-session="${escapeAttribute(sess.runtimeSessionId)}" data-agent-manager="1">Delete</button>
                             </div>
                           </div>
@@ -2008,16 +2002,16 @@ export function renderManagerSurfaceHtml(options: {
           ${
             inbox.notices.length > 0
               ? `<section class="agent-bg-section">
-                  <h3 class="agent-section-heading">Recent Manager Changes (${inbox.notices.length})</h3>
+                  <h3 class="agent-section-heading">Recent Updates (${inbox.notices.length})</h3>
                   <div class="agent-runs-list">
                     ${inbox.notices
                       .map(
                         (notice) => `
                           <div class="agent-run-row">
                             <div class="agent-run-main">
-                              <span class="agent-status-pill tone-waiting"><span>Changed</span></span>
+                              <span class="agent-status-dot tone-waiting"></span>
                               <strong>${escapeHtml(notice.title)}</strong>
-                              ${notice.subtitle ? `<span>${escapeHtml(notice.subtitle)}</span>` : ""}
+                              ${notice.subtitle ? `<span class="agent-timestamp">${escapeHtml(notice.subtitle)}</span>` : ""}
                             </div>
                             <div class="agent-run-actions">
                               <button type="button" class="agent-btn ghost sm" data-inbox-dismiss-notice="${escapeAttribute(notice.noticeId || "")}">Dismiss</button>
@@ -2069,23 +2063,17 @@ export function renderInboxSurfaceHtml(options: {
         }
         ${
           (item.kind === "blocker" || item.kind === "delivery" || item.kind === "attention") && item.taskId
-            ? `<button type="button" class="agent-btn primary sm" data-inbox-inspect-task="${escapeAttribute(item.taskId)}">${item.kind === "delivery" ? "Review Delivery" : item.kind === "blocker" ? "Answer Blocker" : "Inspect Task"}</button>`
+            ? `<button type="button" class="agent-btn primary sm" data-inbox-inspect-task="${escapeAttribute(item.taskId)}">${item.kind === "delivery" ? "Review" : item.kind === "blocker" ? "Answer" : "Inspect"}</button>`
             : ""
         }
         ${
           item.kind === "unconfirmed_run" && item.runId
-            ? `<button type="button" class="agent-btn warning sm" data-inbox-resolve-run="${escapeAttribute(item.runId)}" ${options.busy ? "disabled" : ""}>Confirm Stopped</button>
-               <button type="button" class="agent-btn danger-ghost sm" data-inbox-stop-run="${escapeAttribute(item.runId)}" ${options.busy ? "disabled" : ""}>Stop Run</button>`
+            ? `<button type="button" class="agent-btn warning sm" data-inbox-resolve-run="${escapeAttribute(item.runId)}" ${options.busy ? "disabled" : ""}>Confirm Stopped</button>`
             : ""
         }
         ${
           item.kind === "notice" && item.noticeId
             ? `<button type="button" class="agent-btn ghost sm" data-inbox-dismiss-notice="${escapeAttribute(item.noticeId)}" ${options.busy ? "disabled" : ""}>Dismiss</button>`
-            : ""
-        }
-        ${
-          item.teamId
-            ? `<button type="button" class="agent-btn ghost sm" data-sidebar-open-team="${escapeAttribute(item.teamId)}" data-sidebar-team-tab="organization">Open Team</button>`
             : ""
         }
       </div>
@@ -2096,31 +2084,24 @@ export function renderInboxSurfaceHtml(options: {
     <div class="agent-surface inbox-surface">
       <div class="agent-surface-main">
         <header class="agent-surface-header">
-          <div class="agent-surface-title-block">
-            <div class="agent-surface-kicker">Management Triage</div>
-            <div class="agent-surface-headline-row">
-              <h2 class="agent-surface-title">Inbox</h2>
-              <span class="agent-metric-pill">${sections.badgeCount} pending</span>
-            </div>
-            <p class="agent-surface-desc">Human-in-the-loop approvals, blocked questions, deliveries awaiting review, and Manager updates across all teams.</p>
-          </div>
-          <div class="agent-surface-actions">
-            <button type="button" class="agent-btn ghost" data-sidebar-surface="chat">Back to Chat</button>
+          <div class="agent-surface-headline-row">
+            <h2 class="agent-surface-title">Inbox</h2>
+            <span class="agent-metric-pill">${sections.badgeCount} pending</span>
           </div>
         </header>
         <div class="agent-surface-body panel-scroll">
           ${
             sections.totalCount === 0
-              ? `<div class="agent-empty-box"><h3>Inbox Zero</h3><p>No pending approvals, blocked questions, or unreviewed task deliveries right now.</p></div>`
+              ? `<div class="agent-empty-box"><h3>All caught up</h3><p>No pending approvals, questions, or deliveries waiting on you.</p></div>`
               : `
-                <section class="agent-bg-section">
-                  <h3 class="agent-section-heading">Needs you (${sections.needsYou.length})</h3>
-                  ${
-                    sections.needsYou.length === 0
-                      ? `<div class="agent-section-empty">Nothing waiting on your decision right now.</div>`
-                      : `<div class="agent-inbox-list">${sections.needsYou.map(renderCard).join("")}</div>`
-                  }
-                </section>
+                ${
+                  sections.needsYou.length > 0
+                    ? `<section class="agent-bg-section">
+                        <h3 class="agent-section-heading">Needs you (${sections.needsYou.length})</h3>
+                        <div class="agent-inbox-list">${sections.needsYou.map(renderCard).join("")}</div>
+                      </section>`
+                    : ""
+                }
                 ${
                   sections.notices.length > 0
                     ? `<section class="agent-bg-section">
@@ -2167,86 +2148,34 @@ export function renderBackgroundSurfaceHtml(options: {
     <div class="agent-surface background-surface">
       <div class="agent-surface-main">
         <header class="agent-surface-header">
-          <div class="agent-surface-title-block">
-            <div class="agent-surface-kicker">Operations &amp; Observability</div>
-            <div class="agent-surface-headline-row">
-              <h2 class="agent-surface-title">Background &amp; Runtime</h2>
-              <span class="agent-metric-pill tone-working">${bg.runningCount} active</span>
-            </div>
-            <p class="agent-surface-desc">Monitor delegated background agent runs, live runtime sessions, unconfirmed runs, and shared daemon health.</p>
+          <div class="agent-surface-headline-row">
+            <h2 class="agent-surface-title">Background</h2>
+            <span class="agent-metric-pill tone-working">${bg.runningCount} active</span>
           </div>
           <div class="agent-surface-actions">
-            <button type="button" class="agent-btn secondary" data-bg-read-log="service" ${options.busy ? "disabled" : ""}>Service Log</button>
-            <button type="button" class="agent-btn secondary" data-bg-read-log="runtime" ${options.busy ? "disabled" : ""}>Runtime Log</button>
-            <button type="button" class="agent-btn ghost" data-sidebar-surface="chat">Back to Chat</button>
+            <button type="button" class="agent-btn secondary sm" data-bg-read-log="service" ${options.busy ? "disabled" : ""}>Service Log</button>
+            <button type="button" class="agent-btn secondary sm" data-bg-read-log="runtime" ${options.busy ? "disabled" : ""}>Runtime Log</button>
           </div>
         </header>
         <div class="agent-surface-body panel-scroll">
-          <div class="agent-health-grid">
-            <div class="agent-health-card">
-              <div class="agent-card-kicker">Management Service</div>
-              <div class="agent-health-status">
-                <span class="agent-status-dot tone-${mgmtInfo ? "completed" : "working"}"></span>
-                <strong>${mgmtInfo ? `Running (PID ${mgmtInfo.pid || "active"})` : "Connected"}</strong>
-              </div>
-              <div class="agent-health-meta">
-                <span>Teams: ${snapshot.teams.length}</span>
-                <span>Agents: ${snapshot.agents.length}</span>
-                <span>Tasks: ${snapshot.tasks.length}</span>
-              </div>
-            </div>
-            <div class="agent-health-card">
-              <div class="agent-card-kicker">Shared Python Runtime</div>
-              <div class="agent-health-status">
-                <span class="agent-status-dot tone-completed"></span>
-                <strong>${runtimeInfo?.host ? `${escapeHtml(String(runtimeInfo.host))}:${escapeHtml(String(runtimeInfo.port))}` : "Active"}</strong>
-              </div>
-              <div class="agent-health-meta">
-                <span>Connected sessions: ${snapshot.connectedSessions.length}</span>
-                <span>Live observers: ${snapshot.live.length}</span>
-              </div>
-            </div>
+          <div class="agent-health-strip">
+            <span class="agent-health-item">
+              <span class="agent-status-dot tone-${mgmtInfo ? "completed" : "working"}"></span>
+              <span>Service: <strong>${mgmtInfo ? `Running (PID ${mgmtInfo.pid || "active"})` : "Connected"}</strong></span>
+            </span>
+            <span class="agent-health-sep">·</span>
+            <span class="agent-health-item">
+              <span class="agent-status-dot tone-completed"></span>
+              <span>Runtime: <strong>${runtimeInfo?.host ? `${escapeHtml(String(runtimeInfo.host))}:${escapeHtml(String(runtimeInfo.port))}` : "Active"}</strong></span>
+            </span>
+            <span class="agent-health-sep">·</span>
+            <span class="agent-health-item">${snapshot.connectedSessions.length} connected sessions</span>
           </div>
           ${
             options.logView
               ? `<section class="agent-drawer-card"><div class="agent-card-header-row"><div class="agent-card-kicker">${escapeHtml(options.logView.title)}</div><button type="button" class="agent-btn ghost sm" data-bg-close-log="1">Close</button></div><pre class="agent-report-pre">${escapeHtml(options.logView.content)}</pre></section>`
               : ""
           }
-          <section class="agent-bg-section">
-            <h3 class="agent-section-heading">Running Now (${bg.runningNow.length})</h3>
-            ${
-              bg.runningNow.length === 0
-                ? `<div class="agent-empty-box compact"><p>No delegated agent runs or live turns are currently executing.</p></div>`
-                : `<div class="agent-runs-list">
-                    ${bg.runningNow
-                      .map(
-                        (item) => `
-                          <div class="agent-run-row">
-                            <div class="agent-run-main">
-                              <span class="agent-status-pill tone-working"><span class="agent-status-dot"></span><span>${escapeHtml(String(item.status))}</span></span>
-                              <strong>${escapeHtml(String(item.agentName))}</strong>
-                              <span class="agent-run-brief">${escapeHtml(String(item.title))}</span>
-                              ${item.detail ? `<span class="agent-timestamp">${escapeHtml(String(item.detail))}</span>` : ""}
-                            </div>
-                            <div class="agent-run-actions">
-                              ${
-                                item.agentId && item.teamId
-                                  ? `<button type="button" class="agent-btn secondary sm" data-agent-chat="${escapeAttribute(String(item.agentId))}" data-agent-team="${escapeAttribute(String(item.teamId))}" data-agent-session="${escapeAttribute(String(item.runtimeSessionId || ""))}">Open Session</button>`
-                                  : ""
-                              }
-                              ${
-                                item.runId
-                                  ? `<button type="button" class="agent-btn danger-ghost sm" data-inbox-stop-run="${escapeAttribute(String(item.runId))}" ${options.busy ? "disabled" : ""}>Stop</button>`
-                                  : ""
-                              }
-                            </div>
-                          </div>
-                        `,
-                      )
-                      .join("")}
-                  </div>`
-            }
-          </section>
           ${
             bg.unconfirmedRuns.length > 0
               ? `<section class="agent-bg-section">
@@ -2263,7 +2192,7 @@ export function renderBackgroundSurfaceHtml(options: {
                             </div>
                             <div class="agent-run-actions">
                               <button type="button" class="agent-btn warning sm" data-inbox-resolve-run="${escapeAttribute(String(run.runId))}" ${options.busy ? "disabled" : ""}>Confirm Stopped</button>
-                              <button type="button" class="agent-btn danger-ghost sm" data-inbox-stop-run="${escapeAttribute(String(run.runId))}" ${options.busy ? "disabled" : ""}>Cancel Run</button>
+                              <button type="button" class="agent-btn danger-ghost sm" data-inbox-stop-run="${escapeAttribute(String(run.runId))}" ${options.busy ? "disabled" : ""}>Cancel</button>
                             </div>
                           </div>
                         `,
@@ -2273,6 +2202,41 @@ export function renderBackgroundSurfaceHtml(options: {
                 </section>`
               : ""
           }
+          <section class="agent-bg-section">
+            <h3 class="agent-section-heading">Running Now (${bg.runningNow.length})</h3>
+            ${
+              bg.runningNow.length === 0
+                ? `<div class="agent-empty-box compact"><p>No background runs or active turns right now.</p></div>`
+                : `<div class="agent-runs-list">
+                    ${bg.runningNow
+                      .map(
+                        (item) => `
+                          <div class="agent-run-row">
+                            <div class="agent-run-main">
+                              <span class="agent-status-pill tone-working"><span class="agent-status-dot"></span><span>${escapeHtml(String(item.status))}</span></span>
+                              <strong>${escapeHtml(String(item.agentName))}</strong>
+                              <span class="agent-run-brief">${escapeHtml(String(item.title))}</span>
+                              ${item.detail ? `<span class="agent-timestamp">${escapeHtml(String(item.detail))}</span>` : ""}
+                            </div>
+                            <div class="agent-run-actions">
+                              ${
+                                item.agentId && item.teamId
+                                  ? `<button type="button" class="agent-btn secondary sm" data-agent-chat="${escapeAttribute(String(item.agentId))}" data-agent-team="${escapeAttribute(String(item.teamId))}" data-agent-session="${escapeAttribute(String(item.runtimeSessionId || ""))}">Open</button>`
+                                  : ""
+                              }
+                              ${
+                                item.runId
+                                  ? `<button type="button" class="agent-btn danger-ghost sm" data-inbox-stop-run="${escapeAttribute(String(item.runId))}" ${options.busy ? "disabled" : ""}>Stop</button>`
+                                  : ""
+                              }
+                            </div>
+                          </div>
+                        `,
+                      )
+                      .join("")}
+                  </div>`
+            }
+          </section>
         </div>
       </div>
     </div>
@@ -2290,22 +2254,15 @@ export function renderArchiveSurfaceHtml(options: {
     <div class="agent-surface archive-surface">
       <div class="agent-surface-main">
         <header class="agent-surface-header">
-          <div class="agent-surface-title-block">
-            <div class="agent-surface-kicker">History</div>
-            <div class="agent-surface-headline-row">
-              <h2 class="agent-surface-title">Archived Teams</h2>
-              <span class="agent-metric-pill">${archived.length} archived</span>
-            </div>
-            <p class="agent-surface-desc">Previously deleted teams and their preserved workspace paths.</p>
-          </div>
-          <div class="agent-surface-actions">
-            <button type="button" class="agent-btn ghost" data-sidebar-surface="chat">Back to Chat</button>
+          <div class="agent-surface-headline-row">
+            <h2 class="agent-surface-title">Archived Teams</h2>
+            <span class="agent-metric-pill">${archived.length} archived</span>
           </div>
         </header>
         <div class="agent-surface-body panel-scroll">
           ${
             archived.length === 0
-              ? `<div class="agent-empty-box"><h3>No archived teams</h3><p>Deleted teams will appear here with their preserved workspace paths.</p></div>`
+              ? `<div class="agent-empty-box"><h3>No archived teams</h3><p>Deleted teams appear here with their preserved workspace paths.</p></div>`
               : `<div class="agent-runs-list">
                   ${archived
                     .map(
@@ -2331,3 +2288,4 @@ export function renderArchiveSurfaceHtml(options: {
     </div>
   `
 }
+
