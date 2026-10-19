@@ -17,8 +17,7 @@ import {
   getMergedProviders,
   getModelReasoningEfforts,
   getProviderModels,
-  getProviderSourceLabel,
-  getProviderSourceLabelById,
+  groupConfiguredProviders,
   loadProviders,
   renderProviders,
   setOnProvidersUpdated,
@@ -104,9 +103,8 @@ export function selectSettingsTab(tab: SettingsTab, focus = false) {
 }
 
 function populateGeneralControls(preferredProvider?: string, preferredModel?: string, preferredEffort?: string) {
-  const configured = getMergedProviders()
-    .filter((p) => p.configured)
-    .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
+  const groups = groupConfiguredProviders(getMergedProviders())
+  const configured = groups.flatMap((g) => g.providers)
 
   const emptyEl = document.getElementById("settings-general-empty")
   const cardEl = document.getElementById("settings-general-card")
@@ -127,11 +125,15 @@ function populateGeneralControls(preferredProvider?: string, preferredModel?: st
     ? desiredProvider
     : configured[0].id
 
-  settingsProvider.innerHTML = configured
-    .map((p) => {
-      const selected = p.id === activeProvider ? " selected" : ""
-      const sourceLabel = getProviderSourceLabel(p)
-      return `<option value="${escapeAttribute(p.id)}"${selected}>${escapeHtml(`${p.name || p.id} · ${sourceLabel}`)}</option>`
+  settingsProvider.innerHTML = groups
+    .map((group) => {
+      const optionsHtml = group.providers
+        .map((p) => {
+          const selected = p.id === activeProvider ? " selected" : ""
+          return `<option value="${escapeAttribute(p.id)}"${selected}>${escapeHtml(`${p.name || p.id} · ${group.key}`)}</option>`
+        })
+        .join("")
+      return `<optgroup label="${escapeAttribute(group.label)}">${optionsHtml}</optgroup>`
     })
     .join("")
   settingsProvider.value = activeProvider
@@ -151,12 +153,11 @@ function populateModelSelect(providerId: string, preferredModel = "") {
     ? preferredModel
     : models[0] || preferredModel || ""
 
-  const sourceLabel = getProviderSourceLabelById(providerId)
   const optionIds = models.length > 0 ? models : activeModel ? [activeModel] : []
   settingsModel.innerHTML = optionIds
     .map((id) => {
       const selected = id === activeModel ? " selected" : ""
-      return `<option value="${escapeAttribute(id)}"${selected}>${escapeHtml(`${id} · ${sourceLabel}`)}</option>`
+      return `<option value="${escapeAttribute(id)}"${selected}>${escapeHtml(id)}</option>`
     })
     .join("")
   settingsModel.value = activeModel

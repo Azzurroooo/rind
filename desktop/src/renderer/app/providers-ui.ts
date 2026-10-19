@@ -408,31 +408,33 @@ export function getModelReasoningEfforts(providerId: string, modelId: string): r
   return ALL_EFFORTS
 }
 
+export type ProviderGroup = {
+  key: "OAuth" | "Custom" | "Built-in"
+  label: string
+  providers: EnrichedProvider[]
+}
+
+const PROVIDER_GROUP_DEFS: ReadonlyArray<{ key: "OAuth" | "Custom" | "Built-in"; label: string }> = [
+  { key: "OAuth", label: "OAuth & Accounts" },
+  { key: "Custom", label: "Custom APIs" },
+  { key: "Built-in", label: "Built-in Providers" },
+]
+
 export function getProviderSourceLabel(provider: EnrichedProvider | undefined): "OAuth" | "Custom" | "Built-in" {
   if (provider?.custom || provider?.authType === "custom") return "Custom"
   if (provider?.authType === "oauth") return "OAuth"
   return "Built-in"
 }
 
-export function getProviderSourceLabelById(providerId: string): "OAuth" | "Custom" | "Built-in" {
-  const match = getMergedProviders().find((p) => p.id === providerId)
-  return getProviderSourceLabel(match)
-}
-
-export function providerStatus(provider: DesktopAuthProvider | EnrichedProvider) {
-  const enriched = provider as EnrichedProvider
-  if (!enriched.configured) return "Not connected"
-  if (enriched.authType === "oauth") return "Subscription · OAuth"
-  if (enriched.authType === "api_key") {
-    return enriched.maskedKey ? `API key · ${enriched.maskedKey}` : "API key connected"
-  }
-  if (enriched.source === "env") {
-    return enriched.envKey ? `Environment (${enriched.envKey})` : "Environment variable"
-  }
-  if (enriched.custom) {
-    return enriched.maskedKey ? `Custom · ${enriched.maskedKey}` : "Custom endpoint"
-  }
-  return "Connected"
+export function groupConfiguredProviders(providers: readonly EnrichedProvider[]): ProviderGroup[] {
+  const configured = providers.filter((p) => p.configured)
+  return PROVIDER_GROUP_DEFS.map((group) => ({
+    key: group.key,
+    label: group.label,
+    providers: configured
+      .filter((p) => getProviderSourceLabel(p) === group.key)
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)),
+  })).filter((group) => group.providers.length > 0)
 }
 
 function renderCustomProviderForm() {

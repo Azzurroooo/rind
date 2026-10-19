@@ -86,7 +86,7 @@ describe("SettingsDialog", () => {
     expect(document.querySelector(".settings-dialog")).toBeNull();
   });
 
-  it("opens on General with Global Default Configuration locked by default, shows Built-in/OAuth/Custom tags on models, unlocks on Edit, and saves on Save changes", async () => {
+  it("opens on General with Global Default Configuration locked by default, groups Default provider by OAuth/Custom/Built-in, keeps Default model clean, unlocks on Edit, and saves on Save changes", async () => {
     const handlers = renderSettings();
     expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
     await waitFor(() => {
@@ -108,20 +108,32 @@ describe("SettingsDialog", () => {
     expect(effortSelect.disabled).toBe(true);
     expect(saveBtn.disabled).toBe(true);
 
-    // Only configured providers (DeepSeek, OpenAI, Xiaomi) appear in Default provider with their source tags
-    const providerOptions = [...providerSelect.querySelectorAll("option")].map((o) => ({
-      value: o.value,
-      text: o.textContent,
+    // Default provider separates configured providers into distinct optgroups (OAuth & Accounts, Custom APIs, Built-in Providers)
+    const optgroups = [...providerSelect.querySelectorAll("optgroup")].map((g) => ({
+      label: g.getAttribute("label"),
+      options: [...g.querySelectorAll("option")].map((o) => ({ value: o.value, text: o.textContent })),
     }));
-    expect(providerOptions).toEqual([
-      { value: "deepseek", text: "DeepSeek · Built-in" },
-      { value: "openai", text: "OpenAI · OAuth" },
-      { value: "xiaomi", text: "Xiaomi · Custom" },
+    expect(optgroups).toEqual([
+      {
+        label: "OAuth & Accounts",
+        options: [{ value: "openai", text: "OpenAI · OAuth" }],
+      },
+      {
+        label: "Custom APIs",
+        options: [{ value: "xiaomi", text: "Xiaomi · Custom" }],
+      },
+      {
+        label: "Built-in Providers",
+        options: [{ value: "deepseek", text: "DeepSeek · Built-in" }],
+      },
     ]);
 
-    // Default model dropdown displays the source tag (Built-in / OAuth / Custom)
+    // Default model dropdown shows clean model IDs without redundant Built-in / OAuth / Custom suffixes
     const modelOptionTexts = [...modelSelect.querySelectorAll("option")].map((o) => o.textContent);
-    expect(modelOptionTexts).toContain("deepseek-flash · Built-in");
+    expect(modelOptionTexts).toContain("deepseek-flash");
+    expect(modelOptionTexts.some((t) => t.includes("Built-in") || t.includes("OAuth") || t.includes("Custom"))).toBe(
+      false,
+    );
 
     // Workspace Override is not shown in General
     expect(document.querySelector(".settings-dialog").textContent).not.toContain("Workspace Override");
@@ -141,12 +153,12 @@ describe("SettingsDialog", () => {
     expect(effortSelect.disabled).toBe(false);
     expect(saveBtn.disabled).toBe(false);
 
-    // Selecting OpenAI shows OAuth tag on its models; selecting a non-reasoning model hides Reasoning effort
+    // Selecting OpenAI updates Default model cleanly; selecting a non-reasoning model hides Reasoning effort
     fireEvent.change(providerSelect, { target: { value: "openai" } });
     const openaiModelTexts = [...screen.getByLabelText("Default model").querySelectorAll("option")].map(
       (o) => o.textContent,
     );
-    expect(openaiModelTexts).toContain("gpt-5 · OAuth");
+    expect(openaiModelTexts).toContain("gpt-5");
     fireEvent.change(screen.getByLabelText("Default model"), { target: { value: "gpt-4o-mini" } });
     expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
 
@@ -172,6 +184,9 @@ describe("SettingsDialog", () => {
 
   it("separates OAuth & Accounts, Custom APIs, and Built-in Providers in Providers tab with Manage/Connect buttons without ▾", async () => {
     renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Default provider").value).toBe("deepseek");
+    });
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
     expect(screen.getByRole("button", { name: "Providers" }).getAttribute("aria-current")).toBe("page");
 
@@ -203,8 +218,11 @@ describe("SettingsDialog", () => {
     expect(scrollingContent.contains(footerCloseBtn)).toBe(false);
   });
 
-  it("navigates to Preferences and Account to switch theme, view keyboard shortcuts, and sign out", () => {
+  it("navigates to Preferences and Account to switch theme, view keyboard shortcuts, and sign out", async () => {
     const handlers = renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Default provider").value).toBe("deepseek");
+    });
     fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
     expect(screen.getByRole("button", { name: "Preferences" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("radiogroup", { name: "Color theme" })).not.toBeNull();

@@ -148,7 +148,7 @@ test("saveRuntimeSettings persists global defaults, provider credentials, and cu
   })
 })
 
-test("desktop settings close button is pinned, General locks Global Default Configuration until Edit and shows model source tags, Providers separates OAuth / Custom / Built-in without ▾, and scrollbars match sidebar", async () => {
+test("desktop settings close button is pinned, General locks Global Default Configuration until Edit and groups Default provider by OAuth/Custom/Built-in while keeping Default model clean, Providers separates OAuth / Custom / Built-in without ▾, and scrollbars match sidebar", async () => {
   const domSource = await readFile(new URL("../src/renderer/app/dom.ts", import.meta.url), "utf8")
   const baseCssSource = await readFile(new URL("../src/renderer/styles/base.css", import.meta.url), "utf8")
   const cssSource = await readFile(new URL("../src/renderer/styles/dialogs.css", import.meta.url), "utf8")
@@ -175,9 +175,11 @@ test("desktop settings close button is pinned, General locks Global Default Conf
     "General settings must explicitly state Global Default Configuration and lock controls until Edit is clicked",
   )
   assert.ok(
-    settingsSource.includes(".filter((p) => p.configured)") &&
-      settingsSource.includes("getProviderSourceLabelById(providerId)"),
-    "General settings must filter to configured providers and display Built-in / Custom / OAuth source tags",
+    providersSource.includes("groupConfiguredProviders") &&
+      settingsSource.includes("groupConfiguredProviders(getMergedProviders())") &&
+      settingsSource.includes("<optgroup label=") &&
+      !settingsSource.includes("getProviderSourceLabelById"),
+    "General Default provider must group configured providers by OAuth / Custom / Built-in optgroups while Default model stays clean without redundant source tags",
   )
   assert.ok(
     providersSource.includes("OAuth &amp; Accounts") &&

@@ -164,7 +164,7 @@ appRoot.innerHTML = `
             <div class="settings-row">
               <div class="settings-row-text">
                 <span class="settings-row-label"><label for="settings-provider">Default provider</label></span>
-                <span class="settings-row-desc">Connected provider used for new conversations.</span>
+                <span class="settings-row-desc">Connected provider (grouped by OAuth, Custom, or Built-in) used for new conversations.</span>
               </div>
               <div class="settings-row-control">
                 <select id="settings-provider" disabled></select>
@@ -173,7 +173,7 @@ appRoot.innerHTML = `
             <div id="settings-model-row" class="settings-row">
               <div class="settings-row-text">
                 <span class="settings-row-label"><label for="settings-model">Default model</label></span>
-                <span class="settings-row-desc">Default model and source (Built-in / Custom / OAuth) for the selected provider.</span>
+                <span class="settings-row-desc">Default model for the selected provider.</span>
               </div>
               <div class="settings-row-control">
                 <select id="settings-model" disabled></select>

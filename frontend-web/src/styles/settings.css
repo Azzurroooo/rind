@@ -198,16 +198,6 @@
   align-items: center;
   gap: 6px;
 }
-.settings-row-control-stack {
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-}
-.settings-link-btn {
-  font-size: var(--text-meta, 12px);
-  padding: 3px 8px;
-  height: auto;
-}
 
 .settings-dialog input:not([type="checkbox"]),
 .settings-dialog select {

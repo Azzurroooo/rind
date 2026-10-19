@@ -505,16 +505,27 @@ export function SettingsDialog({
     });
   }, [localSettings.authDetails, localSettings.customProviders, runtimeProviders]);
 
-  const configuredProviders = useMemo(() => {
-    return mergedProviders
-      .filter((p) => p.configured)
-      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+  const configuredProviderGroups = useMemo(() => {
+    const configured = mergedProviders.filter((p) => p.configured);
+    const groupDefs = [
+      { key: "OAuth", label: "OAuth & Accounts" },
+      { key: "Custom", label: "Custom APIs" },
+      { key: "Built-in", label: "Built-in Providers" },
+    ];
+    return groupDefs
+      .map((group) => ({
+        key: group.key,
+        label: group.label,
+        providers: configured
+          .filter((p) => getProviderSourceLabel(p) === group.key)
+          .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)),
+      }))
+      .filter((group) => group.providers.length > 0);
   }, [mergedProviders]);
 
-  const selectedProviderSourceLabel = useMemo(() => {
-    const match = mergedProviders.find((p) => p.id === generalProvider);
-    return getProviderSourceLabel(match);
-  }, [mergedProviders, generalProvider]);
+  const configuredProviders = useMemo(() => {
+    return configuredProviderGroups.flatMap((g) => g.providers);
+  }, [configuredProviderGroups]);
 
   const getModelsForProvider = useCallback(
     (providerId, extraModel = "") => {
@@ -1109,7 +1120,7 @@ export function SettingsDialog({
                           Default provider
                         </label>
                         <span className="settings-row-desc">
-                          Connected provider used for new conversations.
+                          Connected provider (grouped by OAuth, Custom, or Built-in) used for new conversations.
                         </span>
                       </div>
                       <div className="settings-row-control">
@@ -1127,10 +1138,14 @@ export function SettingsDialog({
                             }
                           }}
                         >
-                          {configuredProviders.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {`${p.name} · ${getProviderSourceLabel(p)}`}
-                            </option>
+                          {configuredProviderGroups.map((group) => (
+                            <optgroup key={group.key} label={group.label}>
+                              {group.providers.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {`${p.name} · ${group.key}`}
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                       </div>
@@ -1142,7 +1157,7 @@ export function SettingsDialog({
                           Default model
                         </label>
                         <span className="settings-row-desc">
-                          Default model and source (Built-in / Custom / OAuth) for the selected provider.
+                          Default model for the selected provider.
                         </span>
                       </div>
                       <div className="settings-row-control">
@@ -1155,7 +1170,7 @@ export function SettingsDialog({
                         >
                           {providerModels.map((m) => (
                             <option key={m} value={m}>
-                              {`${m} · ${selectedProviderSourceLabel}`}
+                              {m}
                             </option>
                           ))}
                         </select>
