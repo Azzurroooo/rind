@@ -14,9 +14,9 @@
 .remote-status strong { font-size: 14px; font-weight: 500; }
 .remote-status .subtle { margin-left: auto; }
 .remote-copy-row { display: flex; gap: 6px; margin: 8px 0 20px; }
-.remote-copy-row input, .remote-copy-row select { flex: 1; min-width: 0; width: 100%; }
+.remote-copy-row input, .remote-copy-row .settings-select { flex: 1; min-width: 0; width: 100%; }
 .remote-dialog label { display: block; font-size: 13px; margin-top: 14px; }
-.remote-dialog label > input, .remote-dialog label > select { margin-top: 8px; }
+.remote-dialog label > input, .remote-dialog label > .settings-select { margin-top: 8px; }
 .remote-explanation { color: var(--muted); font-size: 13px; line-height: 1.7; margin: 20px 0 0; }
 .remote-message { min-height: 20px; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .remote-advanced { margin-top: 18px; font-size: 13px; }

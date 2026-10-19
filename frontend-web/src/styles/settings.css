@@ -228,6 +228,13 @@
   position: relative;
   width: 100%;
 }
+.settings-select.is-open {
+  z-index: 40;
+}
+.settings-select.sm {
+  width: auto;
+  min-width: 112px;
+}
 .settings-select-trigger {
   display: flex;
   align-items: center;
@@ -248,6 +255,11 @@
     border-color 140ms ease,
     background-color 140ms ease,
     box-shadow 140ms ease;
+}
+.settings-select.sm .settings-select-trigger {
+  height: 28px;
+  padding: 0 8px;
+  font-size: var(--text-meta, 12px);
 }
 .settings-select-trigger:hover:not(:disabled) {
   background: var(--fill-1, var(--bg-hover));

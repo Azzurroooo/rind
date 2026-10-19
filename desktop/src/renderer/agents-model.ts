@@ -3,6 +3,7 @@
 // native Team Agents Management workbench.
 
 import { escapeAttribute, escapeHtml } from "./app/html.ts"
+import { renderCustomSelectHtml } from "./custom-select.ts"
 
 export type AgentsSnapshotData = {
   seq: number
@@ -1491,6 +1492,9 @@ export function renderSidebarAgentsHtml(options: {
   `
 }
 
+const HEADER_CHEVRON_DOWN_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="settings-select-chevron" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>`
+const HEADER_CHECK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="settings-select-check-icon" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"/></svg>`
+
 export function renderHeaderAgentBreadcrumbHtml(
   context: SessionAgentContext,
   options: {
@@ -1506,7 +1510,7 @@ export function renderHeaderAgentBreadcrumbHtml(
     <div class="header-sessions-dropdown-wrap">
       <button type="button" class="header-agent-action" data-header-toggle-sessions="1" aria-expanded="${menuOpen}">
         <span>Sessions (${sessions.length})</span>
-        <span>▾</span>
+        ${HEADER_CHEVRON_DOWN_SVG}
       </button>
       ${
         menuOpen
@@ -1519,7 +1523,7 @@ export function renderHeaderAgentBreadcrumbHtml(
                     : `data-agent-new-session="${escapeAttribute(context.agentId)}" data-agent-team="${escapeAttribute(context.teamId)}"`
                 }>New chat</button>
               </div>
-              <div class="header-sessions-menu-list">
+              <div class="header-sessions-menu-list panel-scroll">
                 ${
                   sessions.length === 0
                     ? `<div class="org-sessions-empty">No saved conversations yet.</div>`
@@ -1537,6 +1541,7 @@ export function renderHeaderAgentBreadcrumbHtml(
                                 <span class="agent-status-dot tone-${sess.tone}"></span>
                                 <span class="org-session-title">${escapeHtml(sess.title || "Conversation")}</span>
                                 <span class="org-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+                                <span class="settings-select-check" aria-hidden="true">${isCurrent ? HEADER_CHECK_SVG : ""}</span>
                               </button>
                             </div>
                           `
@@ -1553,11 +1558,10 @@ export function renderHeaderAgentBreadcrumbHtml(
   if (context.kind === "manager") {
     return `
       <div class="header-agent-breadcrumb">
-        <button type="button" class="header-agent-pill manager" data-sidebar-surface="manager">
+        <button type="button" class="header-agent-pill manager" data-sidebar-surface="manager" title="Manager">
           <span class="agent-status-dot tone-working"></span>
           <span>Manager</span>
         </button>
-        <span class="header-agent-role">${escapeHtml(context.roleLabel || "Organization coordinator")}</span>
         ${sessionsSwitcherHtml}
       </div>
     `
@@ -1567,8 +1571,7 @@ export function renderHeaderAgentBreadcrumbHtml(
     <div class="header-agent-breadcrumb">
       <button type="button" class="header-team-link" data-sidebar-open-team="${escapeAttribute(context.teamId)}" data-sidebar-team-tab="organization" title="Open team ${escapeAttribute(context.teamName)}">${escapeHtml(context.teamName)}</button>
       <span class="header-breadcrumb-sep" aria-hidden="true">/</span>
-      <span class="header-agent-pill member"><span class="agent-status-dot tone-${tone}"></span><span>${escapeHtml(context.agentName)}</span></span>
-      <span class="header-agent-role">${escapeHtml(context.roleLabel)}${context.isLeader ? " · Leader" : ""}</span>
+      <span class="header-agent-pill member" title="${escapeAttribute(context.agentName)}"><span class="agent-status-dot tone-${tone}"></span><span>${escapeHtml(context.agentName)}</span></span>
       ${sessionsSwitcherHtml}
     </div>
   `
@@ -1607,11 +1610,18 @@ export function renderTaskDrawerHtml(options: {
             <span class="agent-drawer-subtitle">${escapeHtml(task.teamName)} › <strong>${escapeHtml(task.assigneeName)}</strong></span>
             ${
               task.status === "queued"
-                ? `<select class="agent-select sm" data-task-priority="${escapeAttribute(task.id)}" aria-label="Task priority" ${busy ? "disabled" : ""}>
-                    <option value="high" ${task.priority === "high" ? "selected" : ""}>High</option>
-                    <option value="normal" ${task.priority === "normal" ? "selected" : ""}>Normal</option>
-                    <option value="low" ${task.priority === "low" ? "selected" : ""}>Low</option>
-                  </select>`
+                ? renderCustomSelectHtml({
+                    ariaLabel: "Task priority",
+                    value: task.priority,
+                    disabled: busy,
+                    sm: true,
+                    dataAttrs: { "task-priority": task.id },
+                    options: [
+                      { value: "high", label: "High" },
+                      { value: "normal", label: "Normal" },
+                      { value: "low", label: "Low" },
+                    ],
+                  })
                 : task.priority !== "normal"
                   ? `<span class="agent-priority-pill priority-${task.priority}">${escapeHtml(task.priority)}</span>`
                   : ""
@@ -1793,7 +1803,15 @@ export function renderTeamSurfaceHtml(options: {
                 : ""
           }
           <label class="agent-field"><span>Role / Position</span><input name="position" type="text" class="agent-input" placeholder="e.g. UI Specialist" /></label>
-          <label class="agent-field"><span>Reports To</span><select name="reportsToAgentId" class="agent-select"><option value="">${leader ? `${escapeHtml(leader.name)} (Leader)` : "Team Leader"}</option>${members.map((m) => `<option value="${escapeAttribute(m.agentId)}">${escapeHtml(m.name)} (${escapeHtml(m.position)})</option>`).join("")}</select></label>
+          <div class="agent-field"><span>Reports To</span>${renderCustomSelectHtml({
+            name: "reportsToAgentId",
+            ariaLabel: "Reports To",
+            value: "",
+            options: [
+              { value: "", label: leader ? `${leader.name} (Leader)` : "Team Leader" },
+              ...members.map((m) => ({ value: m.agentId, label: `${m.name} (${m.position})` })),
+            ],
+          })}</div>
           <label class="agent-field span-2"><span>Responsibility</span><input name="responsibility" type="text" class="agent-input" placeholder="Primary area of ownership" /></label>
         </div>
         <div class="agent-form-actions">
@@ -1807,8 +1825,25 @@ export function renderTeamSurfaceHtml(options: {
     ? `<form id="agent-assign-task-form" class="agent-inline-panel" data-team-id="${escapeAttribute(team.id)}">
         <div class="agent-panel-head"><h3>Assign Task</h3></div>
         <div class="agent-form-grid">
-          <label class="agent-field"><span>Assignee</span><select name="assigneeAgentId" class="agent-select"><option value="">${leader ? `${escapeHtml(leader.name)} (Leader)` : "Select member..."}</option>${members.map((m) => `<option value="${escapeAttribute(m.agentId)}" ${surface.assignAgentId === m.agentId ? "selected" : ""}>${escapeHtml(m.name)} · ${escapeHtml(m.position)}</option>`).join("")}</select></label>
-          <label class="agent-field"><span>Priority</span><select name="priority" class="agent-select"><option value="high">High</option><option value="normal" selected>Normal</option><option value="low">Low</option></select></label>
+          <div class="agent-field"><span>Assignee</span>${renderCustomSelectHtml({
+            name: "assigneeAgentId",
+            ariaLabel: "Assignee",
+            value: surface.assignAgentId || "",
+            options: [
+              { value: "", label: leader ? `${leader.name} (Leader)` : "Select member..." },
+              ...members.map((m) => ({ value: m.agentId, label: `${m.name} · ${m.position}` })),
+            ],
+          })}</div>
+          <div class="agent-field"><span>Priority</span>${renderCustomSelectHtml({
+            name: "priority",
+            ariaLabel: "Priority",
+            value: "normal",
+            options: [
+              { value: "high", label: "High" },
+              { value: "normal", label: "Normal" },
+              { value: "low", label: "Low" },
+            ],
+          })}</div>
           <label class="agent-field span-2"><span>Task Brief</span><textarea name="brief" class="agent-textarea" rows="3" placeholder="Describe the objective and expected deliverables..." required></textarea></label>
         </div>
         <div class="agent-form-actions">

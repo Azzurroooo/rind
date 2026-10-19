@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Check } from "lucide-react";
 
 // Dropdown menu with roving focus (ArrowUp/Down, Home/End), Esc and outside-click close.
 // Items: { id, label, icon?, danger?, disabled?, onSelect } or { separator: true }.
@@ -109,6 +110,11 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
                 {item.icon && <span className="menu-icon" aria-hidden="true">{item.icon}</span>}
                 <span className="menu-label">{item.label}</span>
                 {item.hint && <span className="menu-hint">{item.hint}</span>}
+                {selection && (
+                  <span className="model-option-check" aria-hidden="true">
+                    {item.selected && <Check size={13} />}
+                  </span>
+                )}
               </button>
             ),
           )}

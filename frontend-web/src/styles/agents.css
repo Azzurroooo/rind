@@ -601,14 +601,18 @@
 }
 .header-agent-breadcrumb {
   display: inline-flex;
+  flex: 0 1 auto;
   align-items: center;
   gap: 4px;
   min-width: 0;
+  max-width: 65%;
 }
 .header-agent-pill {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 5px;
+  min-width: 0;
   height: 24px;
   padding: 0 9px;
   border: 1px solid var(--line);
@@ -616,6 +620,21 @@
   background: var(--surface);
   color: var(--text);
   font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.header-agent-pill.member {
+  flex: 0 1 auto;
+  max-width: 240px;
+  overflow: hidden;
+}
+.header-agent-pill.member svg {
+  flex: none;
+}
+.header-agent-pill.member span:not(.header-agent-sep),
+.header-agent-pill.member strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 button.header-agent-pill:hover {
@@ -632,11 +651,8 @@ button.header-agent-pill:hover {
   font-weight: 500;
 }
 .header-agent-sep {
+  flex: none;
   color: var(--dim);
-}
-.header-agent-role {
-  color: var(--muted);
-  font-size: 11px;
 }
 
 /* --- Center-Stage Multi-Agent Surface --- */
@@ -1157,10 +1173,8 @@ button.header-agent-pill:hover {
   color: var(--muted);
 }
 .org-form-grid input,
-.org-form-grid select,
 .agents-inline-panel textarea,
-.org-member-edit-form input,
-.org-member-edit-form select {
+.org-member-edit-form input {
   width: 100%;
   padding: 6px 10px;
   border: 1px solid var(--line-strong);
@@ -1226,15 +1240,6 @@ button.header-agent-pill:hover {
   gap: 6px;
   font-size: var(--text-meta);
   color: var(--muted);
-}
-.tasks-filter-select select {
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  color: var(--text);
-  font-size: var(--text-meta);
 }
 
 .task-sections-stack {
@@ -1471,15 +1476,6 @@ button.header-agent-pill:hover {
   gap: 6px;
   font-size: var(--text-meta);
   color: var(--muted);
-}
-.task-priority-label select {
-  height: 26px;
-  padding: 0 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--bg);
-  color: var(--text);
-  font-size: var(--text-meta);
 }
 .task-drawer-action-row {
   display: flex;

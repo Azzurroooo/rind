@@ -14,6 +14,7 @@ import {
   Square,
   X,
 } from "lucide-react";
+import { SettingsSelect } from "../settings/SettingsDialog.jsx";
 
 const TASK_DRAWER_MIN_WIDTH = 340;
 const TASK_DRAWER_DEFAULT_WIDTH = 480;
@@ -204,19 +205,21 @@ export function TaskReportDrawer({
           <h3 className="task-drawer-brief">{task.brief}</h3>
           <div className="task-drawer-controls">
             {task.status === "queued" ? (
-              <label className="task-priority-label">
+              <div className="task-priority-label">
                 <span>Priority</span>
-                <select
+                <SettingsSelect
+                  className="sm"
+                  ariaLabel="Task priority"
                   value={task.priority || "normal"}
                   disabled={busy}
-                  aria-label="Task priority"
-                  onChange={(e) => void onSetPriority?.(task.id, e.target.value)}
-                >
-                  <option value="high">High</option>
-                  <option value="normal">Normal</option>
-                  <option value="low">Low</option>
-                </select>
-              </label>
+                  onChange={(val) => void onSetPriority?.(task.id, val)}
+                  options={[
+                    { value: "high", label: "High" },
+                    { value: "normal", label: "Normal" },
+                    { value: "low", label: "Low" },
+                  ]}
+                />
+              </div>
             ) : task.priority && task.priority !== "normal" ? (
               <span className={`task-priority-chip ${task.priority}`}>
                 {task.priority}

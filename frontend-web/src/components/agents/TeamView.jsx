@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { TASK_SECTION_DEFS } from "../../lib/agentsModel.js";
 import { Menu } from "../overlays/Menu.jsx";
+import { SettingsSelect } from "../settings/SettingsDialog.jsx";
 import { TaskReportDrawer } from "./TaskReportDrawer.jsx";
 
 function OrgMemberNode({
@@ -442,16 +443,18 @@ function OrgMemberNode({
               </label>
               <label>
                 <span>Reasoning Effort</span>
-                <select
+                <SettingsSelect
+                  ariaLabel="Reasoning Effort"
                   value={effortInput}
                   disabled={modelLoading}
-                  onChange={(e) => setEffortInput(e.target.value)}
-                >
-                  <option value="">Default</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
+                  onChange={(val) => setEffortInput(val)}
+                  options={[
+                    { value: "", label: "Default" },
+                    { value: "low", label: "Low" },
+                    { value: "medium", label: "Medium" },
+                    { value: "high", label: "High" },
+                  ]}
+                />
               </label>
             </div>
             <div className="org-form-actions">
@@ -479,16 +482,20 @@ function OrgMemberNode({
               </label>
               <label>
                 <span>Reports To</span>
-                <select value={reportsTo} onChange={(e) => setReportsTo(e.target.value)}>
-                  <option value="">None (Top level)</option>
-                  {allMembers
-                    .filter((m) => m.agentId !== node.agentId)
-                    .map((m) => (
-                      <option key={m.agentId} value={m.agentId}>
-                        {m.name} ({m.position})
-                      </option>
-                    ))}
-                </select>
+                <SettingsSelect
+                  ariaLabel="Reports To"
+                  value={reportsTo}
+                  onChange={(val) => setReportsTo(val)}
+                  options={[
+                    { value: "", label: "None (Top level)" },
+                    ...allMembers
+                      .filter((m) => m.agentId !== node.agentId)
+                      .map((m) => ({
+                        value: m.agentId,
+                        label: `${m.name} (${m.position})`,
+                      })),
+                  ]}
+                />
               </label>
             </div>
             <label>
@@ -918,14 +925,18 @@ export function TeamView({
             )}
             <label>
               <span>Reports To</span>
-              <select value={memberSupervisor} onChange={(e) => setMemberSupervisor(e.target.value)}>
-                <option value="">None (Top level)</option>
-                {members.map((m) => (
-                  <option key={m.agentId} value={m.agentId}>
-                    {m.name} ({m.position})
-                  </option>
-                ))}
-              </select>
+              <SettingsSelect
+                ariaLabel="Reports To"
+                value={memberSupervisor}
+                onChange={(val) => setMemberSupervisor(val)}
+                options={[
+                  { value: "", label: "None (Top level)" },
+                  ...members.map((m) => ({
+                    value: m.agentId,
+                    label: `${m.name} (${m.position})`,
+                  })),
+                ]}
+              />
             </label>
             <label>
               <span>Responsibility</span>
@@ -956,17 +967,15 @@ export function TeamView({
           <div className="org-form-grid">
             <label>
               <span>Assignee</span>
-              <select
+              <SettingsSelect
+                ariaLabel="Task assignee"
                 value={assignAgentId}
-                onChange={(e) => setAssignAgentId(e.target.value)}
-                aria-label="Task assignee"
-              >
-                {members.map((m) => (
-                  <option key={m.agentId} value={m.agentId}>
-                    {m.name} — {m.position}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setAssignAgentId(val)}
+                options={members.map((m) => ({
+                  value: m.agentId,
+                  label: `${m.name} — ${m.position}`,
+                }))}
+              />
             </label>
             <label className="org-checkbox-row">
               <input
@@ -1045,21 +1054,22 @@ export function TeamView({
               {(teamTasks?.all?.length || 0) > 0 && (
                 <div className="tasks-toolbar">
                   {members.length > 1 && (
-                    <label className="tasks-filter-select">
+                    <div className="tasks-filter-select">
                       <span>Member:</span>
-                      <select
+                      <SettingsSelect
+                        className="sm"
+                        ariaLabel="Filter tasks by member"
                         value={assigneeFilter}
-                        onChange={(e) => setAssigneeFilter(e.target.value)}
-                        aria-label="Filter tasks by member"
-                      >
-                        <option value="">All ({teamTasks?.all?.length || 0})</option>
-                        {members.map((m) => (
-                          <option key={m.agentId} value={m.agentId}>
-                            {m.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                        onChange={(val) => setAssigneeFilter(val)}
+                        options={[
+                          { value: "", label: `All (${teamTasks?.all?.length || 0})` },
+                          ...members.map((m) => ({
+                            value: m.agentId,
+                            label: m.name,
+                          })),
+                        ]}
+                      />
+                    </div>
                   )}
                   <div className="agents-segmented" role="group" aria-label="Filter tasks by stage">
                     <button

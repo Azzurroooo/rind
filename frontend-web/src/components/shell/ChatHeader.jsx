@@ -69,7 +69,8 @@ export function ChatHeader({
     ...(scopedSessions.length > 0 ? [{ separator: true }] : []),
     ...scopedSessions.slice(0, 12).map((sess) => ({
       id: `sess:${sess.runtimeSessionId}`,
-      label: sess.runtimeSessionId === activeSessionId ? `● ${sess.title}` : sess.title,
+      label: sess.title,
+      active: sess.runtimeSessionId === activeSessionId,
       hint: [sess.status !== "Idle" ? sess.status : "", sess.ageText].filter(Boolean).join(" · "),
       icon: <MessageSquare size={13} />,
       onSelect: () =>
@@ -183,7 +184,6 @@ export function ChatHeader({
             <span>{agentContext.teamName}</span>
             <span className="header-agent-sep">/</span>
             <strong>{agentContext.agentName}</strong>
-            <span className="header-agent-role">{agentContext.roleLabel}</span>
           </button>
           {onOpenAgentConversation && (
             <Menu

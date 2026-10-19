@@ -1,4 +1,5 @@
 import type { DesktopAuthPrompt, DesktopAuthProvider, DesktopCustomProvider } from "../../preload/types.ts"
+import { renderCustomSelectHtml } from "../custom-select.ts"
 import { authPromptDialog, authPromptField, authPromptForm, authPromptMessage, requiredElement, settingsProviders } from "./dom.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
 import { loadAvailableModels } from "./settings.ts"
@@ -457,12 +458,17 @@ function renderCustomProviderForm() {
         </label>
         <label>
           <span>Protocol</span>
-          <select id="custom-provider-api">
-            <option value="openai-chat"${d.api === "openai-chat" ? " selected" : ""}>OpenAI Chat Completions</option>
-            <option value="openai-responses"${d.api === "openai-responses" ? " selected" : ""}>OpenAI Responses</option>
-            <option value="anthropic-messages"${d.api === "anthropic-messages" ? " selected" : ""}>Anthropic Messages</option>
-            <option value="google-generative-ai"${d.api === "google-generative-ai" ? " selected" : ""}>Google Generative AI</option>
-          </select>
+          ${renderCustomSelectHtml({
+            id: "custom-provider-api",
+            ariaLabel: "Protocol",
+            value: d.api || "openai-chat",
+            options: [
+              { value: "openai-chat", label: "OpenAI Chat Completions" },
+              { value: "openai-responses", label: "OpenAI Responses" },
+              { value: "anthropic-messages", label: "Anthropic Messages" },
+              { value: "google-generative-ai", label: "Google Generative AI" },
+            ],
+          })}
         </label>
         <label class="provider-custom-span-2">
           <span>Base URL</span>
@@ -871,10 +877,12 @@ async function logout(providerId: string) {
 
 function promptControl(prompt: DesktopAuthPrompt) {
   if (prompt.kind === "select" && prompt.options.length) {
-    const options = prompt.options
-      .map((option) => `<option value="${escapeAttribute(option)}">${escapeHtml(option)}</option>`)
-      .join("")
-    return `<select id="auth-prompt-input">${options}</select>`
+    return renderCustomSelectHtml({
+      id: "auth-prompt-input",
+      ariaLabel: prompt.message || "Choose an option",
+      value: prompt.options[0],
+      options: prompt.options.map((option) => ({ value: option, label: option })),
+    })
   }
   const type = prompt.kind === "secret" ? "password" : "text"
   return `<input id="auth-prompt-input" type="${type}" autocomplete="off" spellcheck="false" required />`
@@ -908,7 +916,10 @@ function showPrompt(prompt: DesktopAuthPrompt) {
   authPromptField.innerHTML = promptControl(prompt)
   renderOauthBox()
   if (!authPromptDialog.open) authPromptDialog.showModal()
-  requiredElement<HTMLInputElement | HTMLSelectElement>("auth-prompt-input").focus()
+  const focusTarget =
+    authPromptField.querySelector<HTMLElement>("[data-custom-select-trigger]") ||
+    requiredElement<HTMLInputElement>("auth-prompt-input")
+  focusTarget.focus()
 }
 
 async function answerPrompt(value: string) {

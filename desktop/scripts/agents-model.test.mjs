@@ -378,7 +378,8 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
     },
   )
   assert.match(breadcrumbHtml, /Core Platform/)
-  assert.match(breadcrumbHtml, /Engineering Lead · Leader/)
+  assert.match(breadcrumbHtml, />lead</)
+  assert.doesNotMatch(breadcrumbHtml, /Engineering Lead/)
   assert.match(breadcrumbHtml, /Sessions \(1\)/)
   assert.match(breadcrumbHtml, /Architecture kickoff/)
 

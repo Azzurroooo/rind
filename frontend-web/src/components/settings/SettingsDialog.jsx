@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bell, Check, ChevronDown, KeyRound, LogOut, SlidersHorizontal } from "lucide-react";
 import { Dialog } from "../overlays/Dialog.jsx";
 import { methods } from "../../methods.js";
@@ -308,18 +308,44 @@ function formatProviderSectionStatus(provider, section) {
   return "Not connected";
 }
 
-function SettingsSelect({
+export function SettingsSelect({
   id,
   ariaLabel,
   value,
   disabled = false,
   mono = false,
+  className = "",
   groups,
   options,
-  isOpen = false,
+  isOpen,
   onToggle,
   onChange,
 }) {
+  const rootRef = useRef(null);
+  const isControlled = typeof isOpen === "boolean" && typeof onToggle === "function";
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = isControlled ? isOpen : internalOpen;
+
+  useEffect(() => {
+    if (isControlled || !internalOpen) return undefined;
+    const handlePointerDown = (e) => {
+      if (!rootRef.current?.contains(e.target)) {
+        setInternalOpen(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setInternalOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isControlled, internalOpen]);
+
   const flatOptions = useMemo(() => {
     if (Array.isArray(groups)) {
       return groups.flatMap((g) => g.options || []);
@@ -333,18 +359,31 @@ function SettingsSelect({
       label: value || "Default",
     };
 
+  const handleTriggerClick = (e) => {
+    e.preventDefault();
+    if (isControlled) onToggle();
+    else setInternalOpen((prev) => !prev);
+  };
+
+  const handleOptionSelect = (e, nextVal) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isControlled) setInternalOpen(false);
+    onChange(nextVal);
+  };
+
   return (
-    <div className={`settings-select${isOpen ? " is-open" : ""}`}>
+    <div ref={rootRef} className={`settings-select${className ? ` ${className}` : ""}${open ? " is-open" : ""}`}>
       <button
         id={id}
         type="button"
         className="settings-select-trigger"
         aria-label={ariaLabel}
         aria-haspopup="listbox"
-        aria-expanded={isOpen}
+        aria-expanded={open}
         data-value={value}
         disabled={disabled}
-        onClick={onToggle}
+        onClick={handleTriggerClick}
       >
         <span className="settings-select-trigger-content">
           <span className={`settings-select-trigger-label${mono ? " is-mono" : ""}`}>
@@ -357,11 +396,11 @@ function SettingsSelect({
         <ChevronDown size={14} className="settings-select-chevron" aria-hidden="true" />
       </button>
 
-      {isOpen && !disabled && (
+      {open && !disabled && (
         <div
           className="settings-select-menu panel-scroll"
           role="listbox"
-          aria-label={`${ariaLabel} options`}
+          aria-label={ariaLabel ? `${ariaLabel} options` : "Options"}
         >
           {Array.isArray(groups)
             ? groups.map((group) => (
@@ -382,7 +421,7 @@ function SettingsSelect({
                         aria-selected={selected}
                         data-value={opt.value}
                         className={`settings-select-option${selected ? " is-selected" : ""}`}
-                        onClick={() => onChange(opt.value)}
+                        onClick={(e) => handleOptionSelect(e, opt.value)}
                       >
                         <span className="settings-select-option-content">
                           <span
@@ -412,7 +451,7 @@ function SettingsSelect({
                     aria-selected={selected}
                     data-value={opt.value}
                     className={`settings-select-option${selected ? " is-selected" : ""}`}
-                    onClick={() => onChange(opt.value)}
+                    onClick={(e) => handleOptionSelect(e, opt.value)}
                   >
                     <span className="settings-select-option-content">
                       <span
@@ -1443,17 +1482,19 @@ export function SettingsDialog({
                         </label>
                         <label>
                           <span>Protocol</span>
-                          <select
+                          <SettingsSelect
+                            ariaLabel="Protocol"
                             value={customDraft.api}
-                            onChange={(e) =>
-                              setCustomDraft((d) => ({ ...d, api: e.target.value }))
+                            onChange={(val) =>
+                              setCustomDraft((d) => ({ ...d, api: val }))
                             }
-                          >
-                            <option value="openai-chat">OpenAI Chat Completions</option>
-                            <option value="openai-responses">OpenAI Responses</option>
-                            <option value="anthropic-messages">Anthropic Messages</option>
-                            <option value="google-generative-ai">Google Generative AI</option>
-                          </select>
+                            options={[
+                              { value: "openai-chat", label: "OpenAI Chat Completions" },
+                              { value: "openai-responses", label: "OpenAI Responses" },
+                              { value: "anthropic-messages", label: "Anthropic Messages" },
+                              { value: "google-generative-ai", label: "Google Generative AI" },
+                            ]}
+                          />
                         </label>
                         <label className="provider-custom-span-2">
                           <span>Base URL</span>

@@ -1,19 +1,33 @@
 import type { GatewayState } from "../preload/types"
 import QRCode from "qrcode"
+import { bindCustomSelects, renderCustomSelectHtml, setCustomSelectOptions } from "./custom-select.ts"
 
 export function remoteAccessMarkup() {
   return `<dialog id="remote-dialog" class="settings-dialog remote-dialog" aria-labelledby="remote-title">
     <div class="settings-heading"><div><h2 id="remote-title">Remote access</h2><p class="subtle">Continue from your phone or another browser.</p></div><button type="button" class="ghost-button" id="remote-close" aria-label="Close remote access">Close</button></div>
     <div class="remote-status"><span id="remote-indicator" class="status-pip"></span><strong id="remote-status">Off</strong><span id="remote-clients" class="subtle"></span></div>
     <div id="remote-setup">
-      <label>Connect from<select id="remote-scope"><option value="lan">Local network — phone or another computer</option><option value="loopback">This computer — private HTTPS proxy / VPN</option></select></label>
+      <label>Connect from${renderCustomSelectHtml({
+        id: "remote-scope",
+        ariaLabel: "Connect from",
+        value: "lan",
+        options: [
+          { value: "lan", label: "Local network — phone or another computer" },
+          { value: "loopback", label: "This computer — private HTTPS proxy / VPN" },
+        ],
+      })}</label>
       <details class="remote-advanced"><summary>Advanced connection</summary><label>Port<input id="remote-port" type="number" min="1024" max="65535" value="8766" /></label><label>Existing HTTPS address (optional)<input id="remote-origin" type="url" placeholder="https://your-computer.example" /></label><p class="subtle">Use an HTTPS proxy you have already configured to forward to this computer’s port. Rind does not create a public tunnel.</p></details>
       <p class="remote-explanation">Anyone with the access code can use your Rind sessions, files and agent tools. Use a trusted network; use HTTPS or a private VPN outside it. Keep Rind running on this computer.</p>
     </div>
     <div id="remote-sharing" hidden>
       <div class="remote-qr-row"><img id="remote-qr" width="160" height="160" alt="QR code for signing in to Rind" /><div><strong id="remote-connect-title">Scan to connect</strong><p id="remote-connect-hint" class="subtle">Use your phone’s camera on the same Wi-Fi network.</p><button type="button" id="remote-copy-link" class="ghost-button">Copy sign-in link</button></div></div>
       <details class="remote-advanced"><summary>Connect manually or choose another address</summary>
-      <label for="remote-address">1. Open this address on your other device</label><div class="remote-copy-row"><select id="remote-address"></select><button type="button" id="remote-copy-address" class="ghost-button">Copy</button></div>
+      <label for="remote-address">1. Open this address on your other device</label><div class="remote-copy-row">${renderCustomSelectHtml({
+        id: "remote-address",
+        ariaLabel: "1. Open this address on your other device",
+        value: "",
+        options: [],
+      })}<button type="button" id="remote-copy-address" class="ghost-button">Copy</button></div>
       <label for="remote-code">2. Enter the access code</label><div class="remote-copy-row"><input id="remote-code" type="password" readonly autocomplete="off" /><button type="button" id="remote-reveal" class="ghost-button" aria-label="Show access code">Show</button><button type="button" id="remote-copy-code" class="ghost-button">Copy</button></div>
       </details>
       <details class="remote-advanced"><summary>Can’t open the page?</summary>
@@ -29,12 +43,13 @@ export function remoteAccessMarkup() {
 }
 
 export function bindRemoteAccess() {
+  bindCustomSelects()
   const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
   const dialog = element<HTMLDialogElement>("remote-dialog")
   const toggle = element<HTMLButtonElement>("remote-toggle")
   const message = element<HTMLElement>("remote-message")
   const code = element<HTMLInputElement>("remote-code")
-  const addresses = element<HTMLSelectElement>("remote-address")
+  const addresses = element<HTMLInputElement>("remote-address")
   let state: GatewayState | undefined
   let busy = false
   let qrValue = ""
@@ -68,11 +83,14 @@ export function bindRemoteAccess() {
     element("remote-setup").hidden = next.running
     toggle.textContent = next.running ? "Turn off remote access" : "Enable remote access"
     toggle.classList.toggle("danger", next.running)
-    const selected = addresses.value
-    if (JSON.stringify([...addresses.options].map((item) => item.value)) !== JSON.stringify(next.addresses)) {
-      addresses.replaceChildren(...next.addresses.map((address, index) => new Option(`${address}${index === 0 ? " (recommended)" : ""}`, address)))
-      if (next.addresses.includes(selected)) addresses.value = selected
-    }
+    setCustomSelectOptions(
+      "remote-address",
+      next.addresses.map((address, index) => ({
+        value: address,
+        label: `${address}${index === 0 ? " (recommended)" : ""}`,
+      })),
+      addresses.value,
+    )
     code.value = next.accessCode
     void updateQr()
     const trigger = document.getElementById("open-remote")
@@ -95,7 +113,7 @@ export function bindRemoteAccess() {
     if (state?.running) return window.api.gateway.stop()
     const port = Number(element<HTMLInputElement>("remote-port").value)
     if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Choose a port between 1024 and 65535.")
-    return window.api.gateway.start({ scope: element<HTMLSelectElement>("remote-scope").value as "lan" | "loopback", port, externalOrigin: element<HTMLInputElement>("remote-origin").value.trim() || undefined })
+    return window.api.gateway.start({ scope: element<HTMLInputElement>("remote-scope").value as "lan" | "loopback", port, externalOrigin: element<HTMLInputElement>("remote-origin").value.trim() || undefined })
   }))
   element("remote-rotate").addEventListener("click", () => void action(() => window.api.gateway.rotate(), "New access code generated. Previous devices have been disconnected."))
   element("remote-allow-network").addEventListener("click", () => void action(() => window.api.gateway.allowNetwork(), "Rind is allowed on the local network. Scan the QR code again on your phone."))

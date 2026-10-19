@@ -22,6 +22,7 @@ import { bindGoalEvents } from "./inspector-goal.ts"
 import { bindTasksEvents, stopTaskPolling } from "./inspector-tasks.ts"
 import { bindPaletteEvents } from "./palette-ui.ts"
 import { bindOverlays } from "./overlays.ts"
+import { bindCustomSelects } from "../custom-select.ts"
 
 
 requiredElement("open-remote").addEventListener("click", remoteAccess.open)
@@ -39,6 +40,7 @@ bindGoalEvents()
 bindTasksEvents()
 bindPaletteEvents()
 bindOverlays()
+bindCustomSelects()
 const unsubscribeAgents = bindAgentsEvents()
 
 const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {

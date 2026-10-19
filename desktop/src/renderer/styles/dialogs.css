@@ -73,8 +73,7 @@
   color: var(--muted);
   font-size: var(--text-dense);
 }
-.settings-dialog input:not([type="checkbox"]),
-.settings-dialog select {
+.settings-dialog input:not([type="checkbox"]):not([type="hidden"]) {
   width: 100%;
   min-height: var(--control-md);
   padding: 6px 10px;
@@ -86,13 +85,11 @@
   font-size: var(--text-dense);
   transition: border-color var(--dur-fast) var(--ease);
 }
-.settings-dialog input:not([type="checkbox"]):focus,
-.settings-dialog select:focus {
+.settings-dialog input:not([type="checkbox"]):not([type="hidden"]):focus {
   outline: none;
   border-color: var(--accent);
 }
-.settings-dialog input:not([type="checkbox"]):disabled,
-.settings-dialog select:disabled {
+.settings-dialog input:not([type="checkbox"]):not([type="hidden"]):disabled {
   opacity: 0.65;
   cursor: not-allowed;
   background: var(--panel);
@@ -358,6 +355,13 @@
   position: relative;
   width: 100%;
 }
+.settings-select.is-open {
+  z-index: 40;
+}
+.settings-select.sm {
+  width: auto;
+  min-width: 104px;
+}
 .settings-select-trigger {
   display: flex;
   align-items: center;
@@ -378,6 +382,16 @@
     border-color var(--dur-fast) var(--ease),
     background-color var(--dur-fast) var(--ease),
     box-shadow var(--dur-fast) var(--ease);
+}
+.settings-select.sm .settings-select-trigger {
+  height: 28px;
+  padding: 0 8px;
+  font-size: var(--text-meta);
+}
+.settings-select.sm .settings-select-option {
+  min-height: 26px;
+  padding: 3px 8px;
+  font-size: var(--text-meta);
 }
 .settings-select-trigger:hover:not(:disabled) {
   background: var(--fill-1);

@@ -82,7 +82,7 @@ export function renderProjectControl() {
   }
   projectMenu.innerHTML = state.projects.map((project) => {
     const selected = samePath(project.path, state.chatProjectPath)
-    return `<button type="button" class="composer-select-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-project-choice="${escapeAttribute(project.path)}"${project.available ? "" : " disabled"}><span class="composer-select-option-main">${escapeHtml(project.name)}</span><span class="composer-select-option-detail">${escapeHtml(project.available ? project.path : "Folder is unavailable")}</span></button>`
+    return `<button type="button" class="composer-select-option composer-project-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-project-choice="${escapeAttribute(project.path)}"${project.available ? "" : " disabled"}><span class="composer-select-option-copy"><span class="composer-select-option-main">${escapeHtml(project.name)}</span><span class="composer-select-option-detail">${escapeHtml(project.available ? project.path : "Folder is unavailable")}</span></span><span class="model-option-check" aria-hidden="true">${selected ? renderIcon(Check) : ""}</span></button>`
   }).join("")
 }
 
@@ -116,7 +116,7 @@ export function renderModels() {
   const option = (model: ModelOption) => {
     const selected = model.id === activeModel && (model.providerId || "") === (state.modelProvider || "")
     const context = grouped ? formatContextWindow(model.contextWindow) : ""
-    return `<button type="button" class="composer-select-option composer-model-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" title="${escapeAttribute(model.id)}" data-model-choice="${escapeAttribute(model.id)}" data-model-provider="${escapeAttribute(model.providerId)}"${state.modelChanging ? " disabled" : ""}><span class="model-option-check">${selected ? renderIcon(Check) : ""}</span><span class="composer-select-option-main">${escapeHtml(model.id)}</span>${model.imageInput ? `<span role="img" aria-label="Supports images" class="model-option-vision">${renderIcon(Eye)}</span>` : ""}${context ? `<span class="composer-select-option-detail">${escapeHtml(context)}</span>` : ""}</button>`
+    return `<button type="button" class="composer-select-option composer-model-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" title="${escapeAttribute(model.id)}" data-model-choice="${escapeAttribute(model.id)}" data-model-provider="${escapeAttribute(model.providerId)}"${state.modelChanging ? " disabled" : ""}><span class="composer-select-option-main">${escapeHtml(model.id)}</span>${model.imageInput ? `<span role="img" aria-label="Supports images" class="model-option-vision">${renderIcon(Eye)}</span>` : ""}${context ? `<span class="composer-select-option-detail">${escapeHtml(context)}</span>` : ""}<span class="model-option-check" aria-hidden="true">${selected ? renderIcon(Check) : ""}</span></button>`
   }
   const filtered = choices.filter((model) => `${model.id} ${model.providerId} ${state.providerNames[model.providerId] || ""}`.toLowerCase().includes(modelQuery.trim().toLowerCase()))
   // Keep the search input mounted while results change or stream events render.
@@ -283,7 +283,7 @@ export function renderEffortMenu() {
   }
   updateMenu(effortMenu, reasoningEfforts.map((effort) => {
     const selected = effort === activeEffort
-    return `<button type="button" class="composer-select-option composer-effort-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-effort-choice="${escapeAttribute(effort)}"${state.effortChanging ? " disabled" : ""}><span class="model-option-check">${selected ? renderIcon(Check) : ""}</span><span class="composer-select-option-main">${effortLabels[effort]}</span></button>`
+    return `<button type="button" class="composer-select-option composer-effort-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-effort-choice="${escapeAttribute(effort)}"${state.effortChanging ? " disabled" : ""}><span class="composer-select-option-main">${effortLabels[effort]}</span><span class="model-option-check" aria-hidden="true">${selected ? renderIcon(Check) : ""}</span></button>`
   }).join(""))
 }
 

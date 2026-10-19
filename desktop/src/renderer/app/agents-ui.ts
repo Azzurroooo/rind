@@ -265,7 +265,7 @@ export function renderAgentsUI() {
 
   // Center-stage multi-agent surface — only update DOM when rendered HTML changes, and preserve scroll positions
   if (isAgentSurface) {
-    const activeSurfaceInput = agentsSurface.querySelector<HTMLElement>("input:focus, textarea:focus, select:focus")
+    const activeSurfaceInput = agentsSurface.querySelector<HTMLElement>("input:focus, textarea:focus, select:focus, .settings-select.is-open")
     const isResizingDrawer = Boolean(agentsSurface.querySelector(".agent-task-drawer.is-resizing"))
     if (!activeSurfaceInput && !isResizingDrawer) {
       let nextSurfaceHtml = ""
@@ -1159,7 +1159,7 @@ export function bindAgentsEvents(): () => void {
 
   const handleContainerChange = (event: Event) => {
     const target = event.target as HTMLElement
-    if (target instanceof HTMLSelectElement && target.dataset.taskPriority) {
+    if ((target instanceof HTMLSelectElement || target instanceof HTMLInputElement) && target.dataset.taskPriority) {
       const taskId = target.dataset.taskPriority
       const priority = target.value
       runAction(() => runManagementOp({ op: "setTaskPriority", taskId, priority }, "Priority updated."))

@@ -21,8 +21,8 @@
   padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--line);
 }
-.conversation-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.session-title { min-width: 0; max-width: 360px; margin: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-title { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; }
+.session-title { flex: 0 1 auto; min-width: 0; max-width: 360px; margin: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .session-status {
   min-width: 88px;
   white-space: nowrap;
@@ -43,6 +43,7 @@
 .session-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
 .session-status.running { border-color: var(--accent-soft); color: var(--accent); background: var(--accent-soft); }
 .session-status.running .session-status-dot { background: var(--accent); animation: pip-pulse 1.1s ease-in-out infinite; }
+.session-actions { display: flex; flex: none; align-items: center; gap: 2px; }
 .session-actions .head-button { position: relative; width: 28px; height: 28px; }
 .head-button[aria-expanded="true"] { color: var(--text); background: var(--fill-2); }
 .head-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

@@ -16,6 +16,8 @@ type Bridge = {
   subscribe: (listener: (event: RuntimeEvent) => void) => () => void
   agentsRequest?: (method: string, params: Record<string, unknown>) => Promise<unknown>
   subscribeAgents?: (listener: (state: unknown) => void) => () => void
+  settingsLoad?: () => Promise<unknown>
+  settingsSave?: (value: unknown) => Promise<unknown>
 }
 type Client = { subscriptions: Set<string>; pending: Set<string | number>; selected: string; workspace: string; alive: boolean }
 const allowed = new Set(Object.values(runtimeMethods).filter(isRemoteRuntimeMethod))
@@ -34,7 +36,24 @@ const unscoped = new Set([
   "agents/openSession",
   "agents/createSession",
 ])
-const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2" }
+const mime: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".ttf": "font/ttf",
+  ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".webp": "image/webp",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".txt": "text/plain; charset=utf-8",
+}
+const privateLanIpv4 = /^(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3})$/
 const secret = () => randomBytes(24).toString("base64url")
 // Packaged Rind clients serve only bundled assets at these fixed origins.
 // Origin is not authentication: every upgrade still consumes a one-time ticket.
@@ -88,11 +107,12 @@ export class DesktopGateway {
       if (startEpoch !== this.epoch) throw new Error("Remote access startup cancelled.")
       this.options = { ...options, externalOrigin: external?.origin }
       this.accessCode = secret()
-      const hosts = new Set(["localhost", "127.0.0.1", "[::1]", hostname().toLowerCase()])
+      const machineHost = hostname().toLowerCase()
+      const hosts = new Set(["localhost", "127.0.0.1", "[::1]", machineHost, `${machineHost}.local`])
       const local = options.scope === "lan" ? localAddresses(undefined, await outboundAddress()).map((entry) => entry.address) : []
       if (startEpoch !== this.epoch) throw new Error("Remote access startup cancelled.")
-      for (const address of local) hosts.add(address)
-      if (external) hosts.add(external.hostname)
+      for (const address of local) hosts.add(address.toLowerCase())
+      if (external) hosts.add(external.hostname.toLowerCase())
       this.allowedHosts = hosts
       const server = createServer((request, response) => { void this.http(request, response).catch(() => { if (!response.headersSent) this.json(response, 500, { error: "Unable to serve this request." }); else response.end() }) })
       server.requestTimeout = 15000; server.headersTimeout = 10000; server.maxConnections = 64
@@ -165,12 +185,27 @@ export class DesktopGateway {
     this.port = 0; this.addresses = []; this.publish()
   }
 
+  private isAllowedHost(host: string) {
+    const normalized = host.toLowerCase()
+    if (this.allowedHosts.has(normalized)) return true
+    if (this.options.scope === "lan") {
+      if (privateLanIpv4.test(normalized)) {
+        this.allowedHosts.add(normalized)
+        return true
+      }
+      for (const entry of localAddresses()) {
+        this.allowedHosts.add(entry.address.toLowerCase())
+      }
+      if (this.allowedHosts.has(normalized)) return true
+    }
+    return false
+  }
   private requestUrl(request: IncomingMessage) {
     try {
       const path = request.url || "/"
       if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) return null
       const host = new URL(`http://${request.headers.host}`)
-      if (host.username || host.password || host.host !== request.headers.host?.toLowerCase() || !this.allowedHosts.has(host.hostname.toLowerCase())) return null
+      if (host.username || host.password || host.host !== request.headers.host?.toLowerCase() || !this.isAllowedHost(host.hostname)) return null
       return new URL(path, host)
     } catch { return null }
   }
@@ -179,15 +214,69 @@ export class DesktopGateway {
     try {
       const origin = new URL(request.headers.origin)
       if (origin.origin === this.options.externalOrigin) return true
-      return ["http:", "https:"].includes(origin.protocol) && origin.host === request.headers.host && this.allowedHosts.has(origin.hostname.toLowerCase())
+      return ["http:", "https:"].includes(origin.protocol) && origin.host === request.headers.host?.toLowerCase() && this.isAllowedHost(origin.hostname)
     } catch { return false }
   }
   private json(response: ServerResponse, status: number, value: unknown) {
     response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" }); response.end(JSON.stringify(value))
   }
+  private readJsonBody(request: IncomingMessage, maxBytes = 65536): Promise<Record<string, unknown>> {
+    return new Promise((resolveBody, rejectBody) => {
+      const chunks: Buffer[] = []
+      let total = 0
+      request.on("data", (chunk: Buffer) => {
+        total += chunk.length
+        if (total > maxBytes) {
+          rejectBody(new Error("Request payload too large."))
+          request.destroy()
+          return
+        }
+        chunks.push(chunk)
+      })
+      request.on("end", () => {
+        try {
+          const text = Buffer.concat(chunks).toString("utf8").trim()
+          resolveBody(text ? object(JSON.parse(text)) : {})
+        } catch (err) {
+          rejectBody(err)
+        }
+      })
+      request.on("error", rejectBody)
+    })
+  }
   private async http(request: IncomingMessage, response: ServerResponse) {
     const address = this.requestUrl(request)
     if (!address || !this.validOrigin(request)) { this.json(response, 403, { error: "Origin not allowed." }); return }
+    if (address.pathname === "/api/settings" && (request.method === "GET" || request.method === "POST")) {
+      if (this.clients.size === 0) {
+        const code = Buffer.from(request.headers.authorization?.replace(/^Bearer /i, "") || "")
+        const expected = Buffer.from(this.accessCode)
+        if (!expected.length || code.length !== expected.length || !timingSafeEqual(code, expected)) {
+          this.json(response, 401, { error: "Unauthorized." })
+          return
+        }
+      }
+      try {
+        if (request.method === "POST") {
+          if (!this.bridge.settingsSave) { this.json(response, 404, { error: "Settings API unavailable." }); return }
+          const body = await this.readJsonBody(request)
+          const saved = await this.bridge.settingsSave(body)
+          const authList = await this.bridge.request("rind/auth/list", {}).catch(() => ({ providers: [] }))
+          this.json(response, 200, { settings: saved, providers: object(authList).providers || [] })
+          return
+        }
+        if (!this.bridge.settingsLoad) { this.json(response, 404, { error: "Settings API unavailable." }); return }
+        const [settings, authList] = await Promise.all([
+          this.bridge.settingsLoad(),
+          this.bridge.request("rind/auth/list", {}).catch(() => ({ providers: [] })),
+        ])
+        this.json(response, 200, { settings, providers: object(authList).providers || [] })
+        return
+      } catch (err) {
+        this.json(response, 400, { error: err instanceof Error ? err.message : "Failed to process settings." })
+        return
+      }
+    }
     if (request.method !== "GET" && request.method !== "HEAD") { this.json(response, 405, { error: "Method not allowed." }); return }
     if (address.pathname === "/healthz") { this.json(response, 200, { ok: true }); return }
     if (address.pathname === "/ticket") {
@@ -215,7 +304,7 @@ export class DesktopGateway {
     response.writeHead(200, {
       "Content-Type": mime[extname(path)], "Cache-Control": extname(path) === ".html" ? "no-store" : "public, max-age=3600",
       "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
-      "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     })
     response.end(request.method === "HEAD" ? undefined : await readFile(path))
   }

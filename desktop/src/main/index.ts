@@ -14,7 +14,7 @@ import { loadRuntimeSettings as loadSharedRuntimeSettings, resolveRindPaths, sav
 import { readRindVersion } from "./version"
 import { wrapRuntimeIpcError } from "../shared/ipc-error"
 import { DesktopGateway } from "./gateway/server"
-import { allowGatewayOnWindows } from "./gateway/firewall"
+import { allowGatewayOnWindows, isGatewayAllowedOnWindows } from "./gateway/firewall"
 import { workspaceFileRequest } from "./gateway/files"
 import type { GatewayOptions } from "../preload/types"
 import { isDesktopRuntimeMethod, isRemoteRuntimeMethod } from "./method-policy"
@@ -57,7 +57,7 @@ if (process.platform === "win32") {
 const RIND_LOGO_DATA_URL =
   "data:image/svg+xml;utf8," +
   encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect x="16" y="16" width="224" height="224" rx="52" fill="#21563c"/><rect x="84" y="84" width="88" height="88" rx="18" fill="#f7f6f0"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#243d2e"/><path d="M22 4h2a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-2Z" fill="#d6df9a"/></svg>',
   )
 
 let cachedWindowIcon: NativeImage | null = null
@@ -157,7 +157,19 @@ let remoteGateway: DesktopGateway | undefined
 
 function gateway() {
   remoteGateway ||= new DesktopGateway({
-    initialize: initializeRuntime,
+    initialize: async () => {
+      const initialized = asObject(await initializeRuntime())
+      const currentWs = typeof initialized.workspace_root === "string" ? initialized.workspace_root.trim() : ""
+      const runtimeDir = join(rindHomeDir(), "runtime")
+      if (!currentWs || samePath(currentWs, runtimeDir)) {
+        const overview = await projectStore().overview().catch(() => null)
+        const fallbackProject = overview?.projects.find((item) => item.available)?.path
+        if (fallbackProject) {
+          return { ...initialized, workspace_root: fallbackProject }
+        }
+      }
+      return initialized
+    },
     request: async (method, params) => {
       if (!isRemoteRuntimeMethod(method)) throw new Error("Unsupported remote method.")
       const nextParams = method === "session/replay"
@@ -183,6 +195,8 @@ function gateway() {
     },
     agentsRequest: (method, params) => requestManagement(method, params),
     subscribeAgents: subscribeManagement,
+    settingsLoad: loadRuntimeSettings,
+    settingsSave: saveRuntimeSettings,
   }, app.isPackaged ? join(process.resourcesPath, "web") : join(app.getAppPath(), "../frontend-web/dist"),
   (state) => mainWindow?.webContents.send("gateway-changed", state))
   return remoteGateway
@@ -279,7 +293,18 @@ async function requireProject(path: unknown) {
 
 function registerIpc() {
   ipcMain.handle("gateway-get", () => gateway().state())
-  ipcMain.handle("gateway-start", (_event, options: GatewayOptions) => gateway().start(options))
+  ipcMain.handle("gateway-start", async (_event, options: GatewayOptions) => {
+    const state = await gateway().start(options)
+    if (process.platform === "win32" && state.running && state.scope === "lan" && state.port > 0) {
+      const allowed = await isGatewayAllowedOnWindows(process.execPath, state.port)
+      if (!allowed) {
+        await allowGatewayOnWindows(process.execPath, state.port).catch((err) => {
+          log.warn("Automatic Windows Firewall rule setup was skipped or declined:", err)
+        })
+      }
+    }
+    return gateway().state()
+  })
   ipcMain.handle("gateway-stop", async () => { await gateway().stop(); return gateway().state() })
   ipcMain.handle("gateway-rotate", () => gateway().rotate())
   ipcMain.handle("gateway-allow-network", async () => {
