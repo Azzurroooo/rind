@@ -86,34 +86,67 @@ describe("SettingsDialog", () => {
     expect(document.querySelector(".settings-dialog")).toBeNull();
   });
 
-  it("opens on General showing only configured providers, links model & reasoning effort, and keeps Close buttons outside scrolling content", async () => {
+  it("opens on General with Global Default Configuration locked by default, shows Built-in/OAuth/Custom tags on models, unlocks on Edit, and saves on Save changes", async () => {
     const handlers = renderSettings();
     expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
     await waitFor(() => {
       expect(screen.getByLabelText("Default provider").value).toBe("deepseek");
     });
 
-    // Only configured providers (DeepSeek, OpenAI, Xiaomi) appear in Default provider; unconfigured Anthropic is hidden
+    // Explicitly labeled as Global Default Configuration
+    expect(document.querySelector(".settings-dialog").textContent).toContain("Global Default Configuration");
+    expect(document.querySelector(".settings-dialog").textContent).toContain("~/.rind/settings.json");
+
     const providerSelect = screen.getByLabelText("Default provider");
-    const optionValues = [...providerSelect.querySelectorAll("option")].map((o) => o.value);
-    expect(optionValues).toEqual(["deepseek", "openai", "xiaomi"]);
-    expect(optionValues).not.toContain("anthropic");
+    const modelSelect = screen.getByLabelText("Default model");
+    const effortSelect = screen.getByLabelText("Reasoning effort");
+    const saveBtn = screen.getByRole("button", { name: "Save changes" });
+
+    // All fields and Save changes are disabled by default (foolproof lock)
+    expect(providerSelect.disabled).toBe(true);
+    expect(modelSelect.disabled).toBe(true);
+    expect(effortSelect.disabled).toBe(true);
+    expect(saveBtn.disabled).toBe(true);
+
+    // Only configured providers (DeepSeek, OpenAI, Xiaomi) appear in Default provider with their source tags
+    const providerOptions = [...providerSelect.querySelectorAll("option")].map((o) => ({
+      value: o.value,
+      text: o.textContent,
+    }));
+    expect(providerOptions).toEqual([
+      { value: "deepseek", text: "DeepSeek · Built-in" },
+      { value: "openai", text: "OpenAI · OAuth" },
+      { value: "xiaomi", text: "Xiaomi · Custom" },
+    ]);
+
+    // Default model dropdown displays the source tag (Built-in / OAuth / Custom)
+    const modelOptionTexts = [...modelSelect.querySelectorAll("option")].map((o) => o.textContent);
+    expect(modelOptionTexts).toContain("deepseek-flash · Built-in");
 
     // Workspace Override is not shown in General
     expect(document.querySelector(".settings-dialog").textContent).not.toContain("Workspace Override");
-
-    expect(screen.getByLabelText("Default model").value).toBe("deepseek-flash");
-    expect(screen.getByLabelText("Reasoning effort").value).toBe("high");
 
     // Verify both header Close button and footer Close button are outside the scrolling .settings-content
     const headerCloseBtn = screen.getByRole("button", { name: "Close dialog" });
     const footerCloseBtn = screen.getByRole("button", { name: "Close" });
     const scrollingContent = document.querySelector(".settings-content");
+    expect(scrollingContent.classList.contains("panel-scroll")).toBe(true);
     expect(scrollingContent.contains(headerCloseBtn)).toBe(false);
     expect(scrollingContent.contains(footerCloseBtn)).toBe(false);
 
-    // Selecting a non-reasoning model hides Reasoning effort
+    // Clicking Edit unlocks the fields and enables Save changes
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(providerSelect.disabled).toBe(false);
+    expect(modelSelect.disabled).toBe(false);
+    expect(effortSelect.disabled).toBe(false);
+    expect(saveBtn.disabled).toBe(false);
+
+    // Selecting OpenAI shows OAuth tag on its models; selecting a non-reasoning model hides Reasoning effort
     fireEvent.change(providerSelect, { target: { value: "openai" } });
+    const openaiModelTexts = [...screen.getByLabelText("Default model").querySelectorAll("option")].map(
+      (o) => o.textContent,
+    );
+    expect(openaiModelTexts).toContain("gpt-5 · OAuth");
     fireEvent.change(screen.getByLabelText("Default model"), { target: { value: "gpt-4o-mini" } });
     expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
 
@@ -130,9 +163,14 @@ describe("SettingsDialog", () => {
         reasoning_effort: "xhigh",
       });
     });
+
+    // After saving, fields return to locked (disabled) state
+    await waitFor(() => {
+      expect(screen.getByLabelText("Default provider").disabled).toBe(true);
+    });
   });
 
-  it("separates Custom APIs and Built-in Providers in Providers tab with a single action button per row", async () => {
+  it("separates OAuth & Accounts, Custom APIs, and Built-in Providers in Providers tab with Manage/Connect buttons without ▾", async () => {
     renderSettings();
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
     expect(screen.getByRole("button", { name: "Providers" }).getAttribute("aria-current")).toBe("page");
@@ -141,17 +179,20 @@ describe("SettingsDialog", () => {
       expect(document.querySelector(".settings-dialog").textContent).toContain("Subscription · OAuth");
     });
     const dialogText = document.querySelector(".settings-dialog").textContent;
+    expect(dialogText).toContain("OAuth & Accounts");
     expect(dialogText).toContain("Custom APIs");
     expect(dialogText).toContain("Built-in Providers");
     expect(dialogText).toContain("sk-••••9999");
     expect(dialogText).toContain("https://api.xiaomimimo.com/v1");
+    expect(dialogText).not.toContain("▾");
 
-    // Every provider row has a single top-level button in .provider-actions before any menu is opened
+    // Every provider row has a single top-level button in .provider-actions ("Manage" or "Connect", never "▾")
     const rows = document.querySelectorAll(".provider-row");
     expect(rows.length).toBeGreaterThanOrEqual(4);
     for (const row of rows) {
       const buttons = row.querySelectorAll(".provider-actions > button, .provider-actions > .provider-menu-wrap > button");
       expect(buttons).toHaveLength(1);
+      expect(["Manage", "Connect"]).toContain(buttons[0].textContent.trim());
     }
 
     // Both header Close button and footer Close button remain present and outside .settings-content on Providers tab

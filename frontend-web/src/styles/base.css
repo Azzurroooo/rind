@@ -33,10 +33,14 @@ kbd {
 input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offset: 0; }
 
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--line-strong); background-clip: padding-box; }
 
 /* Both side panels reserve a native scrollbar lane; content never sits beneath it. */
 .panel-scroll { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; scrollbar-gutter: stable; overscroll-behavior: contain; }
 .panel-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.panel-scroll::-webkit-scrollbar-track { background: transparent; }
 .panel-scroll::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--line-strong); background-clip: padding-box; }
 
 .visually-hidden {

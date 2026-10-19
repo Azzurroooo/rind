@@ -408,6 +408,17 @@ export function getModelReasoningEfforts(providerId: string, modelId: string): r
   return ALL_EFFORTS
 }
 
+export function getProviderSourceLabel(provider: EnrichedProvider | undefined): "OAuth" | "Custom" | "Built-in" {
+  if (provider?.custom || provider?.authType === "custom") return "Custom"
+  if (provider?.authType === "oauth") return "OAuth"
+  return "Built-in"
+}
+
+export function getProviderSourceLabelById(providerId: string): "OAuth" | "Custom" | "Built-in" {
+  const match = getMergedProviders().find((p) => p.id === providerId)
+  return getProviderSourceLabel(match)
+}
+
 export function providerStatus(provider: DesktopAuthProvider | EnrichedProvider) {
   const enriched = provider as EnrichedProvider
   if (!enriched.configured) return "Not connected"
@@ -419,7 +430,7 @@ export function providerStatus(provider: DesktopAuthProvider | EnrichedProvider)
     return enriched.envKey ? `Environment (${enriched.envKey})` : "Environment variable"
   }
   if (enriched.custom) {
-    return enriched.maskedKey ? `API key · ${enriched.maskedKey}` : "Custom endpoint"
+    return enriched.maskedKey ? `Custom · ${enriched.maskedKey}` : "Custom endpoint"
   }
   return "Connected"
 }
@@ -460,7 +471,7 @@ function renderCustomProviderForm() {
           <input id="custom-provider-model" type="text" value="${escapeAttribute(d.defaultModel)}" placeholder="e.g. mimo-v2-flash" autocomplete="off" />
         </label>
         <label>
-          <span>API key ${isEdit ? "(optional)" : "(optional)"}</span>
+          <span>API key (optional)</span>
           <input id="custom-provider-key" type="password" value="${escapeAttribute(d.apiKey)}" placeholder="sk-..." autocomplete="new-password" />
         </label>
       </div>
@@ -471,71 +482,107 @@ function renderCustomProviderForm() {
   `
 }
 
-function renderSingleActionControl(provider: EnrichedProvider) {
+function renderSingleActionControl(
+  provider: EnrichedProvider,
+  section: "oauth" | "custom" | "builtin",
+) {
   const busy = view.busyProviderId === provider.id
   const disabled = view.busyProviderId !== "" ? " disabled" : ""
-  const isEditingKey = view.editingKeyProviderId === provider.id
-  const isMenuOpen = view.openMenuId === provider.id
-  const methods = provider.methods.length ? provider.methods : ["api_key"]
-  const supportsOauth = methods.includes("oauth")
+  const isEditingKey = section !== "oauth" && view.editingKeyProviderId === provider.id
+  const menuKey = `${section}:${provider.id}`
+  const isMenuOpen = view.openMenuId === menuKey
 
   if (isEditingKey) {
     return `<button type="button" class="ghost-button" data-provider-toggle-key="${escapeAttribute(provider.id)}"${disabled}>Cancel</button>`
   }
 
-  // Unconnected built-in provider that only uses API key: single direct "Connect" button
-  if (!provider.custom && !provider.configured && !supportsOauth) {
-    return `<button type="button" class="secondary-button" data-provider-toggle-key="${escapeAttribute(provider.id)}"${disabled}>${busy ? "Saving..." : "Connect"}</button>`
+  if (section === "oauth") {
+    const isOauthConnected = provider.authType === "oauth"
+    if (!isOauthConnected) {
+      return `<button type="button" class="secondary-button" data-provider-login="${escapeAttribute(provider.id)}" data-provider-method="oauth"${disabled}>${busy ? "Working..." : "Connect"}</button>`
+    }
+    const menuItems = [
+      `<button type="button" class="provider-menu-item" data-provider-login="${escapeAttribute(provider.id)}" data-provider-method="oauth">Reconnect OAuth</button>`,
+      `<button type="button" class="provider-menu-item is-danger" data-provider-logout="${escapeAttribute(provider.id)}">Disconnect</button>`,
+    ]
+    return `
+      <div class="provider-menu-wrap">
+        <button type="button" class="ghost-button provider-menu-trigger" aria-expanded="${isMenuOpen}" data-provider-menu-toggle="${escapeAttribute(menuKey)}"${disabled}>${busy ? "Working..." : "Manage"}</button>
+        ${isMenuOpen ? `<div class="provider-action-menu" role="menu">${menuItems.join("")}</div>` : ""}
+      </div>
+    `
   }
 
-  // Otherwise: single menu trigger button ("Connect ▾" or "Manage ▾")
-  const triggerLabel = busy
-    ? "Working..."
-    : provider.configured || provider.custom
-      ? "Manage ▾"
-      : "Connect ▾"
-  const triggerClass = provider.configured || provider.custom ? "ghost-button" : "secondary-button"
-
-  const menuItems: string[] = []
-  if (provider.custom) {
-    menuItems.push(
+  if (section === "custom") {
+    const menuItems = [
       `<button type="button" class="provider-menu-item" data-provider-edit-custom="${escapeAttribute(provider.id)}">Edit endpoint</button>`,
       `<button type="button" class="provider-menu-item" data-provider-toggle-key="${escapeAttribute(provider.id)}">${provider.maskedKey ? "Update API key" : "Set API key"}</button>`,
       `<button type="button" class="provider-menu-item is-danger" data-provider-delete-custom="${escapeAttribute(provider.id)}">Delete</button>`,
-    )
-  } else {
-    if (supportsOauth) {
-      menuItems.push(
-        `<button type="button" class="provider-menu-item" data-provider-login="${escapeAttribute(provider.id)}" data-provider-method="oauth">${provider.authType === "oauth" ? "Reconnect OAuth" : "Sign in with OAuth"}</button>`,
-      )
-    }
+    ]
+    return `
+      <div class="provider-menu-wrap">
+        <button type="button" class="ghost-button provider-menu-trigger" aria-expanded="${isMenuOpen}" data-provider-menu-toggle="${escapeAttribute(menuKey)}"${disabled}>${busy ? "Working..." : "Manage"}</button>
+        ${isMenuOpen ? `<div class="provider-action-menu" role="menu">${menuItems.join("")}</div>` : ""}
+      </div>
+    `
+  }
+
+  // section === "builtin"
+  const isKeyConfigured = provider.configured && provider.authType !== "oauth"
+  if (!isKeyConfigured) {
+    return `<button type="button" class="secondary-button" data-provider-toggle-key="${escapeAttribute(provider.id)}"${disabled}>${busy ? "Saving..." : "Connect"}</button>`
+  }
+
+  const menuItems = [
+    `<button type="button" class="provider-menu-item" data-provider-toggle-key="${escapeAttribute(provider.id)}">Update API key</button>`,
+  ]
+  if (provider.source !== "env") {
     menuItems.push(
-      `<button type="button" class="provider-menu-item" data-provider-toggle-key="${escapeAttribute(provider.id)}">${provider.configured ? "Update API key" : "Enter API key"}</button>`,
+      `<button type="button" class="provider-menu-item is-danger" data-provider-logout="${escapeAttribute(provider.id)}">Disconnect</button>`,
     )
-    if (provider.configured && provider.source !== "env") {
-      menuItems.push(
-        `<button type="button" class="provider-menu-item is-danger" data-provider-logout="${escapeAttribute(provider.id)}">Disconnect</button>`,
-      )
-    }
   }
 
   return `
     <div class="provider-menu-wrap">
-      <button type="button" class="${triggerClass} provider-menu-trigger" aria-expanded="${isMenuOpen}" data-provider-menu-toggle="${escapeAttribute(provider.id)}"${disabled}>${escapeHtml(triggerLabel)}</button>
+      <button type="button" class="ghost-button provider-menu-trigger" aria-expanded="${isMenuOpen}" data-provider-menu-toggle="${escapeAttribute(menuKey)}"${disabled}>${busy ? "Working..." : "Manage"}</button>
       ${isMenuOpen ? `<div class="provider-action-menu" role="menu">${menuItems.join("")}</div>` : ""}
     </div>
   `
 }
 
-function renderProviderRow(provider: EnrichedProvider) {
-  const isEditingKey = view.editingKeyProviderId === provider.id
-  const isDefault = (state.settings.provider || "openai") === provider.id
+function renderProviderRow(provider: EnrichedProvider, section: "oauth" | "custom" | "builtin") {
+  const isEditingKey = section !== "oauth" && view.editingKeyProviderId === provider.id
+  const isConfiguredInSection =
+    section === "oauth"
+      ? provider.authType === "oauth"
+      : section === "custom"
+        ? true
+        : provider.configured && provider.authType !== "oauth"
+
+  const isDefault = (state.settings.provider || "openai") === provider.id && isConfiguredInSection
   const defaultBadge = isDefault
     ? `<span class="provider-badge provider-badge-default">Default</span>`
     : ""
 
-  const subtitleParts: string[] = [escapeHtml(providerStatus(provider))]
-  if (provider.custom?.baseUrl) {
+  let statusLabel: string
+  if (section === "oauth") {
+    statusLabel = isConfiguredInSection ? "Subscription · OAuth" : "Account subscription (OAuth)"
+  } else if (section === "custom") {
+    statusLabel = provider.maskedKey ? `Custom · ${provider.maskedKey}` : "Custom endpoint"
+  } else {
+    if (provider.authType === "api_key") {
+      statusLabel = provider.maskedKey ? `API key · ${provider.maskedKey}` : "API key connected"
+    } else if (provider.source === "env") {
+      statusLabel = provider.envKey ? `Environment (${provider.envKey})` : "Environment variable"
+    } else if (provider.authType === "oauth") {
+      statusLabel = "API key not set (connected via OAuth)"
+    } else {
+      statusLabel = "Not connected"
+    }
+  }
+
+  const subtitleParts: string[] = [escapeHtml(statusLabel)]
+  if (section === "custom" && provider.custom?.baseUrl) {
     subtitleParts.push(`<span class="provider-endpoint-meta">${escapeHtml(provider.custom.baseUrl)}</span>`)
   }
 
@@ -546,7 +593,7 @@ function renderProviderRow(provider: EnrichedProvider) {
       </div>`
     : ""
 
-  return `<div class="settings-row provider-row${provider.configured ? " is-configured" : ""}">
+  return `<div class="settings-row provider-row${isConfiguredInSection ? " is-configured" : ""}">
     <div class="provider-row-main">
       <div class="settings-row-text">
         <div class="provider-title-line">
@@ -554,11 +601,11 @@ function renderProviderRow(provider: EnrichedProvider) {
           ${defaultBadge}
         </div>
         <span class="settings-row-desc">
-          <span class="status-dot" data-configured="${provider.configured}" aria-hidden="true"></span>
+          <span class="status-dot" data-configured="${isConfiguredInSection}" aria-hidden="true"></span>
           ${subtitleParts.join(" · ")}
         </span>
       </div>
-      <div class="settings-row-control provider-actions">${renderSingleActionControl(provider)}</div>
+      <div class="settings-row-control provider-actions">${renderSingleActionControl(provider, section)}</div>
     </div>
     ${keyEditor}
   </div>`
@@ -571,6 +618,9 @@ export function renderProviders() {
   const selectionEnd = wasFocusedSearch ? activeElement.selectionEnd : null
 
   const allProviders = getMergedProviders()
+  const oauthProviders = allProviders.filter(
+    (p) => !p.custom && (p.methods.includes("oauth") || p.authType === "oauth"),
+  )
   const customProviders = allProviders.filter((p) => Boolean(p.custom))
   const query = view.search.trim().toLowerCase()
   const builtinProviders = allProviders
@@ -584,10 +634,12 @@ export function renderProviders() {
       )
     })
     .sort((a, b) => {
-      const aDefault = (state.settings.provider || "openai") === a.id ? 1 : 0
-      const bDefault = (state.settings.provider || "openai") === b.id ? 1 : 0
+      const aConfigured = a.configured && a.authType !== "oauth"
+      const bConfigured = b.configured && b.authType !== "oauth"
+      const aDefault = (state.settings.provider || "openai") === a.id && aConfigured ? 1 : 0
+      const bDefault = (state.settings.provider || "openai") === b.id && bConfigured ? 1 : 0
       if (aDefault !== bDefault) return bDefault - aDefault
-      if (a.configured !== b.configured) return a.configured ? -1 : 1
+      if (aConfigured !== bConfigured) return aConfigured ? -1 : 1
       return (a.name || a.id).localeCompare(b.name || b.id)
     })
 
@@ -597,18 +649,30 @@ export function renderProviders() {
       ? `<p class="settings-inline-note">${escapeHtml(view.message)}</p>`
       : ""
 
+  const oauthRows = oauthProviders.length
+    ? oauthProviders.map((p) => renderProviderRow(p, "oauth")).join("")
+    : `<p class="subtle provider-empty">No OAuth providers available.</p>`
+
   const customRows = customProviders.length
-    ? customProviders.map(renderProviderRow).join("")
+    ? customProviders.map((p) => renderProviderRow(p, "custom")).join("")
     : !view.customFormOpen
       ? `<p class="subtle provider-empty">No custom API endpoints configured.</p>`
       : ""
 
   const builtinRows = builtinProviders.length
-    ? builtinProviders.map(renderProviderRow).join("")
+    ? builtinProviders.map((p) => renderProviderRow(p, "builtin")).join("")
     : `<p class="subtle provider-empty">No matching built-in providers.</p>`
 
   settingsProviders.innerHTML = `
     ${notice}
+    <div class="settings-group-card">
+      <div class="settings-group-head">
+        <span class="settings-group-title">OAuth &amp; Accounts</span>
+        <span class="settings-group-badge">Subscription</span>
+      </div>
+      <div class="provider-section-rows">${oauthRows}</div>
+    </div>
+
     <div class="settings-group-card">
       <div class="settings-group-head">
         <span class="settings-group-title">Custom APIs</span>

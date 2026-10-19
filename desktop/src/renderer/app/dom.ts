@@ -124,11 +124,11 @@ appRoot.innerHTML = `
         </section>
       </aside>
     </main>
-    <dialog id="usage-dialog" class="settings-dialog usage-dialog" aria-labelledby="usage-title"><div class="settings-heading"><div><h2 id="usage-title">Usage</h2><p>Across all projects and sessions on this Rind computer.</p></div><button id="close-usage" type="button" class="icon-button" aria-label="Close usage">${renderIcon(X)}</button></div><div class="usage-toolbar"><span class="subtle">Last 7 days</span><button id="refresh-usage" type="button" class="ghost-button usage-refresh">Refresh</button></div><div id="inspector-usage"></div></dialog>
+    <dialog id="usage-dialog" class="settings-dialog usage-dialog" aria-labelledby="usage-title"><div class="settings-heading"><div><h2 id="usage-title">Usage</h2><p>Across all projects and sessions on this Rind computer.</p></div><button id="close-usage" type="button" class="icon-button" aria-label="Close usage">${renderIcon(X)}</button></div><div class="usage-toolbar"><span class="subtle">Last 7 days</span><button id="refresh-usage" type="button" class="ghost-button usage-refresh">Refresh</button></div><div id="inspector-usage" class="panel-scroll"></div></dialog>
     ${remoteAccessMarkup()}
     <dialog id="settings-dialog" class="settings-dialog settings-shell" aria-labelledby="settings-title">
       <form id="settings-form" method="dialog" class="settings-layout">
-      <nav class="settings-nav" aria-label="Settings sections">
+      <nav class="settings-nav panel-scroll" aria-label="Settings sections">
         <h2 id="settings-title" class="settings-title">Settings</h2>
         <div role="tablist" aria-orientation="vertical" aria-label="Settings sections" class="settings-tabs">
         <button id="settings-tab-general" type="button" role="tab" class="settings-tab" data-settings-tab="general" aria-controls="settings-panel-general" aria-selected="true">${renderIcon(SlidersHorizontal, "settings-tab-icon")}<span>General</span></button>
@@ -140,11 +140,11 @@ appRoot.innerHTML = `
         <header class="settings-content-head">
           <div class="settings-content-head-meta">
             <h3 id="settings-active-title" class="settings-section-title">General</h3>
-            <p id="settings-active-desc" class="settings-section-desc">Default provider and model for new conversations.</p>
+            <p id="settings-active-desc" class="settings-section-desc">Global default provider and model configuration (~/.rind/settings.json).</p>
           </div>
           <button id="close-settings" type="button" class="icon-button settings-close" aria-label="Close settings" data-tooltip="Close">${renderIcon(X)}</button>
         </header>
-        <section id="settings-panel-general" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-general" data-settings-panel="general">
+        <section id="settings-panel-general" class="settings-panel panel-scroll" role="tabpanel" aria-labelledby="settings-tab-general" data-settings-panel="general">
           <div id="settings-general-empty" class="settings-group-card settings-empty-card" hidden>
             <div class="settings-row-text">
               <span class="settings-row-label">No providers connected</span>
@@ -153,22 +153,30 @@ appRoot.innerHTML = `
             <button id="settings-go-providers" type="button" class="secondary-button">Configure providers</button>
           </div>
           <div id="settings-general-card" class="settings-group-card">
+            <div class="settings-group-head">
+              <div class="settings-group-head-text">
+                <span class="settings-group-title">Global Default Configuration</span>
+                <span class="settings-group-badge">~/.rind/settings.json</span>
+              </div>
+              <button id="settings-general-edit" type="button" class="secondary-button settings-edit-btn">Edit</button>
+            </div>
+            <p class="settings-group-desc">Global defaults applied to new conversations across all workspaces. Click Edit to unlock changes, then Save changes to apply.</p>
             <div class="settings-row">
               <div class="settings-row-text">
                 <span class="settings-row-label"><label for="settings-provider">Default provider</label></span>
                 <span class="settings-row-desc">Connected provider used for new conversations.</span>
               </div>
               <div class="settings-row-control">
-                <select id="settings-provider"></select>
+                <select id="settings-provider" disabled></select>
               </div>
             </div>
             <div id="settings-model-row" class="settings-row">
               <div class="settings-row-text">
                 <span class="settings-row-label"><label for="settings-model">Default model</label></span>
-                <span class="settings-row-desc">Default model for the selected provider.</span>
+                <span class="settings-row-desc">Default model and source (Built-in / Custom / OAuth) for the selected provider.</span>
               </div>
               <div class="settings-row-control">
-                <select id="settings-model"></select>
+                <select id="settings-model" disabled></select>
               </div>
             </div>
             <div id="settings-reasoning-row" class="settings-row">
@@ -177,7 +185,7 @@ appRoot.innerHTML = `
                 <span class="settings-row-desc">Thinking budget for reasoning-capable models.</span>
               </div>
               <div class="settings-row-control">
-                <select id="settings-reasoning">
+                <select id="settings-reasoning" disabled>
                   <option value="">Default</option>
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -189,10 +197,10 @@ appRoot.innerHTML = `
             </div>
           </div>
         </section>
-        <section id="settings-panel-providers" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-providers" data-settings-panel="providers" hidden>
+        <section id="settings-panel-providers" class="settings-panel panel-scroll" role="tabpanel" aria-labelledby="settings-tab-providers" data-settings-panel="providers" hidden>
           <div id="settings-providers" class="provider-list" aria-live="polite"></div>
         </section>
-        <section id="settings-panel-preferences" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-preferences" data-settings-panel="preferences" hidden>
+        <section id="settings-panel-preferences" class="settings-panel panel-scroll" role="tabpanel" aria-labelledby="settings-tab-preferences" data-settings-panel="preferences" hidden>
           <div class="settings-group-card">
             <div class="settings-group-head">
               <span class="settings-group-title">Appearance &amp; Behavior</span>
@@ -229,7 +237,7 @@ appRoot.innerHTML = `
         </section>
         <footer id="settings-footer" class="settings-actions">
           <button id="cancel-settings" type="button" class="ghost-button">Close</button>
-          <button id="save-settings" type="submit" class="primary-button">Save changes</button>
+          <button id="save-settings" type="submit" class="primary-button" disabled>Save changes</button>
         </footer>
       </div>
       </form>
@@ -245,7 +253,7 @@ appRoot.innerHTML = `
     <dialog id="shortcuts-dialog" class="settings-dialog shortcuts-dialog" aria-labelledby="shortcuts-title">
       <form method="dialog">
         <div class="settings-heading"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button id="close-shortcuts" type="button" class="icon-button" aria-label="Close shortcuts">${renderIcon(X)}</button></div>
-        <div class="shortcut-table" id="shortcut-table"></div>
+        <div class="shortcut-table panel-scroll" id="shortcut-table"></div>
       </form>
     </dialog>
     <div id="command-palette" class="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
@@ -325,6 +333,7 @@ export const newSessionButton = requiredElement<HTMLButtonElement>("new-session"
 export const sidebarToggle = requiredElement<HTMLButtonElement>("toggle-sidebar")
 export const settingsDialog = requiredElement<HTMLDialogElement>("settings-dialog")
 export const settingsForm = requiredElement<HTMLFormElement>("settings-form")
+export const settingsGeneralEdit = requiredElement<HTMLButtonElement>("settings-general-edit")
 export const settingsProvider = requiredElement<HTMLSelectElement>("settings-provider")
 export const settingsModel = requiredElement<HTMLSelectElement>("settings-model")
 export const settingsReasoning = requiredElement<HTMLSelectElement>("settings-reasoning")

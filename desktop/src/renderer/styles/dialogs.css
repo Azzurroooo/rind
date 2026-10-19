@@ -91,6 +91,12 @@
   outline: none;
   border-color: var(--accent);
 }
+.settings-dialog input:not([type="checkbox"]):disabled,
+.settings-dialog select:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  background: var(--panel);
+}
 .settings-dialog input[type="checkbox"] {
   width: 16px;
   height: 16px;
@@ -109,6 +115,10 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 /* ---------- settings shell: left nav + content ---------- */
@@ -137,6 +147,10 @@
   background: var(--panel);
   min-height: 0;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 .settings-nav h2 {
   padding: 0 10px;
@@ -215,6 +229,10 @@
   min-height: 0;
   padding: 16px 24px 20px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 .settings-panel[hidden] {
   display: none !important;
@@ -252,6 +270,13 @@
   margin-bottom: 4px;
   border-bottom: 1px solid var(--line);
 }
+.settings-group-head-text {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
 .settings-group-title {
   font-size: var(--text-meta);
   font-weight: 600;
@@ -267,6 +292,19 @@
   background: var(--fill-2);
   color: var(--muted);
 }
+.settings-group-desc {
+  margin: 4px 0 8px;
+  color: var(--muted);
+  font-size: var(--text-meta);
+  line-height: 1.45;
+}
+.settings-edit-btn {
+  flex: none;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 11px;
+  font-size: var(--text-meta);
+}
 
 .settings-row {
   display: flex;
@@ -277,7 +315,8 @@
   border-top: 1px solid var(--line);
 }
 .settings-row:first-of-type,
-.settings-group-head + .settings-row {
+.settings-group-head + .settings-row,
+.settings-group-desc + .settings-row {
   border-top: 0;
 }
 .settings-row-text {
@@ -368,8 +407,8 @@
 }
 
 .settings-shortcut-table {
-  max-height: 220px;
-  overflow-y: auto;
+  max-height: none;
+  overflow-y: visible;
 }
 
 .settings-row[hidden] {

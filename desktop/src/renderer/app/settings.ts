@@ -5,6 +5,7 @@ import {
   saveSettingsButton,
   settingsDialog,
   settingsForm,
+  settingsGeneralEdit,
   settingsModel,
   settingsNotifications,
   settingsProvider,
@@ -16,6 +17,8 @@ import {
   getMergedProviders,
   getModelReasoningEfforts,
   getProviderModels,
+  getProviderSourceLabel,
+  getProviderSourceLabelById,
   loadProviders,
   renderProviders,
   setOnProvidersUpdated,
@@ -28,15 +31,16 @@ import { state } from "./state.ts"
 const settingsTabs = ["general", "providers", "preferences"] as const
 type SettingsTab = (typeof settingsTabs)[number]
 let activeSettingsTab: SettingsTab = "general"
+let generalEditing = false
 
 const TAB_HEADINGS: Record<SettingsTab, { title: string; desc: string }> = {
   general: {
     title: "General",
-    desc: "Default provider and model for new conversations (~/.rind/settings.json).",
+    desc: "Global default provider and model configuration (~/.rind/settings.json).",
   },
   providers: {
     title: "Providers",
-    desc: "Manage custom API endpoints (~/.rind/providers.json) and built-in provider credentials (~/.rind/auth.json).",
+    desc: "Manage OAuth accounts, custom API endpoints (~/.rind/providers.json), and built-in provider keys (~/.rind/auth.json).",
   },
   preferences: {
     title: "Preferences",
@@ -56,6 +60,19 @@ function isSettingsTab(value: unknown): value is SettingsTab {
   return settingsTabs.includes(value as SettingsTab)
 }
 
+function syncGeneralEditingState() {
+  const locked = !generalEditing || state.settingsSaving
+  settingsProvider.disabled = locked
+  settingsModel.disabled = locked
+  settingsReasoning.disabled = locked
+  settingsGeneralEdit.disabled = state.settingsSaving
+  settingsGeneralEdit.textContent = generalEditing ? "Cancel" : "Edit"
+  settingsGeneralEdit.classList.toggle("ghost-button", generalEditing)
+  settingsGeneralEdit.classList.toggle("secondary-button", !generalEditing)
+  saveSettingsButton.disabled = !generalEditing || state.settingsSaving
+  saveSettingsButton.textContent = state.settingsSaving ? "Saving..." : "Save changes"
+}
+
 function renderSettingsTabs() {
   for (const button of settingsDialog.querySelectorAll<HTMLButtonElement>("[data-settings-tab]")) {
     const selected = button.dataset.settingsTab === activeSettingsTab
@@ -72,9 +89,13 @@ function renderSettingsTabs() {
   if (descEl) descEl.textContent = heading.desc
   const hasConfigured = getMergedProviders().some((p) => p.configured)
   saveSettingsButton.hidden = activeSettingsTab !== "general" || !hasConfigured
+  syncGeneralEditingState()
 }
 
 export function selectSettingsTab(tab: SettingsTab, focus = false) {
+  if (tab !== "general") {
+    generalEditing = false
+  }
   activeSettingsTab = tab
   renderSettingsTabs()
   if (tab === "providers") void loadProviders()
@@ -109,7 +130,8 @@ function populateGeneralControls(preferredProvider?: string, preferredModel?: st
   settingsProvider.innerHTML = configured
     .map((p) => {
       const selected = p.id === activeProvider ? " selected" : ""
-      return `<option value="${escapeAttribute(p.id)}"${selected}>${escapeHtml(p.name || p.id)}</option>`
+      const sourceLabel = getProviderSourceLabel(p)
+      return `<option value="${escapeAttribute(p.id)}"${selected}>${escapeHtml(`${p.name || p.id} · ${sourceLabel}`)}</option>`
     })
     .join("")
   settingsProvider.value = activeProvider
@@ -120,6 +142,7 @@ function populateGeneralControls(preferredProvider?: string, preferredModel?: st
     settingsModel.value,
     preferredEffort ?? settingsReasoning.value ?? state.settings.reasoningEffort,
   )
+  syncGeneralEditingState()
 }
 
 function populateModelSelect(providerId: string, preferredModel = "") {
@@ -128,11 +151,12 @@ function populateModelSelect(providerId: string, preferredModel = "") {
     ? preferredModel
     : models[0] || preferredModel || ""
 
+  const sourceLabel = getProviderSourceLabelById(providerId)
   const optionIds = models.length > 0 ? models : activeModel ? [activeModel] : []
   settingsModel.innerHTML = optionIds
     .map((id) => {
       const selected = id === activeModel ? " selected" : ""
-      return `<option value="${escapeAttribute(id)}"${selected}>${escapeHtml(id)}</option>`
+      return `<option value="${escapeAttribute(id)}"${selected}>${escapeHtml(`${id} · ${sourceLabel}`)}</option>`
     })
     .join("")
   settingsModel.value = activeModel
@@ -188,8 +212,6 @@ function renderPreferencesControls() {
 export function renderSettings() {
   if (state.settingsOpen && !settingsDialog.open) settingsDialog.showModal()
   if (!state.settingsOpen && settingsDialog.open) settingsDialog.close()
-  saveSettingsButton.disabled = state.settingsSaving
-  saveSettingsButton.textContent = state.settingsSaving ? "Saving..." : "Save changes"
   renderPreferencesControls()
   renderSettingsTabs()
 }
@@ -239,21 +261,22 @@ export async function loadSettings() {
 export function openSettings(tab: SettingsTab = "general") {
   state.settingsOpen = true
   activeSettingsTab = tab
+  generalEditing = false
   const initialProvider = state.settings.provider || "openai"
   const initialModel = state.settings.model || "gpt-4o-mini"
   const initialEffort = state.settings.reasoningEffort || ""
   populateGeneralControls(initialProvider, initialModel, initialEffort)
   void loadProviders().then(() => {
-    populateGeneralControls(state.settings.provider, state.settings.model, state.settings.reasoningEffort)
+    if (!generalEditing) {
+      populateGeneralControls(state.settings.provider, state.settings.model, state.settings.reasoningEffort)
+    }
   })
   renderProviders()
   render()
 }
 
 export async function saveSettings() {
-  if (activeSettingsTab !== "general") {
-    state.settingsOpen = false
-    render()
+  if (activeSettingsTab !== "general" || !generalEditing) {
     return
   }
   const provider = settingsProvider.value.trim() || state.settings.provider || "openai"
@@ -288,20 +311,21 @@ export async function saveSettings() {
       state.effort = reasoningEffort
     }
 
-    state.settingsOpen = false
+    generalEditing = false
     state.settingsAutoOpened = true
     state.notice = `Saved global defaults (${provider} / ${model}).`
   } catch (error) {
     state.notice = error instanceof Error ? error.message : String(error)
   } finally {
     state.settingsSaving = false
+    syncGeneralEditingState()
     render()
   }
 }
 
 export function bindSettingsEvents(): void {
   setOnProvidersUpdated(() => {
-    if (state.settingsOpen) populateGeneralControls()
+    if (state.settingsOpen && !generalEditing) populateGeneralControls()
   })
 
   settingsForm.addEventListener("submit", (event) => {
@@ -309,28 +333,48 @@ export function bindSettingsEvents(): void {
     runAction(saveSettings)
   })
 
+  settingsGeneralEdit.addEventListener("click", () => {
+    if (generalEditing) {
+      generalEditing = false
+      populateGeneralControls(
+        state.settings.provider || "openai",
+        state.settings.model || "gpt-4o-mini",
+        state.settings.reasoningEffort || "",
+      )
+    } else {
+      generalEditing = true
+      syncGeneralEditingState()
+      settingsProvider.focus()
+    }
+  })
+
   requiredElement("close-settings").addEventListener("click", () => {
+    generalEditing = false
     state.settingsOpen = false
     render()
   })
 
   requiredElement("cancel-settings").addEventListener("click", () => {
+    generalEditing = false
     state.settingsOpen = false
     render()
   })
 
   settingsDialog.addEventListener("cancel", () => {
+    generalEditing = false
     state.settingsOpen = false
     render()
   })
 
   settingsProvider.addEventListener("change", () => {
+    if (!generalEditing) return
     const providerId = settingsProvider.value
     populateModelSelect(providerId, "")
     populateReasoningSelect(providerId, settingsModel.value, "")
   })
 
   settingsModel.addEventListener("change", () => {
+    if (!generalEditing) return
     populateReasoningSelect(settingsProvider.value, settingsModel.value, settingsReasoning.value)
   })
 

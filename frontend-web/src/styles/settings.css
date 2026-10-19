@@ -31,6 +31,10 @@
   border-right: 1px solid var(--line, var(--border));
   background: var(--panel, var(--bg-subtle));
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 .settings-nav-item {
   display: flex;
@@ -88,6 +92,10 @@
   min-height: 0;
   overflow-y: auto;
   padding: 16px 22px 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 .settings-stack {
   display: flex;
@@ -112,6 +120,13 @@
   margin-bottom: 4px;
   border-bottom: 1px solid var(--line, var(--border));
 }
+.settings-group-head-text {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
 .settings-group-title {
   font-size: 11px;
   font-weight: 600;
@@ -127,6 +142,19 @@
   background: var(--fill-2, var(--bg-hover));
   color: var(--muted, var(--fg-muted));
 }
+.settings-group-desc {
+  margin: 4px 0 8px;
+  color: var(--muted, var(--fg-muted));
+  font-size: var(--text-meta, 12px);
+  line-height: 1.45;
+}
+.settings-edit-btn {
+  flex: none;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 11px;
+  font-size: var(--text-meta, 12px);
+}
 
 .settings-row {
   display: flex;
@@ -138,7 +166,8 @@
   border-top: 1px solid var(--line, var(--border));
 }
 .settings-row:first-of-type,
-.settings-group-head + .settings-row {
+.settings-group-head + .settings-row,
+.settings-group-desc + .settings-row {
   border-top: 0;
 }
 .settings-row-text {
@@ -196,6 +225,12 @@
 .settings-dialog select:focus {
   outline: none;
   border-color: var(--accent);
+}
+.settings-dialog input:not([type="checkbox"]):disabled,
+.settings-dialog select:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  background: var(--panel, var(--bg-subtle));
 }
 
 .settings-footer-bar {

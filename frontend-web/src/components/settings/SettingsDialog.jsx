@@ -230,14 +230,14 @@ const TABS = [
     label: "General",
     icon: SlidersHorizontal,
     title: "General",
-    desc: "Default provider and model for new conversations (~/.rind/settings.json).",
+    desc: "Global default provider and model configuration (~/.rind/settings.json).",
   },
   {
     id: "providers",
     label: "Providers",
     icon: KeyRound,
     title: "Providers",
-    desc: "Manage custom API endpoints (~/.rind/providers.json) and built-in provider credentials (~/.rind/auth.json).",
+    desc: "Manage OAuth accounts, custom API endpoints (~/.rind/providers.json), and built-in provider keys (~/.rind/auth.json).",
   },
   {
     id: "preferences",
@@ -281,19 +281,31 @@ const EMPTY_CUSTOM_DRAFT = {
   envKey: "",
 };
 
-function formatProviderStatus(provider) {
-  if (!provider.configured) return "Not connected";
-  if (provider.authType === "oauth") return "Subscription · OAuth";
+function getProviderSourceLabel(provider) {
+  if (provider?.custom || provider?.authType === "custom") return "Custom";
+  if (provider?.authType === "oauth") return "OAuth";
+  return "Built-in";
+}
+
+function formatProviderSectionStatus(provider, section) {
+  if (section === "oauth") {
+    return provider.authType === "oauth"
+      ? "Subscription · OAuth"
+      : "Account subscription (OAuth)";
+  }
+  if (section === "custom") {
+    return provider.maskedKey ? `Custom · ${provider.maskedKey}` : "Custom endpoint";
+  }
   if (provider.authType === "api_key") {
     return provider.maskedKey ? `API key · ${provider.maskedKey}` : "API key connected";
   }
   if (provider.source === "env") {
     return provider.envKey ? `Environment (${provider.envKey})` : "Environment variable";
   }
-  if (provider.custom) {
-    return provider.maskedKey ? `API key · ${provider.maskedKey}` : "Custom endpoint";
+  if (provider.authType === "oauth") {
+    return "API key not set (connected via OAuth)";
   }
-  return "Connected";
+  return "Not connected";
 }
 
 export function SettingsDialog({
@@ -323,6 +335,7 @@ export function SettingsDialog({
   const [generalProvider, setGeneralProvider] = useState("openai");
   const [generalModel, setGeneralModel] = useState("gpt-4o-mini");
   const [generalEffort, setGeneralEffort] = useState("");
+  const [generalEditing, setGeneralEditing] = useState(false);
   const [savingGeneral, setSavingGeneral] = useState(false);
   const [generalStatus, setGeneralStatus] = useState({ tone: "", text: "" });
 
@@ -410,6 +423,7 @@ export function SettingsDialog({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    setGeneralEditing(false);
     setGeneralStatus({ tone: "", text: "" });
     setProviderNotice({ tone: "", text: "" });
     setOpenMenuId("");
@@ -497,6 +511,11 @@ export function SettingsDialog({
       .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
   }, [mergedProviders]);
 
+  const selectedProviderSourceLabel = useMemo(() => {
+    const match = mergedProviders.find((p) => p.id === generalProvider);
+    return getProviderSourceLabel(match);
+  }, [mergedProviders, generalProvider]);
+
   const getModelsForProvider = useCallback(
     (providerId, extraModel = "") => {
       const set = new Set();
@@ -549,6 +568,12 @@ export function SettingsDialog({
     return ALL_EFFORTS;
   }, [info?.models, generalProvider, generalModel, localSettings.customProviders]);
 
+  const oauthProvidersList = useMemo(() => {
+    return mergedProviders.filter(
+      (p) => !p.custom && (p.methods.includes("oauth") || p.authType === "oauth"),
+    );
+  }, [mergedProviders]);
+
   const customProvidersList = useMemo(() => {
     return mergedProviders.filter((p) => Boolean(p.custom));
   }, [mergedProviders]);
@@ -566,10 +591,12 @@ export function SettingsDialog({
         );
       })
       .sort((a, b) => {
-        const aDef = (localSettings.provider || "openai") === a.id ? 1 : 0;
-        const bDef = (localSettings.provider || "openai") === b.id ? 1 : 0;
+        const aConfigured = a.configured && a.authType !== "oauth";
+        const bConfigured = b.configured && b.authType !== "oauth";
+        const aDef = (localSettings.provider || "openai") === a.id && aConfigured ? 1 : 0;
+        const bDef = (localSettings.provider || "openai") === b.id && bConfigured ? 1 : 0;
         if (aDef !== bDef) return bDef - aDef;
-        if (a.configured !== b.configured) return a.configured ? -1 : 1;
+        if (aConfigured !== bConfigured) return aConfigured ? -1 : 1;
         return (a.name || a.id).localeCompare(b.name || b.id);
       });
   }, [mergedProviders, providerSearch, localSettings.provider]);
@@ -591,6 +618,7 @@ export function SettingsDialog({
 
   async function handleSaveGeneral(event) {
     event?.preventDefault?.();
+    if (!generalEditing) return;
     const provider = generalProvider.trim() || "openai";
     const model = generalModel.trim() || "gpt-4o-mini";
     const reasoningEffort = supportedEfforts.length > 0 ? generalEffort.trim() : "";
@@ -614,6 +642,7 @@ export function SettingsDialog({
       }
 
       await loadAllSettings();
+      setGeneralEditing(false);
       onSettingsChanged?.();
       setGeneralStatus({
         tone: "success",
@@ -626,6 +655,29 @@ export function SettingsDialog({
       });
     } finally {
       setSavingGeneral(false);
+    }
+  }
+
+  async function handleOauthLogin(providerId) {
+    setProviderBusyId(providerId);
+    setOpenMenuId("");
+    setProviderNotice({ tone: "", text: "" });
+    try {
+      if (typeof request === "function") {
+        await request(methods.authLogin, { provider: providerId, method: "oauth" });
+        await loadAllSettings();
+        onSettingsChanged?.();
+        setProviderNotice({ tone: "success", text: `Connected ${providerId} via OAuth.` });
+      } else {
+        setProviderNotice({
+          tone: "error",
+          text: "Runtime connection required to start OAuth sign-in.",
+        });
+      }
+    } catch (error) {
+      setProviderNotice({ tone: "error", text: error?.message || String(error) });
+    } finally {
+      setProviderBusyId("");
     }
   }
 
@@ -659,6 +711,9 @@ export function SettingsDialog({
     setOpenMenuId("");
     setProviderNotice({ tone: "", text: "" });
     try {
+      if (typeof request === "function") {
+        await request(methods.authLogout, { provider: providerId }).catch(() => null);
+      }
       await postLocalSettings({ removeProviderCredentialId: providerId });
       await loadAllSettings();
       onSettingsChanged?.();
@@ -721,17 +776,23 @@ export function SettingsDialog({
     }
   }
 
-  function renderProviderRow(provider) {
-    const isDefault = (localSettings.provider || "openai") === provider.id;
-    const isEditing = editingKeyId === provider.id;
-    const isMenuOpen = openMenuId === provider.id;
+  function renderProviderRow(provider, section) {
+    const isConfiguredInSection =
+      section === "oauth"
+        ? provider.authType === "oauth"
+        : section === "custom"
+          ? true
+          : provider.configured && provider.authType !== "oauth";
+    const isDefault = (localSettings.provider || "openai") === provider.id && isConfiguredInSection;
+    const isEditing = section !== "oauth" && editingKeyId === provider.id;
+    const menuKey = `${section}:${provider.id}`;
+    const isMenuOpen = openMenuId === menuKey;
     const busy = providerBusyId === provider.id;
-    const supportsOauth = provider.methods.includes("oauth");
 
     return (
       <div
-        key={provider.id}
-        className={`settings-row provider-row${provider.configured ? " is-configured" : ""}`}
+        key={menuKey}
+        className={`settings-row provider-row${isConfiguredInSection ? " is-configured" : ""}`}
       >
         <div className="provider-row-main">
           <div className="settings-row-text">
@@ -744,11 +805,11 @@ export function SettingsDialog({
             <span className="settings-row-desc">
               <span
                 className="status-dot"
-                data-configured={provider.configured}
+                data-configured={isConfiguredInSection}
                 aria-hidden="true"
               />
-              <span>{formatProviderStatus(provider)}</span>
-              {provider.custom?.baseUrl && (
+              <span>{formatProviderSectionStatus(provider, section)}</span>
+              {section === "custom" && provider.custom?.baseUrl && (
                 <span className="provider-endpoint-meta">{provider.custom.baseUrl}</span>
               )}
             </span>
@@ -767,7 +828,48 @@ export function SettingsDialog({
               >
                 Cancel
               </button>
-            ) : !provider.custom && !provider.configured && !supportsOauth ? (
+            ) : section === "oauth" ? (
+              !isConfiguredInSection ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => void handleOauthLogin(provider.id)}
+                >
+                  {busy ? "Working..." : "Connect"}
+                </button>
+              ) : (
+                <div className="provider-menu-wrap">
+                  <button
+                    type="button"
+                    className="ghost-button provider-menu-trigger"
+                    aria-expanded={isMenuOpen}
+                    disabled={busy}
+                    onClick={() => setOpenMenuId(isMenuOpen ? "" : menuKey)}
+                  >
+                    {busy ? "Working..." : "Manage"}
+                  </button>
+                  {isMenuOpen && (
+                    <div className="provider-action-menu" role="menu">
+                      <button
+                        type="button"
+                        className="provider-menu-item"
+                        onClick={() => void handleOauthLogin(provider.id)}
+                      >
+                        Reconnect OAuth
+                      </button>
+                      <button
+                        type="button"
+                        className="provider-menu-item is-danger"
+                        onClick={() => void handleLogoutProvider(provider.id)}
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            ) : section === "builtin" && !isConfiguredInSection ? (
               <button
                 type="button"
                 className="secondary-button"
@@ -778,26 +880,22 @@ export function SettingsDialog({
                   setOpenMenuId("");
                 }}
               >
-                Connect
+                {busy ? "Saving..." : "Connect"}
               </button>
             ) : (
               <div className="provider-menu-wrap">
                 <button
                   type="button"
-                  className={`${provider.configured || provider.custom ? "ghost-button" : "secondary-button"} provider-menu-trigger`}
+                  className="ghost-button provider-menu-trigger"
                   aria-expanded={isMenuOpen}
                   disabled={busy}
-                  onClick={() => setOpenMenuId(isMenuOpen ? "" : provider.id)}
+                  onClick={() => setOpenMenuId(isMenuOpen ? "" : menuKey)}
                 >
-                  {busy
-                    ? "Working..."
-                    : provider.configured || provider.custom
-                      ? "Manage ▾"
-                      : "Connect ▾"}
+                  {busy ? "Working..." : "Manage"}
                 </button>
                 {isMenuOpen && (
                   <div className="provider-action-menu" role="menu">
-                    {provider.custom ? (
+                    {section === "custom" ? (
                       <>
                         <button
                           type="button"
@@ -848,9 +946,9 @@ export function SettingsDialog({
                             setInlineKeyValue("");
                           }}
                         >
-                          {provider.configured ? "Update API key" : "Enter API key"}
+                          Update API key
                         </button>
-                        {provider.configured && provider.source !== "env" && (
+                        {provider.source !== "env" && (
                           <button
                             type="button"
                             className="provider-menu-item is-danger"
@@ -904,7 +1002,7 @@ export function SettingsDialog({
   return (
     <Dialog open={open} onClose={onClose} title="Settings" className="settings-dialog" size="lg">
       <div className="settings-layout">
-        <nav className="settings-nav" aria-label="Settings sections">
+        <nav className="settings-nav panel-scroll" aria-label="Settings sections">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -912,6 +1010,9 @@ export function SettingsDialog({
               className="settings-nav-item"
               aria-current={tab === id ? "page" : undefined}
               onClick={() => {
+                if (id !== "general") {
+                  setGeneralEditing(false);
+                }
                 setTab(id);
                 setOpenMenuId("");
               }}
@@ -931,7 +1032,7 @@ export function SettingsDialog({
           </header>
 
           <div
-            className="settings-content"
+            className="settings-content panel-scroll"
             onClick={(e) => {
               if (openMenuId && !e.target.closest?.(".provider-menu-wrap")) {
                 setOpenMenuId("");
@@ -975,6 +1076,33 @@ export function SettingsDialog({
                   </div>
                 ) : (
                   <div className="settings-group-card">
+                    <div className="settings-group-head">
+                      <div className="settings-group-head-text">
+                        <span className="settings-group-title">Global Default Configuration</span>
+                        <span className="settings-group-badge">~/.rind/settings.json</span>
+                      </div>
+                      <button
+                        type="button"
+                        className={`${generalEditing ? "ghost-button" : "secondary-button"} settings-edit-btn`}
+                        disabled={savingGeneral}
+                        onClick={() => {
+                          if (generalEditing) {
+                            setGeneralEditing(false);
+                            setGeneralProvider(localSettings.provider || "openai");
+                            setGeneralModel(localSettings.model || "gpt-4o-mini");
+                            setGeneralEffort(localSettings.reasoningEffort || "");
+                          } else {
+                            setGeneralEditing(true);
+                          }
+                        }}
+                      >
+                        {generalEditing ? "Cancel" : "Edit"}
+                      </button>
+                    </div>
+                    <p className="settings-group-desc">
+                      Global defaults applied to new conversations across all workspaces. Click Edit to unlock changes, then Save changes to apply.
+                    </p>
+
                     <div className="settings-row">
                       <div className="settings-row-text">
                         <label htmlFor="web-settings-provider" className="settings-row-label">
@@ -989,6 +1117,7 @@ export function SettingsDialog({
                           id="web-settings-provider"
                           aria-label="Default provider"
                           value={generalProvider}
+                          disabled={!generalEditing || savingGeneral}
                           onChange={(e) => {
                             const nextProvider = e.target.value;
                             setGeneralProvider(nextProvider);
@@ -1000,7 +1129,7 @@ export function SettingsDialog({
                         >
                           {configuredProviders.map((p) => (
                             <option key={p.id} value={p.id}>
-                              {p.name}
+                              {`${p.name} · ${getProviderSourceLabel(p)}`}
                             </option>
                           ))}
                         </select>
@@ -1013,7 +1142,7 @@ export function SettingsDialog({
                           Default model
                         </label>
                         <span className="settings-row-desc">
-                          Default model for the selected provider.
+                          Default model and source (Built-in / Custom / OAuth) for the selected provider.
                         </span>
                       </div>
                       <div className="settings-row-control">
@@ -1021,11 +1150,12 @@ export function SettingsDialog({
                           id="web-settings-model"
                           aria-label="Default model"
                           value={generalModel}
+                          disabled={!generalEditing || savingGeneral}
                           onChange={(e) => setGeneralModel(e.target.value)}
                         >
                           {providerModels.map((m) => (
                             <option key={m} value={m}>
-                              {m}
+                              {`${m} · ${selectedProviderSourceLabel}`}
                             </option>
                           ))}
                         </select>
@@ -1047,6 +1177,7 @@ export function SettingsDialog({
                             id="web-settings-effort"
                             aria-label="Reasoning effort"
                             value={supportedEfforts.includes(generalEffort) ? generalEffort : ""}
+                            disabled={!generalEditing || savingGeneral}
                             onChange={(e) => setGeneralEffort(e.target.value)}
                           >
                             <option value="">Default</option>
@@ -1078,6 +1209,19 @@ export function SettingsDialog({
                     {providerNotice.text}
                   </p>
                 )}
+
+                <div className="settings-group-card">
+                  <div className="settings-group-head">
+                    <span className="settings-group-title">OAuth &amp; Accounts</span>
+                    <span className="settings-group-badge">Subscription</span>
+                  </div>
+                  <div className="provider-section-rows">
+                    {oauthProvidersList.map((p) => renderProviderRow(p, "oauth"))}
+                    {oauthProvidersList.length === 0 && (
+                      <p className="muted provider-empty">No OAuth providers available.</p>
+                    )}
+                  </div>
+                </div>
 
                 <div className="settings-group-card">
                   <div className="settings-group-head">
@@ -1189,7 +1333,7 @@ export function SettingsDialog({
                   )}
 
                   <div className="provider-section-rows">
-                    {customProvidersList.map(renderProviderRow)}
+                    {customProvidersList.map((p) => renderProviderRow(p, "custom"))}
                     {customProvidersList.length === 0 && !customFormOpen && (
                       <p className="muted provider-empty">
                         No custom API endpoints configured.
@@ -1211,7 +1355,7 @@ export function SettingsDialog({
                     />
                   </div>
                   <div className="provider-section-rows">
-                    {builtinProvidersList.map(renderProviderRow)}
+                    {builtinProvidersList.map((p) => renderProviderRow(p, "builtin"))}
                     {builtinProvidersList.length === 0 && (
                       <p className="muted provider-empty">
                         No matching built-in providers.
@@ -1332,7 +1476,7 @@ export function SettingsDialog({
                 type="submit"
                 form="web-settings-general-form"
                 className="primary-button"
-                disabled={savingGeneral}
+                disabled={!generalEditing || savingGeneral}
               >
                 {savingGeneral ? "Saving..." : "Save changes"}
               </button>

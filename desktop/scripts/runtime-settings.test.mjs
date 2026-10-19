@@ -148,8 +148,9 @@ test("saveRuntimeSettings persists global defaults, provider credentials, and cu
   })
 })
 
-test("desktop settings close button is pinned, General only shows configured providers without Workspace Override, and Providers separates Custom APIs from Built-in Providers", async () => {
+test("desktop settings close button is pinned, General locks Global Default Configuration until Edit and shows model source tags, Providers separates OAuth / Custom / Built-in without ▾, and scrollbars match sidebar", async () => {
   const domSource = await readFile(new URL("../src/renderer/app/dom.ts", import.meta.url), "utf8")
+  const baseCssSource = await readFile(new URL("../src/renderer/styles/base.css", import.meta.url), "utf8")
   const cssSource = await readFile(new URL("../src/renderer/styles/dialogs.css", import.meta.url), "utf8")
   const settingsSource = await readFile(new URL("../src/renderer/app/settings.ts", import.meta.url), "utf8")
   const providersSource = await readFile(new URL("../src/renderer/app/providers-ui.ts", import.meta.url), "utf8")
@@ -165,14 +166,30 @@ test("desktop settings close button is pinned, General only shows configured pro
     "Workspace Override must not appear in General settings",
   )
   assert.ok(
-    settingsSource.includes(".filter((p) => p.configured)"),
-    "General settings must filter to configured providers only",
+    domSource.includes("Global Default Configuration") &&
+      domSource.includes('id="settings-general-edit"') &&
+      domSource.includes('<select id="settings-provider" disabled>') &&
+      domSource.includes('<select id="settings-model" disabled>') &&
+      domSource.includes('<select id="settings-reasoning" disabled>') &&
+      settingsSource.includes("syncGeneralEditingState"),
+    "General settings must explicitly state Global Default Configuration and lock controls until Edit is clicked",
   )
   assert.ok(
-    providersSource.includes("Custom APIs") &&
+    settingsSource.includes(".filter((p) => p.configured)") &&
+      settingsSource.includes("getProviderSourceLabelById(providerId)"),
+    "General settings must filter to configured providers and display Built-in / Custom / OAuth source tags",
+  )
+  assert.ok(
+    providersSource.includes("OAuth &amp; Accounts") &&
+      providersSource.includes("Custom APIs") &&
       providersSource.includes("Built-in Providers") &&
       providersSource.includes("renderSingleActionControl"),
-    "Providers must separate Custom APIs and Built-in Providers and render a single action control per row",
+    "Providers must separate OAuth & Accounts, Custom APIs, and Built-in Providers",
+  )
+  assert.equal(
+    providersSource.includes("Manage ▾") || providersSource.includes("Connect ▾"),
+    false,
+    "Manage and Connect buttons must not contain the ▾ symbol",
   )
   assert.ok(
     domSource.includes('<header class="settings-content-head">') &&
@@ -180,10 +197,9 @@ test("desktop settings close button is pinned, General only shows configured pro
     "close-settings button must be inside settings-content-head",
   )
   assert.ok(
-    cssSource.includes(".settings-content {") &&
-      cssSource.includes("overflow: hidden;") &&
-      cssSource.includes(".settings-panel {") &&
-      cssSource.includes("overflow-y: auto;"),
-    "settings-content must not scroll its header; settings-panel must scroll independently",
+    baseCssSource.includes("*::-webkit-scrollbar") &&
+      domSource.includes('class="settings-panel panel-scroll"') &&
+      !cssSource.includes("max-height: 220px;"),
+    "Settings and Preferences shortcuts must use the unified thin sidebar scrollbar without a nested 220px scrollbar",
   )
 })

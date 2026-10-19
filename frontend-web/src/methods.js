@@ -44,6 +44,8 @@ export const methods = Object.freeze({
   contextInspect: "rind/context/inspect",
   usageSummary: "rind/usage/summary",
   authList: "rind/auth/list",
+  authLogin: "rind/auth/login",
+  authLogout: "rind/auth/logout",
   backgroundList: "rind/background/list",
   backgroundOutput: "rind/background/output",
   agentsRequest: "agents/request",
