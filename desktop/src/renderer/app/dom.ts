@@ -140,64 +140,54 @@ appRoot.innerHTML = `
         <header class="settings-content-head">
           <div class="settings-content-head-meta">
             <h3 id="settings-active-title" class="settings-section-title">General</h3>
-            <p id="settings-active-desc" class="settings-section-desc">Global runtime defaults in ~/.rind/settings.json and workspace overrides.</p>
+            <p id="settings-active-desc" class="settings-section-desc">Default provider and model for new conversations.</p>
           </div>
           <button id="close-settings" type="button" class="icon-button settings-close" aria-label="Close settings" data-tooltip="Close">${renderIcon(X)}</button>
         </header>
         <section id="settings-panel-general" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-general" data-settings-panel="general">
-          <div class="settings-group-card">
-            <div class="settings-group-head">
-              <span class="settings-group-title">Global Runtime Defaults</span>
-              <span class="settings-group-badge">~/.rind/settings.json</span>
+          <div id="settings-general-empty" class="settings-group-card settings-empty-card" hidden>
+            <div class="settings-row-text">
+              <span class="settings-row-label">No providers connected</span>
+              <span class="settings-row-desc">Connect a provider or add a custom API in Providers to configure your defaults.</span>
             </div>
+            <button id="settings-go-providers" type="button" class="secondary-button">Configure providers</button>
+          </div>
+          <div id="settings-general-card" class="settings-group-card">
             <div class="settings-row">
               <div class="settings-row-text">
                 <span class="settings-row-label"><label for="settings-provider">Default provider</label></span>
-                <span class="settings-row-desc">Primary model provider for new sessions across all workspaces.</span>
+                <span class="settings-row-desc">Connected provider used for new conversations.</span>
               </div>
               <div class="settings-row-control">
                 <select id="settings-provider"></select>
               </div>
             </div>
-            <div class="settings-row">
+            <div id="settings-model-row" class="settings-row">
               <div class="settings-row-text">
                 <span class="settings-row-label"><label for="settings-model">Default model</label></span>
-                <span class="settings-row-desc">Model identifier used by default for the selected provider.</span>
+                <span class="settings-row-desc">Default model for the selected provider.</span>
               </div>
               <div class="settings-row-control">
-                <input id="settings-model" type="text" list="settings-model-datalist" placeholder="e.g. deepseek-flash, gpt-5" autocomplete="off" />
-                <datalist id="settings-model-datalist"></datalist>
+                <select id="settings-model"></select>
               </div>
             </div>
-            <div class="settings-row">
+            <div id="settings-reasoning-row" class="settings-row">
               <div class="settings-row-text">
                 <span class="settings-row-label"><label for="settings-reasoning">Reasoning effort</label></span>
-                <span class="settings-row-desc">Default thinking budget for reasoning-capable models.</span>
+                <span class="settings-row-desc">Thinking budget for reasoning-capable models.</span>
               </div>
               <div class="settings-row-control">
                 <select id="settings-reasoning">
-                  <option value="">Provider default</option>
+                  <option value="">Default</option>
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
-                  <option value="xhigh">Extra high (xhigh)</option>
-                  <option value="max">Maximum (max)</option>
+                  <option value="xhigh">Extra high</option>
+                  <option value="max">Maximum</option>
                 </select>
               </div>
             </div>
-            <div class="settings-row">
-              <div class="settings-row-text">
-                <span class="settings-row-label"><label for="settings-api-key">Provider credentials</label></span>
-                <span class="settings-row-desc"><span id="settings-key-status"></span></span>
-              </div>
-              <div class="settings-row-control settings-row-control-stack">
-                <input id="settings-api-key" type="password" autocomplete="new-password" placeholder="Optional API key for selected provider" />
-                <input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" hidden />
-                <button id="settings-go-providers" type="button" class="ghost-button settings-link-btn">Manage subscriptions &amp; keys →</button>
-              </div>
-            </div>
           </div>
-          <div id="settings-workspace-defaults" class="settings-group-card"></div>
         </section>
         <section id="settings-panel-providers" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-providers" data-settings-panel="providers" hidden>
           <div id="settings-providers" class="provider-list" aria-live="polite"></div>
@@ -336,11 +326,8 @@ export const sidebarToggle = requiredElement<HTMLButtonElement>("toggle-sidebar"
 export const settingsDialog = requiredElement<HTMLDialogElement>("settings-dialog")
 export const settingsForm = requiredElement<HTMLFormElement>("settings-form")
 export const settingsProvider = requiredElement<HTMLSelectElement>("settings-provider")
-export const settingsApiKey = requiredElement<HTMLInputElement>("settings-api-key")
-export const settingsBaseUrl = requiredElement<HTMLInputElement>("settings-base-url")
-export const settingsModel = requiredElement<HTMLInputElement>("settings-model")
+export const settingsModel = requiredElement<HTMLSelectElement>("settings-model")
 export const settingsReasoning = requiredElement<HTMLSelectElement>("settings-reasoning")
-export const settingsKeyStatus = requiredElement("settings-key-status")
 export const settingsNotifications = requiredElement<HTMLInputElement>("settings-notifications")
 export const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
 export const settingsProviders = requiredElement("settings-providers")

@@ -3,11 +3,8 @@ import { modelSelectionTarget, normalizeModelList, stringModelOptions } from "..
 import {
   requiredElement,
   saveSettingsButton,
-  settingsApiKey,
-  settingsBaseUrl,
   settingsDialog,
   settingsForm,
-  settingsKeyStatus,
   settingsModel,
   settingsNotifications,
   settingsProvider,
@@ -17,13 +14,14 @@ import { escapeAttribute, escapeHtml } from "./html.ts"
 import {
   bindProviderEvents,
   getMergedProviders,
+  getModelReasoningEfforts,
+  getProviderModels,
   loadProviders,
-  providerStatus,
   renderProviders,
   setOnProvidersUpdated,
 } from "./providers-ui.ts"
 import { requestForSession, runAction, runtimeTurnActive } from "./runtime.ts"
-import { applyOverview, chatProject, currentRuntimeSnapshot } from "./sessions.ts"
+import { applyOverview, currentRuntimeSnapshot } from "./sessions.ts"
 import { render, setTheme, shortcutRows } from "./shell.ts"
 import { state } from "./state.ts"
 
@@ -34,11 +32,11 @@ let activeSettingsTab: SettingsTab = "general"
 const TAB_HEADINGS: Record<SettingsTab, { title: string; desc: string }> = {
   general: {
     title: "General",
-    desc: "Global runtime defaults (~/.rind/settings.json) and active workspace overrides.",
+    desc: "Default provider and model for new conversations (~/.rind/settings.json).",
   },
   providers: {
-    title: "Providers & Subscriptions",
-    desc: "Manage OAuth subscriptions, API keys (~/.rind/auth.json), and custom endpoints (~/.rind/providers.json).",
+    title: "Providers",
+    desc: "Manage custom API endpoints (~/.rind/providers.json) and built-in provider credentials (~/.rind/auth.json).",
   },
   preferences: {
     title: "Preferences",
@@ -46,15 +44,13 @@ const TAB_HEADINGS: Record<SettingsTab, { title: string; desc: string }> = {
   },
 }
 
-type FolderDefaultsSnapshot = {
-  workspaceRoot: string
-  folder: { provider_id?: string; model_id?: string; reasoning_effort?: string } | null
-  resolved: { provider_id?: string; model_id?: string; reasoning_effort?: string } | null
-  inherited: boolean
+const EFFORT_LABELS: Record<string, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Maximum",
 }
-
-let folderDefaultsState: FolderDefaultsSnapshot | null = null
-let folderDefaultsBusy = false
 
 function isSettingsTab(value: unknown): value is SettingsTab {
   return settingsTabs.includes(value as SettingsTab)
@@ -74,171 +70,96 @@ function renderSettingsTabs() {
   const descEl = document.getElementById("settings-active-desc")
   if (titleEl) titleEl.textContent = heading.title
   if (descEl) descEl.textContent = heading.desc
-  // Provider sign-in and Preferences apply immediately; General uses Save changes.
-  saveSettingsButton.hidden = activeSettingsTab !== "general"
+  const hasConfigured = getMergedProviders().some((p) => p.configured)
+  saveSettingsButton.hidden = activeSettingsTab !== "general" || !hasConfigured
 }
 
 export function selectSettingsTab(tab: SettingsTab, focus = false) {
   activeSettingsTab = tab
   renderSettingsTabs()
   if (tab === "providers") void loadProviders()
-  if (tab === "general") {
-    populateGeneralProviderControls()
-    void loadWorkspaceFolderDefaults()
-  }
+  if (tab === "general") populateGeneralControls()
   if (focus) settingsDialog.querySelector<HTMLButtonElement>(`[data-settings-tab="${tab}"]`)?.focus()
 }
 
-function populateGeneralProviderControls() {
-  const merged = getMergedProviders()
-  const currentProvider = settingsProvider.value || state.settings.provider || "openai"
-  const optionsHtml: string[] = []
-  const seen = new Set<string>()
+function populateGeneralControls(preferredProvider?: string, preferredModel?: string, preferredEffort?: string) {
+  const configured = getMergedProviders()
+    .filter((p) => p.configured)
+    .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
 
-  // Sort configured providers first, then alphabetical
-  const sorted = [...merged].sort((a, b) => {
-    if (a.configured !== b.configured) return a.configured ? -1 : 1
-    return (a.name || a.id).localeCompare(b.name || b.id)
-  })
+  const emptyEl = document.getElementById("settings-general-empty")
+  const cardEl = document.getElementById("settings-general-card")
 
-  for (const p of sorted) {
-    seen.add(p.id)
-    const statusSuffix = p.configured
-      ? p.authType === "oauth"
-        ? " · OAuth Subscription"
-        : " · Connected"
-      : ""
-    const selected = p.id === currentProvider ? " selected" : ""
-    optionsHtml.push(
-      `<option value="${escapeAttribute(p.id)}"${selected}>${escapeHtml(p.name || p.id)} (${escapeHtml(p.id)})${escapeHtml(statusSuffix)}</option>`,
-    )
+  if (configured.length === 0) {
+    if (emptyEl) emptyEl.hidden = false
+    if (cardEl) cardEl.hidden = true
+    saveSettingsButton.hidden = true
+    return
   }
 
-  if (currentProvider && !seen.has(currentProvider)) {
-    optionsHtml.unshift(
-      `<option value="${escapeAttribute(currentProvider)}" selected>${escapeHtml(currentProvider)}</option>`,
-    )
-  }
+  if (emptyEl) emptyEl.hidden = true
+  if (cardEl) cardEl.hidden = false
+  if (activeSettingsTab === "general") saveSettingsButton.hidden = false
 
-  settingsProvider.innerHTML = optionsHtml.join("")
-  settingsProvider.value = currentProvider
-  updateProviderKeyStatus()
-  populateModelDatalist(currentProvider)
-}
+  const desiredProvider = preferredProvider ?? settingsProvider.value ?? state.settings.provider ?? ""
+  const activeProvider = configured.some((p) => p.id === desiredProvider)
+    ? desiredProvider
+    : configured[0].id
 
-function populateModelDatalist(providerId: string) {
-  const datalist = document.getElementById("settings-model-datalist")
-  if (!datalist) return
-  const modelIds = new Set<string>()
-
-  for (const m of state.models) {
-    if (!m.providerId || m.providerId === providerId) {
-      if (m.id) modelIds.add(m.id)
-    }
-  }
-  const custom = (state.settings.customProviders || []).find((c) => c.id === providerId)
-  if (custom) {
-    for (const m of custom.models) modelIds.add(m)
-  }
-  for (const m of state.models) {
-    if (m.id) modelIds.add(m.id)
-  }
-  if (state.settings.model) modelIds.add(state.settings.model)
-
-  datalist.innerHTML = [...modelIds]
-    .slice(0, 60)
-    .map((id) => `<option value="${escapeAttribute(id)}"></option>`)
+  settingsProvider.innerHTML = configured
+    .map((p) => {
+      const selected = p.id === activeProvider ? " selected" : ""
+      return `<option value="${escapeAttribute(p.id)}"${selected}>${escapeHtml(p.name || p.id)}</option>`
+    })
     .join("")
-}
+  settingsProvider.value = activeProvider
 
-function updateProviderKeyStatus() {
-  const selectedId = settingsProvider.value || state.settings.provider || "openai"
-  const merged = getMergedProviders()
-  const found = merged.find((p) => p.id === selectedId)
-  if (found && found.configured) {
-    settingsKeyStatus.textContent = `${found.name || found.id}: ${providerStatus(found)}`
-    settingsKeyStatus.dataset.configured = "true"
-  } else if (state.settings.hasApiKey) {
-    settingsKeyStatus.textContent = `No stored key for ${selectedId} yet. Enter a key or configure in Providers.`
-    settingsKeyStatus.dataset.configured = "false"
-  } else {
-    settingsKeyStatus.textContent = "No provider credentials configured yet."
-    settingsKeyStatus.dataset.configured = "false"
-  }
-}
-
-async function loadWorkspaceFolderDefaults() {
-  const workspaceRoot = chatProject()?.path || state.chatProjectPath || ""
-  if (!workspaceRoot || state.runtime.status !== "ready") {
-    folderDefaultsState = null
-    renderWorkspaceFolderDefaults()
-    return
-  }
-  try {
-    const res = (await window.api.runtime.request(runtimeMethods.folderDefaultsGet, {
-      workspace_root: workspaceRoot,
-    })) as Record<string, unknown> | null
-    if (res && typeof res === "object") {
-      folderDefaultsState = {
-        workspaceRoot,
-        folder: (res.folder as FolderDefaultsSnapshot["folder"]) || null,
-        resolved: (res.resolved as FolderDefaultsSnapshot["resolved"]) || null,
-        inherited: res.inherited !== false && !res.folder,
-      }
-    }
-  } catch {
-    folderDefaultsState = null
-  }
-  renderWorkspaceFolderDefaults()
-}
-
-function renderWorkspaceFolderDefaults() {
-  const container = document.getElementById("settings-workspace-defaults")
-  if (!container) return
-  const workspaceRoot = chatProject()?.path || state.chatProjectPath || ""
-  if (!workspaceRoot) {
-    container.hidden = true
-    container.innerHTML = ""
-    return
-  }
-  container.hidden = false
-  const folderName = workspaceRoot.replace(/\\/g, "/").split("/").filter(Boolean).pop() || workspaceRoot
-  const hasOverride = Boolean(
-    folderDefaultsState?.folder &&
-      (folderDefaultsState.folder.provider_id ||
-        folderDefaultsState.folder.model_id ||
-        folderDefaultsState.folder.reasoning_effort),
+  populateModelSelect(activeProvider, preferredModel ?? settingsModel.value ?? state.settings.model)
+  populateReasoningSelect(
+    activeProvider,
+    settingsModel.value,
+    preferredEffort ?? settingsReasoning.value ?? state.settings.reasoningEffort,
   )
-  const overrideSummary = hasOverride
-    ? [
-        folderDefaultsState?.folder?.provider_id,
-        folderDefaultsState?.folder?.model_id,
-        folderDefaultsState?.folder?.reasoning_effort
-          ? `effort: ${folderDefaultsState.folder.reasoning_effort}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : "Inheriting global defaults from ~/.rind/settings.json"
+}
 
-  const disabledAttr = state.runtime.status !== "ready" || folderDefaultsBusy ? " disabled" : ""
+function populateModelSelect(providerId: string, preferredModel = "") {
+  const models = getProviderModels(providerId)
+  const activeModel = models.includes(preferredModel)
+    ? preferredModel
+    : models[0] || preferredModel || ""
 
-  container.innerHTML = `
-    <div class="settings-group-head">
-      <span class="settings-group-title">Workspace Override · ${escapeHtml(folderName)}</span>
-      <span class="settings-group-badge">${hasOverride ? "Custom override" : "Inherited"}</span>
-    </div>
-    <div class="settings-row">
-      <div class="settings-row-text">
-        <span class="settings-row-label">${escapeHtml(overrideSummary)}</span>
-        <span class="settings-row-desc">${escapeHtml(workspaceRoot)}</span>
-      </div>
-      <div class="settings-row-control provider-actions">
-        <button type="button" class="secondary-button" data-folder-default-action="pin"${disabledAttr}>Pin form values to workspace</button>
-        ${hasOverride ? `<button type="button" class="ghost-button" data-folder-default-action="reset"${disabledAttr}>Reset to global</button>` : ""}
-      </div>
-    </div>
-  `
+  const optionIds = models.length > 0 ? models : activeModel ? [activeModel] : []
+  settingsModel.innerHTML = optionIds
+    .map((id) => {
+      const selected = id === activeModel ? " selected" : ""
+      return `<option value="${escapeAttribute(id)}"${selected}>${escapeHtml(id)}</option>`
+    })
+    .join("")
+  settingsModel.value = activeModel
+}
+
+function populateReasoningSelect(providerId: string, modelId: string, preferredEffort = "") {
+  const row = document.getElementById("settings-reasoning-row")
+  const efforts = getModelReasoningEfforts(providerId, modelId)
+  if (!efforts || efforts.length === 0) {
+    if (row) row.hidden = true
+    settingsReasoning.innerHTML = `<option value="" selected>Default</option>`
+    settingsReasoning.value = ""
+    return
+  }
+
+  if (row) row.hidden = false
+  const activeEffort = efforts.includes(preferredEffort) ? preferredEffort : ""
+  const optionsHtml = [
+    `<option value=""${activeEffort === "" ? " selected" : ""}>Default</option>`,
+    ...efforts.map((effort) => {
+      const selected = effort === activeEffort ? " selected" : ""
+      const label = EFFORT_LABELS[effort] || effort
+      return `<option value="${escapeAttribute(effort)}"${selected}>${escapeHtml(label)}</option>`
+    }),
+  ]
+  settingsReasoning.innerHTML = optionsHtml.join("")
+  settingsReasoning.value = activeEffort
 }
 
 function renderPreferencesControls() {
@@ -267,16 +188,12 @@ function renderPreferencesControls() {
 export function renderSettings() {
   if (state.settingsOpen && !settingsDialog.open) settingsDialog.showModal()
   if (!state.settingsOpen && settingsDialog.open) settingsDialog.close()
-  updateProviderKeyStatus()
   saveSettingsButton.disabled = state.settingsSaving
   saveSettingsButton.textContent = state.settingsSaving ? "Saving..." : "Save changes"
   renderPreferencesControls()
   renderSettingsTabs()
 }
 
-// The runtime target reads model/list (provider-aware, all signed-in
-// providers); the settings target falls back to the main-process catalog
-// fetch of the configured OpenAI-compatible endpoint.
 export async function loadAvailableModels() {
   const target = modelSelectionTarget(currentRuntimeSnapshot().status, runtimeTurnActive())
   if (target === "runtime") {
@@ -289,8 +206,7 @@ export async function loadAvailableModels() {
     )
     if (sessionId !== state.viewedSessionId || workspace !== state.chatProjectPath) return
     state.models = listing.models
-    if (state.settingsOpen) populateModelDatalist(settingsProvider.value || state.settings.provider || "openai")
-    // Catalog refresh must not overwrite a new-session draft selection.
+    if (state.settingsOpen) populateGeneralControls()
     if (!sessionId) {
       if (!state.modelProvider && state.model === listing.currentModelId) {
         state.modelProvider = listing.currentProviderId
@@ -323,17 +239,14 @@ export async function loadSettings() {
 export function openSettings(tab: SettingsTab = "general") {
   state.settingsOpen = true
   activeSettingsTab = tab
+  const initialProvider = state.settings.provider || "openai"
+  const initialModel = state.settings.model || "gpt-4o-mini"
+  const initialEffort = state.settings.reasoningEffort || ""
+  populateGeneralControls(initialProvider, initialModel, initialEffort)
   void loadProviders().then(() => {
-    populateGeneralProviderControls()
+    populateGeneralControls(state.settings.provider, state.settings.model, state.settings.reasoningEffort)
   })
-  settingsProvider.value = state.settings.provider || "openai"
-  settingsApiKey.value = ""
-  settingsBaseUrl.value = state.settings.baseUrl || ""
-  settingsModel.value = state.settings.model || ""
-  settingsReasoning.value = state.settings.reasoningEffort || ""
-  populateGeneralProviderControls()
   renderProviders()
-  void loadWorkspaceFolderDefaults()
   render()
 }
 
@@ -346,7 +259,6 @@ export async function saveSettings() {
   const provider = settingsProvider.value.trim() || state.settings.provider || "openai"
   const model = settingsModel.value.trim() || state.settings.model || "gpt-4o-mini"
   const reasoningEffort = settingsReasoning.value.trim()
-  const apiKey = settingsApiKey.value.trim()
 
   state.settingsSaving = true
   state.notice = "Saving settings..."
@@ -356,10 +268,8 @@ export async function saveSettings() {
       provider,
       model,
       reasoningEffort,
-      ...(apiKey ? { providerCredential: { providerId: provider, apiKey } } : {}),
     })
 
-    // Sync global defaults with running runtime if ready
     if (state.runtime.status === "ready") {
       await window.api.runtime
         .request(runtimeMethods.folderDefaultsSet, {
@@ -378,7 +288,6 @@ export async function saveSettings() {
       state.effort = reasoningEffort
     }
 
-    settingsApiKey.value = ""
     state.settingsOpen = false
     state.settingsAutoOpened = true
     state.notice = `Saved global defaults (${provider} / ${model}).`
@@ -392,7 +301,7 @@ export async function saveSettings() {
 
 export function bindSettingsEvents(): void {
   setOnProvidersUpdated(() => {
-    if (state.settingsOpen) populateGeneralProviderControls()
+    if (state.settingsOpen) populateGeneralControls()
   })
 
   settingsForm.addEventListener("submit", (event) => {
@@ -416,51 +325,17 @@ export function bindSettingsEvents(): void {
   })
 
   settingsProvider.addEventListener("change", () => {
-    updateProviderKeyStatus()
-    populateModelDatalist(settingsProvider.value)
+    const providerId = settingsProvider.value
+    populateModelSelect(providerId, "")
+    populateReasoningSelect(providerId, settingsModel.value, "")
+  })
+
+  settingsModel.addEventListener("change", () => {
+    populateReasoningSelect(settingsProvider.value, settingsModel.value, settingsReasoning.value)
   })
 
   document.getElementById("settings-go-providers")?.addEventListener("click", () => {
     selectSettingsTab("providers", true)
-  })
-
-  document.getElementById("settings-workspace-defaults")?.addEventListener("click", (event) => {
-    const btn = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-folder-default-action]") : null
-    if (!btn || btn.disabled) return
-    const action = btn.dataset.folderDefaultAction
-    const workspaceRoot = chatProject()?.path || state.chatProjectPath || ""
-    if (!workspaceRoot || state.runtime.status !== "ready") return
-    folderDefaultsBusy = true
-    renderWorkspaceFolderDefaults()
-    void (async () => {
-      try {
-        if (action === "pin") {
-          const provider = settingsProvider.value.trim() || state.settings.provider || "openai"
-          const model = settingsModel.value.trim() || state.settings.model || "gpt-4o-mini"
-          const effort = settingsReasoning.value.trim()
-          await window.api.runtime.request(runtimeMethods.folderDefaultsSet, {
-            scope: "folder",
-            workspace_root: workspaceRoot,
-            provider_id: provider,
-            model_id: model,
-            reasoning_effort: effort,
-          })
-          state.notice = "Pinned model defaults to current workspace."
-        } else if (action === "reset") {
-          await window.api.runtime.request(runtimeMethods.folderDefaultsUnset, {
-            workspace_root: workspaceRoot,
-          })
-          state.notice = "Reset workspace defaults to global settings."
-        }
-        await loadWorkspaceFolderDefaults()
-      } catch (error) {
-        state.notice = error instanceof Error ? error.message : String(error)
-      } finally {
-        folderDefaultsBusy = false
-        renderWorkspaceFolderDefaults()
-        render()
-      }
-    })()
   })
 
   document.getElementById("settings-theme-group")?.addEventListener("click", (event) => {

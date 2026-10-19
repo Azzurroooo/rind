@@ -5,45 +5,238 @@ import { loadAvailableModels } from "./settings.ts"
 import { render } from "./shell.ts"
 import { state } from "./state.ts"
 
-export const BUILTIN_PROVIDER_CATALOG: ReadonlyArray<{
+export type CatalogModelSpec = {
+  id: string
+  efforts: readonly string[]
+}
+
+export type BuiltinProviderSpec = {
   id: string
   name: string
-  methods: string[]
+  api: string
+  methods: readonly string[]
   envKey?: string
-}> = [
-  { id: "openai", name: "OpenAI", methods: ["api_key", "oauth"], envKey: "OPENAI_API_KEY" },
-  { id: "deepseek", name: "DeepSeek", methods: ["api_key"], envKey: "DEEPSEEK_API_KEY" },
-  { id: "anthropic", name: "Anthropic", methods: ["api_key"], envKey: "ANTHROPIC_API_KEY" },
-  { id: "google", name: "Google Gemini", methods: ["api_key"], envKey: "GEMINI_API_KEY" },
-  { id: "openrouter", name: "OpenRouter", methods: ["api_key"], envKey: "OPENROUTER_API_KEY" },
-  { id: "xai", name: "xAI (Grok)", methods: ["api_key"], envKey: "XAI_API_KEY" },
-  { id: "qwen", name: "Qwen (DashScope)", methods: ["api_key"], envKey: "DASHSCOPE_API_KEY" },
-  { id: "kimi-coding", name: "Kimi for Coding", methods: ["api_key"], envKey: "KIMI_API_KEY" },
-  { id: "moonshot", name: "Moonshot AI", methods: ["api_key"], envKey: "MOONSHOT_API_KEY" },
-  { id: "zai", name: "Z.AI", methods: ["api_key"], envKey: "ZAI_API_KEY" },
-  { id: "zhipu", name: "Zhipu AI (GLM)", methods: ["api_key"], envKey: "ZHIPU_API_KEY" },
-  { id: "minimax", name: "MiniMax", methods: ["api_key"], envKey: "MINIMAX_API_KEY" },
-  { id: "volcengine", name: "Volcengine (Ark)", methods: ["api_key"], envKey: "ARK_API_KEY" },
-  { id: "xiaomi", name: "Xiaomi MiMo", methods: ["api_key"], envKey: "MIMO_API_KEY" },
-  { id: "hunyuan", name: "Tencent Hunyuan", methods: ["api_key"], envKey: "HUNYUAN_API_KEY" },
-  { id: "groq", name: "Groq", methods: ["api_key"], envKey: "GROQ_API_KEY" },
-  { id: "mistral", name: "Mistral", methods: ["api_key"], envKey: "MISTRAL_API_KEY" },
-  { id: "siliconflow", name: "SiliconFlow", methods: ["api_key"], envKey: "SILICONFLOW_API_KEY" },
-  { id: "together", name: "Together AI", methods: ["api_key"], envKey: "TOGETHER_API_KEY" },
-  { id: "fireworks", name: "Fireworks AI", methods: ["api_key"], envKey: "FIREWORKS_API_KEY" },
-  { id: "cerebras", name: "Cerebras", methods: ["api_key"], envKey: "CEREBRAS_API_KEY" },
-  { id: "perplexity", name: "Perplexity", methods: ["api_key"], envKey: "PERPLEXITY_API_KEY" },
-  { id: "cohere", name: "Cohere", methods: ["api_key"], envKey: "COHERE_API_KEY" },
-  { id: "nvidia", name: "NVIDIA NIM", methods: ["api_key"], envKey: "NVIDIA_API_KEY" },
-  { id: "longcat", name: "LongCat", methods: ["api_key"], envKey: "LONGCAT_API_KEY" },
+  models: readonly CatalogModelSpec[]
+}
+
+export const BUILTIN_PROVIDER_CATALOG: readonly BuiltinProviderSpec[] = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    api: "openai-responses",
+    methods: ["api_key", "oauth"],
+    envKey: "OPENAI_API_KEY",
+    models: [
+      { id: "gpt-5.5", efforts: ["low", "medium", "high", "xhigh"] },
+      { id: "gpt-5.4", efforts: ["low", "medium", "high", "xhigh"] },
+      { id: "gpt-5.4-mini", efforts: ["low", "medium", "high", "xhigh"] },
+      { id: "gpt-5", efforts: ["low", "medium", "high", "xhigh"] },
+      { id: "gpt-4o-mini", efforts: [] },
+      { id: "gpt-4.1", efforts: [] },
+      { id: "gpt-4o", efforts: [] },
+      { id: "o3", efforts: ["low", "medium", "high"] },
+      { id: "o4-mini", efforts: ["low", "medium", "high"] },
+    ],
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "DEEPSEEK_API_KEY",
+    models: [
+      { id: "deepseek-flash", efforts: ["low", "high", "max"] },
+      { id: "deepseek-v4-pro", efforts: ["low", "high", "max"] },
+      { id: "deepseek-v4-flash", efforts: ["low", "high", "max"] },
+    ],
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    api: "anthropic-messages",
+    methods: ["api_key"],
+    envKey: "ANTHROPIC_API_KEY",
+    models: [
+      { id: "claude-sonnet-5-5", efforts: [] },
+      { id: "claude-opus-5-5", efforts: [] },
+      { id: "claude-sonnet-4-6", efforts: [] },
+      { id: "claude-opus-4-6", efforts: [] },
+      { id: "claude-haiku-4-5", efforts: [] },
+    ],
+  },
+  {
+    id: "google",
+    name: "Google Gemini",
+    api: "google-generative-ai",
+    methods: ["api_key"],
+    envKey: "GEMINI_API_KEY",
+    models: [
+      { id: "gemini-3.5-flash", efforts: [] },
+      { id: "gemini-3.1-pro-preview", efforts: [] },
+      { id: "gemini-2.5-pro", efforts: [] },
+      { id: "gemini-2.5-flash", efforts: [] },
+    ],
+  },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "OPENROUTER_API_KEY",
+    models: [
+      { id: "openai/gpt-5.5", efforts: [] },
+      { id: "anthropic/claude-sonnet-4.6", efforts: [] },
+      { id: "deepseek/deepseek-v4.1-flash", efforts: [] },
+    ],
+  },
+  {
+    id: "xai",
+    name: "xAI (Grok)",
+    api: "openai-responses",
+    methods: ["api_key"],
+    envKey: "XAI_API_KEY",
+    models: [
+      { id: "grok-4.7", efforts: ["low", "medium", "high", "xhigh"] },
+      { id: "grok-4.6", efforts: ["low", "medium", "high", "xhigh"] },
+      { id: "grok-4.5", efforts: ["low", "medium", "high"] },
+    ],
+  },
+  {
+    id: "qwen",
+    name: "Qwen (DashScope)",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "DASHSCOPE_API_KEY",
+    models: [
+      { id: "qwen3-coder-plus", efforts: [] },
+      { id: "qwen3.8-max", efforts: ["low", "medium", "xhigh"] },
+      { id: "qwen3.8-flash", efforts: ["low", "medium", "xhigh"] },
+      { id: "qwen-max", efforts: [] },
+    ],
+  },
+  {
+    id: "kimi-coding",
+    name: "Kimi for Coding",
+    api: "anthropic-messages",
+    methods: ["api_key"],
+    envKey: "KIMI_API_KEY",
+    models: [
+      { id: "kimi-for-coding", efforts: [] },
+      { id: "k3", efforts: [] },
+    ],
+  },
+  {
+    id: "moonshot",
+    name: "Moonshot AI",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "MOONSHOT_API_KEY",
+    models: [
+      { id: "kimi-k3", efforts: ["low", "high", "max"] },
+      { id: "kimi-k2.7-code", efforts: [] },
+      { id: "kimi-k2.6", efforts: [] },
+    ],
+  },
+  {
+    id: "zai",
+    name: "Z.AI",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "ZAI_API_KEY",
+    models: [
+      { id: "glm-5.3", efforts: ["low", "high", "max"] },
+      { id: "glm-5.3-flash", efforts: ["low", "high", "max"] },
+      { id: "glm-4.7", efforts: [] },
+    ],
+  },
+  {
+    id: "zhipu",
+    name: "Zhipu AI (GLM)",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "ZHIPU_API_KEY",
+    models: [
+      { id: "glm-5.3", efforts: ["low", "high", "max"] },
+      { id: "glm-5.3-flash", efforts: ["low", "high", "max"] },
+      { id: "glm-4.7", efforts: [] },
+    ],
+  },
+  {
+    id: "minimax",
+    name: "MiniMax",
+    api: "anthropic-messages",
+    methods: ["api_key"],
+    envKey: "MINIMAX_API_KEY",
+    models: [{ id: "MiniMax-M3", efforts: [] }],
+  },
+  {
+    id: "volcengine",
+    name: "Volcengine (Ark)",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "ARK_API_KEY",
+    models: [{ id: "doubao-seed-2-1-pro-260628", efforts: [] }],
+  },
+  {
+    id: "xiaomi",
+    name: "Xiaomi MiMo",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "MIMO_API_KEY",
+    models: [
+      { id: "mimo-v2.6-pro", efforts: [] },
+      { id: "mimo-v2.6-flash", efforts: [] },
+    ],
+  },
+  {
+    id: "hunyuan",
+    name: "Tencent Hunyuan",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "HUNYUAN_API_KEY",
+    models: [{ id: "hunyuan-turbos-latest", efforts: [] }],
+  },
+  {
+    id: "groq",
+    name: "Groq",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "GROQ_API_KEY",
+    models: [
+      { id: "llama-3.3-70b-versatile", efforts: [] },
+      { id: "openai/gpt-oss-120b", efforts: ["low", "medium", "high"] },
+    ],
+  },
+  {
+    id: "mistral",
+    name: "Mistral",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "MISTRAL_API_KEY",
+    models: [
+      { id: "mistral-large-latest", efforts: [] },
+      { id: "codestral-latest", efforts: [] },
+    ],
+  },
+  {
+    id: "longcat",
+    name: "LongCat",
+    api: "openai-chat",
+    methods: ["api_key"],
+    envKey: "LONGCAT_API_KEY",
+    models: [
+      { id: "LongCat-2.5-Preview", efforts: [] },
+      { id: "LongCat-2.0", efforts: [] },
+    ],
+  },
 ]
 
-type ProviderFilter = "all" | "configured" | "oauth" | "custom"
+const ALL_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 
-type EnrichedProvider = DesktopAuthProvider & {
+export type EnrichedProvider = DesktopAuthProvider & {
   envKey?: string
   custom?: DesktopCustomProvider
-  authType?: "oauth" | "api_key" | "env" | ""
+  authType?: "oauth" | "api_key" | "env" | "custom" | ""
   maskedKey?: string
 }
 
@@ -54,7 +247,7 @@ type ProvidersView = {
   error: string
   message: string
   search: string
-  filter: ProviderFilter
+  openMenuId: string
   editingKeyProviderId: string
   customFormOpen: boolean
   editingCustomId: string
@@ -85,7 +278,7 @@ let view: ProvidersView = {
   error: "",
   message: "",
   search: "",
-  filter: "all",
+  openMenuId: "",
   editingKeyProviderId: "",
   customFormOpen: false,
   editingCustomId: "",
@@ -137,8 +330,8 @@ export function getMergedProviders(): EnrichedProvider[] {
         id: custom.id,
         name: custom.name || custom.id,
         methods: ["api_key"],
-        configured: Boolean(authDetails[custom.id]),
-        source: authDetails[custom.id] ? "auth.json" : "",
+        configured: true,
+        source: authDetails[custom.id] ? "auth.json" : "providers.json",
         envKey: custom.envKey,
       })
       seenIds.add(custom.id)
@@ -148,21 +341,23 @@ export function getMergedProviders(): EnrichedProvider[] {
   return baseList.map((p) => {
     const detail = authDetails[p.id]
     const custom = customMap.get(p.id)
-    const configured = Boolean(p.configured || detail)
-    const authType: "oauth" | "api_key" | "env" | "" = detail?.type === "oauth"
+    const configured = Boolean(p.configured || detail || custom)
+    const authType: EnrichedProvider["authType"] = detail?.type === "oauth"
       ? "oauth"
       : detail?.type === "api_key"
         ? "api_key"
         : p.source === "env"
           ? "env"
-          : configured
-            ? "api_key"
-            : ""
+          : custom
+            ? "custom"
+            : configured
+              ? "api_key"
+              : ""
     return {
       ...p,
       name: custom?.name || p.name || p.id,
       configured,
-      source: detail ? "auth.json" : p.source,
+      source: detail ? "auth.json" : p.source || (custom ? "providers.json" : ""),
       custom,
       authType,
       maskedKey: detail?.maskedKey,
@@ -170,19 +365,63 @@ export function getMergedProviders(): EnrichedProvider[] {
   })
 }
 
+export function getProviderModels(providerId: string): string[] {
+  const models = new Set<string>()
+  for (const m of state.models) {
+    if (m.providerId === providerId && m.id) {
+      models.add(m.id)
+    }
+  }
+  const custom = (state.settings.customProviders || []).find((c) => c.id === providerId)
+  if (custom) {
+    for (const m of custom.models) {
+      if (m) models.add(m)
+    }
+  }
+  const builtin = BUILTIN_PROVIDER_CATALOG.find((b) => b.id === providerId)
+  if (builtin) {
+    for (const m of builtin.models) {
+      models.add(m.id)
+    }
+  }
+  if (state.settings.provider === providerId && state.settings.model) {
+    models.add(state.settings.model)
+  }
+  return [...models]
+}
+
+export function getModelReasoningEfforts(providerId: string, modelId: string): readonly string[] {
+  const runtimeMatch = state.models.find((m) => m.providerId === providerId && m.id === modelId)
+  if (runtimeMatch && Array.isArray((runtimeMatch as any).reasoningEfforts)) {
+    return (runtimeMatch as any).reasoningEfforts
+  }
+  const builtin = BUILTIN_PROVIDER_CATALOG.find((b) => b.id === providerId)
+  const builtinModel = builtin?.models.find((m) => m.id === modelId)
+  if (builtinModel) {
+    return builtinModel.efforts
+  }
+  const custom = (state.settings.customProviders || []).find((c) => c.id === providerId)
+  const api = custom?.api || builtin?.api || "openai-chat"
+  if (api === "anthropic-messages" || api === "google-generative-ai") {
+    return []
+  }
+  return ALL_EFFORTS
+}
+
 export function providerStatus(provider: DesktopAuthProvider | EnrichedProvider) {
   const enriched = provider as EnrichedProvider
-  if (!enriched.configured) return "Not configured"
-  if (enriched.authType === "oauth") return "OAuth subscription (auth.json)"
+  if (!enriched.configured) return "Not connected"
+  if (enriched.authType === "oauth") return "Subscription · OAuth"
   if (enriched.authType === "api_key") {
-    return enriched.maskedKey
-      ? `API key · ${enriched.maskedKey}`
-      : "API key (auth.json)"
+    return enriched.maskedKey ? `API key · ${enriched.maskedKey}` : "API key connected"
   }
   if (enriched.source === "env") {
     return enriched.envKey ? `Environment (${enriched.envKey})` : "Environment variable"
   }
-  return enriched.source ? `Signed in (${enriched.source})` : "Signed in"
+  if (enriched.custom) {
+    return enriched.maskedKey ? `API key · ${enriched.maskedKey}` : "Custom endpoint"
+  }
+  return "Connected"
 }
 
 function renderCustomProviderForm() {
@@ -193,23 +432,23 @@ function renderCustomProviderForm() {
     <div class="provider-custom-card">
       <div class="provider-custom-head">
         <div>
-          <h4>${isEdit ? `Edit provider "${escapeHtml(d.name || view.editingCustomId)}"` : "Add custom provider"}</h4>
-          <p class="subtle">Saved to ~/.rind/providers.json and ~/.rind/auth.json.</p>
+          <h4>${isEdit ? `Edit "${escapeHtml(d.name || view.editingCustomId)}"` : "New custom API"}</h4>
+          <p class="subtle">Saved to ~/.rind/providers.json</p>
         </div>
         <button type="button" class="ghost-button" data-provider-cancel-custom="1">Cancel</button>
       </div>
       <div class="provider-custom-grid">
         <label>
-          <span>Connection name</span>
+          <span>Name</span>
           <input id="custom-provider-name" type="text" value="${escapeAttribute(d.name)}" placeholder="e.g. Xiaomi, Ollama, vLLM" autocomplete="off" />
         </label>
         <label>
-          <span>API protocol</span>
+          <span>Protocol</span>
           <select id="custom-provider-api">
-            <option value="openai-chat"${d.api === "openai-chat" ? " selected" : ""}>openai-chat · OpenAI Chat Completions</option>
-            <option value="openai-responses"${d.api === "openai-responses" ? " selected" : ""}>openai-responses · OpenAI Responses</option>
-            <option value="anthropic-messages"${d.api === "anthropic-messages" ? " selected" : ""}>anthropic-messages · Anthropic Messages</option>
-            <option value="google-generative-ai"${d.api === "google-generative-ai" ? " selected" : ""}>google-generative-ai · Google Generative AI</option>
+            <option value="openai-chat"${d.api === "openai-chat" ? " selected" : ""}>OpenAI Chat Completions</option>
+            <option value="openai-responses"${d.api === "openai-responses" ? " selected" : ""}>OpenAI Responses</option>
+            <option value="anthropic-messages"${d.api === "anthropic-messages" ? " selected" : ""}>Anthropic Messages</option>
+            <option value="google-generative-ai"${d.api === "google-generative-ai" ? " selected" : ""}>Google Generative AI</option>
           </select>
         </label>
         <label class="provider-custom-span-2">
@@ -217,81 +456,93 @@ function renderCustomProviderForm() {
           <input id="custom-provider-url" type="url" value="${escapeAttribute(d.baseUrl)}" placeholder="https://api.example.com/v1" autocomplete="off" />
         </label>
         <label>
-          <span>Default model ID (optional)</span>
+          <span>Default model</span>
           <input id="custom-provider-model" type="text" value="${escapeAttribute(d.defaultModel)}" placeholder="e.g. mimo-v2-flash" autocomplete="off" />
         </label>
         <label>
-          <span>API key ${isEdit ? "(leave blank to keep)" : "(optional for local endpoints)"}</span>
+          <span>API key ${isEdit ? "(optional)" : "(optional)"}</span>
           <input id="custom-provider-key" type="password" value="${escapeAttribute(d.apiKey)}" placeholder="sk-..." autocomplete="new-password" />
         </label>
       </div>
       <div class="provider-custom-actions">
-        <button type="button" class="primary-button" data-provider-save-custom="1">${isEdit ? "Update provider" : "Save provider"}</button>
+        <button type="button" class="primary-button" data-provider-save-custom="1">${isEdit ? "Update" : "Save"}</button>
       </div>
     </div>
   `
 }
 
-function renderProviderRow(provider: EnrichedProvider) {
+function renderSingleActionControl(provider: EnrichedProvider) {
   const busy = view.busyProviderId === provider.id
   const disabled = view.busyProviderId !== "" ? " disabled" : ""
+  const isEditingKey = view.editingKeyProviderId === provider.id
+  const isMenuOpen = view.openMenuId === provider.id
   const methods = provider.methods.length ? provider.methods : ["api_key"]
   const supportsOauth = methods.includes("oauth")
+
+  if (isEditingKey) {
+    return `<button type="button" class="ghost-button" data-provider-toggle-key="${escapeAttribute(provider.id)}"${disabled}>Cancel</button>`
+  }
+
+  // Unconnected built-in provider that only uses API key: single direct "Connect" button
+  if (!provider.custom && !provider.configured && !supportsOauth) {
+    return `<button type="button" class="secondary-button" data-provider-toggle-key="${escapeAttribute(provider.id)}"${disabled}>${busy ? "Saving..." : "Connect"}</button>`
+  }
+
+  // Otherwise: single menu trigger button ("Connect ▾" or "Manage ▾")
+  const triggerLabel = busy
+    ? "Working..."
+    : provider.configured || provider.custom
+      ? "Manage ▾"
+      : "Connect ▾"
+  const triggerClass = provider.configured || provider.custom ? "ghost-button" : "secondary-button"
+
+  const menuItems: string[] = []
+  if (provider.custom) {
+    menuItems.push(
+      `<button type="button" class="provider-menu-item" data-provider-edit-custom="${escapeAttribute(provider.id)}">Edit endpoint</button>`,
+      `<button type="button" class="provider-menu-item" data-provider-toggle-key="${escapeAttribute(provider.id)}">${provider.maskedKey ? "Update API key" : "Set API key"}</button>`,
+      `<button type="button" class="provider-menu-item is-danger" data-provider-delete-custom="${escapeAttribute(provider.id)}">Delete</button>`,
+    )
+  } else {
+    if (supportsOauth) {
+      menuItems.push(
+        `<button type="button" class="provider-menu-item" data-provider-login="${escapeAttribute(provider.id)}" data-provider-method="oauth">${provider.authType === "oauth" ? "Reconnect OAuth" : "Sign in with OAuth"}</button>`,
+      )
+    }
+    menuItems.push(
+      `<button type="button" class="provider-menu-item" data-provider-toggle-key="${escapeAttribute(provider.id)}">${provider.configured ? "Update API key" : "Enter API key"}</button>`,
+    )
+    if (provider.configured && provider.source !== "env") {
+      menuItems.push(
+        `<button type="button" class="provider-menu-item is-danger" data-provider-logout="${escapeAttribute(provider.id)}">Disconnect</button>`,
+      )
+    }
+  }
+
+  return `
+    <div class="provider-menu-wrap">
+      <button type="button" class="${triggerClass} provider-menu-trigger" aria-expanded="${isMenuOpen}" data-provider-menu-toggle="${escapeAttribute(provider.id)}"${disabled}>${escapeHtml(triggerLabel)}</button>
+      ${isMenuOpen ? `<div class="provider-action-menu" role="menu">${menuItems.join("")}</div>` : ""}
+    </div>
+  `
+}
+
+function renderProviderRow(provider: EnrichedProvider) {
   const isEditingKey = view.editingKeyProviderId === provider.id
   const isDefault = (state.settings.provider || "openai") === provider.id
-
-  const badges: string[] = [
-    `<span class="provider-id-chip">${escapeHtml(provider.id)}</span>`,
-  ]
-  if (isDefault) {
-    badges.push(`<span class="provider-badge provider-badge-default">Default</span>`)
-  }
-  if (provider.authType === "oauth") {
-    badges.push(`<span class="provider-badge provider-badge-oauth">Subscription · OAuth</span>`)
-  } else if (provider.authType === "api_key") {
-    badges.push(`<span class="provider-badge provider-badge-key">API Key</span>`)
-  } else if (provider.authType === "env") {
-    badges.push(`<span class="provider-badge provider-badge-env">Env</span>`)
-  }
-  if (provider.custom) {
-    badges.push(`<span class="provider-badge provider-badge-custom">${escapeHtml(provider.custom.api)}</span>`)
-  }
-
-  const actionButtons: string[] = []
-  if (supportsOauth) {
-    const oauthLabel = busy
-      ? "Connecting..."
-      : provider.authType === "oauth"
-        ? "Reconnect OAuth"
-        : "Sign in (OAuth)"
-    actionButtons.push(
-      `<button type="button" class="${provider.authType === "oauth" ? "ghost-button" : "secondary-button"}" data-provider-login="${escapeAttribute(provider.id)}" data-provider-method="oauth"${disabled}>${escapeHtml(oauthLabel)}</button>`,
-    )
-  }
-
-  actionButtons.push(
-    `<button type="button" class="${provider.configured && !isEditingKey ? "ghost-button" : "secondary-button"}" data-provider-toggle-key="${escapeAttribute(provider.id)}"${disabled}>${isEditingKey ? "Cancel" : provider.authType === "api_key" ? "Update key" : "API key"}</button>`,
-  )
-
-  if (provider.custom) {
-    actionButtons.push(
-      `<button type="button" class="ghost-button" data-provider-edit-custom="${escapeAttribute(provider.id)}"${disabled}>Edit</button>`,
-      `<button type="button" class="ghost-button danger-text-btn" data-provider-delete-custom="${escapeAttribute(provider.id)}"${disabled}>Delete</button>`,
-    )
-  } else if (provider.configured && provider.source !== "env") {
-    actionButtons.push(
-      `<button type="button" class="ghost-button" data-provider-logout="${escapeAttribute(provider.id)}"${disabled}>${busy ? "Signing out..." : "Sign out"}</button>`,
-    )
-  }
-
-  const endpointSubtitle = provider.custom?.baseUrl
-    ? `<span class="provider-endpoint-meta">${escapeHtml(provider.custom.baseUrl)}</span>`
+  const defaultBadge = isDefault
+    ? `<span class="provider-badge provider-badge-default">Default</span>`
     : ""
+
+  const subtitleParts: string[] = [escapeHtml(providerStatus(provider))]
+  if (provider.custom?.baseUrl) {
+    subtitleParts.push(`<span class="provider-endpoint-meta">${escapeHtml(provider.custom.baseUrl)}</span>`)
+  }
 
   const keyEditor = isEditingKey
     ? `<div class="provider-key-editor">
         <input id="provider-inline-key-${escapeAttribute(provider.id)}" class="provider-inline-key-input" type="password" placeholder="Paste ${escapeAttribute(provider.name || provider.id)} API key..." autocomplete="new-password" spellcheck="false" />
-        <button type="button" class="primary-button" data-provider-save-key="${escapeAttribute(provider.id)}">Save key</button>
+        <button type="button" class="primary-button" data-provider-save-key="${escapeAttribute(provider.id)}">Save</button>
       </div>`
     : ""
 
@@ -300,15 +551,14 @@ function renderProviderRow(provider: EnrichedProvider) {
       <div class="settings-row-text">
         <div class="provider-title-line">
           <span class="settings-row-label">${escapeHtml(provider.name || provider.id)}</span>
-          ${badges.join("")}
+          ${defaultBadge}
         </div>
         <span class="settings-row-desc">
           <span class="status-dot" data-configured="${provider.configured}" aria-hidden="true"></span>
-          <span>${escapeHtml(providerStatus(provider))}</span>
-          ${endpointSubtitle}
+          ${subtitleParts.join(" · ")}
         </span>
       </div>
-      <div class="settings-row-control provider-actions">${actionButtons.join("")}</div>
+      <div class="settings-row-control provider-actions">${renderSingleActionControl(provider)}</div>
     </div>
     ${keyEditor}
   </div>`
@@ -321,22 +571,16 @@ export function renderProviders() {
   const selectionEnd = wasFocusedSearch ? activeElement.selectionEnd : null
 
   const allProviders = getMergedProviders()
-  const configuredCount = allProviders.filter((p) => p.configured).length
-  const oauthCount = allProviders.filter((p) => p.methods.includes("oauth") || p.authType === "oauth").length
-  const customCount = allProviders.filter((p) => Boolean(p.custom)).length
-
+  const customProviders = allProviders.filter((p) => Boolean(p.custom))
   const query = view.search.trim().toLowerCase()
-  const filtered = allProviders
+  const builtinProviders = allProviders
+    .filter((p) => !p.custom)
     .filter((p) => {
-      if (view.filter === "configured" && !p.configured) return false
-      if (view.filter === "oauth" && !p.methods.includes("oauth") && p.authType !== "oauth") return false
-      if (view.filter === "custom" && !p.custom) return false
       if (!query) return true
       return (
         p.id.toLowerCase().includes(query) ||
         (p.name || "").toLowerCase().includes(query) ||
-        (p.envKey || "").toLowerCase().includes(query) ||
-        (p.custom?.baseUrl || "").toLowerCase().includes(query)
+        (p.envKey || "").toLowerCase().includes(query)
       )
     })
     .sort((a, b) => {
@@ -353,26 +597,35 @@ export function renderProviders() {
       ? `<p class="settings-inline-note">${escapeHtml(view.message)}</p>`
       : ""
 
-  const toolbar = `
-    <div class="providers-toolbar">
-      <div class="providers-search-row">
-        <input id="providers-search-input" type="search" value="${escapeAttribute(view.search)}" placeholder="Search providers by name, ID, or env var..." autocomplete="off" />
-        <button type="button" class="secondary-button providers-add-btn" data-provider-open-custom="1">+ Custom provider</button>
+  const customRows = customProviders.length
+    ? customProviders.map(renderProviderRow).join("")
+    : !view.customFormOpen
+      ? `<p class="subtle provider-empty">No custom API endpoints configured.</p>`
+      : ""
+
+  const builtinRows = builtinProviders.length
+    ? builtinProviders.map(renderProviderRow).join("")
+    : `<p class="subtle provider-empty">No matching built-in providers.</p>`
+
+  settingsProviders.innerHTML = `
+    ${notice}
+    <div class="settings-group-card">
+      <div class="settings-group-head">
+        <span class="settings-group-title">Custom APIs</span>
+        <button type="button" class="secondary-button providers-add-btn" data-provider-open-custom="1">+ Add API</button>
       </div>
-      <div class="providers-filter-pills" role="tablist" aria-label="Filter providers">
-        <button type="button" class="provider-filter-pill${view.filter === "all" ? " is-active" : ""}" data-provider-filter="all">All (${allProviders.length})</button>
-        <button type="button" class="provider-filter-pill${view.filter === "configured" ? " is-active" : ""}" data-provider-filter="configured">Connected (${configuredCount})</button>
-        <button type="button" class="provider-filter-pill${view.filter === "oauth" ? " is-active" : ""}" data-provider-filter="oauth">Subscription (${oauthCount})</button>
-        <button type="button" class="provider-filter-pill${view.filter === "custom" ? " is-active" : ""}" data-provider-filter="custom">Custom (${customCount})</button>
+      ${renderCustomProviderForm()}
+      <div class="provider-section-rows">${customRows}</div>
+    </div>
+
+    <div class="settings-group-card">
+      <div class="settings-group-head">
+        <span class="settings-group-title">Built-in Providers</span>
+        <input id="providers-search-input" class="providers-compact-search" type="search" value="${escapeAttribute(view.search)}" placeholder="Search..." autocomplete="off" />
       </div>
+      <div class="provider-section-rows">${builtinRows}</div>
     </div>
   `
-
-  const rows = filtered.length
-    ? filtered.map(renderProviderRow).join("")
-    : `<p class="subtle provider-empty">No providers match the current filter.</p>`
-
-  settingsProviders.innerHTML = `${toolbar}${renderCustomProviderForm()}${notice}<div class="provider-rows-wrap">${rows}</div>`
 
   if (wasFocusedSearch) {
     const nextSearch = document.getElementById("providers-search-input") as HTMLInputElement | null
@@ -419,9 +672,8 @@ export async function loadProviders() {
 }
 
 async function login(providerId: string, method?: string) {
-  setView({ busyProviderId: providerId, error: "", message: "", oauthUrl: "" })
+  setView({ busyProviderId: providerId, openMenuId: "", error: "", message: "", oauthUrl: "" })
   try {
-    // Pass state.viewedSessionId || "" so the worker never creates a junk session just for login.
     const sessionId = state.viewedSessionId || ""
     const result = await window.api.auth.login(sessionId, providerId, method)
     const count = typeof result.models_count === "number" ? ` ${result.models_count} models available.` : ""
@@ -450,6 +702,7 @@ async function saveInlineKey(providerId: string) {
     setView({
       busyProviderId: "",
       editingKeyProviderId: "",
+      openMenuId: "",
       message: `Saved API key for ${providerId}.`,
     })
     await loadProviders()
@@ -502,8 +755,9 @@ async function saveCustomProviderFromForm() {
       busyProviderId: "",
       customFormOpen: false,
       editingCustomId: "",
+      openMenuId: "",
       customDraft: emptyCustomDraft(),
-      message: `Saved custom provider "${name}".`,
+      message: `Saved custom API "${name}".`,
     })
     await loadProviders()
     await loadAvailableModels().catch(() => undefined)
@@ -514,7 +768,7 @@ async function saveCustomProviderFromForm() {
 }
 
 async function deleteCustomProvider(providerId: string) {
-  setView({ busyProviderId: providerId, error: "", message: "" })
+  setView({ busyProviderId: providerId, openMenuId: "", error: "", message: "" })
   try {
     if (state.runtime.status === "ready") {
       await window.api.auth.logout(providerId).catch(() => undefined)
@@ -522,7 +776,7 @@ async function deleteCustomProvider(providerId: string) {
     state.settings = await window.api.settings.save({
       deleteCustomProviderId: providerId,
     })
-    setView({ busyProviderId: "", message: `Removed custom provider "${providerId}".` })
+    setView({ busyProviderId: "", message: `Removed custom API "${providerId}".` })
     await loadProviders()
     await loadAvailableModels().catch(() => undefined)
     render()
@@ -532,7 +786,7 @@ async function deleteCustomProvider(providerId: string) {
 }
 
 async function logout(providerId: string) {
-  setView({ busyProviderId: providerId, error: "", message: "" })
+  setView({ busyProviderId: providerId, openMenuId: "", error: "", message: "" })
   try {
     if (state.runtime.status === "ready") {
       await window.api.auth.logout(providerId).catch(() => undefined)
@@ -540,7 +794,7 @@ async function logout(providerId: string) {
     state.settings = await window.api.settings.save({
       removeProviderCredentialId: providerId,
     })
-    setView({ busyProviderId: "", message: `Signed out of ${providerId}.` })
+    setView({ busyProviderId: "", message: `Disconnected ${providerId}.` })
     await loadProviders()
     await loadAvailableModels().catch(() => undefined)
     render()
@@ -623,17 +877,23 @@ export function bindProviderEvents(): void {
 
   settingsProviders.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null
-    if (!target || target.disabled) return
-
-    const filter = target.dataset.providerFilter as ProviderFilter | undefined
-    if (filter) {
-      setView({ filter })
+    if (!target) {
+      if (view.openMenuId) setView({ openMenuId: "" })
       return
     }
+    if (target.disabled) return
+
+    const menuToggleId = target.dataset.providerMenuToggle
+    if (menuToggleId) {
+      setView({ openMenuId: view.openMenuId === menuToggleId ? "" : menuToggleId })
+      return
+    }
+
     if (target.dataset.providerOpenCustom) {
       setView({
         customFormOpen: true,
         editingCustomId: "",
+        openMenuId: "",
         customDraft: emptyCustomDraft(),
         error: "",
       })
@@ -658,6 +918,7 @@ export function bindProviderEvents(): void {
         setView({
           customFormOpen: true,
           editingCustomId: custom.id,
+          openMenuId: "",
           customDraft: {
             name: custom.name,
             api: custom.api,
@@ -679,7 +940,7 @@ export function bindProviderEvents(): void {
     const toggleKeyId = target.dataset.providerToggleKey
     if (toggleKeyId) {
       const nextId = view.editingKeyProviderId === toggleKeyId ? "" : toggleKeyId
-      setView({ editingKeyProviderId: nextId, error: "" })
+      setView({ editingKeyProviderId: nextId, openMenuId: "", error: "" })
       if (nextId) {
         requestAnimationFrame(() => {
           const input = document.getElementById(`provider-inline-key-${nextId}`) as HTMLInputElement | null

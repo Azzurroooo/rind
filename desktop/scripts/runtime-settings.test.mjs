@@ -148,15 +148,31 @@ test("saveRuntimeSettings persists global defaults, provider credentials, and cu
   })
 })
 
-test("desktop settings close button is pinned in non-scrolling header and obsolete startup warning is removed", async () => {
+test("desktop settings close button is pinned, General only shows configured providers without Workspace Override, and Providers separates Custom APIs from Built-in Providers", async () => {
   const domSource = await readFile(new URL("../src/renderer/app/dom.ts", import.meta.url), "utf8")
   const cssSource = await readFile(new URL("../src/renderer/styles/dialogs.css", import.meta.url), "utf8")
   const settingsSource = await readFile(new URL("../src/renderer/app/settings.ts", import.meta.url), "utf8")
+  const providersSource = await readFile(new URL("../src/renderer/app/providers-ui.ts", import.meta.url), "utf8")
 
   assert.equal(
     settingsSource.includes("Configure the shared ~/.rind/settings.json before using the runtime."),
     false,
     "obsolete startup warning must not exist in settings.ts",
+  )
+  assert.equal(
+    domSource.includes("settings-workspace-defaults") || settingsSource.includes("Workspace Override"),
+    false,
+    "Workspace Override must not appear in General settings",
+  )
+  assert.ok(
+    settingsSource.includes(".filter((p) => p.configured)"),
+    "General settings must filter to configured providers only",
+  )
+  assert.ok(
+    providersSource.includes("Custom APIs") &&
+      providersSource.includes("Built-in Providers") &&
+      providersSource.includes("renderSingleActionControl"),
+    "Providers must separate Custom APIs and Built-in Providers and render a single action control per row",
   )
   assert.ok(
     domSource.includes('<header class="settings-content-head">') &&

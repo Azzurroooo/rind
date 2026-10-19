@@ -86,12 +86,22 @@ describe("SettingsDialog", () => {
     expect(document.querySelector(".settings-dialog")).toBeNull();
   });
 
-  it("opens on General with latest kernel defaults and keeps the Close button outside the scrolling content container", async () => {
+  it("opens on General showing only configured providers, links model & reasoning effort, and keeps Close buttons outside scrolling content", async () => {
     const handlers = renderSettings();
     expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
     await waitFor(() => {
       expect(screen.getByLabelText("Default provider").value).toBe("deepseek");
     });
+
+    // Only configured providers (DeepSeek, OpenAI, Xiaomi) appear in Default provider; unconfigured Anthropic is hidden
+    const providerSelect = screen.getByLabelText("Default provider");
+    const optionValues = [...providerSelect.querySelectorAll("option")].map((o) => o.value);
+    expect(optionValues).toEqual(["deepseek", "openai", "xiaomi"]);
+    expect(optionValues).not.toContain("anthropic");
+
+    // Workspace Override is not shown in General
+    expect(document.querySelector(".settings-dialog").textContent).not.toContain("Workspace Override");
+
     expect(screen.getByLabelText("Default model").value).toBe("deepseek-flash");
     expect(screen.getByLabelText("Reasoning effort").value).toBe("high");
 
@@ -102,7 +112,12 @@ describe("SettingsDialog", () => {
     expect(scrollingContent.contains(headerCloseBtn)).toBe(false);
     expect(scrollingContent.contains(footerCloseBtn)).toBe(false);
 
-    fireEvent.change(screen.getByLabelText("Default provider"), { target: { value: "openai" } });
+    // Selecting a non-reasoning model hides Reasoning effort
+    fireEvent.change(providerSelect, { target: { value: "openai" } });
+    fireEvent.change(screen.getByLabelText("Default model"), { target: { value: "gpt-4o-mini" } });
+    expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
+
+    // Selecting a reasoning model reveals Reasoning effort
     fireEvent.change(screen.getByLabelText("Default model"), { target: { value: "gpt-5" } });
     fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "xhigh" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -117,7 +132,7 @@ describe("SettingsDialog", () => {
     });
   });
 
-  it("displays OAuth subscription, API key, and custom providers in Providers tab with fixed Close buttons", async () => {
+  it("separates Custom APIs and Built-in Providers in Providers tab with a single action button per row", async () => {
     renderSettings();
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
     expect(screen.getByRole("button", { name: "Providers" }).getAttribute("aria-current")).toBe("page");
@@ -125,8 +140,19 @@ describe("SettingsDialog", () => {
     await waitFor(() => {
       expect(document.querySelector(".settings-dialog").textContent).toContain("Subscription · OAuth");
     });
-    expect(document.querySelector(".settings-dialog").textContent).toContain("sk-••••9999");
-    expect(document.querySelector(".settings-dialog").textContent).toContain("https://api.xiaomimimo.com/v1");
+    const dialogText = document.querySelector(".settings-dialog").textContent;
+    expect(dialogText).toContain("Custom APIs");
+    expect(dialogText).toContain("Built-in Providers");
+    expect(dialogText).toContain("sk-••••9999");
+    expect(dialogText).toContain("https://api.xiaomimimo.com/v1");
+
+    // Every provider row has a single top-level button in .provider-actions before any menu is opened
+    const rows = document.querySelectorAll(".provider-row");
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    for (const row of rows) {
+      const buttons = row.querySelectorAll(".provider-actions > button, .provider-actions > .provider-menu-wrap > button");
+      expect(buttons).toHaveLength(1);
+    }
 
     // Both header Close button and footer Close button remain present and outside .settings-content on Providers tab
     const headerCloseBtn = screen.getByRole("button", { name: "Close dialog" });
