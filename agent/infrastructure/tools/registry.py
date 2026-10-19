@@ -25,6 +25,17 @@ class DefaultToolRegistry:
         self._specs_by_name = specs_by_name
         self._schemas = [spec.schema for spec in catalog if spec.advertised]
 
+    def replace_external_specs(self, previous_names: Iterable[str], specs: Iterable[ToolSpec]) -> None:
+        for name in previous_names:
+            self._specs_by_name.pop(name, None)
+        for spec in specs:
+            if not isinstance(spec, ToolSpec):
+                raise TypeError("Tool catalog entries must be ToolSpec instances.")
+            if spec.name in self._specs_by_name:
+                raise ValueError(f"Duplicate tool name: {spec.name}")
+            self._specs_by_name[spec.name] = spec
+        self._schemas[:] = [spec.schema for spec in self._specs_by_name.values() if spec.advertised]
+
     @property
     def schemas(self) -> list[dict]:
         return self._schemas

@@ -80,19 +80,30 @@ def _detect_shell_display() -> tuple[str, str]:
     return shell_type, detection.executable or "not found"
 
 
+def _is_git_repo(cwd: str) -> bool:
+    try:
+        current = Path(cwd)
+        return any((directory / ".git").exists() for directory in (current, *current.parents))
+    except OSError:
+        return False
+
+
 def get_system_info(cwd: str | os.PathLike[str] | None = None):
     """Collect dynamic system information."""
     system = platform.system()
     cwd = os.path.abspath(os.fspath(cwd)) if cwd is not None else os.getcwd()
     current_date = date.today().isoformat()
     shell_type, shell_executable = _detect_shell_display()
+    git_repo = "yes" if _is_git_repo(cwd) else "no"
 
     return f"""
 <environment_context>
 Operating System: {system}
 Current Date: {current_date}
 Current Working Directory (Project Root): {cwd}
+Git Repository: {git_repo}
 Shell Type: {shell_type}
 Shell Executable: {shell_executable}
 </environment_context>
 """
+

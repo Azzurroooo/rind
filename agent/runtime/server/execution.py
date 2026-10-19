@@ -112,10 +112,20 @@ class ExecutionCoordinator:
             if previous and previous[0] and external_tool and (previous[0].command, previous[0].args) == (external_tool.command, external_tool.args):
                 merged = replace(external_tool, instructions=external_tool.instructions or previous[0].instructions)
                 self._session_options[clean] = (merged, previous[1] if clean in self._active or clean in self._starting else enable_user_question)
+                self._sync_external_tool(clean, previous[0], merged)
                 return
             if clean in self._active or clean in self._starting:
                 raise ValueError("Cannot change a running session's execution configuration.")
             self._session_options[clean] = options
+
+    def _sync_external_tool(self, session_id: str, previous, current) -> None:
+        container = getattr(self._active.get(session_id), "container", None)
+        if container is None or current is None:
+            return
+        previous_names = (tool.name for tool in previous.tools) if previous else ()
+        container.tool_registry.replace_external_specs(previous_names, current.specs(session_id))
+        if current.instructions:
+            container.runtime.set_external_instructions(current.instructions)
 
     def user_question_enabled(self, session_id: str) -> bool:
         return self._session_options.get(session_id, (self._external_tool, self._enable_user_question))[1]
@@ -767,6 +777,9 @@ class ExecutionCoordinator:
             await _close_container(container)
             raise RuntimeError("Worker is shutting down.")
         self._active[clean] = _ActiveExecution(container=container, chat_client=chat_client, selection=selection)
+        latest_tool = self.external_tool(clean)
+        if latest_tool is not external_tool:
+            self._sync_external_tool(clean, external_tool, latest_tool)
         return container
 
     async def _chat_client_for(self, settings, selection: ModelSelection):

@@ -15,7 +15,7 @@ import { publishArtifact } from "./artifacts.js";
 import { newWorkspacePath, addWorktree, removeWorktree } from "./workspaces.js";
 
 type Params = Record<string, any>;
-const DELEGATE_NEXT = "Keep working in parallel, call delegate({wait: true}) to collect results in this turn, or end your turn to receive them when they settle.";
+const DELEGATE_NEXT = "Keep working in parallel, call delegate({wait: true}) only if this turn is blocked on the result right now, or tell the user what was started and end your turn to receive results when they settle.";
 const WAIT_PENDING = Symbol("waitPending");
 interface WaitPending { [WAIT_PENDING]: { sessionId: string; ids: string[]; timeoutMs: number; includeReturned: boolean } }
 // Teams are picked by name in the sidebar and in `rind agents`; two live teams never share one.

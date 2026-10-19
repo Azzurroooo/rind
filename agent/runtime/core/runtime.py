@@ -62,7 +62,20 @@ class AgentRuntime:
         self._follow_up_queue: deque[QueuedInput] = deque()
         self._goal_enabled = bool(goal_enabled)
         self._runtime_system_messages = tuple(dict(message) for message in (runtime_system_messages or []))
+        self._active_context_messages: list[dict] | None = None
         self._skills = skills
+
+    def set_external_instructions(self, instructions: str) -> None:
+        entry = ({"role": "system", "content": instructions, "_context_kind": "external_tools"},) if instructions else ()
+        self._runtime_system_messages = (
+            *(m for m in self._runtime_system_messages if m.get("_context_kind") != "external_tools"),
+            *entry,
+        )
+        if self._active_context_messages is not None:
+            self._active_context_messages[:] = [
+                *(dict(m) for m in entry),
+                *(m for m in self._active_context_messages if m.get("_context_kind") != "external_tools"),
+            ]
 
     async def initialize(self) -> None:
         """Initialize or load the session state. Safe to call multiple times."""
@@ -329,6 +342,7 @@ class AgentRuntime:
                     }
                     context_messages = [dict(message) for message in self._runtime_system_messages]
                     context_messages.extend(dict(message) for message in (transient_system_messages or []))
+                    self._active_context_messages = context_messages
                     if context_messages:
                         runner_kwargs["transient_system_messages"] = context_messages
                     if resume:
@@ -372,6 +386,7 @@ class AgentRuntime:
                     yield terminal_event
                     return
             finally:
+                self._active_context_messages = None
                 self._accepting_inputs = False
                 self._active_turn_id = ""
                 self.discard_pending_inputs()

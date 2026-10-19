@@ -44,6 +44,19 @@ def test_system_info_uses_detected_shell_backend(monkeypatch):
     assert f"Shell Executable: {shell_path}" in info
 
 
+def test_system_info_reports_git_repository_status(tmp_path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    nested = repo / "sub" / "dir"
+    nested.mkdir(parents=True)
+
+    assert "Git Repository: no" in environment.get_system_info(plain)
+    assert "Git Repository: yes" in environment.get_system_info(repo)
+    assert "Git Repository: yes" in environment.get_system_info(nested)
+
+
 def test_system_prompt_contains_rind_doc_rules():
     text = prompts.build_system_prompt(environment=environment.get_system_info(PROJECT_ROOT))
 

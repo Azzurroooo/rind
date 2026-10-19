@@ -209,15 +209,25 @@ test("a leader conversation delegates work and the delivery returns as its own t
       const toolMessage = body.messages.find(message => message.role === "tool" && typeof message.content === "string");
       const delivered = body.messages.some(message => message.role === "user" && typeof message.content === "string" && message.content.startsWith("Delegated work settled:"));
       const prompt = body.messages.findLast(message => message.role === "user")?.content || "";
+      const systemText = body.messages.filter(message => message.role === "system").map(message => message.content).join("\n");
       let delta;
       if (prompt === "Build the fixture") {
         if (names.includes("report") || names.includes("delegate")) trouble.push("delegated leaf member received unexpected tools: " + names.join(","));
         delta = { content: "Fixture delivery" };
       } else {
         if (!names.includes("delegate")) trouble.push("the leader conversation cannot delegate: " + names.join(","));
-        if (delivered) delta = { content: "Delivery received." };
-        else if (toolMessage) { delegateResult = toolMessage.content; delta = { content: "Delegating." }; }
-        else delta = { tool_calls: [{ index: 0, id: "delegate-1", type: "function", function: { name: "delegate", arguments: JSON.stringify({ new: { name: "Builder" }, brief: "Build the fixture" }) } }] };
+        if (!systemText.includes("Git Repository: no")) trouble.push("environment context missing Git Repository status");
+        if (delivered) {
+          if (!/Your direct reports: Builder \([^)]+, workspace [^\n)]+Builder\)/i.test(systemText)) trouble.push("delivery turn missing updated direct reports roster: " + systemText);
+          delta = { content: "Delivery received." };
+        } else if (toolMessage) {
+          if (!/Your direct reports: Builder \([^)]+, workspace [^\n)]+Builder\)/i.test(systemText)) trouble.push("post-delegate step missing live direct reports roster: " + systemText);
+          delegateResult = toolMessage.content;
+          delta = { content: "Delegating." };
+        } else {
+          if (!systemText.includes("Your direct reports: none.")) trouble.push("initial turn should start with no direct reports");
+          delta = { tool_calls: [{ index: 0, id: "delegate-1", type: "function", function: { name: "delegate", arguments: JSON.stringify({ new: { name: "Builder" }, brief: "Build the fixture" }) } }] };
+        }
       }
       const toolCall = Boolean(delta.tool_calls);
       response.writeHead(200, { "Content-Type": "text/event-stream" });

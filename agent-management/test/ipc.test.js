@@ -65,7 +65,10 @@ test("local service has one writer, scoped credentials, subscription and disconn
   const runtime = await connectClient({ endpoint: server.paths.endpoint, token: config.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "runtime-1" });
   clients.push(runtime);
   assert.deepEqual(config.tools.map(tool => tool.name), ["delegate"], "a leader's conversation can delegate; only a task run reports");
+  assert.match(config.tools[0].description, /persistent direct report/);
   assert.match(config.instructions, /Your direct reports: none\./);
+  assert.match(config.instructions, /authoritative source for team state/);
+  assert.doesNotMatch(config.instructions, /agents-management/);
   await assert.rejects(runtime.request("delegate", { to: agent.id, brief: "Myself" }), { code: "NOT_DIRECT_REPORT" });
   await assert.rejects(runtime.request("listTeams"), { code: "FORBIDDEN" });
   await assert.rejects(runtime.request("hostTurnEnd", { outcome: "turn_completed" }), { code: "FORBIDDEN" });

@@ -339,6 +339,12 @@ export async function startServer(options: { home?: string; python?: string; rep
           result = await service.request(principal, message.method, message.params);
           if (message.method === "attachSession" || message.method === "reattachSession") attached.push(result.id);
           if (message.method === "bindSession") await reconcile(result);
+          else if (message.method === "delegate" && (message.params.new !== undefined || message.params.retire !== undefined) && principal.kind === "agent") {
+            const teamId = store.state.sessions[principal.sessionId]?.teamId;
+            await Promise.all(Object.values(store.state.sessions).filter(s => s.teamId === teamId && s.shared && s.runtimeSessionId).map(reconcile));
+          } else if (["addMember", "removeMember", "updateMember", "setLeader", "setSupervisor", "createWorkspace", "createWorktree", "copyWorkspace"].includes(message.method)) {
+            for (const s of Object.values(store.state.sessions)) if (s.teamId === message.params.teamId && s.shared && s.runtimeSessionId) void reconcile(s);
+          }
         }
         send({ id, result });
       } catch (error) {

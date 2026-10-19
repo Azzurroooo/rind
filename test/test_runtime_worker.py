@@ -670,10 +670,26 @@ def test_replay_end_zero_skips_store_and_refreshes_running_session_credentials(t
             assert refreshed.instructions == "Team instructions"
             assert worker.execution.user_question_enabled(session_id) is False
 
-            # Same-host tool list changes (e.g. member retiring its last direct report mid-turn) update without ValueError.
-            tool_v3 = {**tool_v2, "tools": []}
+            # Same-host tool list and instruction changes update both _session_options and a live container's registry/runtime in place.
+            from agent.infrastructure.tools import DefaultToolRegistry
+            from agent.runtime.core.runtime import AgentRuntime
+            live_registry = DefaultToolRegistry(worker.execution.external_tool(session_id).specs(session_id))
+            live_runtime = AgentRuntime(
+                turn_runner=SimpleNamespace(),
+                session_store=store,
+                runtime_system_messages=[{"role": "system", "content": "Team instructions", "_context_kind": "external_tools"}],
+            )
+            live_runtime._active_context_messages = [dict(m) for m in live_runtime._runtime_system_messages]
+            worker.execution._active[session_id] = SimpleNamespace(
+                container=SimpleNamespace(tool_registry=live_registry, runtime=live_runtime),
+            )
+            tool_v3 = {**tool_v2, "tools": [], "instructions": "Updated team roster"}
             await worker.configure_if_unowned(session_id, {"external_tools": tool_v3})
             assert worker.execution.external_tool(session_id).tools == ()
+            assert live_registry.schemas == []
+            assert not live_registry.has("delegate")
+            assert live_runtime._runtime_system_messages[0]["content"] == "Updated team roster"
+            assert live_runtime._active_context_messages[0]["content"] == "Updated team roster"
 
             # Opening a persisted store and projecting messages reads messages.jsonl once via _messages_cache.
             from agent.infrastructure.persistence.message_repository import MessageRepository
