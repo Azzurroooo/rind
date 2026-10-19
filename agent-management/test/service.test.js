@@ -547,5 +547,34 @@ test("resolveRun settles delegations, returns direct-session deliveries, and mar
   assert.equal(secondRun.status, "failed", "resumed run that fails before starting is marked failed, not unknown");
 });
 
+test("renameTeam enforces uniqueness and authority, updates member instructions, and cancelRun stops direct session runs and child delegations", async t => {
+  const f = await fixture(t);
+  const specialist = await f.member("specialist");
+  const other = await f.call("createTeam", { name: "Platform" });
+  const direct = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id, runtimeSessionId: "r-direct", shared: true });
 
+  await assert.rejects(f.call("renameTeam", { teamId: f.team.id, name: "Hacked" }, { kind: "agent", sessionId: direct.id }), { code: "FORBIDDEN" });
+  await assert.rejects(f.call("renameTeam", { teamId: f.team.id, name: " platform " }), { code: "TEAM_NAME_TAKEN" });
 
+  // Case-only rename on the same team is allowed; renaming updates instructions on subsequent runs.
+  const sameCase = await f.call("renameTeam", { teamId: other.id, name: "PLATFORM" });
+  assert.equal(sameCase.name, "PLATFORM");
+  const renamed = await f.call("renameTeam", { teamId: f.team.id, name: "Core Infrastructure" });
+  assert.equal(renamed.name, "Core Infrastructure");
+
+  await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: specialist.id, brief: "Verify team name" });
+  await eventually(() => f.starts.length === 1);
+  assert.match(f.starts[0].input.instructions, /in team Core Infrastructure/);
+  f.starts[0].finish({ content: "done" });
+
+  // Direct session run with an active child delegation can be cancelled via cancelRun.
+  const directRun = await f.call("hostTurnStart", { sessionId: direct.id, runtimeSessionId: "r-direct" });
+  const child = await f.call("delegate", { to: specialist.id, brief: "Long search" }, { kind: "agent", sessionId: direct.id });
+  await eventually(() => f.starts.length === 2);
+  const cancelled = await f.call("cancelRun", { runId: directRun.id });
+  assert.equal(cancelled.cancelling, true);
+  assert.equal(cancelled.runtimeSessionId, "r-direct");
+  assert.equal(f.store.state.runs[directRun.id].status, "cancelled");
+  assert.equal(f.store.state.delegations[child.taskId].status, "cancelled");
+  await eventually(() => Object.values(f.store.state.runs).find(r => r.delegationId === child.taskId)?.status === "cancelled");
+});

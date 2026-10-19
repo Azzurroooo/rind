@@ -65,7 +65,7 @@ export async function startServer(options: { home?: string; python?: string; rep
           const replay = await runtime!.request("session/replay", { session_id: current.runtimeSessionId, end: 0, ...(externalTools ? { external_tools: externalTools } : {}) });
           const active = replay.live_turn?.status === "running" || (replay.background_wait?.count || 0) > 0;
           const rawOutcome = replay.live_turn?.status || replay.turn_state?.status;
-          const outcome = !active && rawOutcome === "running" ? "failed" : rawOutcome;
+          const outcome = !active && (!rawOutcome || rawOutcome === "running") ? "failed" : rawOutcome;
           await service.request({ kind: "user" }, "reconcileSession", { requestId: "observe-" + randomBytes(12).toString("hex"), sessionId: current.id, connected: replay.hosted === true,
             active, needsInput: !!replay.live_turn?.question, outcome });
         } catch (error) {
@@ -339,10 +339,13 @@ export async function startServer(options: { home?: string; python?: string; rep
           result = await service.request(principal, message.method, message.params);
           if (message.method === "attachSession" || message.method === "reattachSession") attached.push(result.id);
           if (message.method === "bindSession") await reconcile(result);
-          else if (message.method === "delegate" && (message.params.new !== undefined || message.params.retire !== undefined) && principal.kind === "agent") {
+          else if (message.method === "cancelRun" && result?.runtimeSessionId) {
+            const host = runtime || await executionHost(false).catch(() => undefined);
+            if (host) await host.request("session/cancel", { session_id: result.runtimeSessionId }).catch(() => {});
+          } else if (message.method === "delegate" && (message.params.new !== undefined || message.params.retire !== undefined) && principal.kind === "agent") {
             const teamId = store.state.sessions[principal.sessionId]?.teamId;
             await Promise.all(Object.values(store.state.sessions).filter(s => s.teamId === teamId && s.shared && s.runtimeSessionId).map(reconcile));
-          } else if (["addMember", "removeMember", "updateMember", "setLeader", "setSupervisor", "createWorkspace", "createWorktree", "copyWorkspace"].includes(message.method)) {
+          } else if (["renameTeam", "addMember", "removeMember", "updateMember", "setLeader", "setSupervisor", "createWorkspace", "createWorktree", "copyWorkspace"].includes(message.method)) {
             for (const s of Object.values(store.state.sessions)) if (s.teamId === message.params.teamId && s.shared && s.runtimeSessionId) void reconcile(s);
           }
         }

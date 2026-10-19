@@ -74,11 +74,22 @@ export function createReviewActions(ui, { agentName, display, teamOf, assignTask
     ui.choose("Open", items);
   }
 
+  function renameTeam(teamId) {
+    const team = teamOf(teamId);
+    if (!team) return;
+    ui.form("Rename team", [{ key: "name", label: "Team name", hint: "What the team works on, e.g. Product, Research or Finance." }],
+      async ({ name }) => {
+        const updated = await ui.request("renameTeam", { teamId, name });
+        ui.notify("Renamed team to " + single(updated.name) + ".", "success");
+      }, { description: ["Now named: " + single(team.name)] });
+  }
+
   function teamActions(teamId) {
     const team = teamOf(teamId);
     if (!team) return;
     ui.choose(single(team.name), [
       { label: "Open team", key: "enter", action: () => ui.openTeam(teamId) },
+      { label: "Rename team", key: "e", action: () => renameTeam(teamId) },
       { label: "Assign task", key: "t", description: "Give the leader a tracked task", action: () => assignTask(teamId) },
       { label: "Delete team…", key: "x", danger: true, description: "Folders and history are kept", action: () => deleteTeam(teamId) },
     ]);
@@ -121,5 +132,5 @@ export function createReviewActions(ui, { agentName, display, teamOf, assignTask
     ], { description, danger: true });
   }
 
-  return { delivery, teamActions, deleteTeam, approval };
+  return { delivery, teamActions, renameTeam, deleteTeam, approval };
 }

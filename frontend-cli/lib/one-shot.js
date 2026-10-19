@@ -154,6 +154,16 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   let anonymousToolCounter = 0;
   let client;
   let management;
+  let activeSessionId = "";
+  let promptInFlight = false;
+  const onSignal = () => {
+    if (promptInFlight && client && activeSessionId) {
+      turnFailure ||= "Request interrupted.";
+      void client.request(runtimeMethods.sessionCancel, { session_id: activeSessionId }).catch(() => {});
+    }
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
   try {
     management = clientFactory === createSharedRuntimeClient
       ? await prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false })
@@ -196,14 +206,16 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     if (!sessionInfo.session_id && !options.session) sessionInfo = { ...sessionInfo, ...await client.request(runtimeMethods.sessionCreate, {}) };
     const sessionId = String(sessionInfo.session_id || options.session || "").trim();
     if (!sessionId) throw new Error("Runtime initialization did not return a session_id.");
+    activeSessionId = sessionId;
     progress.session({ sessionId, model: String(sessionInfo.model || "") });
     const requestCompletion = sessionInfo.capabilities.includes("rind/request-completion");
     if (!requestCompletion) progress.note("This Worker completes one turn only; automatic background continuation is unavailable.");
+    promptInFlight = true;
     const result = await client.request(runtimeMethods.sessionPrompt, {
       session_id: sessionId,
       input: options.prompt,
       ...(requestCompletion ? { completion_scope: "request" } : {}),
-    });
+    }).finally(() => { promptInFlight = false; });
     if (turnFailure) throw new Error(turnFailure);
     status = "completed";
     const responseTurnId = String(result?.turn_id || turnId || "");
@@ -251,6 +263,8 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     process.exitCode = 1;
     return true;
   } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
     if (client) await client.shutdown().catch((error) => {
       stderr(`Runtime shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`);
       process.exitCode = 1;

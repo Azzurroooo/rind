@@ -621,7 +621,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       case "open": return activate(row);
       case "actions": return rowActions(row);
       case "chat": return ["independent", "folder"].includes(view.page.kind) ? ui.startNew({ agentId: row?.agentId, workspace: row?.workspace || view.page.workspace }) : member && ui.startNew(member);
-      case "edit": return member && actions.editMember(member.teamId, member.agentId);
+      case "edit": return member ? actions.editMember(member.teamId, member.agentId) : (row?.teamId || view.page.teamId) && actions.renameTeam(row?.teamId || view.page.teamId);
       case "task": return actions.assignTask(view.page.teamId, member?.agentId);
       case "add": return actions.addMember(view.page.teamId, row?.kind === "member" ? row.agentId : undefined);
       case "tabs": return switchTab(key.text === "1" ? "org" : key.text === "2" ? "tasks" : undefined);

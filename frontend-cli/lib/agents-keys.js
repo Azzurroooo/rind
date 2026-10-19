@@ -10,7 +10,7 @@ export const ACTIONS = {
   open: { keys: ["enter"], key: "enter", label: "open", help: "open the selected item" },
   actions: { keys: ["space"], key: "space", label: "more actions", help: "all actions for the selected item or team" },
   chat: { keys: ["c"], key: "c", label: "new conversation", help: "new conversation with a member or folder" },
-  edit: { keys: ["e"], key: "e", label: "edit role", help: "edit a member's role and responsibility" },
+  edit: { keys: ["e"], key: "e", label: "edit role", help: "edit a member's role, or rename a team" },
   task: { keys: ["t"], key: "t", label: "assign task", help: "give a member, or the leader, a task" },
   add: { keys: ["a"], key: "a", label: "add member", help: "add a member, below the selected one" },
   tabs: { keys: ["tab", "1", "2"], key: "tab", label: "Organization · Tasks", help: "Organization (1) · Tasks (2)" },
@@ -73,7 +73,7 @@ export function available(view, row) {
   const list = [];
   const enter = enterLabel(view, row);
   if (enter) list.push(act("open", enter));
-  if (view.focus === "sidebar") return [...list, ...(row?.kind === "team" ? [act("actions")] : []), act("newTeam"), act("refresh"), act("help")];
+  if (view.focus === "sidebar") return [...list, ...(row?.kind === "team" ? [act("actions"), act("edit", "rename")] : []), act("newTeam"), act("refresh"), act("help")];
   if (["member", "session", "task", "service", "live"].includes(row?.kind) && !(row.kind === "task" && (row.answer || row.archived))) list.push(act("actions"));
   const folder = ["independent", "folder"].includes(page) && (row?.workspace || view.page.workspace);
   if ((org && ["member", "session", "more"].includes(row?.kind)) || page === "member" || folder) list.push(act("chat"));

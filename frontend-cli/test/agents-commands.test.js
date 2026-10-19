@@ -45,9 +45,14 @@ test("rind agents commands work in a fresh home and read relative folders from w
   assert.equal(lead.code, 0, lead.stderr);
   const reviewer = await rind(home, path.join(work, "nested"), "agents", "team", "add", "notes", "./reviewer");
   assert.equal(reviewer.code, 0, reviewer.stderr);
+  const renamed = await rind(home, root, "agents", "team", "rename", "notes", "notes-v2");
+  assert.equal(renamed.code, 0, renamed.stderr);
+  assert.match(renamed.stdout, /notes-v2/);
   const listed = await rind(home, root, "agents", "list", "--json");
   assert.equal(listed.code, 0, listed.stderr);
-  const folders = JSON.parse(listed.stdout).agents.map(agent => agent.canonicalWorkspace);
+  const parsed = JSON.parse(listed.stdout);
+  assert.equal(parsed.teams[0].name, "notes-v2");
+  const folders = parsed.agents.map(agent => agent.canonicalWorkspace);
   for (const relative of ["lead", path.join("nested", "reviewer")]) {
     const absolute = await realpath(path.join(work, relative));
     const expected = process.platform === "win32" ? absolute.toLowerCase() : absolute;

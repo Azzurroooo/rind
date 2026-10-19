@@ -609,6 +609,13 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         const team = { id, name, createRoot };
         state.teams[id] = team; return team;
       }
+      case "renameTeam": {
+        requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can rename teams.");
+        const team = teamAccess(state, actor, p.teamId);
+        const name = text(p.name, "Team name", 200);
+        requireValue(!Object.values(state.teams).some(t => t.id !== team.id && !t.archive && t.name.trim().toLowerCase() === name.trim().toLowerCase()), "TEAM_NAME_TAKEN", "A team named \"" + name.trim() + "\" already exists. Choose another name.");
+        team.name = name; return team;
+      }
       case "registerAgent": return register(state, p);
       case "addMember": {
         if (!p.agentId) { const agent = await register(state, p); p = { ...p, agentId: agent.id }; }
@@ -972,7 +979,17 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         return run;
       }
       case "cancelRun": {
-        const run = state.runs[p.runId]; requireValue((run?.taskId || run?.delegationId) && live.has(run.id), "NOT_RUNNING", "Only a live managed task can be cancelled here.");
+        const run = state.runs[p.runId];
+        if (run && !run.taskId && !run.delegationId) {
+          userOnly(actor);
+          requireValue(activeRun(run), "NOT_RUNNING", "This conversation is not running.");
+          run.status = "cancelled"; run.needsInput = false; run.lastObservedAt = new Date().toISOString();
+          for (const d of sessionDelegations(state, run.sessionId)) if (!["done", "failed", "cancelled"].includes(d.status)) { d.status = "cancelled"; delete d.dispatch; cancelDelegationTree(state, d.id); }
+          releaseSessionWait(run.sessionId);
+          const runtimeSessionId = state.sessions[run.sessionId]?.runtimeSessionId;
+          return { runId: run.id, cancelling: true, ...(runtimeSessionId ? { runtimeSessionId } : {}) };
+        }
+        requireValue((run?.taskId || run?.delegationId) && live.has(run.id), "NOT_RUNNING", "Only a live managed task can be cancelled here.");
         if (run.taskId) {
           const task = taskAccess(state, actor, run.taskId);
           if (actor.kind === "manager") return askUser(state, actor, { kind: "cancelRun", teamId: task.teamId, runId: run.id, taskId: task.id, title: "Stop " + task.brief });

@@ -329,62 +329,80 @@ class AgentRuntime:
                     started_event,
                     recovery_attempt=turn_state.get("recovery_attempt") if isinstance(turn_state, dict) else None,
                 )
-                if not compact:
-                    yield started_event
+                started_persisted = True
+                terminal_persisted = False
+                try:
+                    if not compact:
+                        yield started_event
 
-                total_duration_ms = 0
-                while True:
-                    runner_kwargs = {
-                        "session": self._session_store,
-                        "cancellation_token": cancellation_token,
-                        "turn_id": turn_id,
-                        "take_steering": self._take_steering,
-                    }
-                    context_messages = [dict(message) for message in self._runtime_system_messages]
-                    context_messages.extend(dict(message) for message in (transient_system_messages or []))
-                    self._active_context_messages = context_messages
-                    if context_messages:
-                        runner_kwargs["transient_system_messages"] = context_messages
-                    if resume:
-                        runner_kwargs["resume"] = True
-                        resume = False
+                    total_duration_ms = 0
+                    while True:
+                        runner_kwargs = {
+                            "session": self._session_store,
+                            "cancellation_token": cancellation_token,
+                            "turn_id": turn_id,
+                            "take_steering": self._take_steering,
+                        }
+                        context_messages = [dict(message) for message in self._runtime_system_messages]
+                        context_messages.extend(dict(message) for message in (transient_system_messages or []))
+                        self._active_context_messages = context_messages
+                        if context_messages:
+                            runner_kwargs["transient_system_messages"] = context_messages
+                        if resume:
+                            runner_kwargs["resume"] = True
+                            resume = False
 
-                    terminal_event = None
-                    async for event in self._turn_runner.run_turn(**runner_kwargs):
-                        if event.type in {"turn_completed", "turn_failed", "turn_cancelled"}:
-                            terminal_event = event
-                            continue
-                        yield event
+                        terminal_event = None
+                        async for event in self._turn_runner.run_turn(**runner_kwargs):
+                            if event.type in {"turn_completed", "turn_failed", "turn_cancelled"}:
+                                terminal_event = event
+                                continue
+                            yield event
 
-                    if terminal_event is None:
-                        raise RuntimeError("Turn runner ended without a terminal event.")
+                        if terminal_event is None:
+                            raise RuntimeError("Turn runner ended without a terminal event.")
 
-                    if terminal_event.type == "turn_completed":
-                        total_duration_ms += int(getattr(terminal_event, "duration_ms", 0) or 0)
-                    if terminal_event.type == "turn_completed" and not self._is_cancelled(cancellation_token):
-                        follow_up = self._take_follow_up()
-                        if follow_up is not None:
-                            await self._persist_user_input(follow_up.text)
-                            yield QueuedInputDeliveredEvent(
-                                **event_meta(self._session_store, turn_id),
-                                input_id=follow_up.input_id,
-                                input=follow_up.text,
-                                mode="follow_up",
-                            )
-                            continue
-                    if terminal_event.type == "turn_failed":
-                        await self._stop_active_goal("blocked")
-                    elif terminal_event.type == "turn_cancelled":
+                        if terminal_event.type == "turn_completed":
+                            total_duration_ms += int(getattr(terminal_event, "duration_ms", 0) or 0)
+                        if terminal_event.type == "turn_completed" and not self._is_cancelled(cancellation_token):
+                            follow_up = self._take_follow_up()
+                            if follow_up is not None:
+                                await self._persist_user_input(follow_up.text)
+                                yield QueuedInputDeliveredEvent(
+                                    **event_meta(self._session_store, turn_id),
+                                    input_id=follow_up.input_id,
+                                    input=follow_up.text,
+                                    mode="follow_up",
+                                )
+                                continue
+                        if terminal_event.type == "turn_failed":
+                            await self._stop_active_goal("blocked")
+                        elif terminal_event.type == "turn_cancelled":
+                            await self._stop_active_goal("paused")
+
+                        if terminal_event.type == "turn_completed":
+                            terminal_event.duration_ms = total_duration_ms
+
+                        self._accepting_inputs = False
+                        self.discard_pending_inputs()
+                        await self._persist_turn_state(terminal_event)
+                        terminal_persisted = True
+                        yield terminal_event
+                        return
+                except asyncio.CancelledError as exc:
+                    if started_persisted and not terminal_persisted:
                         await self._stop_active_goal("paused")
-
-                    if terminal_event.type == "turn_completed":
-                        terminal_event.duration_ms = total_duration_ms
-
-                    self._accepting_inputs = False
-                    self.discard_pending_inputs()
-                    await self._persist_turn_state(terminal_event)
-                    yield terminal_event
-                    return
+                        await self._persist_turn_state(
+                            TurnCancelledEvent(**event_meta(self._session_store, turn_id), reason=str(exc) or "Turn cancelled.")
+                        )
+                    raise
+                except Exception as exc:
+                    if started_persisted and not terminal_persisted:
+                        await self._stop_active_goal("blocked")
+                        await self._persist_turn_state(
+                            TurnFailedEvent(**event_meta(self._session_store, turn_id), error=str(exc), error_type=type(exc).__name__)
+                        )
+                    raise
             finally:
                 self._active_context_messages = None
                 self._accepting_inputs = False

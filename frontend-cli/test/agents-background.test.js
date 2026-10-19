@@ -24,6 +24,11 @@ test("a running conversation offers join, its task report and stopping the task"
   await menu.items[2].action();
   assert.deepEqual(requests, [["cancelRun", { runId: "w1" }]]);
 
+  createActions(ui).liveActions({ ...row, taskId: undefined, note: "Conversation" });
+  assert.deepEqual(dialogs[1].items.map(item => item.label), ["Join conversation", "Stop"]);
+  await dialogs[1].items[1].action();
+  assert.deepEqual(requests[1], ["cancelRun", { runId: "w1" }]);
+
   createActions(ui).liveActions({ ...row, taskId: undefined, runId: undefined, note: "Conversation" });
-  assert.deepEqual(dialogs[1].items.map(item => item.label), ["Join conversation"], "a plain conversation has no task to stop");
+  assert.deepEqual(dialogs[2].items.map(item => item.label), ["Join conversation"], "a plain conversation has no task to stop");
 });

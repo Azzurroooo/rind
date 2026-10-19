@@ -92,6 +92,10 @@ test("team page edits members, nests team conversations and drives tasks from th
   key("\x1b[D"); key("h"); await settle();
   await visible("back to chat");
   assert.match(h.screen(), /20261005_team_history/, "leaving the tree keeps it expanded");
+  key("e"); await visible("Rename team");
+  key("\x15"); paste("Product Core"); key("\r");
+  await visible("Renamed team to Product Core.");
+  assert.equal((await h.client.request("snapshot")).teams[0].name, "Product Core");
   key("\r"); await visible("enter open member");
   key("z"); await visible("▸ Lead");
   assert.doesNotMatch(h.screen(), /20261005_team_history/);

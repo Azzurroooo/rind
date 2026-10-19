@@ -249,6 +249,66 @@ async def test_async_runtime_persists_terminal_turn_state():
 
 
 @pytest.mark.asyncio
+async def test_async_runtime_persists_terminal_state_on_cancelled_error_or_crash():
+    class FakeSession:
+        model = "test-model"
+        reasoning_effort = ""
+        session_id = "session_1"
+
+        def __init__(self):
+            self.states = []
+
+        async def get_turn_state(self):
+            return None
+
+        async def initialize(self):
+            return None
+
+        async def persist_user_input(self, content, **kwargs):
+            return None
+
+        async def persist_message(self, role, content, **kwargs):
+            return None
+
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            self.states.append((turn_id, status, ts))
+
+        def now_iso(self):
+            return "2026-05-08T00:00:00Z"
+
+    class CancellingRunner:
+        def set_model(self, model):
+            self.model = model
+
+        async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
+            if False:
+                yield None
+            raise asyncio.CancelledError("task cancelled")
+
+    class CrashingRunner:
+        def set_model(self, model):
+            self.model = model
+
+        async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
+            if False:
+                yield None
+            raise RuntimeError("unexpected failure")
+
+    cancelled_session = FakeSession()
+    with pytest.raises(asyncio.CancelledError):
+        async for _ in AgentRuntime(CancellingRunner(), cancelled_session).run_turn(query="hello"):
+            pass
+    assert [status for _, status, _ in cancelled_session.states] == ["running", "cancelled"]
+
+    crashed_session = FakeSession()
+    with pytest.raises(RuntimeError):
+        async for _ in AgentRuntime(CrashingRunner(), crashed_session).run_turn(query="hello"):
+            pass
+    assert [status for _, status, _ in crashed_session.states] == ["running", "failed"]
+
+
+
+@pytest.mark.asyncio
 async def test_async_runtime_facade_passes_transient_system_messages():
     class FakeSession:
         async def get_turn_state(self):

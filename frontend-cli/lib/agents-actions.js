@@ -199,6 +199,7 @@ export function createActions(ui) {
         { label: "Change supervisor", key: "s", action: () => changeSupervisor(teamId, agentId) },
         { label: "Make team leader", key: "l", action: async () => { await ui.request("setLeader", { teamId, agentId }); ui.notify(agentName(agentId) + " now leads the team.", "success"); } },
       ] : []),
+      { label: "Rename team", key: "R", description: single(team?.name), action: () => review.renameTeam(teamId) },
       ...(run ? [{ label: "Resolve unconfirmed run", key: "u", description: "Confirm the old process stopped", action: () => resolveRun(run) }] : []),
       { label: "Remove from team", key: "x", danger: true, description: "Folder and history are kept", action: () => ui.confirm("Remove " + agentName(agentId) + "?", ["They leave " + single(team?.name) + ". The folder, its files and history are kept. Their unfinished tasks will need attention."], "Remove member",
         async () => { await ui.request("removeMember", { teamId, agentId }); ui.notify(agentName(agentId) + " removed from the team.", "success"); }) },
@@ -267,14 +268,16 @@ export function createActions(ui) {
     ], { description: [single(task.brief)] });
   }
 
-  // A running conversation: join it, read the task it works on, or stop that task.
+  // A running conversation: join it, read the task it works on, or stop it.
   function liveActions(row) {
     const task = snap().tasks.find(t => t.id === row.taskId);
     ui.choose(row.title, [
       ...(row.sessionId ? [{ label: "Join conversation", key: "enter", description: "Watch it work, or step in", action: () => ui.join(row) }] : []),
       ...(task ? [{ label: "Task report", key: "r", description: single(task.brief), action: () => delivery(task.id) }] : []),
       ...(task && row.runId ? [{ label: "Stop this task", key: "x", danger: true, action: () => ui.confirm("Stop this task?", [single(task.brief), "Its conversation is kept."], "Stop execution",
-        async () => { await ui.request("cancelRun", { runId: row.runId }); ui.notify("Stopping the task.", "success"); }) }] : []),
+        async () => { await ui.request("cancelRun", { runId: row.runId }); ui.notify("Stopping the task.", "success"); }) }]
+        : row.runId ? [{ label: "Stop", key: "x", danger: true, action: () => ui.confirm("Stop this conversation?", [single(row.title), "Its conversation history is kept."], "Stop execution",
+          async () => { await ui.request("cancelRun", { runId: row.runId }); ui.notify("Stopping the conversation.", "success"); }) }] : []),
     ], { description: [[row.context, row.note].filter(Boolean).join(" · ")] });
   }
 

@@ -1,9 +1,11 @@
 """File navigation tool implementations."""
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import subprocess
+import threading
 
 from agent.domain import tool_cancelled, tool_error, tool_ok
 from agent.domain.cancellation import CancellationToken
@@ -21,12 +23,45 @@ _SKIP_GLOBS = tuple(
 _READ_MAX_LIMIT = 2000
 _READ_MAX_BYTES = 50 * 1024
 _MAX_LINE_CHARS = 2000
+_RG_TIMEOUT_SECONDS = 30.0
+_GLOB_SCAN_MULTIPLIER = 10
+_GLOB_MIN_SCAN_LIMIT = 10_000
 
 
 def _cancelled(tool_name: str, token: CancellationToken | None) -> str | None:
     if token and token.is_cancelled:
         return tool_cancelled(tool_name, token.reason)
     return None
+
+
+def _is_filesystem_root(path: Path) -> bool:
+    return path.is_dir() and path == path.parent
+
+
+@contextmanager
+def _watch_rg(process: subprocess.Popen[str], token: CancellationToken | None, timeout: float = _RG_TIMEOUT_SECONDS):
+    state = {"timed_out": False}
+
+    def _kill() -> None:
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+
+    def _on_timeout() -> None:
+        state["timed_out"] = True
+        _kill()
+
+    deregister = token.register_callback(_kill) if token is not None else (lambda: None)
+    timer = threading.Timer(timeout, _on_timeout)
+    timer.daemon = True
+    timer.start()
+    try:
+        yield state
+    finally:
+        timer.cancel()
+        deregister()
 
 
 def _existing_path(tool_name: str, raw_path: str) -> tuple[Path, str | None]:
@@ -193,6 +228,8 @@ def glob(
         return error
     if not search_path.is_dir():
         return tool_error("glob", f"Path is not a directory: {path}", "NotADirectory")
+    if _is_filesystem_root(search_path):
+        return tool_error("glob", f"Cannot search the filesystem root ({search_path}); specify a workspace or project directory.", "InvalidPath")
     if not isinstance(pattern, str) or not pattern:
         return tool_error("glob", "pattern must not be empty.", "InvalidPattern")
     try:
@@ -208,6 +245,8 @@ def glob(
     # Like opencode's glob (rg --files) and pi's find (fd --glob): brace patterns match
     # and skipped folders are never walked.
     process: subprocess.Popen[str] | None = None
+    scan_limit = max(max_results * _GLOB_SCAN_MULTIPLIER, _GLOB_MIN_SCAN_LIMIT)
+    scan_truncated = False
     try:
         process = subprocess.Popen(
             [rg, "--files", "--hidden", "--glob", pattern, *_SKIP_GLOBS, "."],
@@ -220,18 +259,33 @@ def glob(
         )
         assert process.stdout is not None
         paths: list[Path] = []
-        for line in process.stdout:
-            if cancelled := _cancelled("glob", _cancellation_token):
-                return cancelled
-            paths.append(search_path / line.rstrip("\r\n"))
-        stderr = process.stderr.read() if process.stderr is not None else ""
-        if process.wait() not in (0, 1):
+        with _watch_rg(process, _cancellation_token) as watch:
+            for line in process.stdout:
+                if cancelled := _cancelled("glob", _cancellation_token):
+                    return cancelled
+                if len(paths) >= scan_limit:
+                    scan_truncated = True
+                    process.terminate()
+                    break
+                paths.append(search_path / line.rstrip("\r\n"))
+            stderr = process.stderr.read() if process.stderr is not None else ""
+            return_code = process.wait()
+        if cancelled := _cancelled("glob", _cancellation_token):
+            return cancelled
+        if watch["timed_out"]:
+            return tool_error("glob", f"File lookup timed out after {int(_RG_TIMEOUT_SECONDS)}s; narrow the path or pattern.", "Timeout")
+        if return_code not in (0, 1) and not scan_truncated:
             return tool_error("glob", stderr.strip() or "rg file lookup failed.", _rg_error(stderr, "GlobError"))
         paths.sort(key=lambda item: item.as_posix().lower())
-        results = [
-            {"path": _relative_path(file_path, search_path), "size_bytes": file_path.stat().st_size}
-            for file_path in paths[:max_results]
-        ]
+        results = []
+        for file_path in paths:
+            if len(results) >= max_results:
+                break
+            try:
+                size_bytes = file_path.stat().st_size
+            except OSError:
+                continue
+            results.append({"path": _relative_path(file_path, search_path), "size_bytes": size_bytes})
         return tool_ok(
             "glob",
             results,
@@ -240,7 +294,7 @@ def glob(
                 "pattern": pattern,
                 "count": len(results),
                 "max_results": max_results,
-                "truncated": len(paths) > max_results,
+                "truncated": scan_truncated or len(paths) > max_results,
             },
         )
     except PermissionError as exc:
@@ -286,6 +340,8 @@ def grep(
     search_path, error = _existing_path("grep", path)
     if error:
         return error
+    if _is_filesystem_root(search_path):
+        return tool_error("grep", f"Cannot search the filesystem root ({search_path}); specify a workspace or project directory.", "InvalidPath")
     if not isinstance(pattern, str) or not pattern:
         return tool_error("grep", "pattern must not be empty.", "InvalidPattern")
     if not isinstance(glob, str) or not glob:
@@ -314,35 +370,37 @@ def grep(
             errors="replace",
         )
         assert process.stdout is not None
-        for raw_line in process.stdout:
-            if cancelled := _cancelled("grep", _cancellation_token):
-                process.kill()
-                process.wait()
-                return cancelled
-            try:
-                event = json.loads(raw_line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") != "match":
-                continue
-            if len(results) >= max_results:
-                truncated = True
-                process.terminate()
-                break
-            data = event.get("data") or {}
-            path_data = data.get("path") or {}
-            raw_path = path_data.get("text") or ""
-            line_data = data.get("lines") or {}
-            results.append(
-                {
-                    "file": _rg_result_path(raw_path, search_path),
-                    "line": int(data.get("line_number") or 0),
-                    "text": _clip_text(str(line_data.get("text") or "").rstrip("\r\n")),
-                }
-            )
-
-        stderr = process.stderr.read() if process.stderr is not None else ""
-        return_code = process.wait()
+        with _watch_rg(process, _cancellation_token) as watch:
+            for raw_line in process.stdout:
+                if cancelled := _cancelled("grep", _cancellation_token):
+                    return cancelled
+                try:
+                    event = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") != "match":
+                    continue
+                if len(results) >= max_results:
+                    truncated = True
+                    process.terminate()
+                    break
+                data = event.get("data") or {}
+                path_data = data.get("path") or {}
+                raw_path = path_data.get("text") or ""
+                line_data = data.get("lines") or {}
+                results.append(
+                    {
+                        "file": _rg_result_path(raw_path, search_path),
+                        "line": int(data.get("line_number") or 0),
+                        "text": _clip_text(str(line_data.get("text") or "").rstrip("\r\n")),
+                    }
+                )
+            stderr = process.stderr.read() if process.stderr is not None else ""
+            return_code = process.wait()
+        if cancelled := _cancelled("grep", _cancellation_token):
+            return cancelled
+        if watch["timed_out"]:
+            return tool_error("grep", f"Search timed out after {int(_RG_TIMEOUT_SECONDS)}s; narrow the path or pattern.", "Timeout")
         if return_code not in (0, 1) and not truncated:
             return tool_error("grep", stderr.strip() or "rg search failed.", _rg_error(stderr, "GrepError"))
         return tool_ok(

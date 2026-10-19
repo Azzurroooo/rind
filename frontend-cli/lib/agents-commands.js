@@ -10,7 +10,7 @@ import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
 
 export const agentsHelp = [
   "Usage: rind agents [list | team | task | open | manager | import] [--json]",
-  "  team create <name> [--root <existing-directory>]",
+  "  team create <name> [--root <existing-directory>] | team rename <team> <name>",
   "  team add <team> <workspace> [--share] [--position <name>] [--responsibility <text>]",
   "  team leader <team> <agent> | team remove <team> <agent>",
   "  team reports-to <team> <agent> <supervisor>",
@@ -114,7 +114,7 @@ export async function runAgentsCommand(args, launch) {
     if (result.leave) console.log(leaveSummary(result));
     exitInteractive();
   }
-  if (args[0] === "stop") { await stopBackground(args.includes("--all"), launch, json); return; }
+  if (args[0] === "stop" && (!args[1] || args[1] === "--all")) { await stopBackground(args.includes("--all"), launch, json); return; }
   const client = await managementClient(launch);
   try {
     const snapshot = await client.request("snapshot");
@@ -140,7 +140,8 @@ export async function runAgentsCommand(args, launch) {
       if (sub === "create") result = await client.request("createTeam", { name: rest.slice(0, rest.includes("--root") ? rest.indexOf("--root") : rest.length).join(" "), createRoot: folder(option(rest, "--root")) });
       else {
         const selected = team(rest[0]);
-        if (sub === "add") {
+        if (sub === "rename") result = await client.request("renameTeam", { teamId: selected.id, name: rest.slice(1).join(" ") });
+        else if (sub === "add") {
           result = await client.request("addMember", { teamId: selected.id, workspace: folder(rest[1]), share: rest.includes("--share"), position: option(rest, "--position"), responsibility: option(rest, "--responsibility") });
         }
         else if (sub === "leader" || sub === "remove") result = await client.request(sub === "leader" ? "setLeader" : "removeMember", { teamId: selected.id, agentId: agent(rest[1], selected.id).id });

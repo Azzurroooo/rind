@@ -170,6 +170,49 @@ def test_sync_file_tools_return_cancelled_payload(tmp_path: Path) -> None:
     assert_error(grep("needle", path=str(tmp_path), _cancellation_token=source.token), "Cancelled")
 
 
+def test_glob_and_grep_reject_filesystem_root(tmp_path: Path) -> None:
+    root = str(Path(tmp_path.anchor))
+    assert_error(glob_tool("*", path=root), "InvalidPath")
+    assert_error(grep("needle", path=root), "InvalidPath")
+    assert_error(glob_tool("*", path="/"), "InvalidPath")
+    assert_error(grep("needle", path="/"), "InvalidPath")
+
+
+def test_glob_and_grep_kill_blocked_rg_on_cancellation_and_timeout(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+    import threading
+    import time
+    import agent.infrastructure.tools.files.queries as queries
+
+    real_popen = subprocess.Popen
+
+    def sleeping_popen(_cmd, **kwargs):
+        return real_popen([sys.executable, "-c", "import time; time.sleep(10)"], **kwargs)
+
+    monkeypatch.setattr(queries.subprocess, "Popen", sleeping_popen)
+
+    for tool_fn in (
+        lambda token: glob_tool("*.py", path=str(tmp_path), _cancellation_token=token),
+        lambda token: grep("needle", path=str(tmp_path), _cancellation_token=token),
+    ):
+        source = CancellationTokenSource()
+        timer = threading.Timer(0.05, lambda: source.cancel("interrupted"))
+        timer.start()
+        started = time.monotonic()
+        try:
+            assert_error(tool_fn(source.token), "Cancelled")
+        finally:
+            timer.cancel()
+        assert time.monotonic() - started < 2.0
+
+    orig_watch = queries._watch_rg
+    monkeypatch.setattr(queries, "_watch_rg", lambda process, token, timeout=0.05: orig_watch(process, token, timeout=0.05))
+    started = time.monotonic()
+    assert_error(glob_tool("*.py", path=str(tmp_path)), "Timeout")
+    assert_error(grep("needle", path=str(tmp_path)), "Timeout")
+    assert time.monotonic() - started < 2.0
+
+
 def test_schema_exposes_only_minimal_file_navigation_fields(build_builtin_tool_specs) -> None:
     schemas = {item["function"]["name"]: item["function"] for item in DefaultToolRegistry(build_builtin_tool_specs()).schemas}
     if "list_files" in schemas:
@@ -185,3 +228,4 @@ def test_schema_exposes_only_minimal_file_navigation_fields(build_builtin_tool_s
         actual = set(schemas[name]["parameters"]["properties"])
         if actual != fields:
             raise AssertionError(f"Unexpected {name} schema fields: {actual}")
+
