@@ -77,9 +77,17 @@ test("every kind of row draws inside the panel at 28 and 46 columns", () => {
     assert.ok(lines.every(line => textWidth(line) <= width), row.kind + " fits " + width);
   }
   const member = plain(detailLines(view, rows[0], 46)).join("\n");
-  assert.match(member, /^Lead\nLeader · Builder · reports to you\n\n● Working/);
+  assert.match(member, /^Lead\nLeader · Builder\nreports to you\n\n● Working/);
   assert.match(member, /! Needs your answer · Pick the release date/, "what needs doing is the callout");
   assert.doesNotMatch(member, /Enter /, "keys are the footer's job");
+
+  s.agents.push({ id: "be", name: "be-api", canonicalWorkspace: "/w/be" });
+  s.memberships.push({ teamId: "team", agentId: "be", reportsToAgentId: "lead", status: "Idle", position: "Sub-agent | Backend/API" });
+  view.folderDefaults["/w/be"] = { provider: "deepseek", model: "deepseek-flash", reasoning_effort: "high", model_source: "folder", effort_source: "folder", connection_ready: true };
+  const sub = plain(detailLines(view, { kind: "member", teamId: "team", agentId: "be", title: "be-api", status: "Idle" }, 36)).join("\n");
+  assert.match(sub, /^be-api\nSub-agent \| Backend\/API\nreports to Lead\n\n· Idle/);
+  assert.match(sub, /Runs on {2}deepseek \/ deepseek-flash ·\n {9}high\n {9}this folder/);
+  assert.doesNotMatch(sub, /high …/);
 });
 
 test("task detail panel renders structured Delivery, Evidence, Files and Next with ANSI styling in unreviewed, accepted, rework and archived states", () => {

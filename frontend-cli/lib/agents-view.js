@@ -38,7 +38,7 @@ const fill = (lines, height) => [...lines.slice(0, height), ...Array(Math.max(0,
 
 export function layout(view, width, rows) {
   const height = Math.max(1, rows - 1);
-  const bodyHeight = Math.max(1, height - 3);
+  const bodyHeight = Math.max(1, height - (view?.busy || view?.notice ? 3 : 2));
   const sidebar = width >= SIDEBAR_AT;
   const sidebarWidth = sidebar ? Math.max(22, Math.min(30, Math.floor(width * 0.22))) : width;
   const mainX = sidebar ? sidebarWidth + 1 : 0;
@@ -122,7 +122,7 @@ function treeLine(row, width, nameColumn) {
     left = name + where;
   } else if (row.kind === "member") {
     const fold = row.expanded === false ? paint.accent("▸ ") : "";
-    const name = fold + paint.bold(single(row.title)) + (row.hidden ? paint.dim(" +" + row.hidden) : "");
+    const name = fold + paint.bold(paint.accent(single(row.title))) + (row.hidden ? paint.dim(" +" + row.hidden) : "");
     const used = textWidth(row.guide) + textWidth(name);
     const role = row.role && !compact ? " ".repeat(Math.max(1, nameColumn - used)) + paint.dim(row.role) : "";
     left = guide + name + role;
@@ -149,7 +149,8 @@ function rowLine(row, width, selected, focused, nameColumn) {
   }
   if (row.guide !== undefined) return marker + " " + treeLine(row, width - 2, nameColumn);
   let name = single(row.title);
-  if (row.kind === "member" || row.kind === "team" || row.fresh) name = paint.bold(name);
+  if (row.kind === "member") name = paint.bold(paint.accent(name));
+  else if (row.kind === "team" || row.fresh) name = paint.bold(name);
   else if (["add-member", "new-session", "assign", "new-team", "more", "clear"].includes(row.kind)) name = paint.dim(name);
   const extra = (row.role ? paint.dim(" · " + row.role) : "") + (row.hidden ? paint.dim(" +" + row.hidden) : "") + (row.note && row.kind !== "service" && width >= 60 ? paint.dim(" — " + row.note) : "");
   const left = marker + " " + leadIcon(row) + " " + paint.dim(row.guide || "") + (row.back ? paint.accent("↩ ") : "") + name + extra;
@@ -396,7 +397,8 @@ export function renderAgents(view, width, rows, now = Date.now()) {
   } else body = showSidebar && !view.dialog ? renderSidebar(view, width, lay.bodyHeight) : main;
   if (view.help) body = overlay(fill(body, lay.bodyHeight).map(line => fitLine(line, width)), helpBox(Math.min(width - 2, 112), lay.bodyHeight), width);
   const row = view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId);
+  const notice = noticeLine(view, width, now);
   return [paintBackground(headerLine(view, width), "surfaceActive"), ...fill(body, lay.bodyHeight).map(line => fitLine(line, width)),
-    paintBackground(fitLine(noticeLine(view, width, now), width), "surface"),
+    ...(notice ? [fitLine(notice, width)] : []),
     paintBackground(fitLine(" " + formatHints(hintsFor(view, row), width - 2), width), "surface")].slice(0, lay.height);
 }

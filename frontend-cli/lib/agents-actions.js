@@ -195,10 +195,7 @@ export function createActions(ui) {
       { label: "Add member below", key: "a", description: "Add a member below " + agentName(agentId), action: () => addMember(teamId, agentId) },
       { label: "Edit role and responsibility", key: "e", action: () => editMember(teamId, agentId) },
       { label: "Model and effort", key: "m", description: "What this member runs on", action: () => memberModel(teamId, agentId) },
-      ...(team?.leaderAgentId !== agentId ? [
-        { label: "Change supervisor", key: "s", action: () => changeSupervisor(teamId, agentId) },
-        { label: "Make team leader", key: "l", action: async () => { await ui.request("setLeader", { teamId, agentId }); ui.notify(agentName(agentId) + " now leads the team.", "success"); } },
-      ] : []),
+      ...(team?.leaderAgentId !== agentId ? [{ label: "Change supervisor", key: "s", action: () => changeSupervisor(teamId, agentId) }] : []),
       { label: "Rename team", key: "R", description: single(team?.name), action: () => review.renameTeam(teamId) },
       ...(run ? [{ label: "Resolve unconfirmed run", key: "u", description: "Confirm the old process stopped", action: () => resolveRun(run) }] : []),
       { label: "Remove from team", key: "x", danger: true, description: "Folder and history are kept", action: () => ui.confirm("Remove " + agentName(agentId) + "?", ["They leave " + single(team?.name) + ". The folder, its files and history are kept. Their unfinished tasks will need attention."], "Remove member",

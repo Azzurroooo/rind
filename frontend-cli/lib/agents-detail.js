@@ -25,7 +25,7 @@ function sessionRunsOn(selection) {
   if (!selection) return {};
   const { provider, model, reasoningEffort, selectionSource = {}, connectionReady } = selection;
   return {
-    fact: { label: "Runs on", value: [runsOn(provider, model, reasoningEffort), sources(SESSION_SOURCES, selectionSource.model, reasoningEffort && selectionSource.effort)] },
+    fact: { label: "Runs on", value: [runsOn(provider, model, reasoningEffort), sources(SESSION_SOURCES, selectionSource.model, reasoningEffort && selectionSource.effort)], lines: 4 },
     callout: connectionReady === false ? notConfigured(provider, "its next turn fails") : undefined,
   };
 }
@@ -33,7 +33,7 @@ function folderRunsOn(resolved, label) {
   if (!resolved) return {};
   const { provider, model, reasoning_effort: effort, model_source: modelSource, effort_source: effortSource, connection_ready: ready } = resolved;
   return {
-    fact: { label, value: [runsOn(provider, model, effort), sources(FOLDER_SOURCES, modelSource, effort && effortSource)] },
+    fact: { label, value: [runsOn(provider, model, effort), sources(FOLDER_SOURCES, modelSource, effort && effortSource)], lines: 4 },
     callout: ready === false ? notConfigured(provider, "new conversations fail") : undefined,
   };
 }
@@ -69,7 +69,7 @@ export function detailFor(view, row) {
       const { tone, label } = memberState(row.ownStatus || row.status, row.open);
       const model = folderRunsOn(view.folderDefaults?.[agent?.canonicalWorkspace], "Runs on");
       return {
-        title: row.title, context: role + (parent ? " · reports to " + single(parent.name) : row.leader ? " · reports to you" : ""),
+        title: row.title, context: [role, parent ? "reports to " + single(parent.name) : row.leader ? "reports to you" : ""],
         state: toned(tone, label),
         callout: first(current && needsUser(current) && current.blockedOn && { text: "! Needs your answer · " + single(current.blockedOn.action) }, model.callout),
         facts: [

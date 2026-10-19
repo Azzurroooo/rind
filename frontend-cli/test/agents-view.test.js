@@ -111,7 +111,7 @@ test("offline state and tiny terminals stay bounded", () => {
   for (const [width, rows] of [[20, 8], [4, 3], [39, 11]]) bounded(renderAgents(view, width, rows), width, rows);
 });
 
-test("colored rows with long roles keep every line exactly the terminal width", t => {
+test("colored rows with long roles keep every line exactly the terminal width", async t => {
   const tty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY"), noColor = process.env.NO_COLOR;
   Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
   delete process.env.NO_COLOR;
@@ -128,6 +128,20 @@ test("colored rows with long roles keep every line exactly the terminal width", 
       assert.doesNotMatch(line.replace(/\x1b\[[0-9;]*m/g, ""), /\x1b/, "only whole SGR sequences: " + JSON.stringify(line));
     }
   }
+  const { paint, paintBackground } = await import("../lib/theme.js");
+  const sample = renderAgents(view, 120, 30);
+  const surfaceBg = paintBackground("x", "surface").split("x")[0];
+  assert.ok(sample.at(-1).includes(surfaceBg), "footer hints line has surface background");
+  assert.ok(!sample.at(-2).includes(surfaceBg), "row above footer hints does not have surface background");
+  const withNotice = renderAgents({ ...view, notice: { text: "Up to date", tone: "success" } }, 120, 30);
+  assert.ok(withNotice.at(-1).includes(surfaceBg), "footer hints line keeps surface background with notice");
+  assert.ok(!withNotice.at(-2).includes(surfaceBg), "notice line does not paint a second surface background row");
+  const unselectedMember = sample.find(line => stripAnsi(line).includes("├─ 工程师 6"));
+  const selectedMember = sample.find(line => stripAnsi(line).includes("├─ 工程师 7"));
+  const sessionLine = sample.find(line => stripAnsi(line).includes("└─ ? r7"));
+  assert.ok(unselectedMember.includes(paint.bold(paint.accent("工程师 6"))), "unselected member name is colored with accent");
+  assert.ok(selectedMember.includes(paint.bold(paint.accent("工程师 7")).split("\x1b[0m")[0]), "selected member name is colored with accent");
+  assert.ok(!sessionLine.includes(paint.accent("r7")), "session title stays uncolored");
 });
 
 test("short paths replace only a whole home directory", () => {

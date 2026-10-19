@@ -76,15 +76,24 @@ test("sessions beyond the inline limit become a single overflow row", () => {
   assert.match(rows[2].title, /\+1 more/);
 });
 
-test("tasks are grouped into sections a human acts on first", () => {
+test("tasks are grouped into sections a human acts on first and sorted newest to oldest", () => {
   const { snapshot } = fixture();
   snapshot.tasks.push(
-    { id: "t1", teamId: "team", assigneeAgentId: "api", brief: "Ship", status: "done", report: { summary: "Shipped" } },
+    { id: "t1", teamId: "team", assigneeAgentId: "api", brief: "Ship v1", status: "done", deliveredAt: "2026-10-06T09:00:00Z", report: { summary: "Shipped v1" } },
     { id: "t2", teamId: "team", assigneeAgentId: "lead", brief: "Decide", status: "blocked", blockedOn: { responder: "user", action: "Pick a date" } },
     { id: "t3", teamId: "team", assigneeAgentId: "lead", brief: "Coordinate", status: "blocked", blockedOn: { responder: "children", action: "Wait" } },
+    { id: "t4", teamId: "team", assigneeAgentId: "api", brief: "Ship v2", status: "done", deliveredAt: "2026-10-06T11:00:00Z", report: { summary: "Shipped v2" } },
+    { id: "t5", teamId: "team", assigneeAgentId: "api", brief: "Older running", status: "running" },
+    { id: "t6", teamId: "team", assigneeAgentId: "web", brief: "Newer running", status: "running" },
   );
   const rows = taskRows(snapshot, "team");
-  assert.deepEqual(rows.map(r => r.kind === "section" ? "#" + r.title : r.title), ["Assign a task", "#Needs you", "Decide", "#Delegated to members", "Coordinate", "#Delivered", "Ship"]);
+  assert.deepEqual(rows.map(r => r.kind === "section" ? "#" + r.title : r.title), [
+    "Assign a task",
+    "#Needs you", "Decide",
+    "#In progress", "Newer running", "Older running",
+    "#Delegated to members", "Coordinate",
+    "#Delivered", "Ship v2", "Ship v1",
+  ]);
   assert.equal(rows.find(r => r.title === "Decide").note, "Pick a date");
   assert.equal(rows.find(r => r.title === "Coordinate").status, "Delegated");
 });

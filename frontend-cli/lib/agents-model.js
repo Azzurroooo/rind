@@ -214,13 +214,24 @@ const TASK_SECTIONS = [
 ];
 export function taskRows(snapshot, teamId, { query = "", filter = "All" } = {}) {
   const tasks = snapshot.tasks.filter(t => t.teamId === teamId && entryTask(t));
+  const order = new Map(tasks.map((task, index) => [task.id, index]));
+  const latestByTask = new Map();
+  for (const run of snapshot.runs || []) {
+    if (run.taskId && !run.delegationId) latestByTask.set(run.taskId, later(latestByTask.get(run.taskId), later(run.lastObservedAt, run.startedAt)));
+  }
+  for (const note of snapshot.notes || []) {
+    if (note.taskId) latestByTask.set(note.taskId, later(latestByTask.get(note.taskId), note.createdAt));
+  }
+  const taskTime = task => later(task.deliveredAt, latestByTask.get(task.id));
+  const byNewest = (a, b) => taskTime(b).localeCompare(taskTime(a)) || (order.get(b.id) ?? 0) - (order.get(a.id) ?? 0);
+  const byPriority = task => ({ high: 0, low: 2 }[task.priority] ?? 1);
   const rows = [{ id: "assign", kind: "assign", title: "Assign a task", teamId }];
   for (const section of TASK_SECTIONS) {
     const items = tasks.filter(section.test).filter(task => {
       const owner = byId(snapshot.agents, task.assigneeAgentId)?.name;
       return matches(query, task.brief, owner, task.blockedOn?.action, task.report?.summary) && statusOk(filter, taskStatus(task, snapshot));
     });
-    if (section.id === "working" || section.id === "queued") items.sort((a, b) => ({ high: 0, low: 2 }[a.priority] ?? 1) - ({ high: 0, low: 2 }[b.priority] ?? 1));
+    items.sort((a, b) => (section.id === "queued" ? byPriority(a) - byPriority(b) : 0) || byNewest(a, b));
     if (!items.length) continue;
     rows.push({ id: "section:" + section.id, kind: "section", title: section.title, count: items.length });
     for (const task of items) {

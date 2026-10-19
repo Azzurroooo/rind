@@ -127,6 +127,11 @@ test("team page edits members, nests team conversations and drives tasks from th
   assert.equal(chats[1].teamId, team.id);
 
   key("\x1b"); await visible("Leader · Coordinator");
+  key("G"); await visible("Reviewer");
+  key(" "); await visible("Change supervisor");
+  assert.doesNotMatch(h.screen(), /Make team leader/, "interactive member menu never offers Make team leader");
+  key("\x1b"); await settle();
+  key("g"); key("j"); await visible("Leader · Coordinator");
   key(" "); await visible("Add member below"); key("c");
   await waitFor(() => chats.length === 3, "conversation from the member menu");
   assert.equal(chats[2].agent.id, lead.id);

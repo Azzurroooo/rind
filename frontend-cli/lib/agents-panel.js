@@ -44,7 +44,7 @@ export function renderPanel(panel, width, height = Infinity) {
   if (!panel) return [];
   const head = [
     ...limited(wrapped(paint.bold(clean(panel.title || "")), width), panel.titleLines || 2, width),
-    ...(panel.context ? [truncateToWidth(paint.dim(clean(panel.context)), width, "…")] : []),
+    ...[panel.context].flat().filter(Boolean).map(line => truncateToWidth(paint.dim(clean(line)), width, "…")),
   ];
   const sections = [head];
   if (panel.state) sections.push([truncateToWidth(safe(panel.state), width, "…")]);
