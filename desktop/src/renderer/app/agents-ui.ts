@@ -514,7 +514,7 @@ function findOrgMemberSessionsElement(agentId: string): HTMLElement | null {
   const trigger = [...agentsSurface.querySelectorAll<HTMLElement>("[data-org-toggle-member-sessions]")].find(
     (el) => el.dataset.orgToggleMemberSessions === agentId,
   )
-  return trigger?.closest<HTMLElement>(".org-member-card")?.querySelector<HTMLElement>(".org-member-sessions") || null
+  return trigger?.closest<HTMLElement>(".org-member-card")?.querySelector<HTMLElement>(".org-member-sessions-list") || null
 }
 
 export function bindAgentsEvents(): () => void {

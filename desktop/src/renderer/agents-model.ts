@@ -1284,88 +1284,92 @@ export function renderSidebarAgentsHtml(options: {
       const teamMenuOpen = itemMenuKey === teamMenuKey
       const membersCountLabel = `${membersCount} ${membersCount === 1 ? "member" : "members"}`
 
+      const renderSidebarMemberBranch = (member: OrgMemberSummary, depth = 0): string => {
+        const memberKey = `${team.id}:${member.agentId}`
+        const memberMenuKey = `member:${memberKey}`
+        const memberMenuOpen = itemMenuKey === memberMenuKey
+        const isMemberActive =
+          options.surface.kind === "chat" &&
+          options.chatContext.kind === "member" &&
+          options.chatContext.agentId === member.agentId
+        const isMemberExpanded = expandedMembers.has(memberKey)
+        const memberSessions = member.sessions || []
+        const memberLimit = sessionLimits[memberKey] || DEFAULT_SIDEBAR_SESSIONS_LIMIT
+        const visibleMemberSessions = memberSessions.slice(0, memberLimit)
+        const childrenHtml =
+          Array.isArray(member.children) && member.children.length > 0
+            ? `<div class="sidebar-org-children" role="group" aria-label="Direct reports of ${escapeAttribute(member.name)}">${member.children
+                .map((child) => renderSidebarMemberBranch(child, depth + 1))
+                .join("")}</div>`
+            : ""
+
+        return `
+          <div class="sidebar-org-branch" data-org-depth="${depth}" data-agent-id="${escapeAttribute(member.agentId)}">
+            <section class="project-item member-project-item${isMemberExpanded ? " expanded" : ""}${isMemberActive ? " is-selected-member" : ""}">
+              <div class="project-row">
+                <button type="button" class="project-trigger" data-sidebar-toggle-member="${escapeAttribute(memberKey)}" aria-expanded="${isMemberExpanded}" title="${escapeAttribute(member.name)}">
+                  <span class="project-name-row">
+                    <span class="agent-status-dot tone-${member.tone}"></span>
+                    <span class="project-name">${escapeHtml(member.name)}</span>
+                  </span>
+                </button>
+                <div class="project-menu-wrap">
+                  <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(memberMenuKey)}" title="Member actions" aria-label="Actions for ${escapeAttribute(member.name)}" aria-haspopup="menu" aria-expanded="${String(memberMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
+                  ${
+                    memberMenuOpen
+                      ? `<div class="project-menu" role="menu">
+                          <button type="button" data-agent-new-session="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">New chat</button>
+                          <button type="button" data-sidebar-member-assign="${escapeAttribute(member.agentId)}" data-team-id="${escapeAttribute(team.id)}" role="menuitem">Assign task</button>
+                          ${!member.isLeader ? `<button type="button" data-agent-make-leader="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">Make leader</button>` : ""}
+                          <button type="button" data-agent-remove="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">Remove</button>
+                        </div>`
+                      : ""
+                  }
+                </div>
+              </div>
+              ${
+                isMemberExpanded
+                  ? `<div class="project-sessions member-sessions-group" role="group" aria-label="${escapeAttribute(member.name)} sessions">
+                      ${
+                        visibleMemberSessions.length === 0
+                          ? `<p class="session-search-empty">No sessions yet.</p>`
+                          : visibleMemberSessions
+                              .map((sess) => {
+                                const isCurrent =
+                                  options.surface.kind === "chat" &&
+                                  sess.runtimeSessionId === options.viewedSessionId
+                                return renderAgentSidebarSessionRow({
+                                  sess,
+                                  isCurrent,
+                                  menuOpen: sessionMenuId === sess.runtimeSessionId,
+                                  confirmingDelete: sessionDeleteConfirmId === sess.runtimeSessionId,
+                                  deleting: sessionDeleteBusyId === sess.runtimeSessionId,
+                                  openAttrs: `data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}"`,
+                                })
+                              })
+                              .join("")
+                      }
+                      ${
+                        memberSessions.length > memberLimit
+                          ? `<button type="button" class="sidebar-load-more" data-agent-more-sessions="${escapeAttribute(memberKey)}">View more sessions</button>`
+                          : ""
+                      }
+                    </div>`
+                  : ""
+              }
+            </section>
+            ${childrenHtml}
+          </div>
+        `
+      }
+
+      const rootNodes = summary ? (summary.orgRoots.length > 0 ? summary.orgRoots : summary.members) : []
       const membersHtml =
         !isCollapsed && summary
           ? `<div class="project-sessions team-members-group" role="group" aria-label="${escapeAttribute(team.name)} members">${
-              summary.members.length === 0
+              rootNodes.length === 0
                 ? `<p class="session-search-empty">No members yet.</p>`
-                : summary.members
-                    .map((member) => {
-                      const memberKey = `${team.id}:${member.agentId}`
-                      const memberMenuKey = `member:${memberKey}`
-                      const memberMenuOpen = itemMenuKey === memberMenuKey
-                      const isMemberActive =
-                        options.surface.kind === "chat" &&
-                        options.chatContext.kind === "member" &&
-                        options.chatContext.agentId === member.agentId
-                      const isMemberExpanded = expandedMembers.has(memberKey)
-                      const memberSessions = member.sessions || []
-                      const memberLimit = sessionLimits[memberKey] || DEFAULT_SIDEBAR_SESSIONS_LIMIT
-                      const visibleMemberSessions = memberSessions.slice(0, memberLimit)
-                      const roleSubtitle = [
-                        member.isLeader ? `${member.position} · Lead` : member.position,
-                        member.status !== "Idle" ? member.status : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")
-                      return `
-                        <section class="project-item member-project-item${isMemberExpanded ? " expanded" : ""}${isMemberActive ? " is-selected-member" : ""}">
-                          <div class="project-row">
-                            <button type="button" class="project-trigger" data-sidebar-toggle-member="${escapeAttribute(memberKey)}" aria-expanded="${isMemberExpanded}" title="${escapeAttribute(`${member.name} · ${roleSubtitle}`)}">
-                              <span class="project-name-row">
-                                <span class="agent-status-dot tone-${member.tone}"></span>
-                                <span class="project-name">${escapeHtml(member.name)}</span>
-                              </span>
-                              <span class="project-path">${escapeHtml(roleSubtitle)}</span>
-                            </button>
-                            <div class="project-menu-wrap">
-                              <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(memberMenuKey)}" title="Member actions" aria-label="Actions for ${escapeAttribute(member.name)}" aria-haspopup="menu" aria-expanded="${String(memberMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
-                              ${
-                                memberMenuOpen
-                                  ? `<div class="project-menu" role="menu">
-                                      <button type="button" data-agent-new-session="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">New chat</button>
-                                      <button type="button" data-sidebar-member-assign="${escapeAttribute(member.agentId)}" data-team-id="${escapeAttribute(team.id)}" role="menuitem">Assign task</button>
-                                      ${!member.isLeader ? `<button type="button" data-agent-make-leader="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">Make leader</button>` : ""}
-                                      <button type="button" data-agent-remove="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" role="menuitem">Remove</button>
-                                    </div>`
-                                  : ""
-                              }
-                            </div>
-                          </div>
-                          ${
-                            isMemberExpanded
-                              ? `<div class="project-sessions" role="group" aria-label="${escapeAttribute(member.name)} sessions">
-                                  ${
-                                    visibleMemberSessions.length === 0
-                                      ? `<p class="session-search-empty">No sessions yet.</p>`
-                                      : visibleMemberSessions
-                                          .map((sess) => {
-                                            const isCurrent =
-                                              options.surface.kind === "chat" &&
-                                              sess.runtimeSessionId === options.viewedSessionId
-                                            return renderAgentSidebarSessionRow({
-                                              sess,
-                                              isCurrent,
-                                              menuOpen: sessionMenuId === sess.runtimeSessionId,
-                                              confirmingDelete: sessionDeleteConfirmId === sess.runtimeSessionId,
-                                              deleting: sessionDeleteBusyId === sess.runtimeSessionId,
-                                              openAttrs: `data-agent-chat="${escapeAttribute(member.agentId)}" data-agent-team="${escapeAttribute(team.id)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}"`,
-                                            })
-                                          })
-                                          .join("")
-                                  }
-                                  ${
-                                    memberSessions.length > memberLimit
-                                      ? `<button type="button" class="sidebar-load-more" data-agent-more-sessions="${escapeAttribute(memberKey)}">View more sessions</button>`
-                                      : ""
-                                  }
-                                </div>`
-                              : ""
-                          }
-                        </section>
-                      `
-                    })
-                    .join("")
+                : rootNodes.map((rootNode) => renderSidebarMemberBranch(rootNode, 0)).join("")
             }</div>`
           : ""
 

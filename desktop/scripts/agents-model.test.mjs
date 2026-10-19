@@ -178,8 +178,18 @@ test("resolveSessionAgentContext identifies team member, manager, and independen
     assert.equal(leadCtx.isLeader, true)
   }
 
+  const workspaceOnlyMemberCtx = resolveSessionAgentContext(sampleSnapshot, "", "/workspace/core/fe")
+  assert.equal(workspaceOnlyMemberCtx.kind, "member")
+  if (workspaceOnlyMemberCtx.kind === "member") {
+    assert.equal(workspaceOnlyMemberCtx.agentId, "agent-fe")
+    assert.equal(workspaceOnlyMemberCtx.teamId, "team-1")
+  }
+
   const managerCtx = resolveSessionAgentContext(sampleSnapshot, "rt-mgr-1", "/home/user/.rind/agents/manager")
   assert.equal(managerCtx.kind, "manager")
+
+  const workspaceOnlyManagerCtx = resolveSessionAgentContext(sampleSnapshot, "", "/home/user/.rind/agents/manager")
+  assert.equal(workspaceOnlyManagerCtx.kind, "manager")
 
   const indepCtx = resolveSessionAgentContext(sampleSnapshot, "rt-other", "/workspace/my-app")
   assert.equal(indepCtx.kind, "independent")
@@ -210,11 +220,17 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
   assert.match(sidebarHtml, /Manager/)
   assert.match(sidebarHtml, /Core Platform/)
   assert.match(sidebarHtml, /frontend-specialist/)
+  assert.match(sidebarHtml, /qa-verifier/)
   assert.match(sidebarHtml, /Architecture kickoff/)
   assert.match(sidebarHtml, /session-item-row/)
   assert.match(sidebarHtml, /session-menu-trigger/)
   assert.match(sidebarHtml, /View more sessions/)
   assert.match(sidebarHtml, /team-trigger-meta">3 members</)
+  assert.match(sidebarHtml, /sidebar-org-children" role="group" aria-label="Direct reports of lead"/)
+  assert.match(sidebarHtml, /sidebar-org-children" role="group" aria-label="Direct reports of frontend-specialist"/)
+  assert.doesNotMatch(sidebarHtml, /project-path/)
+  assert.doesNotMatch(sidebarHtml, /Engineering Lead/)
+  assert.doesNotMatch(sidebarHtml, /Frontend Specialist/)
   assert.doesNotMatch(sidebarHtml, /Organization coordinator ·/)
   assert.doesNotMatch(sidebarHtml, /3 tasks/)
   assert.doesNotMatch(sidebarHtml, /Session 6/)

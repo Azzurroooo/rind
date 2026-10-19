@@ -14,6 +14,7 @@ import { TeamView } from "../components/agents/TeamView.jsx";
 import { InboxView } from "../components/agents/InboxView.jsx";
 import { BackgroundView } from "../components/agents/BackgroundView.jsx";
 import { ManagerView } from "../components/agents/ManagerView.jsx";
+import { resolveSessionAgentContext } from "../lib/agentsModel.js";
 import { methods } from "../methods.js";
 import { INSPECTOR_WIDTH, SIDEBAR_WIDTH } from "./constants.js";
 import { useAppController } from "./useAppController.js";
@@ -133,13 +134,50 @@ export function Shell() {
           canExport
           notificationPermission={ctx.notificationPermission}
           onNew={() => {
-            agents.clearAgentOverride();
             agents.openChatSurface();
+            const wsCtx = resolveSessionAgentContext(
+              agents.snapshot,
+              "",
+              ctx.selectedWorkspace || ctx.info?.workspace_root,
+            );
+            if (wsCtx.kind === "member") {
+              void agents.openAgentConversation({
+                teamId: wsCtx.teamId,
+                agentId: wsCtx.agentId,
+                forceNew: true,
+              });
+              return;
+            }
+            if (wsCtx.kind === "manager") {
+              void agents.openAgentConversation({ manager: true, forceNew: true });
+              return;
+            }
+            agents.clearAgentOverride();
             void actions.createSession();
           }}
           onSelect={(id) => {
-            agents.clearAgentOverride();
             agents.openChatSurface();
+            const sessCtx = resolveSessionAgentContext(
+              agents.snapshot,
+              id,
+              ctx.selectedWorkspace || ctx.info?.workspace_root,
+            );
+            if (sessCtx.kind === "member") {
+              void agents.openAgentConversation({
+                teamId: sessCtx.teamId,
+                agentId: sessCtx.agentId,
+                runtimeSessionId: id,
+              });
+              return;
+            }
+            if (sessCtx.kind === "manager") {
+              void agents.openAgentConversation({
+                manager: true,
+                runtimeSessionId: id,
+              });
+              return;
+            }
+            agents.clearAgentOverride();
             void actions.handleSelectSession(id);
           }}
           onFork={(id) => void actions.forkSession(id, "")}

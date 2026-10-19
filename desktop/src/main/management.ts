@@ -667,6 +667,44 @@ async function ensureRuntimeForWorkspace(workspaceRoot?: string) {
   }
 }
 
+async function resolveManagedAgentByWorkspace(workspaceRoot: string): Promise<{
+  manager: boolean
+  teamId: string
+  agentId: string
+  workspaceRoot: string
+} | null> {
+  const wsKey = normalizeWorkspaceKey(workspaceRoot)
+  if (!wsKey) return null
+  try {
+    const { managementPaths } = await loadManagementModule()
+    const managerFolder = normalizeWorkspaceKey(managementPaths(launchOptions().home).manager)
+    if (wsKey === managerFolder || wsKey.replace(/\\/g, "/").endsWith("/agents/manager")) {
+      return { manager: true, teamId: "", agentId: "", workspaceRoot }
+    }
+  } catch {
+    if (wsKey.replace(/\\/g, "/").endsWith("/agents/manager")) {
+      return { manager: true, teamId: "", agentId: "", workspaceRoot }
+    }
+  }
+  const agent = currentSnapshot.agents.find((a) => normalizeWorkspaceKey(a.canonicalWorkspace) === wsKey)
+  if (!agent) return null
+  if (String(agent.name || "").toLowerCase() === "manager") {
+    return {
+      manager: true,
+      teamId: "",
+      agentId: String(agent.id || ""),
+      workspaceRoot: String(agent.canonicalWorkspace || workspaceRoot),
+    }
+  }
+  const membership = currentSnapshot.memberships.find((m) => m.agentId === agent.id)
+  return {
+    manager: false,
+    teamId: membership ? String(membership.teamId || "") : "",
+    agentId: String(agent.id || ""),
+    workspaceRoot: String(agent.canonicalWorkspace || workspaceRoot),
+  }
+}
+
 export async function openAgentSession(params: {
   teamId?: unknown
   agentId?: unknown
@@ -676,9 +714,9 @@ export async function openAgentSession(params: {
   resumeLatest?: unknown
   workspace?: unknown
 }) {
-  const manager = params.manager === true
-  const teamId = typeof params.teamId === "string" && !manager ? params.teamId.trim() : ""
-  const agentId = typeof params.agentId === "string" ? params.agentId.trim() : ""
+  let manager = params.manager === true
+  let teamId = typeof params.teamId === "string" && !manager ? params.teamId.trim() : ""
+  let agentId = typeof params.agentId === "string" ? params.agentId.trim() : ""
   let runtimeSessionId =
     typeof params.runtimeSessionId === "string"
       ? params.runtimeSessionId.trim()
@@ -687,7 +725,16 @@ export async function openAgentSession(params: {
         : ""
   const explicitWorkspace = typeof params.workspace === "string" ? params.workspace.trim() : ""
 
-  // Plain independent workspace session (outside any team and not Manager):
+  if (!manager && !teamId && !agentId && explicitWorkspace) {
+    const resolvedByWs = await resolveManagedAgentByWorkspace(explicitWorkspace)
+    if (resolvedByWs) {
+      manager = resolvedByWs.manager
+      teamId = resolvedByWs.teamId
+      agentId = resolvedByWs.agentId
+    }
+  }
+
+  // Plain workspace session (outside any team and not Manager):
   if (!manager && !teamId && !agentId && explicitWorkspace) {
     await ensureRuntimeForWorkspace(explicitWorkspace)
     const opened = (await requestRuntime(runtimeMethods.sessionOpen, {
@@ -793,17 +840,27 @@ export async function createAgentSession(params: Record<string, unknown>) {
     : typeof params.managementSessionId === "string"
       ? params.managementSessionId.trim()
       : ""
-  const manager = params.manager === true
-  const teamId = typeof params.team_id === "string"
+  let manager = params.manager === true
+  let teamId = typeof params.team_id === "string"
     ? params.team_id.trim()
     : typeof params.teamId === "string"
       ? params.teamId.trim()
       : ""
-  const agentId = typeof params.agent_id === "string"
+  let agentId = typeof params.agent_id === "string"
     ? params.agent_id.trim()
     : typeof params.agentId === "string"
       ? params.agentId.trim()
       : ""
+  const requestedWorkspace = typeof params.workspace_root === "string" ? params.workspace_root.trim() : ""
+
+  if (!manager && !teamId && !agentId && requestedWorkspace) {
+    const resolvedByWs = await resolveManagedAgentByWorkspace(requestedWorkspace)
+    if (resolvedByWs) {
+      manager = resolvedByWs.manager
+      teamId = resolvedByWs.teamId
+      agentId = resolvedByWs.agentId
+    }
+  }
 
   let attachment = managementSessionId ? attachmentsByManagementId.get(managementSessionId) : undefined
 
@@ -831,10 +888,7 @@ export async function createAgentSession(params: Record<string, unknown>) {
     attachmentsByManagementId.set(attachment.managementSessionId, attachment)
   }
 
-  const workspaceRoot = String(
-    attachment?.workspaceRoot ||
-      (typeof params.workspace_root === "string" ? params.workspace_root.trim() : ""),
-  )
+  const workspaceRoot = String(attachment?.workspaceRoot || requestedWorkspace)
   if (attachment) {
     const active = await ensureManagementConnected({ start: true })
     if (await reconcileStaleWorkspaceRuns(active, currentSnapshot, attachment.agentId, workspaceRoot)) {
@@ -899,6 +953,10 @@ export async function enrichSessionReplayParams(
     const isManager =
       typeof agent?.canonicalWorkspace === "string" &&
       agent.canonicalWorkspace.toLowerCase() === managerFolder
+    const workspaceRoot = String(agent?.canonicalWorkspace || managedSession.workspaceRoot || "")
+    if (workspaceRoot && (await reconcileStaleWorkspaceRuns(client, currentSnapshot, String(managedSession.agentId || ""), workspaceRoot))) {
+      acceptSnapshot(await client.request("snapshot"))
+    }
     const attached = await client.request("attachSession", {
       agentId: isManager ? undefined : managedSession.agentId,
       teamId: managedSession.teamId || undefined,
@@ -918,7 +976,7 @@ export async function enrichSessionReplayParams(
       agentId: String(managedSession.agentId || ""),
       teamId: String(managedSession.teamId || ""),
       manager: isManager,
-      workspaceRoot: String(agent?.canonicalWorkspace || ""),
+      workspaceRoot,
       runtimeSessionId: sessionId,
       externalTools,
     }

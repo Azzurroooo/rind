@@ -138,7 +138,7 @@
   gap: 4px;
   min-width: 0;
   height: 28px;
-  padding: 0 6px;
+  padding: 0 6px 1px;
   overflow: hidden;
   border: 0;
   border-radius: var(--radius-chip);
@@ -146,7 +146,7 @@
   color: var(--muted);
   font-size: 11px;
   font-weight: 500;
-  line-height: 1;
+  line-height: 1.35;
   white-space: nowrap;
 }
 .sidebar-mode-tab svg {
@@ -159,6 +159,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.35;
+  padding-bottom: 1px;
 }
 .sidebar-mode-tab .sidebar-nav-badge {
   margin-left: 0;
@@ -187,10 +189,16 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
   padding-right: 2px;
 }
 .sidebar-nav-rail {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.sidebar-manager-section {
   display: grid;
   gap: 2px;
 }
@@ -220,7 +228,7 @@
 }
 .sidebar-manager-group {
   display: grid;
-  gap: 2px;
+  gap: 0;
 }
 .sidebar-manager-row {
   padding: 0 4px;
@@ -270,7 +278,9 @@
 
 .sidebar-teams-section {
   display: grid;
-  gap: 4px;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
 .sidebar-section-head {
   display: flex;
@@ -314,7 +324,7 @@
 }
 .sidebar-team-group {
   display: grid;
-  gap: 2px;
+  gap: 0;
 }
 .sidebar-team-row {
   display: flex;
@@ -396,10 +406,11 @@
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
+  margin-top: 0;
   transition:
-    grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 175ms cubic-bezier(0.22, 1, 0.36, 1),
-    margin-top 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    grid-template-rows 210ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 165ms cubic-bezier(0.32, 0.72, 0, 1),
+    margin-top 210ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .sidebar-team-meta-wrap.is-open {
   grid-template-rows: 1fr;
@@ -420,13 +431,16 @@
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
+  margin-top: 0;
   transition:
-    grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 175ms cubic-bezier(0.22, 1, 0.36, 1);
+    grid-template-rows 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 170ms cubic-bezier(0.32, 0.72, 0, 1),
+    margin-top 220ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .sidebar-collapse-wrap.is-open {
   grid-template-rows: 1fr;
   opacity: 1;
+  margin-top: 2px;
 }
 .sidebar-collapse-inner {
   min-height: 0;
@@ -440,9 +454,37 @@
   padding-left: 6px;
   border-left: 1px solid var(--line);
 }
+.sidebar-org-branch {
+  display: grid;
+  gap: 2px;
+}
+.sidebar-org-children {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  margin-left: 11px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.sidebar-org-children > .sidebar-org-branch {
+  position: relative;
+}
+.sidebar-org-children > .sidebar-org-branch > .sidebar-member-block > .sidebar-member-row {
+  position: relative;
+}
+.sidebar-org-children > .sidebar-org-branch > .sidebar-member-block > .sidebar-member-row::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  width: 6px;
+  height: 1px;
+  background: var(--line);
+  pointer-events: none;
+}
 .sidebar-member-block {
   display: grid;
-  gap: 1px;
+  gap: 0;
 }
 .sidebar-member-row {
   display: flex;
@@ -483,23 +525,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.sidebar-leader-tag {
-  padding: 0 5px;
-  border-radius: var(--radius-pill);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 600;
-  flex: none;
-}
-.sidebar-member-role {
-  max-width: 72px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--dim);
-  font-size: 10.5px;
 }
 
 /* Nested Member / Manager Conversations in Sidebar (uses SessionRow) */

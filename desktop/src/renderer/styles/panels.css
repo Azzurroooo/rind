@@ -9,9 +9,9 @@
 .sidebar-actions .primary-button { min-width: 0; }
 
 .project-list { display: grid; align-content: start; gap: 5px; }
-.recent-sessions { min-width: 0; margin: -2px 0 12px; }
+.recent-sessions { min-width: 0; margin: 10px 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .recent-list { display: grid; gap: 2px; }
-.project-item { min-width: 0; }
+.project-item { display: flex; flex-direction: column; min-width: 0; }
 .project-row { position: relative; min-width: 0; }
 .project-trigger {
   width: 100%;

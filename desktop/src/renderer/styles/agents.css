@@ -18,7 +18,7 @@
   gap: 4px;
   min-width: 0;
   min-height: 28px;
-  padding: 2px 6px;
+  padding: 2px 6px 3px;
   overflow: hidden;
   border: 0;
   border-radius: var(--radius-xs);
@@ -26,7 +26,7 @@
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
-  line-height: 1;
+  line-height: 1.35;
   white-space: nowrap;
   transition: background-color var(--dur-hover) var(--ease), color var(--dur-hover) var(--ease);
 }
@@ -38,8 +38,11 @@
 }
 
 .sidebar-mode-tab > span:not(.sidebar-mode-badges):not(.sidebar-nav-badge) {
+  display: block;
   min-width: 0;
+  padding-bottom: 1px;
   overflow: hidden;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -94,7 +97,19 @@
 .sidebar-global-nav {
   display: grid;
   gap: 2px;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sidebar-agents .sidebar-projects {
+  margin-bottom: 0;
+}
+
+.sidebar-agents .sidebar-projects + .sidebar-projects {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 .sidebar-nav-badge {
@@ -170,8 +185,49 @@
   line-height: 1.3;
 }
 
+.sidebar-agents .team-members-group {
+  display: grid;
+  gap: 2px;
+}
+
+.sidebar-org-branch {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sidebar-org-children {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 2px 11px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+
+.sidebar-org-children > .sidebar-org-branch > .member-project-item > .project-row::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -8px;
+  width: 6px;
+  height: 1px;
+  background: var(--line);
+  pointer-events: none;
+}
+
+.sidebar-agents .member-project-item > .project-row .project-trigger {
+  padding-block: 5px;
+}
+
 .sidebar-agents .member-project-item > .project-row .project-name {
   font-size: 13px;
+  font-weight: 500;
+}
+
+.sidebar-agents .member-sessions-group {
+  margin: 2px 0 6px 14px;
+  padding-left: 7px;
+  border-left: 1px dashed var(--line-strong);
 }
 
 .sidebar-agents .project-item.is-selected-team > .project-row > .project-trigger,

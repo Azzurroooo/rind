@@ -54,7 +54,7 @@ appRoot.innerHTML = `
               ${renderIcon(Search, "session-search-icon")}
               <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search loaded sessions" autocomplete="off" />
             </div>
-            <section class="sidebar-projects" aria-label="Projects"><div class="sidebar-heading"><h2 class="sidebar-section-title">Independent Workspaces</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
+            <section class="sidebar-projects" aria-label="Workspaces"><div class="sidebar-heading"><h2 class="sidebar-section-title">Workspaces</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add workspace">Add</button></div>
             <div id="project-list" class="project-list"></div></section>
             <section id="recent-sessions" class="recent-sessions" aria-label="Recent sessions" hidden>
               <h2 class="sidebar-section-title">Recent sessions</h2>

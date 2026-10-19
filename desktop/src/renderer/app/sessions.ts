@@ -1,4 +1,5 @@
 import { type DesktopProject, type DesktopSessionSummary, runtimeMethods } from "../../preload/types.ts"
+import { resolveSessionAgentContext } from "../agents-model.ts"
 import { defaultNewChatProjectPath, projectForPath as findProjectForPath, sameProjectPath as samePath } from "../project-selection.ts"
 import { replayMarkdown } from "../session-actions.ts"
 import { createTaskMonitorState } from "../task-monitor.ts"
@@ -194,6 +195,11 @@ export function resolveNewChatProjectPath() {
   return defaultNewChatProjectPath(state.projects, state.recentSessions, state.fallbackProjectPath)
 }
 
+function syncWorkspaceAgentContext(sessionId: string, projectPath: string) {
+  const resolved = resolveSessionAgentContext(state.agentsSnapshot, sessionId, projectPath)
+  state.agentChatContext = resolved.kind !== "independent" ? resolved : null
+}
+
 export async function addProject() {
   const overview = await window.api.projects.add()
   if (!overview) return
@@ -201,6 +207,7 @@ export async function addProject() {
   resetProjectView()
   state.chatProjectPath = overview.activeProjectPath
   state.viewedProjectPath = overview.activeProjectPath
+  syncWorkspaceAgentContext("", overview.activeProjectPath)
   restoreProjectDraft()
   state.notice = ""
   render()
@@ -227,6 +234,9 @@ export async function toggleProject(path: string) {
   render()
   if (!wasExpanded) {
     animateExpand(findProjectSessionsElement(path))
+    if (!state.viewedSessionId && !samePath(path, state.chatProjectPath)) {
+      await selectChatProject(path)
+    }
   }
 }
 
@@ -242,6 +252,7 @@ export async function removeProject(path: string) {
   if (removesViewedProject || removesChatProject) {
     state.chatProjectPath = resolveNewChatProjectPath()
     state.viewedProjectPath = state.chatProjectPath
+    syncWorkspaceAgentContext("", state.chatProjectPath)
     resetProjectView()
     restoreProjectDraft()
   }
@@ -254,9 +265,9 @@ export async function startNewChat() {
   closeComposerSelectMenus()
   if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
   state.agentSurface = { kind: "chat" }
-  state.agentChatContext = null
   state.chatProjectPath = resolveNewChatProjectPath()
   state.viewedProjectPath = state.chatProjectPath
+  syncWorkspaceAgentContext("", state.chatProjectPath)
   const project = chatProject()
   if (!project?.available) {
     await addProject()
@@ -303,7 +314,7 @@ export async function switchSession(nextSessionId: string) {
   if (!project) return
   closeComposerSelectMenus()
   state.agentSurface = { kind: "chat" }
-  state.agentChatContext = null
+  syncWorkspaceAgentContext(nextSessionId, project.path)
   showCachedSession(nextSessionId)
   state.viewedSessionId = nextSessionId
   state.model = state.sessionModels[nextSessionId] || ""
@@ -330,7 +341,7 @@ export async function selectChatProject(path: string) {
   closeComposerSelectMenus()
   if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
   state.agentSurface = { kind: "chat" }
-  state.agentChatContext = null
+  syncWorkspaceAgentContext("", project.path)
   state.chatProjectPath = project.path
   state.viewedProjectPath = project.path
   state.viewedSessionId = ""

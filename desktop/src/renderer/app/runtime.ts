@@ -1,4 +1,5 @@
 import { type RuntimeMethod, runtimeMethods, sessionScopedMethods, turnScopedMethods } from "../../preload/types.ts"
+import { resolveSessionAgentContext } from "../agents-model.ts"
 import { sameProjectPath as samePath } from "../project-selection.ts"
 import { createQuestionSelection, type QuestionSelection } from "../question-state.ts"
 import { mergeSlashCatalog } from "../desktop-slash.ts"
@@ -160,7 +161,10 @@ export function draftModelSelection() {
 export async function ensureSession(workspaceRoot: string, requestedSessionId?: string, selection = draftModelSelection()) {
   const currentSessionId = requestedSessionId === undefined ? state.viewedSessionId : requestedSessionId
   if (currentSessionId) return currentSessionId
-  const agentCtx = state.agentChatContext
+  const agentCtx =
+    state.agentChatContext && state.agentChatContext.kind !== "independent"
+      ? state.agentChatContext
+      : resolveSessionAgentContext(state.agentsSnapshot, "", workspaceRoot)
   let created: Record<string, unknown>
   if (agentCtx && agentCtx.kind !== "independent" && window.api.agents) {
     const res = asRecord(
@@ -176,6 +180,12 @@ export async function ensureSession(workspaceRoot: string, requestedSessionId?: 
       }),
     )
     created = asRecord(res.runtimeSession || res)
+    const managementSessionId = asRecordText(res.managementSessionId) || agentCtx.managementSessionId
+    state.agentChatContext = {
+      ...agentCtx,
+      ...(managementSessionId ? { managementSessionId } : {}),
+      workspaceRoot,
+    }
   } else {
     created = asRecord(await request(runtimeMethods.sessionNew, { workspace_root: workspaceRoot }))
   }
