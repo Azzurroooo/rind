@@ -158,7 +158,7 @@ let remoteGateway: DesktopGateway | undefined
 function gateway() {
   remoteGateway ||= new DesktopGateway({
     initialize: async () => {
-      const initialized = asObject(await initializeRuntime())
+      const initialized = asObject(await initializeRuntime()) || {}
       const currentWs = typeof initialized.workspace_root === "string" ? initialized.workspace_root.trim() : ""
       const runtimeDir = join(rindHomeDir(), "runtime")
       if (!currentWs || samePath(currentWs, runtimeDir)) {

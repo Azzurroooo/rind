@@ -59,10 +59,11 @@
 .project-workspace code { overflow-wrap: anywhere; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .session-item {
   position: relative; display: flex; align-items: center; min-width: 0;
+  padding-right: 4px;
   border-radius: var(--radius-control); color: var(--muted);
 }
 .session-item.menu-open, .session-item:has(.menu-root[data-open="true"]) { z-index: 60; }
-.session-item:hover, .session-item.menu-open { background: var(--fill-1); color: var(--text); }
+.session-item:hover, .session-item.menu-open, .session-item:has(.menu-root[data-open="true"]) { background: var(--fill-1); color: var(--text); }
 .session-item.selected { background: var(--fill-2); color: var(--text); }
 .session-main {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2);
@@ -72,15 +73,25 @@
 .session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); }
 .session-running { flex: none; color: var(--accent); }
 .session-unread { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-.session-menu { flex: none; opacity: 0; transition: opacity var(--motion-fast) var(--ease); }
-.session-item:hover .session-menu, .session-item:focus-within .session-menu, .session-item.menu-open .session-menu,
-.session-item.selected .session-menu { opacity: 1; }
+.session-menu { flex: none; }
 .session-more {
-  display: inline-grid; place-items: center; width: 24px; height: 24px; margin-right: var(--space-1); padding: 0;
+  display: inline-grid; place-items: center; flex: none;
+  width: 24px; height: 24px; margin: 0; padding: 0;
   border: 0; border-radius: var(--radius-chip); background: transparent; color: var(--muted);
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease);
 }
-.session-more:hover, .session-more[aria-expanded="true"] { background: var(--fill-2); color: var(--text); }
-@media (hover: none) { .session-menu { opacity: 1; } }
+.session-item:hover .session-more,
+.session-item.menu-open .session-more,
+.session-item:has(.menu-root[data-open="true"]) .session-more,
+.session-more[aria-expanded="true"],
+.session-more:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.session-more:focus-visible { outline-offset: 0; }
+.session-more:hover, .session-more[aria-expanded="true"] { background: var(--fill-3); color: var(--text); }
+@media (hover: none) { .session-more { opacity: 1; pointer-events: auto; } }
 
 .sidebar-empty { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-4) var(--space-2); color: var(--muted); font-size: var(--text-dense); }
 .sidebar-load-more {

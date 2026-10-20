@@ -107,7 +107,7 @@
   width: 100%;
   min-height: 28px;
   height: 28px;
-  padding: 0 32px 0 8px;
+  padding: 3px 30px 3px 8px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -125,7 +125,8 @@
 }
 
 .sidebar-global-nav .session-item:hover,
-.sidebar-agents .manager-project-item > .project-row > .project-trigger:hover {
+.sidebar-agents .manager-project-item > .project-row:hover > .project-trigger,
+.sidebar-agents .manager-project-item > .project-row.menu-open > .project-trigger {
   background: var(--fill-1);
   color: var(--text);
 }
@@ -139,6 +140,13 @@
 
 .sidebar-agents .sidebar-projects {
   margin-bottom: 0;
+}
+
+.sidebar-agents .sidebar-projects:has(.menu-open),
+.sidebar-agents .sidebar-projects:has(.project-menu-trigger[aria-expanded="true"]),
+.sidebar-agents .sidebar-projects:has(.session-menu-trigger[aria-expanded="true"]) {
+  position: relative;
+  z-index: 60;
 }
 
 .sidebar-agents .sidebar-projects + .sidebar-projects {
@@ -205,7 +213,13 @@
 
 .sidebar-agents .team-project-item > .project-row > .project-trigger {
   min-height: 28px;
-  padding: 3px 32px 3px 8px;
+  padding: 3px 30px 3px 8px;
+}
+
+.sidebar-agents .team-project-item > .project-row:hover > .project-trigger,
+.sidebar-agents .team-project-item > .project-row.menu-open > .project-trigger {
+  background: var(--fill-1);
+  color: var(--text);
 }
 
 .sidebar-agents .team-project-item > .project-row .project-name {
@@ -268,9 +282,21 @@
   pointer-events: none;
 }
 
-.sidebar-agents .member-project-item > .project-row .project-trigger {
-  min-height: 25px;
-  padding: 2px 28px 2px 6px;
+.sidebar-agents .member-project-item > .project-row > .project-trigger {
+  min-height: 26px;
+  padding: 3px 28px 3px 6px;
+  color: var(--muted);
+}
+
+.sidebar-agents .member-project-item > .project-row:hover > .project-trigger,
+.sidebar-agents .member-project-item > .project-row.menu-open > .project-trigger {
+  background: var(--fill-1);
+  color: var(--text);
+}
+
+.sidebar-agents .member-project-item > .project-row > .project-menu-wrap > .project-menu-trigger {
+  width: 20px;
+  height: 20px;
 }
 
 .sidebar-agents .member-project-item > .project-row .project-name {
@@ -287,16 +313,30 @@
 
 .sidebar-agents .project-sessions .session-item {
   height: 26px;
+  padding: 0 28px 0 8px;
   font-size: 12px;
 }
 
 .sidebar-agents .project-sessions .session-menu-wrap {
-  top: 1px;
+  top: 3px;
+  bottom: 3px;
+  right: 3px;
+}
+
+.sidebar-agents .project-sessions .session-menu-trigger {
+  width: 20px;
+  height: 20px;
+}
+
+.sidebar-agents .project-sessions .session-menu-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .sidebar-agents .project-item.is-selected-team > .project-row > .project-trigger,
 .sidebar-agents .project-item.is-selected-member > .project-row > .project-trigger {
   background: var(--fill-2);
+  color: var(--text);
 }
 
 .sidebar-mini-dot.working {
@@ -305,26 +345,6 @@
   border-radius: 50%;
   background: var(--info);
   flex: none;
-}
-
-.sidebar-leader-tag {
-  padding: 0 5px;
-  border-radius: var(--radius-pill);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 600;
-  flex: none;
-}
-
-.sidebar-agents .session-item-new {
-  padding-right: 8px;
-  color: var(--dim);
-  font-size: 12px;
-}
-
-.sidebar-agents .session-item-new:hover {
-  color: var(--text);
 }
 
 /* ---------- Header Agent Context Breadcrumb & Sessions Switcher ---------- */
@@ -593,7 +613,8 @@
 
 .agent-surface-header.menu-open,
 .agent-surface-header:has(.project-menu-wrap.menu-open),
-.agent-surface-header:has([aria-expanded="true"]) {
+.agent-surface-header:has(.project-menu-trigger[aria-expanded="true"]),
+.agent-surface-header:has(.settings-select.is-open) {
   z-index: 60;
 }
 
@@ -899,10 +920,14 @@
 
 .sidebar-org-branch.menu-open,
 .sidebar-org-branch:has(.menu-open),
-.sidebar-org-branch:has([aria-expanded="true"]),
+.sidebar-org-branch:has(.project-menu-trigger[aria-expanded="true"]),
+.sidebar-org-branch:has(.session-menu-trigger[aria-expanded="true"]),
+.sidebar-org-children:has(.menu-open),
+.sidebar-org-children:has(.project-menu-trigger[aria-expanded="true"]),
+.sidebar-org-children:has(.session-menu-trigger[aria-expanded="true"]),
 .org-tree-branch.menu-open,
 .org-tree-branch:has(.menu-open),
-.org-tree-branch:has([aria-expanded="true"]) {
+.org-tree-branch:has(.project-menu-trigger[aria-expanded="true"]) {
   position: relative;
   z-index: 60;
 }
@@ -930,7 +955,7 @@
 
 .org-member-card.menu-open,
 .org-member-card:has(.menu-open),
-.org-member-card:has([aria-expanded="true"]) {
+.org-member-card:has(.project-menu-trigger[aria-expanded="true"]) {
   z-index: 60;
 }
 

@@ -89,6 +89,7 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
           aria-label={label}
           className={`menu menu-${align} menu-${placement}`}
           onKeyDown={onKeyDown}
+          onClick={(event) => event.stopPropagation()}
         >
           {items.map((item, index) =>
             item.separator ? (

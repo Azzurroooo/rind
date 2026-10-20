@@ -453,9 +453,27 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
     busy: false,
   })
   assert.match(sidebarMemberMenuOpenHtml, /sidebar-org-branch menu-open/)
+  assert.match(sidebarMemberMenuOpenHtml, /team-project-item expanded menu-open/)
+  assert.match(sidebarMemberMenuOpenHtml, /team-members-group menu-open/)
   assert.match(sidebarMemberMenuOpenHtml, /member-project-item expanded menu-open|member-project-item menu-open/)
   assert.doesNotMatch(sidebarMemberMenuOpenHtml, /Make leader/)
   assert.doesNotMatch(sidebarMemberMenuOpenHtml, /data-agent-make-leader/)
+
+  const sidebarTeamMenuOpenHtml = renderSidebarAgentsHtml({
+    snapshot: sampleSnapshot,
+    surface: { kind: "chat" },
+    chatContext: { kind: "independent" },
+    collapsedTeams: new Set(),
+    expandedSidebarMembers: new Set(["team-1:agent-lead", "team-1:agent-fe"]),
+    managerExpanded: true,
+    teamSessionsByTeam: { "team-1": sixLeadSessions },
+    itemMenuKey: "team:team-1",
+    newTeamOpen: false,
+    busy: false,
+  })
+  assert.match(sidebarTeamMenuOpenHtml, /team-project-item expanded menu-open/)
+  assert.doesNotMatch(sidebarTeamMenuOpenHtml, /sidebar-org-branch menu-open/)
+  assert.doesNotMatch(sidebarTeamMenuOpenHtml, /member-project-item[^"]*menu-open/)
 })
 
 

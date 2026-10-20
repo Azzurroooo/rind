@@ -1116,13 +1116,14 @@ export function renderOrgNodeHtml(
         .map((c) => renderOrgNodeHtml(c, depth + 1, expandedOrgMembers, viewedSessionId, sessionLimits, itemMenuKey))
         .join("")}</div>`
     : ""
+  const branchMenuOpen = memberMenuOpen || childrenHtml.includes(" menu-open")
 
   const metaItems: string[] = []
   if (node.reportsToName) metaItems.push(`Reports to ${escapeHtml(node.reportsToName)}`)
   if (node.responsibility) metaItems.push(escapeHtml(node.responsibility))
 
   return `
-    <div class="org-tree-branch depth-${Math.min(depth, 4)}${memberMenuOpen ? " menu-open" : ""}" data-agent-id="${escapeAttribute(node.agentId)}">
+    <div class="org-tree-branch depth-${Math.min(depth, 4)}${branchMenuOpen ? " menu-open" : ""}" data-agent-id="${escapeAttribute(node.agentId)}">
       <div class="org-member-card${node.isLeader ? " is-leader" : ""}${memberMenuOpen ? " menu-open" : ""}">
         <div class="org-member-top">
           <div class="org-member-identity">
@@ -1242,9 +1243,18 @@ export function renderSidebarAgentsHtml(options: {
   const managerLimit = sessionLimits.manager || DEFAULT_SIDEBAR_SESSIONS_LIMIT
   const visibleManagerSessions = managerSessionsList.slice(0, managerLimit)
   const managerMenuOpen = itemMenuKey === "manager"
+  const managerHasOpenSessionMenu = Boolean(
+    options.managerExpanded &&
+      visibleManagerSessions.some(
+        (sess) =>
+          sessionMenuId === `manager:${sess.runtimeSessionId}` ||
+          sessionMenuId === sess.runtimeSessionId,
+      ),
+  )
+  const managerItemMenuOpen = managerMenuOpen || managerHasOpenSessionMenu
 
   const managerSessionsHtml = options.managerExpanded
-    ? `<div class="project-sessions" role="group" aria-label="Manager sessions">
+    ? `<div class="project-sessions${managerHasOpenSessionMenu ? " menu-open" : ""}" role="group" aria-label="Manager sessions">
         ${
           visibleManagerSessions.length === 0
             ? `<p class="session-search-empty">No sessions yet.</p>`
@@ -1300,16 +1310,26 @@ export function renderSidebarAgentsHtml(options: {
         const memberSessions = member.sessions || []
         const memberLimit = sessionLimits[memberKey] || DEFAULT_SIDEBAR_SESSIONS_LIMIT
         const visibleMemberSessions = memberSessions.slice(0, memberLimit)
+        const memberHasOpenSessionMenu = Boolean(
+          isMemberExpanded &&
+            visibleMemberSessions.some(
+              (sess) =>
+                sessionMenuId === `member:${memberKey}:${sess.runtimeSessionId}` ||
+                sessionMenuId === sess.runtimeSessionId,
+            ),
+        )
+        const memberItemMenuOpen = memberMenuOpen || memberHasOpenSessionMenu
         const childrenHtml =
           Array.isArray(member.children) && member.children.length > 0
             ? `<div class="sidebar-org-children" role="group" aria-label="Direct reports of ${escapeAttribute(member.name)}">${member.children
                 .map((child) => renderSidebarMemberBranch(child, depth + 1))
                 .join("")}</div>`
             : ""
+        const branchMenuOpen = memberItemMenuOpen || childrenHtml.includes(" menu-open")
 
         return `
-          <div class="sidebar-org-branch${memberMenuOpen ? " menu-open" : ""}" data-org-depth="${depth}" data-agent-id="${escapeAttribute(member.agentId)}">
-            <section class="project-item member-project-item${isMemberExpanded ? " expanded" : ""}${isMemberActive ? " is-selected-member" : ""}${memberMenuOpen ? " menu-open" : ""}">
+          <div class="sidebar-org-branch${branchMenuOpen ? " menu-open" : ""}" data-org-depth="${depth}" data-agent-id="${escapeAttribute(member.agentId)}">
+            <section class="project-item member-project-item${isMemberExpanded ? " expanded" : ""}${isMemberActive ? " is-selected-member" : ""}${memberItemMenuOpen ? " menu-open" : ""}">
               <div class="project-row${memberMenuOpen ? " menu-open" : ""}">
                 <button type="button" class="project-trigger" data-sidebar-toggle-member="${escapeAttribute(memberKey)}" aria-expanded="${isMemberExpanded}" title="${escapeAttribute(member.name)}">
                   <span class="project-name-row">
@@ -1332,7 +1352,7 @@ export function renderSidebarAgentsHtml(options: {
               </div>
               ${
                 isMemberExpanded
-                  ? `<div class="project-sessions member-sessions-group" role="group" aria-label="${escapeAttribute(member.name)} sessions">
+                  ? `<div class="project-sessions member-sessions-group${memberHasOpenSessionMenu ? " menu-open" : ""}" role="group" aria-label="${escapeAttribute(member.name)} sessions">
                       ${
                         visibleMemberSessions.length === 0
                           ? `<p class="session-search-empty">No sessions yet.</p>`
@@ -1369,17 +1389,21 @@ export function renderSidebarAgentsHtml(options: {
       }
 
       const rootNodes = summary ? (summary.orgRoots.length > 0 ? summary.orgRoots : summary.members) : []
+      const renderedMembers =
+        !isCollapsed && summary && rootNodes.length > 0
+          ? rootNodes.map((rootNode) => renderSidebarMemberBranch(rootNode, 0)).join("")
+          : ""
+      const membersGroupMenuOpen = renderedMembers.includes(" menu-open")
       const membersHtml =
         !isCollapsed && summary
-          ? `<div class="project-sessions team-members-group" role="group" aria-label="${escapeAttribute(team.name)} members">${
-              rootNodes.length === 0
-                ? `<p class="session-search-empty">No members yet.</p>`
-                : rootNodes.map((rootNode) => renderSidebarMemberBranch(rootNode, 0)).join("")
+          ? `<div class="project-sessions team-members-group${membersGroupMenuOpen ? " menu-open" : ""}" role="group" aria-label="${escapeAttribute(team.name)} members">${
+              rootNodes.length === 0 ? `<p class="session-search-empty">No members yet.</p>` : renderedMembers
             }</div>`
           : ""
+      const teamItemMenuOpen = teamMenuOpen || membersGroupMenuOpen
 
       return `
-        <section class="project-item team-project-item${!isCollapsed ? " expanded" : ""}${isSelectedTeam ? " is-selected-team" : ""}${teamMenuOpen ? " menu-open" : ""}">
+        <section class="project-item team-project-item${!isCollapsed ? " expanded" : ""}${isSelectedTeam ? " is-selected-team" : ""}${teamItemMenuOpen ? " menu-open" : ""}">
           <div class="project-row${teamMenuOpen ? " menu-open" : ""}">
             <button type="button" class="project-trigger" data-sidebar-toggle-team="${escapeAttribute(team.id)}" aria-expanded="${!isCollapsed}" title="${escapeAttribute(team.createRoot || team.name)}">
               <span class="project-name-row">
@@ -1445,7 +1469,7 @@ export function renderSidebarAgentsHtml(options: {
           }
         </div>
         <div class="project-list">
-          <section class="project-item manager-project-item${options.managerExpanded ? " expanded" : ""}${isManagerActive ? " is-selected-team" : ""}${managerMenuOpen ? " menu-open" : ""}">
+          <section class="project-item manager-project-item${options.managerExpanded ? " expanded" : ""}${isManagerActive ? " is-selected-team" : ""}${managerItemMenuOpen ? " menu-open" : ""}">
             <div class="project-row${managerMenuOpen ? " menu-open" : ""}">
               <button type="button" class="project-trigger" data-sidebar-toggle-manager="1" aria-expanded="${Boolean(options.managerExpanded)}" title="Organization coordinator">
                 <span class="project-name">Manager</span>

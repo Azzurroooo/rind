@@ -127,4 +127,61 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByLabelText("Open settings"));
     expect(handlers.onOpenSettings).toHaveBeenCalledTimes(1);
   });
+
+  it("renders Agents & Teams overflow menus inside team and member row containers with open-menu state", () => {
+    const onOpenTeam = vi.fn();
+    const onOpenMemberChat = vi.fn();
+    renderSidebar({
+      agents: {
+        mode: "agents",
+        onModeChange: vi.fn(),
+        surface: { kind: "team", teamId: "team-1", tab: "organization" },
+        snapshot: {
+          teams: [{ id: "team-1", name: "Core Platform", leaderAgentId: "agent-lead" }],
+          agents: [
+            { id: "agent-lead", name: "lead" },
+            { id: "agent-fe", name: "frontend-specialist" },
+          ],
+          memberships: [
+            { teamId: "team-1", agentId: "agent-lead", position: "Lead", status: "Working" },
+            {
+              teamId: "team-1",
+              agentId: "agent-fe",
+              position: "FE",
+              reportsToAgentId: "agent-lead",
+              status: "Idle",
+            },
+          ],
+          tasks: [],
+          runs: [],
+          sessions: [],
+          approvals: [],
+          notices: [],
+        },
+        onOpenTeam,
+        onOpenMemberChat,
+      },
+    });
+
+    const teamMore = screen.getByLabelText("Actions for Core Platform");
+    expect(teamMore.closest(".sidebar-team-row")).not.toBeNull();
+    expect(teamMore.closest(".sidebar-team-group")).not.toBeNull();
+    fireEvent.click(teamMore);
+    expect(teamMore.closest(".menu-root").getAttribute("data-open")).toBe("true");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Tasks" }));
+    expect(onOpenTeam).toHaveBeenCalledWith("team-1", "tasks");
+
+    const memberMore = screen.getByLabelText("Actions for lead");
+    expect(memberMore.closest(".sidebar-member-row")).not.toBeNull();
+    expect(memberMore.closest(".sidebar-member-block")).not.toBeNull();
+    expect(memberMore.closest(".sidebar-org-branch")).not.toBeNull();
+    fireEvent.click(memberMore);
+    expect(memberMore.closest(".menu-root").getAttribute("data-open")).toBe("true");
+    fireEvent.click(screen.getByRole("menuitem", { name: "New session" }));
+    expect(onOpenMemberChat).toHaveBeenCalledWith({
+      teamId: "team-1",
+      agentId: "agent-lead",
+      forceNew: true,
+    });
+  });
 });
