@@ -1220,7 +1220,7 @@ export function renderOrgFlowNodeHtml(
               ${node.isLeader ? `<span class="org-leader-badge">Leader</span>` : ""}
             </div>
             <div class="org-flow-node-subrow">
-              <span class="org-role-pill">${escapeHtml(node.position)}</span>
+              <span class="org-role-pill" title="${escapeAttribute(node.position)}">${escapeHtml(node.position)}</span>
               ${node.worktreeOf ? `<span class="org-worktree-pill" title="${escapeAttribute(node.worktreeOf)}">Worktree</span>` : ""}
               ${node.status && node.status !== "Idle" ? `<span class="agent-status-pill tone-${node.tone}">${escapeHtml(node.status)}</span>` : ""}
               ${sessions.length > 0 ? `<span class="org-flow-mini-stat" title="${sessions.length} conversation(s)" aria-hidden="${String(isNodeExpanded)}">${sessions.length}</span>` : ""}

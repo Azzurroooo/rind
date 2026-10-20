@@ -1007,7 +1007,7 @@ button.header-agent-pill:hover {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: 224px;
+  width: 240px;
   max-width: calc(100vw - 56px);
   min-width: 0;
   border: 1px solid var(--line);
@@ -1034,7 +1034,7 @@ button.header-agent-pill:hover {
   border-left: 3px solid var(--warning);
 }
 .org-flow-node.is-expanded {
-  width: 344px;
+  width: 348px;
   border-color: var(--accent);
   box-shadow: var(--shadow-popover);
 }
@@ -1069,11 +1069,24 @@ button.header-agent-pill:hover {
 }
 .org-flow-node-subrow {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 5px;
   min-width: 0;
   margin-top: 5px;
+  overflow: hidden;
+}
+.org-flow-node-subrow .org-role-pill {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.org-flow-node-subrow .org-worktree-pill,
+.org-flow-node-subrow .agent-status-pill {
+  flex: none;
 }
 .org-flow-mini-stat {
   display: inline-flex;
@@ -1090,6 +1103,9 @@ button.header-agent-pill:hover {
   transition:
     opacity 180ms cubic-bezier(0.22, 1, 0.36, 1),
     transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.org-flow-mini-stat + .org-flow-mini-stat {
+  margin-left: 0;
 }
 .org-flow-node.is-expanded .org-flow-mini-stat {
   opacity: 0;

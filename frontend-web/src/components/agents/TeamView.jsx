@@ -497,7 +497,9 @@ function OrgMemberNode({
                 )}
               </div>
               <div className="org-flow-node-subrow">
-                <span className="org-role-pill">{node.position}</span>
+                <span className="org-role-pill" title={node.position}>
+                  {node.position}
+                </span>
                 {node.worktreeOf && (
                   <span className="org-worktree-pill" title={`Git worktree of ${node.worktreeOf}`}>
                     <GitBranch size={10} aria-hidden="true" />
