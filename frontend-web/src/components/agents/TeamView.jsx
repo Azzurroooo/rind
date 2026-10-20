@@ -737,7 +737,9 @@ export function TeamView({
 
   return (
     <div className="agents-surface">
-      <div className="agents-surface-header">
+      <div className="agents-surface-split">
+        <div className="agents-surface-column">
+          <div className="agents-surface-header">
         <div className="agents-surface-title-row">
           <h2 className="agents-surface-title">{team.name}</h2>
           <div className="agents-segmented" role="tablist" aria-label="Team view mode">
@@ -1008,8 +1010,7 @@ export function TeamView({
         </form>
       )}
 
-      <div className="agents-surface-split">
-        <div className="agents-surface-main panel-scroll">
+          <div className="agents-surface-main panel-scroll">
           {activeTab === "organization" ? (
             <div className="org-view-container">
               {orgRoots.length === 0 ? (
@@ -1212,6 +1213,7 @@ export function TeamView({
               )}
             </div>
           )}
+        </div>
         </div>
 
         {selectedTask && (

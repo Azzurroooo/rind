@@ -682,7 +682,9 @@ button.header-agent-pill:hover {
 
 /* --- Center-Stage Multi-Agent Surface --- */
 .agents-surface {
+  --agent-panel-max-width: 920px;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -695,7 +697,7 @@ button.header-agent-pill:hover {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-4) max(var(--space-6), calc((100% - var(--agent-panel-max-width, 920px)) / 2));
   border-bottom: 1px solid var(--line);
   background: var(--surface);
 }
@@ -780,7 +782,8 @@ button.header-agent-pill:hover {
   flex: none;
   display: grid;
   gap: var(--space-3);
-  margin: var(--space-3) var(--space-5) 0;
+  width: min(var(--agent-panel-max-width, 920px), calc(100% - var(--space-6) * 2));
+  margin: var(--space-4) auto 0;
   padding: var(--space-4);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-card);
@@ -815,15 +818,28 @@ button.header-agent-pill:hover {
 
 .agents-surface-split {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
+}
+.agents-surface-column {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .agents-surface-main {
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-5) var(--space-6) var(--space-8);
+}
+.agents-surface-main > * {
+  width: 100%;
+  max-width: var(--agent-panel-max-width, 920px);
+  margin-inline: auto;
 }
 
 .agents-empty-hero {
@@ -832,6 +848,9 @@ button.header-agent-pill:hover {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
+  width: 100%;
+  max-width: var(--agent-panel-max-width, 920px);
+  margin-inline: auto;
   padding: 64px var(--space-4);
   text-align: center;
   color: var(--muted);
@@ -853,7 +872,7 @@ button.header-agent-pill:hover {
 .org-view-container {
   display: grid;
   gap: var(--space-5);
-  max-width: 960px;
+  width: 100%;
 }
 .org-chart-tree {
   display: grid;
@@ -1250,7 +1269,7 @@ button.header-agent-pill:hover {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  max-width: 960px;
+  width: 100%;
 }
 .tasks-toolbar {
   display: flex;
@@ -1730,7 +1749,7 @@ button.header-agent-pill:hover {
 .inbox-card-list {
   display: grid;
   gap: var(--space-3);
-  max-width: 820px;
+  width: 100%;
 }
 .inbox-card {
   display: grid;
@@ -1782,7 +1801,7 @@ button.header-agent-pill:hover {
 .bg-grid {
   display: grid;
   gap: var(--space-4);
-  max-width: 920px;
+  width: 100%;
 }
 .bg-health-strip {
   display: flex;
