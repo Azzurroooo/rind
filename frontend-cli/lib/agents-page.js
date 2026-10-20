@@ -251,7 +251,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (connecting) await connecting;
     if (view.connection !== "connected") throw new Error("Agents management is offline. Press r to reconnect, then try again.");
     const result = await client.request(method, params);
-    if (!closed) acceptSnapshot(await client.request("snapshot"));
+    if (!closed && !["getTask", "readArtifact", "previewCopy", "previewImport", "listModels", "getMemberModel", "listFolderDefaults", "listArchive", "listSessions", "serviceInfo"].includes(method)) acceptSnapshot(await client.request("snapshot"));
     return result;
   }
 

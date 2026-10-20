@@ -5,6 +5,9 @@ from threading import Condition
 
 
 class WebSessions:
+    MAX_IDLE_SESSIONS = 4
+    CLOSE_TIMEOUT_SECONDS = 5.0
+
     def __init__(self):
         self._idle = []
         self._condition = Condition()
@@ -23,7 +26,7 @@ class WebSessions:
         finally:
             with self._condition:
                 try:
-                    if self._closed:
+                    if self._closed or len(self._idle) >= self.MAX_IDLE_SESSIONS:
                         session.close()
                     else:
                         self._idle.append(session)
@@ -38,7 +41,7 @@ class WebSessions:
         for session in sessions:
             session.close()
         with self._condition:
-            self._condition.wait_for(lambda: self._active == 0)
+            self._condition.wait_for(lambda: self._active == 0, timeout=self.CLOSE_TIMEOUT_SECONDS)
 
     @staticmethod
     def _create_session():

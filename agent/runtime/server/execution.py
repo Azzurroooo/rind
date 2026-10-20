@@ -303,6 +303,8 @@ class ExecutionCoordinator:
             if session_id in self._pending_wakes:
                 self._pending_wakes.discard(session_id)
                 self._schedule_continuation(session_id)
+            if session_id not in self._continuations and (active := self._active.get(session_id)):
+                await self._release_if_idle(session_id, active)
 
     def deliver(self, session_id: str, text: str) -> None:
         """Run a message from outside the conversation as its next turn, after any current one.
@@ -327,6 +329,8 @@ class ExecutionCoordinator:
             await self._emit_to_event_sinks({"type": "task_continuation_failed", "session_id": session_id, "turn_id": "", "error": str(exc)})
         finally:
             self._delivery_runs.pop(session_id, None)
+            if active := self._active.get(session_id):
+                await self._release_if_idle(session_id, active)
 
     def begin_request(self, session_id: str) -> str:
         clean = validate_session_id(session_id)
@@ -742,7 +746,8 @@ class ExecutionCoordinator:
             str(metadata.get("reasoning_effort") or settings.reasoning_effort),
         )
         chat_client = await self._chat_client_for(settings, selection)
-        definition = self._definition(selection, settings)
+        definition = self._definition(selection)
+
         container = None
         try:
             container = build_agent_container(
@@ -793,10 +798,10 @@ class ExecutionCoordinator:
                 raise
             return self._provider_service.unavailable_client(selection, exc)
 
-    def _definition(self, selection: ModelSelection, settings) -> ModelDefinition | None:
+    def _definition(self, selection: ModelSelection) -> ModelDefinition | None:
         """The selected model's declared capabilities, or None while its connection is unusable."""
         try:
-            return self._provider_service.resolve_selection(selection, settings=settings)
+            return self._provider_service.resolve_selection(selection)
         except ProviderError as exc:
             if exc.code not in UNUSABLE_CONNECTION_CODES:
                 raise
@@ -815,8 +820,8 @@ class ExecutionCoordinator:
         selection = ModelSelection(str(store.provider or ""), str(store.model or ""), str(store.reasoning_effort or ""))
         if not selection.model_id or selection == execution.selection:
             return
-        settings = await asyncio.to_thread(load_settings)
-        definition = self._definition(selection, settings)
+        definition = self._definition(selection)
+        settings = getattr(execution.container, "settings", None) or await asyncio.to_thread(load_settings)
         replacement = await self._chat_client_for(settings, selection)
         previous = execution.chat_client
         execution.container.turn_runner.replace_chat_client(
@@ -832,7 +837,7 @@ class ExecutionCoordinator:
 
 
     async def _release_if_idle(self, session_id: str, execution: _ActiveExecution) -> None:
-        if execution.current_cancel is not None or execution.queued_turn_starts or execution.container.runtime.turn_active:
+        if execution.current_cancel is not None or execution.queued_turn_starts or execution.container.runtime.turn_active or session_id in self._continuations or session_id in self._pending_wakes or bool(self._deliveries.get(session_id)):
             return
         released = None
         async with self._lock:
@@ -850,6 +855,10 @@ class ExecutionCoordinator:
         if permanent:
             self._closed_sessions.add(clean)
             await self._shell_tools.close_session(clean)
+            self._session_options.pop(clean, None)
+            self._suppressed.discard(clean)
+            self._pending_wakes.discard(clean)
+            self._deliveries.pop(clean, None)
         starting = self._starting.get(clean)
         if starting:
             await asyncio.gather(asyncio.shield(starting), return_exceptions=True)

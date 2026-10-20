@@ -83,7 +83,7 @@ class ProviderServiceImpl:
         settings = load_settings()
         return ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
 
-    def resolve_selection(self, selection: ModelSelection, *, settings: AppSettings | None = None) -> ModelDefinition:
+    def resolve_selection(self, selection: ModelSelection) -> ModelDefinition:
         connections, user_models = self._loaded_providers()
         definition = self._provider_from(connections, selection.provider_id)
         return self._resolve_model(

@@ -1,4 +1,4 @@
-import { activeRun, type Run, type State } from "./model.js";
+import { activeRun, awaitingDelegation, type Run, type State } from "./model.js";
 
 // Every transaction clones and diffs the whole state, so history that only
 // grows (one receipt per request, one run per conversation turn) would make
@@ -10,6 +10,9 @@ export const RECEIPT_MIN_AGE_MS = 10 * 60 * 1000;
 export const TASK_RUN_LIMIT = 10;
 // The user reads and dismisses notices; ones never dismissed stop at the newest few.
 export const NOTICE_LIMIT = 50;
+export const DELEGATION_LIMIT = 200;
+export const COMPLETED_TASK_LIMIT = 100;
+export const SESSION_LIMIT = 200;
 
 export function retain(state: State, now = Date.now()) {
   // Receipts only make retries idempotent. Beyond the newest few hundred, old
@@ -23,6 +26,30 @@ export function retain(state: State, now = Date.now()) {
 
   const notices = Object.keys(state.notices);
   for (const key of notices.slice(0, Math.max(0, notices.length - NOTICE_LIMIT))) delete state.notices[key];
+
+  const activeRuns = Object.values(state.runs).filter(activeRun);
+  const delegations = Object.keys(state.delegations);
+  for (let drop = Math.max(0, delegations.length - DELEGATION_LIMIT), i = 0; drop > 0 && i < delegations.length; i++) {
+    const d = state.delegations[delegations[i]];
+    if (!d || awaitingDelegation(d) || (!d.returned && d.status !== "cancelled")) continue;
+    if (Object.values(state.delegations).some(child => child.parentDelegationId === d.id)) continue;
+    if (activeRuns.some(r => r.delegationId === d.id)) continue;
+    delete state.delegations[d.id];
+    for (const [runId, run] of Object.entries(state.runs)) if (run.delegationId === d.id && !activeRun(run)) delete state.runs[runId];
+    drop--;
+  }
+
+  const finishedTasks = Object.values(state.tasks).filter(t => !state.teams[t.teamId]?.archive && (t.status === "done" || t.status === "cancelled"));
+  for (let drop = Math.max(0, finishedTasks.length - COMPLETED_TASK_LIMIT), i = 0; drop > 0 && i < finishedTasks.length; i++) {
+    const task = finishedTasks[i];
+    if (activeRuns.some(r => r.taskId === task.id)) continue;
+    if (Object.values(state.delegations).some(d => d.taskId === task.id)) continue;
+    delete state.tasks[task.id];
+    for (const [noteId, note] of Object.entries(state.notes)) if (note.taskId === task.id) delete state.notes[noteId];
+    for (const [artId, art] of Object.entries(state.artifacts)) if (art.taskId === task.id) delete state.artifacts[artId];
+    for (const [runId, run] of Object.entries(state.runs)) if (run.taskId === task.id && !activeRun(run)) delete state.runs[runId];
+    drop--;
+  }
 
   const groups = new Map<string, Run[]>();
   for (const run of Object.values(state.runs)) {
@@ -50,5 +77,17 @@ export function retain(state: State, now = Date.now()) {
     ) {
       delete state.sessions[id];
     }
+  }
+
+  const sessionIds = Object.keys(state.sessions);
+  for (let drop = Math.max(0, sessionIds.length - SESSION_LIMIT), i = 0; drop > 0 && i < sessionIds.length; i++) {
+    const id = sessionIds[i];
+    const s = state.sessions[id];
+    if (!s || state.deliveries[id] || activeRuns.some(r => r.sessionId === id)) continue;
+    if (s.delegationId && state.delegations[s.delegationId]) continue;
+    if (Object.values(state.delegations).some(d => d.originSessionId === id && !d.returned && d.status !== "cancelled")) continue;
+    delete state.sessions[id];
+    for (const [runId, run] of Object.entries(state.runs)) if (run.sessionId === id && !activeRun(run)) delete state.runs[runId];
+    drop--;
   }
 }

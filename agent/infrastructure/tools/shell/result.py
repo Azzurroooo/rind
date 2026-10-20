@@ -30,7 +30,7 @@ def task_snapshot(record: ProcessRecord) -> dict:
     }
 
 
-def task_result(tool: str, record: ProcessRecord, return_reason: str, max_chars: int = 20000) -> ToolExecutionResult:
+def task_payload(record: ProcessRecord, return_reason: str, max_chars: int = 20000) -> tuple[dict, dict]:
     stdout = record.stdout.render()
     stderr = record.stderr.render()
     truncated = record.stdout.truncated or record.stderr.truncated or len(stdout) + len(stderr) > max_chars
@@ -47,11 +47,17 @@ def task_result(tool: str, record: ProcessRecord, return_reason: str, max_chars:
             meta["output_error"] = record.output.incomplete
     if record.persistence_error:
         meta["persistence_error"] = record.persistence_error
-    return ToolExecutionResult(status="ok", result_str=tool_ok(tool, {
+    data = {
         **task_snapshot(record), "return_reason": return_reason, "stdout": stdout, "stderr": stderr,
         "next_cursor": encode_cursor(record.task_id, record.output.records_path.stat().st_size if record.output and record.output.records_path.exists() else 0),
         "start_cursor": encode_cursor(record.task_id, 0),
-    }, meta=meta))
+    }
+    return data, meta
+
+
+def task_result(tool: str, record: ProcessRecord, return_reason: str, max_chars: int = 20000) -> ToolExecutionResult:
+    data, meta = task_payload(record, return_reason, max_chars)
+    return ToolExecutionResult(status="ok", result_str=tool_ok(tool, data, meta=meta))
 
 
 def output_preview(stdout: str, stderr: str, limit: int) -> tuple[str, str]:

@@ -13,7 +13,7 @@ from agent.domain.cancellation import CancellationToken
 from agent.domain.tool_result import ToolExecutionResult
 from agent.infrastructure.tools.shell.process import ProcessRecord
 from agent.infrastructure.tools.shell.process_tree import close_process_tree, kill_tree_now, own_process_tree, spawn_group_args, terminate_tree, wait_parent_exit
-from agent.infrastructure.tools.shell.result import error_result, not_found, task_result, task_snapshot, output_preview
+from agent.infrastructure.tools.shell.result import error_result, not_found, task_payload, task_snapshot, output_preview
 from agent.infrastructure.tools.shell.session_pool import ShellState
 from agent.infrastructure.persistence.task_journal import TaskJournal
 from agent.infrastructure.persistence.task_output import TaskOutput, read_output_page
@@ -103,6 +103,7 @@ class ProcessSupervisor:
             result = await self._result("bash", record, reason)
             await self._save(record)
             return result
+    
         except asyncio.CancelledError:
             if record.process is not None and not record.handed_off:
                 await self._terminate(record, "cancelled", "Initial call interrupted")
@@ -222,23 +223,26 @@ class ProcessSupervisor:
     async def _result(self, tool, record, reason, max_chars=20000, cursor=None):
         if record.output:
             await record.output.flush()
-        result = task_result(tool, record, reason, max_chars)
+        data, meta = task_payload(record, reason, max_chars)
         if cursor is not None:
             if record.output is None:
                 raise ValueError("This task has no stored output.")
             page = await record.output.read(cursor, max_chars)
-            payload = json.loads(result.result_str)
-            payload["data"].update({k: v for k, v in page.items() if k not in {"truncated", "output_incomplete", "output_error"}})
-            payload["meta"].update({k: page[k] for k in ("truncated", "output_incomplete", "output_error") if k in page})
-            result.result_str = json.dumps(payload, ensure_ascii=False)
-        return result
+            data.update({k: v for k, v in page.items() if k not in {"truncated", "output_incomplete", "output_error"}})
+            meta.update({k: page[k] for k in ("truncated", "output_incomplete", "output_error") if k in page})
+        return ToolExecutionResult(status="ok", result_str=tool_ok(tool, data, meta=meta))
+
+
 
     async def _save(self, record, **changes):
         if self.journal is None:
             return True
         async with record.lock:
-            payload = json.loads((await self._result("task_control", record, "finished" if record.status in TERMINAL_STATES else "yield_timeout")).result_str)
-            snapshot = {**payload["data"], "meta": payload["meta"], **changes}
+            if record.output:
+                await record.output.flush()
+            data, meta = task_payload(record, "finished" if record.status in TERMINAL_STATES else "yield_timeout")
+            snapshot = {**data, "meta": meta, **changes}
+
             if record.process:
                 snapshot["pid"] = record.process.pid
             if record.status in TERMINAL_STATES:
@@ -309,6 +313,8 @@ class ProcessSupervisor:
             if not record.persistence_error:
                 self._processes.pop(record.task_id, None)
                 self._origins.pop((session_id, record.call_id), None)
+        if self.journal:
+            self.journal.forget_session(session_id)
 
     async def close(self) -> None:
         self._closed = True

@@ -1104,43 +1104,6 @@ class JsonlSessionStore(SessionStore):
 
         return await asyncio.to_thread(_get)
 
-    async def get_messages_for_session(
-        self,
-        session_id: str,
-        start: int | None = None,
-        end: int | None = None,
-        roles: list[str] | None = None,
-        compacted: bool = True,
-        include_internal: bool = False,
-    ) -> list[dict[str, Any]]:
-        """Project another persisted session without rebinding this store."""
-        def _get():
-            clean = validate_session_id(session_id)
-            session_root = self.resolve_session_root(self._session_dir)
-            paths = self._get_session_paths(clean, session_root)
-            if not os.path.isdir(paths["base"]):
-                raise ValueError(f"Session not found: {clean}")
-            meta = self._files.load_json(paths["meta"])
-            _validate_session_meta(meta, clean)
-            self._validate_session_binding(meta)
-            _require_session_files(paths, clean)
-            messages = MessageRepository(self._files, paths["messages"]).load_messages()
-            tool_records = ToolCallRepository(self._files, paths["tool_calls"], looks_like_tool_payload).load_tool_calls()
-            compactions = CompactionRepository(self._files, paths["compactions"]).load_compactions()
-            projected = project_messages(
-                messages,
-                tool_records,
-                compactions,
-                self._system_prompt,
-                compacted=compacted,
-                include_internal=include_internal,
-            )
-            if roles:
-                projected = [message for message in projected if message.get("role") in set(roles)]
-            return [dict(message) for message in projected[slice(start, end)]]
-
-        return await asyncio.to_thread(_get)
-
     async def list_recent_sessions(self, limit: int = 10) -> list[dict[str, Any]]:
         def _list():
             self._setup_paths()

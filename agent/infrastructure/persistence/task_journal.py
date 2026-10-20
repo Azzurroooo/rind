@@ -328,3 +328,11 @@ class TaskJournal:
                 self._lease = None
             self._sessions.clear()
             self._tasks.clear()
+
+
+    def forget_session(self, session_id: str) -> None:
+        with self._lock:
+            self._sessions.pop(session_id, None)
+            self._file_locks.pop(str(resolve_session_base(self.root, session_id) / "tasks.jsonl") + ".lock", None)
+            for key in [k for k in self._tasks if k[0] == session_id]:
+                self._tasks.pop(key)

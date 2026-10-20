@@ -9,6 +9,8 @@ import { randomUUID } from "node:crypto";
 import { createService } from "../dist/service.js";
 import { openStore } from "../dist/store.js";
 import { managementPaths } from "../dist/paths.js";
+import { retain, DELEGATION_LIMIT, COMPLETED_TASK_LIMIT, SESSION_LIMIT } from "../dist/retention.js";
+import { emptyState } from "../dist/model.js";
 import { fixture, eventually, user } from "./fixture.js";
 
 test("disconnecting a client after stop cannot write to the closed service", async t => {
@@ -618,4 +620,35 @@ test("delegation depth is capped at MAX_DELEGATION_DEPTH and leaf members do not
     { code: "DELEGATION_DEPTH_EXCEEDED" },
   );
   for (const s of f.starts) s.finish({ content: "done" });
+});
+
+test("retain bounds settled delegations, completed tasks with cascading notes/artifacts/runs, and idle sessions", () => {
+  const state = emptyState();
+  state.teams.t1 = { id: "t1", name: "T1", createRoot: "/tmp", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  for (let i = 0; i < DELEGATION_LIMIT + 15; i++) {
+    const id = `del-${i}`;
+    state.delegations[id] = {
+      id, teamId: "t1", originSessionId: "s-origin", fromAgentId: "a1", toAgentId: "a2",
+      brief: "b", status: "done", returned: true, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+    };
+  }
+  for (let i = 0; i < COMPLETED_TASK_LIMIT + 12; i++) {
+    const id = `task-${i}`;
+    state.tasks[id] = {
+      id, teamId: "t1", assigneeAgentId: "a1", brief: "b", priority: "normal",
+      status: "done", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+    };
+    state.notes[`note-${i}`] = { id: `note-${i}`, taskId: id, author: "user", text: "n", createdAt: "2026-01-01T00:00:00Z" };
+    state.artifacts[`art-${i}`] = { id: `art-${i}`, taskId: id, name: "a", path: "/tmp/a", sha256: "0", size: 1, createdAt: "2026-01-01T00:00:00Z" };
+  }
+  for (let i = 0; i < SESSION_LIMIT + 20; i++) {
+    const id = `sess-${i}`;
+    state.sessions[id] = { id, agentId: "a1", origin: "user", shared: false, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  }
+  retain(state);
+  assert.equal(Object.keys(state.delegations).length, DELEGATION_LIMIT);
+  assert.equal(Object.keys(state.tasks).length, COMPLETED_TASK_LIMIT);
+  assert.equal(Object.keys(state.notes).length, COMPLETED_TASK_LIMIT);
+  assert.equal(Object.keys(state.artifacts).length, COMPLETED_TASK_LIMIT);
+  assert.equal(Object.keys(state.sessions).length, SESSION_LIMIT);
 });
