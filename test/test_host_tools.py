@@ -100,3 +100,65 @@ def test_a_malformed_declaration_is_refused(tools, message):
 def test_a_schema_without_required_fields_requires_none():
     spec, = _tool(tools=[{**DELEGATE, "parameters": {"type": "object", "properties": {}}}]).specs("s")
     assert spec.schema["function"]["parameters"]["required"] == []
+
+
+
+@pytest.mark.asyncio
+async def test_host_declared_delegate_calls_run_in_parallel_until_wait_barrier(monkeypatch):
+    import asyncio
+    from agent.application.tools.executor import ToolExecutor
+    from agent.application.tools.processor import ToolCallProcessor
+    from agent.domain import ParsedToolCall
+
+    tool = _tool(tools=[{
+        "name": "delegate",
+        "description": "Coordinate work with direct reports.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string"},
+                "brief": {"type": "string"},
+                "wait": {"type": "boolean"},
+            },
+        },
+    }])
+    active = 0
+    max_active = 0
+    order = []
+
+    async def call(self, session_id, method, parameters, env=None):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        tag = "wait" if parameters.get("wait") else parameters.get("to")
+        order.append(f"start:{tag}")
+        try:
+            await asyncio.sleep(0.02)
+            order.append(f"end:{tag}")
+            return {"ok": True, "result": {"tag": tag}}
+        finally:
+            active -= 1
+
+    class DummySession:
+        session_id = "session-1"
+        def now_iso(self):
+            return "2026-05-21T00:00:00Z"
+        async def get_tool_records(self, **kwargs):
+            return []
+        async def persist_tool_call(self, *args, **kwargs):
+            pass
+        async def persist_message(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(ExternalTool, "call", call)
+    registry = DefaultToolRegistry(tool.specs("session-1"))
+    processor = ToolCallProcessor(ToolExecutor(registry))
+    calls = [
+        ParsedToolCall(call_id="c1", name="delegate", raw_args='{"to":"ui","brief":"A"}'),
+        ParsedToolCall(call_id="c2", name="delegate", raw_args='{"to":"api","brief":"B"}'),
+        ParsedToolCall(call_id="c3", name="delegate", raw_args='{"wait":true}'),
+    ]
+    _ = [event async for event in processor.execute(DummySession(), calls)]
+    assert max_active == 2
+    assert order.index("end:ui") < order.index("start:wait")
+    assert order.index("end:api") < order.index("start:wait")

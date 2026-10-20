@@ -214,6 +214,7 @@ export function createEventController({
         output.setBackgroundWait?.(null);
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
+        output.settleTools?.();
         output.closeAssistant?.();
         output.log?.(() => errorLine(event.error));
         resetTurnState();
@@ -222,6 +223,7 @@ export function createEventController({
         output.setBackgroundWait?.(null);
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
+        output.settleTools?.();
         output.closeAssistant?.();
         output.log?.(() => cancelledText());
         resetTurnState();
@@ -229,6 +231,7 @@ export function createEventController({
       case "turn_completed":
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
+        output.settleTools?.();
         output.closeAssistant?.();
         output.setBackgroundWait?.(event.background_wait);
         if (event.background_wait) {

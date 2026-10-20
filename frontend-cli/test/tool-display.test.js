@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   renderToolRunning,
   renderToolFinished,
+  renderToolGroupBrief,
   parseToolArguments,
   parseToolResult,
   argsFromResult,
@@ -422,3 +423,51 @@ for (const name of ["write_file", "edit_file"]) {
     assert.match(lines.map(stripAnsi).join("\n"), /src\/target\.py/);
   });
 }
+
+test("renderToolGroupBrief animates breathing ◌ while unsettled, builds compact verb trail, and locks into ◉/⊘ when settled", () => {
+  const doneBlock = (name, args, result = { ok: true, data: {} }, status = "completed", fileChange = null) => ({
+    name,
+    args,
+    isRunning: false,
+    resultEvent: { status, result: JSON.stringify(result) },
+    fileChange,
+  });
+  const blocks = [
+    doneBlock("read_file", { path: "a.js" }),
+    doneBlock("read_file", { path: "b.js" }),
+    doneBlock("grep", { pattern: "foo", path: "src" }, { ok: true, data: [], meta: { count: 2 } }),
+    doneBlock("edit_file", { path: "src/a.js" }, { ok: true, data: "edited" }, "completed", {
+      lines: [{ kind: "removed", text: "x" }, { kind: "added", text: "y" }],
+    }),
+  ];
+
+  // Unsettled group: leading glyph stays ◌ (breathing color changes with elapsedMs), never ◉, and verb trail collapses read ×2.
+  const frame0 = renderToolGroupBrief(blocks, 90, { settled: false, elapsedMs: 0 })[0];
+  const frameMid = renderToolGroupBrief(blocks, 90, { settled: false, elapsedMs: 900 })[0];
+  assert.notEqual(frame0, frameMid, "breathing ◌ shifts ANSI color across elapsedMs while unsettled");
+  assert.equal(stripAnsi(frame0), "  ◌ read ×2 → grep → edit src/a.js (+1 -1) · 4 tools");
+  assert.ok(!stripAnsi(frame0).includes("◉"), "unsettled brief tool line never renders ◉");
+
+  // Settled group: leading glyph locks into ◉.
+  const settledOk = renderToolGroupBrief(blocks, 90, { settled: true })[0];
+  assert.equal(stripAnsi(settledOk), "  ◉ read ×2 → grep → edit src/a.js (+1 -1) · 4 tools");
+
+  // Long verb trail (> 3 distinct preceding steps) truncates to … → last two steps.
+  const manyBlocks = [
+    doneBlock("read_file", { path: "a.js" }),
+    doneBlock("glob", { pattern: "*.js" }),
+    doneBlock("grep", { pattern: "foo" }),
+    doneBlock("bash", { command: "npm test" }),
+    doneBlock("write_file", { path: "out.txt" }, { ok: true, data: {}, meta: { files: [{ path: "out.txt", added_lines: 3, removed_lines: 0 }] } }),
+  ];
+  const settledMany = renderToolGroupBrief(manyBlocks, 100, { settled: true })[0];
+  assert.equal(stripAnsi(settledMany), "  ◉ … → grep → bash → write out.txt (+3 -0) · 5 tools");
+
+  // Settled group ending in a failed tool locks into ⊘.
+  const failedBlocks = [
+    doneBlock("read_file", { path: "a.js" }),
+    doneBlock("bash", { command: "bad" }, { ok: false, error: "denied" }, "failed"),
+  ];
+  const settledErr = renderToolGroupBrief(failedBlocks, 90, { settled: true })[0];
+  assert.equal(stripAnsi(settledErr), "  ⊘ read → $ bad · 0ms · 2 tools · 1 failed");
+});

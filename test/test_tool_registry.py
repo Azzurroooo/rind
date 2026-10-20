@@ -142,3 +142,23 @@ def test_builtin_catalog_can_disable_user_questions_and_enable_goal(build_builti
     assert registry.has("ask_user_question") is False
     assert registry.has("update_goal") is True
     assert [schema["function"]["name"] for schema in registry.schemas][-1] == "update_goal"
+
+
+def test_builtin_and_external_parallel_flags(build_builtin_tool_specs) -> None:
+    from agent.infrastructure.tools.external import ExternalTool, HostToolDeclaration
+
+    registry = DefaultToolRegistry(build_builtin_tool_specs())
+    for parallel_name in ("read_file", "glob", "grep"):
+        assert registry.is_parallel(parallel_name) is True
+    for serial_name in ("ask_user_question", "write_file", "edit_file", "bash", "task_control", "bash_output", "update_plan"):
+        assert registry.is_parallel(serial_name) is False
+
+    ext = ExternalTool(
+        command="/bin/echo",
+        args=(),
+        env={},
+        tools=(HostToolDeclaration(name="delegate", description="Delegate work", parameters={"type": "object", "properties": {}}),),
+    )
+    ext_specs = ext.specs("session_1")
+    assert len(ext_specs) == 1
+    assert ext_specs[0].parallel is True

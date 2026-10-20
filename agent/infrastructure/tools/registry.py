@@ -47,6 +47,10 @@ class DefaultToolRegistry:
         spec = self._specs_by_name.get(name)
         return spec is not None and spec.is_async
 
+    def is_parallel(self, name: str) -> bool:
+        spec = self._specs_by_name.get(name)
+        return spec is not None and spec.parallel
+
     def call(self, name: str, args: dict) -> Any:
         spec = self._specs_by_name[name]
         prepared = self._prepare_call_args(spec, args)

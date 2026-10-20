@@ -109,7 +109,13 @@ class ExternalTool:
                 str(failure.get("code") or ""),
             )
 
-        return ToolSpec(name=declaration.name, handler=invoke, description=declaration.description, parameters=declaration.parameters)
+        return ToolSpec(
+            name=declaration.name,
+            handler=invoke,
+            description=declaration.description,
+            parameters=declaration.parameters,
+            parallel=True,
+        )
 
 
 def _declarations(raw: object) -> tuple[HostToolDeclaration, ...]:

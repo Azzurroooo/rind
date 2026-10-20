@@ -23,6 +23,7 @@ export class ToolBlock {
     this.leading = Boolean(leading);
     this.animate = animate;
     this.onRequestRender = onRequestRender;
+    this.onInvalidate = null;
   }
 
   setProgress(message) {
@@ -86,6 +87,7 @@ export class ToolBlock {
 
   invalidate() {
     this.cache = null;
+    this.onInvalidate?.();
   }
 
   render(width) {
@@ -122,28 +124,53 @@ export class ToolBlock {
 }
 
 export class ToolGroupBlock {
-  constructor({ leading = false } = {}) {
+  constructor({ leading = false, animate = true, now = Date.now } = {}) {
     this.blocks = [];
     this.leading = Boolean(leading);
     this.expanded = false;
+    this.settled = false;
+    this.animate = Boolean(animate);
+    this.now = now;
+    this.startedAt = now();
+    this.cache = null;
   }
 
   add(block) {
+    if (this.blocks.length === 0) {
+      this.startedAt = block.startedAt ?? this.now();
+    }
     block.leading = this.blocks.length === 0 ? this.leading : true;
     block.expanded = this.expanded;
+    block.onInvalidate = () => { this.cache = null; };
     this.blocks.push(block);
+    this.cache = null;
     return block;
+  }
+
+  settle() {
+    if (this.settled) {
+      return false;
+    }
+    this.settled = true;
+    this.cache = null;
+    return true;
+  }
+
+  get isRunning() {
+    return this.blocks.some((block) => block.isRunning);
   }
 
   setExpanded(expanded) {
     const next = Boolean(expanded);
     this.expanded = next;
+    this.cache = null;
     for (const block of this.blocks) {
       block.setExpanded(next);
     }
   }
 
   invalidate() {
+    this.cache = null;
     for (const block of this.blocks) {
       block.invalidate();
     }
@@ -153,7 +180,17 @@ export class ToolGroupBlock {
     if (!isBriefMode() || this.expanded) {
       return this.blocks.flatMap((block) => block.render(width));
     }
-    const lines = renderToolGroupBrief(this.blocks, width);
-    return this.leading && lines.length ? ["", ...lines] : lines;
+    const done = this.settled && !this.isRunning;
+    if (done && this.cache?.width === width) {
+      return this.cache.lines;
+    }
+    const elapsedMs = !done && this.animate ? Math.max(0, this.now() - this.startedAt) : 0;
+    const raw = renderToolGroupBrief(this.blocks, width, { settled: this.settled, elapsedMs });
+    const lines = this.leading && raw.length ? ["", ...raw] : raw;
+    if (done) {
+      this.cache = { width, lines: Object.freeze(lines) };
+      return this.cache.lines;
+    }
+    return lines;
   }
 }

@@ -7,7 +7,6 @@ import contextvars
 import json
 import time
 from dataclasses import dataclass
-from collections.abc import Awaitable, Callable
 from typing import AsyncIterator, Any
 
 from agent.application.ports.session_store import SessionStore
@@ -26,16 +25,19 @@ from agent.domain.events import (
     ToolCallStartedEvent,
     ToolProgressEvent,
     ToolResultEvent,
-    UserQuestionRequestedEvent,
     event_meta,
 )
 from agent.application.tools.executor import ToolExecutor
 from agent.application.tools.change_events import build_file_change_event
 from agent.application.tools.result_normalizer import NormalizedToolResult, ToolResultNormalizer
+from agent.application.tools.user_question import (
+    UserQuestionResponder,
+    build_user_question_event,
+    run_user_question,
+)
 from agent.domain.cancellation import CancellationToken, CancellationTokenSource
 from agent.application.task_notifications import TaskNotifications
 
-UserQuestionResponder = Callable[[UserQuestionRequestedEvent], str | Awaitable[str]]
 _HEARTBEAT_TOOLS = frozenset({"bash", "task_control", "bash_output"})
 
 
@@ -71,6 +73,14 @@ class ToolCallProcessor:
         """Set the callback used to collect answers for ask_user_question."""
         self._user_question_responder = responder
 
+    def _is_parallel_call(self, call: ParsedToolCall, parsed_args: dict, parse_error: str | None) -> bool:
+        if parse_error or call.name == "ask_user_question" or call.name in _HEARTBEAT_TOOLS:
+            return False
+        if bool(parsed_args.get("wait")):
+            return False
+        is_parallel = getattr(self._tool_executor, "is_parallel_tool", None)
+        return bool(callable(is_parallel) and is_parallel(call.name))
+
     async def execute(
         self,
         session: SessionStore,
@@ -80,100 +90,212 @@ class ToolCallProcessor:
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Execute multiple tool calls asynchronously.
-        Async tools (like bash) are awaited directly; sync tools run in a thread.
+        Contiguous parallel-safe tool calls run concurrently while preserving call-order events and persistence.
         """
-        for call in tool_calls:
+        index = 0
+        total = len(tool_calls)
+        while index < total:
+            call = tool_calls[index]
             started_at = time.perf_counter()
             parsed_args, parse_error = parse_tool_args(call.raw_args)
             ts_start = session.now_iso()
-            reused = False
-
             existing = await self._load_tool_record(session, call)
-            if existing is not None:
-                parsed_args = existing.get("args") if isinstance(existing.get("args"), dict) else parsed_args
-                outcome = self._outcome_from_record(existing)
-                reused = True
-            elif cancellation_token and cancellation_token.is_cancelled:
-                outcome = _ToolCallOutcome(
-                    status="cancelled",
-                    error_type="Cancelled",
-                    result=tool_cancelled(call.name, cancellation_token.reason),
-                )
-            elif parse_error:
-                outcome = _ToolCallOutcome(
-                    status="rejected",
-                    error_type="ToolArgsJSONError",
-                    result=tool_error(
-                        call.name,
-                        f"Invalid tool arguments JSON: {parse_error}",
-                        "ToolArgsJSONError",
-                        meta={"raw_args": call.raw_args[:2000]},
-                    ),
-                )
-            else:
+
+            if (
+                existing is not None
+                or (cancellation_token and cancellation_token.is_cancelled)
+                or parse_error
+                or not self._is_parallel_call(call, parsed_args, parse_error)
+            ):
+                index += 1
+                async for event in self._execute_serial_call(
+                    session=session,
+                    turn_id=turn_id,
+                    call=call,
+                    parsed_args=parsed_args,
+                    parse_error=parse_error,
+                    existing=existing,
+                    ts_start=ts_start,
+                    started_at=started_at,
+                    cancellation_token=cancellation_token,
+                ):
+                    yield event
+                continue
+
+            batch: list[tuple[ParsedToolCall, dict, str, float]] = [
+                (call, parsed_args, ts_start, started_at)
+            ]
+            index += 1
+            while index < total:
+                next_call = tool_calls[index]
+                next_args, next_error = parse_tool_args(next_call.raw_args)
+                if not self._is_parallel_call(next_call, next_args, next_error):
+                    break
+                if await self._load_tool_record(session, next_call) is not None:
+                    break
+                batch.append((next_call, next_args, session.now_iso(), time.perf_counter()))
+                index += 1
+
+            for b_call, _, _, _ in batch:
                 yield ToolCallStartedEvent(
                     **event_meta(session, turn_id),
-                    tool_call_id=call.call_id,
-                    tool_name=call.name,
+                    tool_call_id=b_call.call_id,
+                    tool_name=b_call.name,
                 )
-                if call.name == "ask_user_question":
-                    try:
-                        question_event = self._build_user_question_event(
-                            session=session,
+
+            session_id = session.session_id or "default"
+            if len(batch) == 1:
+                b_call, b_args, b_ts_start, b_started_at = batch[0]
+                outcome = await self._run_tool_call(
+                    call=b_call,
+                    parsed_args=b_args,
+                    session_id=session_id,
+                    cancellation_token=cancellation_token,
+                    turn_id=turn_id,
+                )
+                outcomes = [outcome]
+            else:
+                tasks = [
+                    asyncio.create_task(
+                        self._run_tool_call(
+                            call=b_call,
+                            parsed_args=b_args,
+                            session_id=session_id,
+                            cancellation_token=cancellation_token,
                             turn_id=turn_id,
-                            call=call,
-                            parsed_args=parsed_args,
                         )
-                    except ValueError as exc:
-                        outcome = _ToolCallOutcome(
-                            status="rejected",
-                            error_type="InvalidUserQuestion",
-                            result=tool_error("ask_user_question", str(exc), "InvalidUserQuestion"),
-                        )
-                    else:
-                        yield question_event
-                        outcome = await self._run_user_question(question_event, cancellation_token)
-                else:
-                    tool_execution = self._run_tool_call(
+                    )
+                    for b_call, b_args, _, _ in batch
+                ]
+                try:
+                    outcomes = list(await asyncio.gather(*tasks))
+                finally:
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+
+            for (b_call, b_args, b_ts_start, b_started_at), outcome in zip(batch, outcomes):
+                async for event in self._finish_tool_call(
+                    session=session,
+                    turn_id=turn_id,
+                    call=b_call,
+                    parsed_args=b_args,
+                    outcome=outcome,
+                    reused=False,
+                    ts_start=b_ts_start,
+                    started_at=b_started_at,
+                ):
+                    yield event
+
+    async def _execute_serial_call(
+        self,
+        *,
+        session: SessionStore,
+        turn_id: str,
+        call: ParsedToolCall,
+        parsed_args: dict,
+        parse_error: str | None,
+        existing: dict[str, Any] | None,
+        ts_start: str,
+        started_at: float,
+        cancellation_token: CancellationToken | None,
+    ) -> AsyncIterator[RuntimeEvent]:
+        reused = False
+        if existing is not None:
+            parsed_args = existing.get("args") if isinstance(existing.get("args"), dict) else parsed_args
+            outcome = self._outcome_from_record(existing)
+            reused = True
+        elif cancellation_token and cancellation_token.is_cancelled:
+            outcome = _ToolCallOutcome(
+                status="cancelled",
+                error_type="Cancelled",
+                result=tool_cancelled(call.name, cancellation_token.reason),
+            )
+        elif parse_error:
+            outcome = _ToolCallOutcome(
+                status="rejected",
+                error_type="ToolArgsJSONError",
+                result=tool_error(
+                    call.name,
+                    f"Invalid tool arguments JSON: {parse_error}",
+                    "ToolArgsJSONError",
+                    meta={"raw_args": call.raw_args[:2000]},
+                ),
+            )
+        else:
+            yield ToolCallStartedEvent(
+                **event_meta(session, turn_id),
+                tool_call_id=call.call_id,
+                tool_name=call.name,
+            )
+            if call.name == "ask_user_question":
+                try:
+                    question_event = build_user_question_event(
+                        session=session,
+                        turn_id=turn_id,
                         call=call,
                         parsed_args=parsed_args,
-                        session_id=session.session_id or "default",
-                        cancellation_token=cancellation_token,
-                        turn_id=turn_id,
                     )
-                    if call.name not in _HEARTBEAT_TOOLS:
-                        outcome = await tool_execution
-                    else:
-                        execution = asyncio.create_task(tool_execution)
-                        try:
-                            while not execution.done():
-                                done, _ = await asyncio.wait(
-                                    [execution], timeout=self.HEARTBEAT_INTERVAL
-                                )
-                                if done:
-                                    break
-                                elapsed_seconds = max(
-                                    1, round(time.perf_counter() - started_at)
-                                )
-                                yield ToolProgressEvent(
-                                    **event_meta(session, turn_id),
-                                    tool_call_id=call.call_id,
-                                    tool_name=call.name,
-                                    payload={
-                                        "message": f"still running ({elapsed_seconds}s)"
-                                    },
-                                )
-                            outcome = await execution
-                        finally:
-                            if not execution.done():
-                                execution.cancel()
-                                await asyncio.gather(execution, return_exceptions=True)
+                except ValueError as exc:
+                    outcome = _ToolCallOutcome(
+                        status="rejected",
+                        error_type="InvalidUserQuestion",
+                        result=tool_error("ask_user_question", str(exc), "InvalidUserQuestion"),
+                    )
+                else:
+                    yield question_event
+                    status, result, error_type = await run_user_question(
+                        self._user_question_responder, question_event, cancellation_token
+                    )
+                    outcome = _ToolCallOutcome(status=status, result=result, error_type=error_type)
+            else:
+                tool_execution = self._run_tool_call(
+                    call=call,
+                    parsed_args=parsed_args,
+                    session_id=session.session_id or "default",
+                    cancellation_token=cancellation_token,
+                    turn_id=turn_id,
+                )
+                if call.name not in _HEARTBEAT_TOOLS:
+                    outcome = await tool_execution
+                else:
+                    execution = asyncio.create_task(tool_execution)
+                    try:
+                        while not execution.done():
+                            done, _ = await asyncio.wait(
+                                [execution], timeout=self.HEARTBEAT_INTERVAL
+                            )
+                            if done:
+                                break
+                            elapsed_seconds = max(
+                                1, round(time.perf_counter() - started_at)
+                            )
+                            yield ToolProgressEvent(
+                                **event_meta(session, turn_id),
+                                tool_call_id=call.call_id,
+                                tool_name=call.name,
+                                payload={
+                                    "message": f"still running ({elapsed_seconds}s)"
+                                },
+                            )
+                        outcome = await execution
+                    finally:
+                        if not execution.done():
+                            execution.cancel()
+                            await asyncio.gather(execution, return_exceptions=True)
 
-            async for event in self._finish_tool_call(
-                session=session, turn_id=turn_id, call=call, parsed_args=parsed_args,
-                outcome=outcome, reused=reused, ts_start=ts_start, started_at=started_at,
-            ):
-                yield event
+        async for event in self._finish_tool_call(
+            session=session,
+            turn_id=turn_id,
+            call=call,
+            parsed_args=parsed_args,
+            outcome=outcome,
+            reused=reused,
+            ts_start=ts_start,
+            started_at=started_at,
+        ):
+            yield event
 
     async def _finish_tool_call(
         self,
@@ -361,122 +483,6 @@ class ToolCallProcessor:
             error_type=payload_status[1] if payload_status else error_type,
             result=result_content,
         )
-
-    def _build_user_question_event(
-        self,
-        *,
-        session: SessionStore,
-        turn_id: str,
-        call: ParsedToolCall,
-        parsed_args: dict,
-    ) -> UserQuestionRequestedEvent:
-        question = self._clean_required_text(parsed_args.get("question"))
-        if not question:
-            raise ValueError("ask_user_question requires a non-empty question string.")
-        if "recommended" in parsed_args:
-            raise ValueError("ask_user_question no longer accepts a top-level recommended field.")
-        options = self._clean_user_question_options(parsed_args.get("options"))
-        return UserQuestionRequestedEvent(
-            **event_meta(session, turn_id),
-            tool_call_id=call.call_id,
-            question=question,
-            options=options,
-        )
-
-    async def _run_user_question(
-        self, event: UserQuestionRequestedEvent, cancellation_token: CancellationToken | None,
-    ) -> _ToolCallOutcome:
-        if self._user_question_responder is None:
-            return _ToolCallOutcome(
-                status="unavailable",
-                error_type="UserQuestionUnsupported",
-                result=tool_error(
-                    "ask_user_question",
-                    "No user-question responder is available in this execution environment.",
-                    "UserQuestionUnsupported",
-                ),
-            )
-        try:
-            answer_value = self._user_question_responder(event)
-            if isinstance(answer_value, Awaitable):
-                answer_value = await answer_value
-        except (KeyboardInterrupt, EOFError) as exc:
-            return _ToolCallOutcome(
-                status="cancelled",
-                error_type=type(exc).__name__,
-                result=tool_error(
-                    "ask_user_question",
-                    "User question input was interrupted.",
-                    type(exc).__name__,
-                ),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            return _ToolCallOutcome(
-                status="failed",
-                error_type=type(exc).__name__,
-                result=tool_error("ask_user_question", str(exc), type(exc).__name__),
-            )
-
-        # Interrupting the turn releases the question; the user did not answer it.
-        if cancellation_token and cancellation_token.is_cancelled:
-            return _ToolCallOutcome(
-                status="cancelled",
-                error_type="Cancelled",
-                result=tool_cancelled("ask_user_question", cancellation_token.reason),
-            )
-        answer = str(answer_value or "").strip()
-        if not answer:
-            return _ToolCallOutcome(
-                status="failed",
-                error_type="UserQuestionEmptyAnswer",
-                result=tool_error(
-                    "ask_user_question",
-                    "User provided an empty answer.",
-                    "UserQuestionEmptyAnswer",
-                ),
-            )
-        return _ToolCallOutcome(
-            status="completed",
-            result=tool_ok("ask_user_question", {"answer": answer}),
-        )
-
-    def _clean_required_text(self, value: Any) -> str:
-        if not isinstance(value, str):
-            return ""
-        return value.strip()
-
-    def _clean_user_question_options(self, value: Any) -> list[dict[str, str]] | None:
-        if value is None:
-            return None
-        if not isinstance(value, list) or not value:
-            raise ValueError("ask_user_question options must be a non-empty array of option objects.")
-        cleaned: list[dict[str, str]] = []
-        labels: set[str] = set()
-        for index, item in enumerate(value):
-            if not isinstance(item, dict):
-                raise ValueError("Each ask_user_question option must be an object.")
-            unknown = set(item) - {"label", "description"}
-            if unknown:
-                raise ValueError(f"ask_user_question options contain unsupported fields: {sorted(unknown)!r}.")
-            label = item.get("label")
-            description = item.get("description")
-            if not isinstance(label, str) or not label.strip():
-                raise ValueError("Each ask_user_question option requires a non-empty label.")
-            if not isinstance(description, str) or not description.strip():
-                raise ValueError("Each ask_user_question option requires a non-empty description.")
-            label = label.strip()
-            if label in labels:
-                raise ValueError(f"ask_user_question option labels must be unique: {label!r}.")
-            labels.add(label)
-            has_recommended_suffix = label.endswith(" (Recommended)")
-            if index == 0 and not has_recommended_suffix:
-                raise ValueError('The first ask_user_question option label must end with " (Recommended)".')
-            if index > 0 and has_recommended_suffix:
-                raise ValueError('Only the first ask_user_question option may end with " (Recommended)".')
-            cleaned.append({"label": label, "description": description.strip()})
-        return cleaned
 
     async def _persist_tool_result(
         self,

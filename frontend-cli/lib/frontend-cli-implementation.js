@@ -248,6 +248,7 @@ const {
   log: logOutput,
   writeError: writeErrorOutput,
   closeAssistant,
+  settleTools,
   clearTranscript,
   renderHistory,
   setTurnContext,
@@ -359,6 +360,7 @@ turnController = createTurnController({
     writeError: (text) => writeErrorOutput(`${text}\n`),
     refreshInputState,
     closeAssistant,
+    settleTools,
     cancelInput,
     logInterrupt: () => logOutput(() => interruptText()),
   },
@@ -478,6 +480,7 @@ const eventController = createEventController({
     handleContextBuilt: (event) => compactContextState.handleContextBuilt(event),
     resetContextUsage,
     closeAssistant,
+    settleTools,
     log: logOutput,
     debug: (text) => writeErrorOutput(`${text}\n`),
     updateGoal: updateGoalState,
@@ -575,6 +578,7 @@ try {
 } catch (error) {
   startupGuard.stop();
   windowLog.step("ended: " + (error instanceof Error ? error.message : String(error)));
+  settleTools();
   closeAssistant();
   if (!isInputClosed(error)) {
     writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
