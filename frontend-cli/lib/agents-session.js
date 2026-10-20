@@ -34,7 +34,10 @@ export async function renameConversation(launch, sessionId, name) {
     const result = await host.request("rind/command/execute", { session_id: sessionId, input: name.trim() ? "/rename " + name.trim() : "/rename --reset" });
     if (result?.display?.type !== "session_renamed") throw new Error(String(result?.text || "Could not rename this conversation."));
     return result.display;
-  } finally { host.close(); }
+  } finally {
+    if (host.spawned) await host.request("runtime/shutdown", { if_idle: true }).catch(() => {});
+    host.close();
+  }
 }
 
 export function managementArgs(args) {

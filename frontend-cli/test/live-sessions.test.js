@@ -63,6 +63,22 @@ test("a crashed worker ends every running turn instead of leaving it working for
   assert.equal(pushes.length, 1, "nothing to report when every turn is already idle");
 });
 
+test("settle clears a stuck running turn when a prompt RPC finishes without a terminal event", () => {
+  const { live, pushes, flush, advance } = setup();
+  live.event({ session_id: "s1", event: { type: "turn_started" } });
+  live.event({ session_id: "s1", event: { type: "background_wait_changed", background_wait: { count: 1, started_at: 1791374400, commands: ["sleep 1"] } } });
+  flush(); pushes.length = 0;
+  live.settle("s1");
+  flush();
+  assert.equal(live.turn("s1"), "idle");
+  assert.equal(live.list()[0].background?.count, 1, "a normal prompt settle preserves background wait state");
+  live.settle("s1", true);
+  flush();
+  assert.equal(live.list()[0].background, null, "a failed prompt settle also clears background wait state");
+  advance(11 * 60 * 1000);
+  assert.deepEqual(live.list(), [], "settled unwatched session is forgotten after TTL");
+});
+
 test("a window shows one session at a time, and idle unwatched sessions are forgotten", () => {
   const { live, flush, advance } = setup();
   const w = {};

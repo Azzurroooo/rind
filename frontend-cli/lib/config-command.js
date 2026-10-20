@@ -44,7 +44,7 @@ export function parseConfigArgs(args, cwd = process.cwd()) {
 // Through the shared Runtime, so an open Agents page hears the change.
 export async function runConfig({ args, launch, cwd = process.cwd(), write = text => process.stdout.write(text), clientFactory = createSharedRuntimeClient }) {
   const options = parseConfigArgs(args, cwd);
-  const client = clientFactory({ ...launch, cwd: options.folder, cliArgs: ["--cwd", options.folder] });
+  const client = clientFactory({ ...launch, cwd: options.folder, cliArgs: ["--cwd", options.folder], stopSpawnedHost: true });
   client.start();
   try {
     requireRuntimeInitialization(await client.request(runtimeMethods.initialize));

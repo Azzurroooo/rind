@@ -13,7 +13,7 @@ import { acquireProcessLock } from "./process-lock.js";
 export function sharedRuntimePaths(home = process.env.RIND_HOME) {
   const directory = path.join(resolveRindHome(home), "runtime");
   const endpoint = process.platform === "win32" ? "\\\\.\\pipe\\rind-runtime-" + createHash("sha256").update(directory.toLowerCase()).digest("hex").slice(0, 24) : path.join(directory, "runtime.sock");
-  return { directory, endpoint, token: path.join(directory, "token"), record: path.join(directory, "host.json") };
+  return { directory, endpoint, token: path.join(directory, "token"), record: path.join(directory, "host.json"), log: path.join(directory, "runtime.log") };
 }
 
 export async function connectSharedRuntime(options = {}) {
@@ -76,8 +76,10 @@ export async function connectSharedRuntime(options = {}) {
   };
   // A host started from older code keeps running it. Replace it when nothing
   // depends on it; otherwise keep using it and report the pending update.
+  let replaced = false;
   const checked = async connection => {
     try {
+      connection.spawned = false;
       if (options.start === false || !(options.repoRoot || options.runtimePath)) return connection;
       const [info, expected] = await Promise.all([
         // A host that takes seconds to answer its own health check is not usable.
@@ -86,10 +88,11 @@ export async function connectSharedRuntime(options = {}) {
       ]);
       if (info?.buildId === expected) return connection;
       if (info && !info.busy && !info.attached) {
+        replaced = true;
         await connection.request("runtime/shutdown").catch(() => {});
         connection.close();
         for (let i = 0; i < 50; i++) { try { (await connect()).close(); } catch { return null; } await delay(100); }
-        throw new Error("The outdated shared Runtime did not stop. See " + path.join(paths.directory, "runtime.log"));
+        throw new Error("The outdated shared Runtime did not stop. See " + paths.log);
       }
       if (!info) {
         // The endpoint answers but no host serves it: a Runtime that is shutting
@@ -141,16 +144,16 @@ export async function connectSharedRuntime(options = {}) {
     if (existing) { const current = await checked(existing); if (current) return current; }
     const taken = await takeOverStuckEndpoint();
     if (taken) { const current = await checked(taken); if (current) return current; }
-    const log = await open(path.join(paths.directory, "runtime.log"), "a", 0o600);
+    const log = await open(paths.log, "a", 0o600);
     // The host must not hold the caller's working directory open: on Windows a
     // process whose current directory is inside a folder blocks removing it.
     const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ python: options.python, repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome }), "--rind-host-nonce=" + randomUUID()], { cwd: paths.directory, detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd] });
     child.on("error", () => {}); child.unref(); await log.close();
     for (let i = 0; i < 100; i++) {
-      try { return await connect(); } catch {}
+      try { const started = await connect(); started.spawned = !replaced; return started; } catch {}
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    throw new Error("Unable to connect to shared Runtime. See " + path.join(paths.directory, "runtime.log"));
+    throw new Error("Unable to connect to shared Runtime. See " + paths.log);
   } finally {
     await lock?.release();
   }
@@ -302,11 +305,26 @@ export function createSharedRuntimeClient(options) {
     return client.request(method, params);
   }
   function close() { closed = true; connection?.close(); starting?.then(c => c.close()).catch(() => {}); }
+  async function shutdown() {
+    closed = true;
+    const active = connection || await starting?.catch(() => null);
+    if (active && options.stopSpawnedHost && active.spawned) {
+      try {
+        const result = await within(active.request("runtime/shutdown", { if_idle: true }).catch(() => null), 5000);
+        active.close();
+        if (result?.stopped) await waitForFreeEndpoint(sharedRuntimePaths(options.rindHome || options.home), 5000);
+      } finally {
+        active.close();
+      }
+      return;
+    }
+    close();
+  }
   // Covered by the Agents page, the window still holds its session but no
   // longer shows it. Best effort: an older host does not know this request.
   async function setVisible(visible) {
     if (!connection || closed) return;
     try { await connection.request("runtime/visibility", { visible }); } catch {}
   }
-  return { start, request, setVisible, shutdown: async () => close(), forceShutdown: close, closeInput: close, get child() { return connection || null; } };
+  return { start, request, setVisible, shutdown, forceShutdown: close, closeInput: close, get child() { return connection || null; } };
 }

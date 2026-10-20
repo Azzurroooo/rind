@@ -176,6 +176,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       cwd: options.dir || cwd,
       cliArgs: management.args,
       externalTools: management.externalTools,
+      stopSpawnedHost: true,
       onMessage: (message) => {
         const event = message?.event;
         const type = event?.type;
@@ -265,11 +266,14 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   } finally {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
-    if (client) await client.shutdown().catch((error) => {
-      stderr(`Runtime shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`);
-      process.exitCode = 1;
-    });
-    else await management?.close?.();
+    try {
+      if (client) await client.shutdown().catch((error) => {
+        stderr(`Runtime shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      });
+    } finally {
+      await management?.close?.().catch(() => {});
+    }
   }
 }
 

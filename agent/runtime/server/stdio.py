@@ -64,22 +64,25 @@ class StdioRuntimeServer:
 
     async def run(self) -> int:
         loop = asyncio.get_running_loop()
+        closed = threading.Event()
 
         def pump() -> None:
-            while True:
+            while not closed.is_set():
                 line = sys.stdin.readline()
-                if not line:
+                if not line or closed.is_set():
                     break
                 future = _schedule_ingest(loop, self._ingest_line, line)
                 if future is None:
                     return
                 future.result()
-            _schedule_ingest(loop, self._dispatcher.submit, None)
+            if not closed.is_set():
+                _schedule_ingest(loop, self._dispatcher.submit, None)
 
         threading.Thread(target=pump, name="rind-stdin-pump", daemon=True).start()
         try:
             return await self._dispatcher.serve()
         finally:
+            closed.set()
             self._dispatcher.close()
 
     async def _ingest_line(self, line: str) -> None:

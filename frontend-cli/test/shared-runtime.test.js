@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, rm, realpath, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath, symlink, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -11,6 +11,7 @@ import { connectSharedRuntime, createSharedRuntimeClient, sharedRuntimePaths, st
 import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
 import { managementPaths } from "../../agent-management/dist/paths.js";
 import { startServer } from "../../agent-management/dist/ipc.js";
+import { runOneShot } from "../lib/one-shot.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 
 test("one host isolates workspaces and tools, runs sessions concurrently and survives client detach", { timeout: 25000 }, async t => {
@@ -137,4 +138,104 @@ test("host.json records workerPid and stopSharedRuntime cleans up orphaned worke
   assert.equal(alive(record.pid), false);
   assert.equal(alive(record.workerPid), false);
   assert.equal(existsSync(paths.record), false);
+});
+
+test("one-shot run stops a shared host it spawned when idle, preserves an existing or shared host, and writes lifecycle logs", { timeout: 30000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-oneshot-lifecycle-"));
+  const work = path.join(home, "work");
+  await mkdir(work, { recursive: true });
+  const provider = http.createServer((request, response) => {
+    if (request.method === "GET") { response.end(JSON.stringify({ data: [{ id: "fixture" }] })); return; }
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.end('data: {"choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":null}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+    });
+  });
+  await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const python = process.env.RIND_PYTHON || "python";
+  const previousHome = process.env.RIND_HOME;
+  process.env.RIND_HOME = home;
+  t.after(async () => {
+    if (previousHome === undefined) delete process.env.RIND_HOME;
+    else process.env.RIND_HOME = previousHome;
+    await stopSharedRuntime({ rindHome: home });
+    await new Promise(resolve => provider.close(resolve));
+    await removeRindHome(home);
+  });
+
+  const stdout = [], stderr = [];
+  await runOneShot({
+    args: ["run", "--dir", work, "--prompt", "Reply"],
+    python, repoRoot, cwd: work,
+    stdout: text => stdout.push(text),
+    stderr: text => stderr.push(text),
+  });
+  assert.deepEqual(stdout, ["Done."]);
+  const paths = sharedRuntimePaths(home);
+  await assert.rejects(connectSharedRuntime({ rindHome: home, start: false }), "host spawned by one-shot run must stop when the run finishes");
+  assert.equal(existsSync(paths.record), false);
+  const logText = await readFile(paths.log, "utf8");
+  assert.match(logText, /host started pid=\d+/);
+  assert.match(logText, /worker started pid=\d+ workerPid=\d+/);
+  assert.match(logText, /host stopped pid=\d+ workerPid=\d+ reason=shutdown/);
+
+  // When a host is already running before one-shot starts, one-shot leaves it running.
+  const existing = await connectSharedRuntime({ rindHome: home, python, repoRoot });
+  assert.equal(existing.spawned, true);
+  existing.close();
+  await runOneShot({
+    args: ["run", "--dir", work, "--prompt", "Reply again"],
+    python, repoRoot, cwd: work,
+    stdout: text => stdout.push(text),
+    stderr: text => stderr.push(text),
+  });
+  const stillRunning = await connectSharedRuntime({ rindHome: home, start: false });
+  assert.equal(stillRunning.spawned, false);
+  stillRunning.close();
+  await stopSharedRuntime({ rindHome: home });
+
+  // When a spawned host is joined by another window before shutdown, stopSpawnedHost leaves it up for that window.
+  const firstClient = createSharedRuntimeClient({ rindHome: home, python, repoRoot, cwd: work, cliArgs: ["--cwd", work], stopSpawnedHost: true });
+  await firstClient.request("initialize");
+  const secondWindow = createSharedRuntimeClient({ rindHome: home, python, repoRoot, cwd: work, cliArgs: ["--cwd", work] });
+  await secondWindow.request("initialize");
+  await firstClient.shutdown();
+  const afterFirst = await connectSharedRuntime({ rindHome: home, start: false });
+  afterFirst.close();
+  await secondWindow.shutdown();
+  await stopSharedRuntime({ rindHome: home });
+});
+
+test("idle TTL and record removal automatically stop an unattached shared host", { timeout: 25000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-idle-ttl-"));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot };
+  t.after(async () => { await stopSharedRuntime(options); await removeRindHome(home); });
+
+  // 1. Idle timeout stops the host after all peers disconnect.
+  const host1 = await startSharedServer({ ...options, idleTtlMs: 120 });
+  const peer = await connectSharedRuntime({ ...options, start: false });
+  await new Promise(resolve => setTimeout(resolve, 180));
+  assert.equal(existsSync(host1.paths.record), true, "connected peer keeps host alive past idleTtlMs");
+  peer.close();
+  for (let i = 0; i < 40 && existsSync(host1.paths.record); i++) await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(existsSync(host1.paths.record), false, "unattached host stops after idleTtlMs");
+  assert.match(await readFile(host1.paths.log, "utf8"), /reason=idle_timeout/);
+
+  // 2. Removing host.json while unattached stops the host automatically.
+  const host2 = await startSharedServer({ ...options, idleTtlMs: 60000 });
+  await unlink(host2.paths.record);
+  let gone = false;
+  for (let i = 0; i < 30; i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const conn = await connectSharedRuntime({ ...options, start: false }).catch(() => null);
+    if (!conn) { gone = true; break; }
+    conn.close();
+  }
+  assert.equal(gone, true, "unattached host stops when its record file is removed");
 });

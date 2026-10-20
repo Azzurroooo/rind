@@ -103,6 +103,15 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       }
       if (any) changed();
     },
+    // A prompt RPC finished: its turn can no longer be running even if a terminal event was missed.
+    settle(id, clearBackground = false) {
+      const item = sessions.get(id);
+      if (!item || (item.turn === "idle" && (!clearBackground || !item.background))) return;
+      item.turn = "idle";
+      if (clearBackground) item.background = null;
+      item.updatedAt = new Date(now()).toISOString();
+      changed();
+    },
     event(message) {
       const id = message?.session_id;
       // Renamed in some window: every list shows the new title at once.
