@@ -727,10 +727,11 @@ export function settingsMenuText(items, selectedIndex = 0, level = "root") {
       const marker = active ? accent("›") : dim("·");
       const box = item.chosen ? accent("[x]") : dim("[ ]");
       const label = padRight(item.label, labelWidth);
+      const name = active ? bold(label) : dim(label);
       const paths = (Array.isArray(item.paths) ? item.paths : []).map(prettySkillLocation).join(" · ");
       const count = Number(item.count) || 0;
       const found = count ? `${count} ${count === 1 ? "skill" : "skills"}` : "—";
-      lines.push(`  ${marker} ${box} ${active ? bold(label) : label}  ${dim(padRight(clipSingleLine(paths, pathWidth), pathWidth))}  ${dim(found)}`);
+      lines.push(`  ${marker} ${box} ${name}  ${dim(padRight(clipSingleLine(paths, pathWidth), pathWidth))}  ${dim(found)}`);
     }
     lines.push(dim("    ↑↓ select · space toggle · enter apply · esc back"));
     return `${lines.join("\n")}\n`;
@@ -743,11 +744,12 @@ export function settingsMenuText(items, selectedIndex = 0, level = "root") {
     const active = index === selectedIndex;
     const marker = active ? accent("›") : dim("·");
     const label = padRight(item.label, labelWidth);
+    const name = active ? bold(label) : dim(label);
     const rawValue = String(item.value || "");
     const paddedValue = padRight(rawValue, valueWidth);
     const value = item.enabled || (item.submenu && active) ? accent(paddedValue) : dim(paddedValue);
     const description = item.description ? `  ${dim(clipSingleLine(item.description, descWidth))}` : "";
-    lines.push(`  ${marker} ${active ? bold(label) : label}  ${value}${description}`);
+    lines.push(`  ${marker} ${name}  ${value}${description}`);
   }
   lines.push(dim("    ↑↓ select · space toggle · enter open/apply · esc cancel"));
   return `${lines.join("\n")}\n`;

@@ -799,6 +799,30 @@ test("settingsMenuText theme and spinner submenus render options with current ma
   assert.match(spinnerText, /Settings · Working spinner/);
   assert.match(spinnerText, /· Sweep\s+█▒░░░ ▒█▒░░/);
   assert.match(spinnerText, /› Orbit\s+◐ ◓ ◑ ◒\s+current/);
+
+  const tty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+  const priorNoColor = process.env.NO_COLOR;
+  Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+  delete process.env.NO_COLOR;
+  try {
+    const rootColored = settingsMenuText([
+      { id: "brief", label: "Brief output", value: "off", enabled: false, description: "desc" },
+      { id: "theme", label: "Theme", value: "Frappé ›", submenu: true, description: "desc" },
+    ], 0, "root");
+    assert.ok(rootColored.includes(paintRaw.bold("Brief output    ")), "active option name is bold");
+    assert.ok(rootColored.includes(paintRaw.dim("Theme           ")), "inactive option name is dim");
+
+    const importColored = settingsMenuText([
+      { id: "claude_user", label: "Claude · user", chosen: true, paths: [], count: 1 },
+      { id: "codex_user", label: "Codex · user", chosen: false, paths: [], count: 2 },
+    ], 1, "import");
+    assert.ok(importColored.includes(paintRaw.dim("Claude · user   ")), "inactive import option name is dim");
+    assert.ok(importColored.includes(paintRaw.bold("Codex · user    ")), "active import option name is bold");
+  } finally {
+    if (tty) Object.defineProperty(process.stdout, "isTTY", tty);
+    else delete process.stdout.isTTY;
+    if (priorNoColor !== undefined) process.env.NO_COLOR = priorNoColor;
+  }
 });
 
 test("task monitor header directs background work without obsolete delegate tabs", () => {
