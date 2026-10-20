@@ -119,8 +119,11 @@ export function ChatHeader({
     );
   }
 
+  const hasAgentContext =
+    agentContext?.kind === "manager" || agentContext?.kind === "member";
+
   return (
-    <header className="chat-header">
+    <header className={`chat-header${hasAgentContext ? " has-agent-context" : ""}`}>
       <Tooltip label="Toggle sidebar (Ctrl+B)">
         <button
           ref={sidebarToggleRef}
@@ -151,6 +154,7 @@ export function ChatHeader({
           {onOpenAgentConversation && (
             <Menu
               label="Manager conversations"
+              align="start"
               items={sessionSwitchItems}
               trigger={(props) => (
                 <button
@@ -188,6 +192,7 @@ export function ChatHeader({
           {onOpenAgentConversation && (
             <Menu
               label={`${agentContext.agentName} conversations`}
+              align="start"
               items={sessionSwitchItems}
               trigger={(props) => (
                 <button

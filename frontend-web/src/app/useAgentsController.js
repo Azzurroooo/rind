@@ -307,8 +307,6 @@ export function useAgentsController(ctx) {
         const applyAgentWorkspace = (ws) => {
           const resolvedWs = String(ws || "").trim();
           if (!resolvedWs) return;
-          ctx.setSelectedWorkspace(resolvedWs);
-          ctx.setWorkspaceDraft(resolvedWs);
           ctx.setInfo((curr) => ({ ...curr, workspace_root: resolvedWs }));
           if (ctx.refs.info.current) {
             ctx.refs.info.current = { ...ctx.refs.info.current, workspace_root: resolvedWs };
@@ -343,9 +341,10 @@ export function useAgentsController(ctx) {
           );
           applyAgentWorkspace(resolvedWs);
           if (targetSessionId) {
-            await ctx.call.current.loadSession(targetSessionId, true);
+            await ctx.call.current.loadSession(targetSessionId, true, false, {
+              preserveSelectedWorkspace: true,
+            });
             applyAgentWorkspace(resolvedWs);
-            await ctx.call.current.refreshSessions(resolvedWs);
           }
           void refreshAgentHistories(teamId ? [teamId] : []);
           return;
@@ -369,9 +368,11 @@ export function useAgentsController(ctx) {
         applyAgentWorkspace(resolvedWs);
         const externalTools = opened?.externalTools || null;
         if (opened?.runtimeSessionId) {
-          await ctx.call.current.loadSession(opened.runtimeSessionId, true, false, { externalTools });
+          await ctx.call.current.loadSession(opened.runtimeSessionId, true, false, {
+            externalTools,
+            preserveSelectedWorkspace: true,
+          });
           applyAgentWorkspace(resolvedWs);
-          await ctx.call.current.refreshSessions(resolvedWs);
         } else if (resolvedWs && client) {
           const created = await client.request(methods.sessionNew, {
             workspace_root: resolvedWs,
@@ -384,9 +385,11 @@ export function useAgentsController(ctx) {
                 runtimeSessionId: created.session_id,
               }).catch(() => {});
             }
-            await ctx.call.current.loadSession(created.session_id, true, false, { externalTools });
+            await ctx.call.current.loadSession(created.session_id, true, false, {
+              externalTools,
+              preserveSelectedWorkspace: true,
+            });
             applyAgentWorkspace(resolvedWs);
-            await ctx.call.current.refreshSessions(resolvedWs);
           }
         }
         void refreshAgentHistories(teamId ? [teamId] : []);

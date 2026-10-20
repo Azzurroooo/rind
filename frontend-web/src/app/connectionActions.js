@@ -1,5 +1,6 @@
 import { methods, sessionIdOf } from "../methods.js";
 import { isAuthError } from "../runtimeClient.js";
+import { isManagedAgentWorkspace } from "../lib/agentsModel.js";
 import { finalAssistantText, showNotification, truncateFirstLine } from "../lib/notifications.js";
 import { readPreference } from "../lib/sessionPreferences.js";
 import { fetchTicket, loginErrorMessage, unauthorizedMessage } from "../ticket.js";
@@ -248,7 +249,17 @@ export function createConnectionActions(ctx) {
         void call().refreshAgents?.();
       }
       const currentId = sessionIdOf(result);
-      const workspace = String(result?.workspace_root || "").trim();
+      const rawWorkspace = String(result?.workspace_root || "").trim();
+      const hasHostWorkspaces = Array.isArray(result?.workspaces);
+      const hostWorkspaces = hasHostWorkspaces
+        ? [...new Set(result.workspaces.map((w) => String(w || "").trim()).filter(Boolean))]
+        : [];
+      const workspace = hasHostWorkspaces
+        ? (hostWorkspaces.includes(rawWorkspace) ? rawWorkspace : (hostWorkspaces[0] || ""))
+        : rawWorkspace;
+      if (hasHostWorkspaces) {
+        ctx.setWorkspaces(hostWorkspaces);
+      }
       ctx.setSelectedWorkspace(workspace);
       ctx.setWorkspaceDraft(workspace);
       if (previous && previous !== currentId) {
@@ -256,12 +267,17 @@ export function createConnectionActions(ctx) {
         catch (error) { if (error.type === "SessionNotFound" && currentId) await call().loadSession(currentId, true, true); else throw error; }
       } else if (currentId) await call().loadSession(currentId, true, true);
       if (run !== refs.connectionRun.current) return;
-      await call().refreshSessions(refs.info.current.workspace_root || workspace);
+      await call().refreshSessions(workspace || refs.info.current.workspace_root);
       if (run !== refs.connectionRun.current) return;
-      const allSessions = await client.request(methods.sessionList, { limit: SESSION_LIMIT_MAX });
-      if (run === refs.connectionRun.current) {
-        const roots = (allSessions?.sessions || []).map((session) => session.workspace_root);
-        ctx.setWorkspaces([...new Set([workspace, refs.info.current.workspace_root, ...roots].filter(Boolean))]);
+      if (!hasHostWorkspaces) {
+        const allSessions = await client.request(methods.sessionList, { limit: SESSION_LIMIT_MAX });
+        if (run === refs.connectionRun.current) {
+          const agentsSnapshot = result?.agents_state?.snapshot || result?.agents_state;
+          const roots = (allSessions?.sessions || []).map((session) => session.workspace_root);
+          ctx.setWorkspaces(
+            [...new Set([workspace, refs.info.current.workspace_root, ...roots].filter((root) => root && !isManagedAgentWorkspace(root, agentsSnapshot)))],
+          );
+        }
       }
       void call().refreshModels(refs.info.current.session_id);
       void call().refreshProviders();

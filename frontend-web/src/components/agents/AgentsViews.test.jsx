@@ -5,6 +5,8 @@ import { TeamView } from "./TeamView.jsx";
 import { InboxView } from "./InboxView.jsx";
 import { BackgroundView } from "./BackgroundView.jsx";
 import { Sidebar } from "../shell/Sidebar.jsx";
+import { ChatHeader } from "../shell/ChatHeader.jsx";
+import { ProjectSelector } from "../shell/ProjectSelector.jsx";
 import { Inspector } from "../inspector/Inspector.jsx";
 
 afterEach(cleanup);
@@ -217,5 +219,51 @@ describe("Native Multi-Agent Views", () => {
     expect(screen.getByRole("tab", { name: "Context" }).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Expand inspector width" }));
     expect(onToggleMaximize).toHaveBeenCalledTimes(1);
+  });
+
+  it("restricts ProjectSelector to registered host Workspaces on remote desktop and marks ChatHeader agent context", () => {
+    const onSelect = vi.fn();
+    render(
+      <ProjectSelector
+        workspace="E:/teams/alpha/lead"
+        workspaces={["E:/projects/app-one", "E:/projects/app-two"]}
+        allowCustomFolder={false}
+        onSelect={onSelect}
+      />,
+    );
+
+    // Trigger falls back to registered workspace instead of showing the team member folder
+    const trigger = screen.getByRole("button", { name: /Project: app-one/i });
+    expect(trigger).not.toBeNull();
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole("menuitem", { name: /app-one/i })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: /app-two/i })).not.toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /lead/i })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Open another folder/i })).toBeNull();
+
+    const { container } = render(
+      <ChatHeader
+        title="Design org hierarchy"
+        status={{ label: "Idle", tone: "muted" }}
+        activeSessionId="rs-1"
+        agentContext={{
+          kind: "member",
+          teamId: "team-alpha",
+          teamName: "Alpha Squad",
+          agentId: "a-1",
+          agentName: "alpha-lead",
+          isLeader: true,
+        }}
+        memberSessions={[{ runtimeSessionId: "rs-1", title: "Design org hierarchy", status: "Idle" }]}
+        teamTaskCount={2}
+        surface={{ kind: "chat" }}
+        menuItems={[]}
+        onOpenAgentConversation={() => {}}
+      />,
+    );
+
+    const header = container.querySelector("header.chat-header");
+    expect(header?.classList.contains("has-agent-context")).toBe(true);
   });
 });

@@ -354,7 +354,6 @@
   flex: 0 1 auto;
   align-items: center;
   min-width: 0;
-  max-width: 68%;
 }
 
 .header-agent-breadcrumb {
@@ -1009,13 +1008,16 @@
 
 .org-member-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .org-member-identity {
+  flex: 1 1 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 3px;
   min-width: 0;
 }
@@ -1025,29 +1027,41 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .org-member-name {
+  min-width: 0;
   font-size: 13.5px;
   color: var(--text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .org-leader-badge {
+  flex: none;
   padding: 1px 6px;
   border-radius: var(--radius-pill);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 10px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .org-role-pill,
 .org-worktree-pill {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   padding: 1px 6px;
   border-radius: var(--radius-pill);
   background: var(--fill-1);
   color: var(--muted);
   font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .org-member-sub {

@@ -7,6 +7,7 @@ import {
   buildTeamSummary,
   groupTeamTasks,
   inboxBadgeCount,
+  isManagedAgentWorkspace,
   memberStatusTone,
   mergeManagerSessions,
   mergeTeamSessions,
@@ -358,5 +359,12 @@ describe("agentsModel", () => {
 
     const indCtx = resolveSessionAgentContext(sampleSnapshot, "rs-other", "E:/other/repo");
     expect(indCtx.kind).toBe("independent");
+  });
+
+  it("identifies managed agent and team workspaces to exclude them from user Workspaces", () => {
+    expect(isManagedAgentWorkspace("E:\\teams\\core\\lead", sampleSnapshot)).toBe(true);
+    expect(isManagedAgentWorkspace("C:/Users/admin/.rind/agents/manager", sampleSnapshot)).toBe(true);
+    expect(isManagedAgentWorkspace("C:/Users/admin/.rind/agents/workspaces/team-1/dev", sampleSnapshot)).toBe(true);
+    expect(isManagedAgentWorkspace("E:/other/repo", sampleSnapshot)).toBe(false);
   });
 });

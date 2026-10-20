@@ -98,6 +98,7 @@ export function Shell() {
             message: ctx.workspaceMessage,
             draft: ctx.workspaceDraft,
             onDraftChange: ctx.setWorkspaceDraft,
+            allowCustomFolder: !info?.gateway?.desktop,
             onSelect: (path) => {
               agents.clearAgentOverride();
               agents.openChatSurface();

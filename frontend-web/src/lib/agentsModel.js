@@ -1000,6 +1000,27 @@ function normalizePathKey(value) {
   return String(value || "").trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
+export function isManagedAgentWorkspace(workspacePath, rawSnapshot) {
+  const wsKey = normalizePathKey(workspacePath);
+  if (!wsKey) return false;
+  if (
+    wsKey.endsWith("/agents-management/manager") ||
+    wsKey.endsWith("/agents/manager") ||
+    wsKey.includes("/agents-management/workspaces/") ||
+    wsKey.includes("/agents/workspaces/")
+  ) {
+    return true;
+  }
+  const snapshot = normalizeAgentsSnapshot(rawSnapshot);
+  if (snapshot.agents.some((a) => normalizePathKey(a.canonicalWorkspace) === wsKey)) {
+    return true;
+  }
+  if (snapshot.sessions.some((s) => normalizePathKey(s.workspaceRoot) === wsKey)) {
+    return true;
+  }
+  return false;
+}
+
 export function resolveSessionAgentContext(rawSnapshot, sessionId, workspaceRoot) {
   const snapshot = normalizeAgentsSnapshot(rawSnapshot);
   const sid = String(sessionId || "").trim();

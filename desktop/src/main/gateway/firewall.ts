@@ -46,29 +46,6 @@ try {
 `
 }
 
-/** Non-elevated check whether Windows Firewall already has an active allow rule for this executable and port. */
-export async function isGatewayAllowedOnWindows(executable: string, port: number): Promise<boolean> {
-  if (process.platform !== "win32") return true
-  try {
-    const { stdout } = await execute("netsh.exe", ["advfirewall", "firewall", "show", "rule", "name=Rind Remote Access", "verbose"], {
-      windowsHide: true,
-      timeout: 5000,
-    })
-    const blocks = stdout.split(/\r?\n\r?\n+/)
-    const normExe = executable.trim().toLowerCase()
-    const portStr = String(port)
-    for (const block of blocks) {
-      const hasProg = block.toLowerCase().includes(normExe)
-      const hasPort = new RegExp(`:\\s*${portStr}\\b`).test(block)
-      const isAllow = /\bAllow\b/i.test(block)
-      if (hasProg && hasPort && isAllow) return true
-    }
-    return false
-  } catch {
-    return false
-  }
-}
-
 /** Explicit user action only. UAC owns elevation; no firewall changes at startup. */
 export async function allowGatewayOnWindows(executable: string, port: number) {
   if (process.platform !== "win32") throw new Error("This action is available on Windows only.")

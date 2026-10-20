@@ -19,6 +19,13 @@ export function createSessionActions(ctx) {
       const params = workspace ? { limit, workspace_root: workspace } : { limit };
       const result = await client.request(methods.sessionList, params);
       if (run !== refs.connectionRun.current || requestId !== refs.listRequest.current) return;
+      if (Array.isArray(result?.workspaces)) {
+        const nextWorkspaces = [...new Set(result.workspaces.map((w) => String(w || "").trim()).filter(Boolean))];
+        ctx.setWorkspaces(nextWorkspaces);
+        if (refs.info.current) {
+          refs.info.current = { ...refs.info.current, workspaces: nextWorkspaces };
+        }
+      }
       const list = Array.isArray(result?.sessions) ? result.sessions : [];
       ctx.setSessions(applyInteractions(list, client.url || endpoint));
       ctx.setHasMoreSessions(list.length >= limit && limit < SESSION_LIMIT_MAX);
@@ -179,7 +186,13 @@ export function createSessionActions(ctx) {
       if (previousId !== target) ctx.setInput(refs.drafts.current[target] || "");
       void refreshModels(target);
       void refreshContext(target);
-      if (workspace) {
+      const hasRegisteredList = Array.isArray(refs.info.current?.workspaces);
+      const registeredList = hasRegisteredList ? refs.info.current.workspaces : ctx.workspaces;
+      const canSelectWorkspace =
+        !options?.preserveSelectedWorkspace &&
+        Boolean(workspace) &&
+        (!hasRegisteredList || registeredList.includes(workspace));
+      if (canSelectWorkspace) {
         ctx.setSelectedWorkspace(workspace);
         ctx.setWorkspaceDraft(workspace);
       }
@@ -240,7 +253,15 @@ export function createSessionActions(ctx) {
       const nextSessions = Array.isArray(result?.sessions) ? result.sessions : [];
       ctx.setSelectedWorkspace(workspace);
       ctx.setWorkspaceDraft(workspace);
-      ctx.setWorkspaces((current) => [...new Set([...current, workspace])]);
+      if (Array.isArray(result?.workspaces)) {
+        const nextWorkspaces = [...new Set(result.workspaces.map((w) => String(w || "").trim()).filter(Boolean))];
+        ctx.setWorkspaces(nextWorkspaces);
+        if (refs.info.current) {
+          refs.info.current = { ...refs.info.current, workspaces: nextWorkspaces };
+        }
+      } else if (!Array.isArray(refs.info.current?.workspaces)) {
+        ctx.setWorkspaces((current) => [...new Set([...current, workspace])]);
+      }
       ctx.setSessions(applyInteractions(nextSessions, refs.client.current.url || endpoint));
       ctx.setHasMoreSessions(nextSessions.length >= limit && limit < SESSION_LIMIT_MAX);
       void syncSubscriptions(nextSessions);

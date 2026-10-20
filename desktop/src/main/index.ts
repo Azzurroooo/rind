@@ -14,7 +14,7 @@ import { loadRuntimeSettings as loadSharedRuntimeSettings, resolveRindPaths, sav
 import { readRindVersion } from "./version"
 import { wrapRuntimeIpcError } from "../shared/ipc-error"
 import { DesktopGateway } from "./gateway/server"
-import { allowGatewayOnWindows, isGatewayAllowedOnWindows } from "./gateway/firewall"
+import { allowGatewayOnWindows } from "./gateway/firewall"
 import { workspaceFileRequest } from "./gateway/files"
 import type { GatewayOptions } from "../preload/types"
 import { isDesktopRuntimeMethod, isRemoteRuntimeMethod } from "./method-policy"
@@ -159,16 +159,38 @@ function gateway() {
   remoteGateway ||= new DesktopGateway({
     initialize: async () => {
       const initialized = asObject(await initializeRuntime()) || {}
+      const overview = await projectStore().overview().catch(() => null)
+      const availableProjects = (overview?.projects || []).filter((item) => item.available)
+      const registeredWorkspaces = availableProjects.map((item) => item.path)
       const currentWs = typeof initialized.workspace_root === "string" ? initialized.workspace_root.trim() : ""
       const runtimeDir = join(rindHomeDir(), "runtime")
-      if (!currentWs || samePath(currentWs, runtimeDir)) {
-        const overview = await projectStore().overview().catch(() => null)
-        const fallbackProject = overview?.projects.find((item) => item.available)?.path
-        if (fallbackProject) {
-          return { ...initialized, workspace_root: fallbackProject }
+      const matchedProject = currentWs
+        ? availableProjects.find((item) => samePath(item.path, currentWs))
+        : undefined
+      const activeProject = overview?.activeProjectPath
+        ? availableProjects.find((item) => samePath(item.path, overview.activeProjectPath))
+        : undefined
+      const preferredProject = matchedProject || activeProject || availableProjects[0]
+      if (preferredProject) {
+        const nextSessionId = matchedProject
+          ? initialized.session_id
+          : (preferredProject.sessions[0]?.id || "")
+        return {
+          ...initialized,
+          workspace_root: preferredProject.path,
+          session_id: nextSessionId,
+          workspaces: registeredWorkspaces,
         }
       }
-      return initialized
+      const isInternalOrManaged =
+        !currentWs ||
+        samePath(currentWs, runtimeDir) ||
+        (await isManagedWorkspacePath(currentWs))
+      return {
+        ...initialized,
+        ...(isInternalOrManaged ? { workspace_root: "", session_id: "" } : {}),
+        workspaces: registeredWorkspaces,
+      }
     },
     request: async (method, params) => {
       if (!isRemoteRuntimeMethod(method)) throw new Error("Unsupported remote method.")
@@ -176,7 +198,28 @@ function gateway() {
         ? await enrichSessionReplayParams(String(params.session_id || ""), params)
         : params
       try {
-        return await requestRuntime(method, nextParams)
+        const result = await requestRuntime(method, nextParams)
+        if (method === "session/list" && result && typeof result === "object") {
+          const overview = await projectStore().overview().catch(() => null)
+          const registeredWorkspaces = (overview?.projects || [])
+            .filter((item) => item.available)
+            .map((item) => item.path)
+          const rawSessions = Array.isArray((result as Record<string, unknown>).sessions)
+            ? ((result as Record<string, unknown>).sessions as Array<Record<string, unknown>>)
+            : []
+          const filteredSessions = params.workspace_root
+            ? rawSessions
+            : rawSessions.filter((s) => {
+                const ws = typeof s?.workspace_root === "string" ? s.workspace_root.trim() : ""
+                return Boolean(ws && registeredWorkspaces.some((reg) => samePath(reg, ws)))
+              })
+          return {
+            ...(result as Record<string, unknown>),
+            sessions: filteredSessions,
+            workspaces: registeredWorkspaces,
+          }
+        }
+        return result
       } catch (error: any) {
         if (error?.name === "TurnNotActive" || error?.name === "QuestionNotFound") {
           const forwarded = await forwardControlToSharedRuntimeIfNeeded(method, nextParams)
@@ -293,18 +336,7 @@ async function requireProject(path: unknown) {
 
 function registerIpc() {
   ipcMain.handle("gateway-get", () => gateway().state())
-  ipcMain.handle("gateway-start", async (_event, options: GatewayOptions) => {
-    const state = await gateway().start(options)
-    if (process.platform === "win32" && state.running && state.scope === "lan" && state.port > 0) {
-      const allowed = await isGatewayAllowedOnWindows(process.execPath, state.port)
-      if (!allowed) {
-        await allowGatewayOnWindows(process.execPath, state.port).catch((err) => {
-          log.warn("Automatic Windows Firewall rule setup was skipped or declined:", err)
-        })
-      }
-    }
-    return gateway().state()
-  })
+  ipcMain.handle("gateway-start", (_event, options: GatewayOptions) => gateway().start(options))
   ipcMain.handle("gateway-stop", async () => { await gateway().stop(); return gateway().state() })
   ipcMain.handle("gateway-rotate", () => gateway().rotate())
   ipcMain.handle("gateway-allow-network", async () => {
