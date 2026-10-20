@@ -1113,3 +1113,48 @@ export function resolveSessionAgentContext(rawSnapshot, sessionId, workspaceRoot
 
   return { kind: "independent" };
 }
+
+export const ORG_VIEW_MODE_STORAGE_KEY = "rind:orgViewMode";
+export const DEFAULT_ORG_VIEW_MODE = "minimal";
+
+function loadInitialOrgViewMode() {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const saved = window.localStorage.getItem(ORG_VIEW_MODE_STORAGE_KEY);
+      if (saved === "detailed" || saved === "minimal") return saved;
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return DEFAULT_ORG_VIEW_MODE;
+}
+
+let currentOrgViewMode = loadInitialOrgViewMode();
+const orgViewModeListeners = new Set();
+
+export function getOrgViewMode() {
+  return currentOrgViewMode;
+}
+
+export function setOrgViewMode(nextMode) {
+  const normalized = nextMode === "detailed" ? "detailed" : "minimal";
+  if (currentOrgViewMode === normalized) return currentOrgViewMode;
+  currentOrgViewMode = normalized;
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.setItem(ORG_VIEW_MODE_STORAGE_KEY, normalized);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  for (const listener of orgViewModeListeners) {
+    listener(normalized);
+  }
+  return currentOrgViewMode;
+}
+
+export function subscribeOrgViewMode(listener) {
+  orgViewModeListeners.add(listener);
+  return () => orgViewModeListeners.delete(listener);
+}
+

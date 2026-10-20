@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -8,6 +8,8 @@ import {
   FileText,
   FolderGit2,
   GitBranch,
+  GitFork,
+  LayoutList,
   ListChecks,
   MessageSquare,
   MoreHorizontal,
@@ -19,7 +21,12 @@ import {
   Trash2,
   UserPlus,
 } from "lucide-react";
-import { TASK_SECTION_DEFS } from "../../lib/agentsModel.js";
+import {
+  getOrgViewMode,
+  setOrgViewMode,
+  subscribeOrgViewMode,
+  TASK_SECTION_DEFS,
+} from "../../lib/agentsModel.js";
 import { Menu } from "../overlays/Menu.jsx";
 import { SettingsSelect } from "../settings/SettingsDialog.jsx";
 import { TaskReportDrawer } from "./TaskReportDrawer.jsx";
@@ -28,6 +35,9 @@ function OrgMemberNode({
   node,
   allMembers,
   depth = 0,
+  viewMode = "minimal",
+  expandedFlowNodes,
+  onToggleFlowNode,
   busy,
   onOpenChat,
   onRenameSession,
@@ -174,6 +184,453 @@ function OrgMemberNode({
     },
   ];
 
+  const detailsBody = (
+    <>
+      {node.activeTask && (
+        <button
+          type="button"
+          className="org-active-task"
+          onClick={() => onSelectTask?.(node.teamId, node.activeTask.id)}
+        >
+          <span className="org-active-task-kicker">Working on</span>
+          <span className="org-active-task-brief">{node.activeTask.brief}</span>
+        </button>
+      )}
+
+      <div className="org-member-meta-bar">
+        <button
+          type="button"
+          className="org-member-sessions-toggle"
+          aria-expanded={sessionsExpanded}
+          onClick={() => setSessionsExpanded((prev) => !prev)}
+        >
+          {sessionsExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <span>Conversations ({memberSessions.length})</span>
+        </button>
+        <div className="org-member-stats">
+          {node.taskCounts.active > 0 && <span>{node.taskCounts.active} active</span>}
+          {node.taskCounts.attention > 0 && (
+            <span className="org-stat-attention">{node.taskCounts.attention} need review</span>
+          )}
+          {sessionsExpanded && (
+            <button
+              type="button"
+              className="agent-btn ghost xs"
+              disabled={busy}
+              onClick={() =>
+                onOpenChat?.({
+                  teamId: node.teamId,
+                  agentId: node.agentId,
+                  forceNew: true,
+                })
+              }
+            >
+              <Plus size={11} aria-hidden="true" />
+              <span>New</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div
+        className={`sidebar-collapse-wrap ${sessionsExpanded ? "is-open" : ""}`}
+        aria-hidden={!sessionsExpanded}
+        inert={!sessionsExpanded ? "" : undefined}
+      >
+        <div className="sidebar-collapse-inner">
+          <div className="org-member-session-list">
+            {memberSessions.length === 0 ? (
+              <div className="org-member-session-empty">
+                <span>No conversations yet.</span>
+                <button
+                  type="button"
+                  className="agent-btn secondary xs"
+                  disabled={busy}
+                  onClick={() =>
+                    onOpenChat?.({
+                      teamId: node.teamId,
+                      agentId: node.agentId,
+                      forceNew: true,
+                    })
+                  }
+                >
+                  <Plus size={11} aria-hidden="true" />
+                  <span>Start conversation</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                {visibleSessions.map((sess) => (
+                  <div key={sess.runtimeSessionId} className="org-member-session-row">
+                    {renamingSessionId === sess.runtimeSessionId ? (
+                      <form
+                        className="org-session-rename-form"
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          await onRenameSession?.(sess.runtimeSessionId, renameDraft, {
+                            teamId: node.teamId,
+                          });
+                          setRenamingSessionId("");
+                        }}
+                      >
+                        <input
+                          type="text"
+                          value={renameDraft}
+                          onChange={(e) => setRenameDraft(e.target.value)}
+                          placeholder="Conversation title"
+                          autoFocus
+                        />
+                        <button type="submit" className="agent-btn primary xs" disabled={busy}>
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-btn ghost xs"
+                          onClick={() => setRenamingSessionId("")}
+                        >
+                          Cancel
+                        </button>
+                      </form>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="org-member-session-main"
+                          onClick={() =>
+                            onOpenChat?.({
+                              teamId: node.teamId,
+                              agentId: node.agentId,
+                              runtimeSessionId: sess.runtimeSessionId,
+                            })
+                          }
+                        >
+                          <span className={`agent-status-dot tone-${sess.tone}`} />
+                          <span className="org-member-session-title">{sess.title}</span>
+                          {sess.origin === "task" && (
+                            <span className="org-member-session-badge">Task</span>
+                          )}
+                          {sess.status && sess.status !== "Idle" && (
+                            <span className={`org-member-session-status tone-${sess.tone}`}>
+                              {sess.status}
+                            </span>
+                          )}
+                          {sess.ageText && (
+                            <span className="org-member-session-age">{sess.ageText}</span>
+                          )}
+                        </button>
+                        <div className="org-member-session-actions">
+                          <button
+                            type="button"
+                            className="icon-button xs"
+                            title="Rename conversation"
+                            aria-label={`Rename ${sess.title}`}
+                            onClick={() => {
+                              setRenamingSessionId(sess.runtimeSessionId);
+                              setRenameDraft(sess.title);
+                            }}
+                          >
+                            <Pencil size={11} aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button xs"
+                            title="Delete conversation"
+                            aria-label={`Delete ${sess.title}`}
+                            onClick={() =>
+                              onDeleteSession?.(sess.runtimeSessionId, { teamId: node.teamId })
+                            }
+                          >
+                            <Trash2 size={11} aria-hidden="true" />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+                {moreSessionsCount > 0 && (
+                  <button
+                    type="button"
+                    className="sidebar-load-more"
+                    onClick={() => setSessionLimit((prev) => prev + 5)}
+                  >
+                    <span>Show {moreSessionsCount} more</span>
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {modelOpen && (
+        <form className="org-member-edit-form" onSubmit={saveModelConfig}>
+          <div className="org-form-grid">
+            <label>
+              <span>Default Model ({modelSource || "folder"})</span>
+              <input
+                type="text"
+                value={modelInput}
+                disabled={modelLoading}
+                onChange={(e) => setModelInput(e.target.value)}
+                placeholder="Leave empty to inherit runtime default"
+              />
+            </label>
+            <label>
+              <span>Provider (Optional)</span>
+              <input
+                type="text"
+                value={providerInput}
+                disabled={modelLoading}
+                onChange={(e) => setProviderInput(e.target.value)}
+                placeholder="e.g. openai, anthropic"
+              />
+            </label>
+            <label>
+              <span>Reasoning Effort</span>
+              <SettingsSelect
+                ariaLabel="Reasoning Effort"
+                value={effortInput}
+                disabled={modelLoading}
+                onChange={(val) => setEffortInput(val)}
+                options={[
+                  { value: "", label: "Default" },
+                  { value: "low", label: "Low" },
+                  { value: "medium", label: "Medium" },
+                  { value: "high", label: "High" },
+                ]}
+              />
+            </label>
+          </div>
+          <div className="org-form-actions">
+            <button type="button" className="agent-btn ghost sm" onClick={() => setModelOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="agent-btn primary sm" disabled={busy || modelLoading}>
+              Save model defaults
+            </button>
+          </div>
+        </form>
+      )}
+
+      {editing && (
+        <form className="org-member-edit-form" onSubmit={saveEdits}>
+          <div className="org-form-grid">
+            <label>
+              <span>Position / Title</span>
+              <input
+                type="text"
+                value={position}
+                onChange={(e) => setPosition(e.target.value)}
+                placeholder="e.g. Frontend Architect, QA Lead"
+              />
+            </label>
+            <label>
+              <span>Reports To</span>
+              <SettingsSelect
+                ariaLabel="Reports To"
+                value={reportsTo}
+                onChange={(val) => setReportsTo(val)}
+                options={[
+                  { value: "", label: "None (Top level)" },
+                  ...allMembers
+                    .filter((m) => m.agentId !== node.agentId)
+                    .map((m) => ({
+                      value: m.agentId,
+                      label: `${m.name} (${m.position})`,
+                    })),
+                ]}
+              />
+            </label>
+          </div>
+          <label>
+            <span>Responsibility</span>
+            <input
+              type="text"
+              value={responsibility}
+              onChange={(e) => setResponsibility(e.target.value)}
+              placeholder="Scope of ownership and deliverables…"
+            />
+          </label>
+          <div className="org-form-actions">
+            <button type="button" className="agent-btn ghost sm" onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="agent-btn primary sm" disabled={busy}>
+              Save role
+            </button>
+          </div>
+        </form>
+      )}
+    </>
+  );
+
+  if (viewMode === "minimal") {
+    const isNodeExpanded = Boolean(expandedFlowNodes?.has(node.agentId)) || editing || modelOpen;
+    const hasChildren = Boolean(node.children?.length > 0);
+    return (
+      <div
+        className={`org-flow-branch depth-${Math.min(depth, 6)}${isNodeExpanded ? " is-node-expanded" : ""}`}
+        data-agent-id={node.agentId}
+      >
+        <div
+          className={`org-flow-node-wrap${hasChildren ? " has-children" : ""}${depth > 0 ? " has-parent" : ""}`}
+        >
+          {depth > 0 && <span className="org-flow-port in" aria-hidden="true" />}
+          <div
+            className={`org-flow-node tone-${node.tone}${node.isLeader ? " is-leader" : ""}${isNodeExpanded ? " is-expanded" : ""}`}
+            data-flow-node={node.agentId}
+          >
+            <button
+              type="button"
+              className="org-flow-node-trigger"
+              aria-expanded={isNodeExpanded}
+              onClick={() => onToggleFlowNode?.(node.agentId)}
+            >
+              <div className="org-flow-node-head">
+                <span className={`agent-status-dot tone-${node.tone}`} />
+                <strong className="org-flow-node-name">{node.name}</strong>
+                {node.isLeader && (
+                  <span className="org-leader-badge" title="Team Leader">
+                    <Crown size={10} aria-hidden="true" />
+                    <span>Leader</span>
+                  </span>
+                )}
+                <span className="org-flow-node-chevron" aria-hidden="true">
+                  {isNodeExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                </span>
+              </div>
+              <div className="org-flow-node-subrow">
+                <span className="org-role-pill">{node.position}</span>
+                {node.worktreeOf && (
+                  <span className="org-worktree-pill" title={`Git worktree of ${node.worktreeOf}`}>
+                    <GitBranch size={10} aria-hidden="true" />
+                    <span>Worktree</span>
+                  </span>
+                )}
+                {node.status && node.status !== "Idle" && (
+                  <span className={`agent-status-pill tone-${node.tone}`}>{node.status}</span>
+                )}
+                {!isNodeExpanded && memberSessions.length > 0 && (
+                  <span className="org-flow-mini-stat" title={`${memberSessions.length} conversation(s)`}>
+                    <MessageSquare size={10} aria-hidden="true" />
+                    <span>{memberSessions.length}</span>
+                  </span>
+                )}
+                {!isNodeExpanded && node.taskCounts.attention > 0 && (
+                  <span className="org-flow-mini-stat attention">!{node.taskCounts.attention}</span>
+                )}
+              </div>
+              {!isNodeExpanded && node.activeTask && (
+                <div className="org-flow-mini-task" title={node.activeTask.brief}>
+                  <span className="org-flow-mini-task-dot" />
+                  <span className="org-flow-mini-task-text">{node.activeTask.brief}</span>
+                </div>
+              )}
+            </button>
+
+            {isNodeExpanded && (
+              <div className="org-flow-node-body">
+                {(node.reportsToName || node.responsibility) && (
+                  <div className="org-member-sub">
+                    {node.reportsToName && <span>Reports to {node.reportsToName}</span>}
+                    {node.reportsToName && node.responsibility && <span>·</span>}
+                    {node.responsibility && <span>{node.responsibility}</span>}
+                  </div>
+                )}
+
+                <div className="org-flow-node-actions">
+                  <button
+                    type="button"
+                    className="agent-btn primary sm"
+                    disabled={busy}
+                    onClick={() =>
+                      onOpenChat?.({
+                        teamId: node.teamId,
+                        agentId: node.agentId,
+                        runtimeSessionId: node.latestRuntimeSessionId,
+                        resumeLatest: true,
+                      })
+                    }
+                  >
+                    <MessageSquare size={13} aria-hidden="true" />
+                    <span>Chat</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="agent-btn secondary sm"
+                    disabled={busy}
+                    onClick={() => onQuickAssign?.(node.agentId)}
+                  >
+                    <Plus size={12} aria-hidden="true" />
+                    <span>Assign</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="agent-btn ghost sm"
+                    disabled={busy}
+                    onClick={() => onQuickAddReport?.(node.agentId)}
+                    title="Add direct report"
+                  >
+                    <UserPlus size={12} aria-hidden="true" />
+                    <span>Report</span>
+                  </button>
+                  <Menu
+                    label={`Actions for ${node.name}`}
+                    items={memberMenuItems}
+                    trigger={(props) => (
+                      <button
+                        type="button"
+                        className="icon-button small"
+                        aria-label={`Actions for ${node.name}`}
+                        title="Member actions"
+                        {...props}
+                      >
+                        <MoreHorizontal size={14} aria-hidden="true" />
+                      </button>
+                    )}
+                  />
+                </div>
+
+                {detailsBody}
+              </div>
+            )}
+          </div>
+          {hasChildren && <span className="org-flow-port out" aria-hidden="true" />}
+        </div>
+
+        {hasChildren && (
+          <div className="org-flow-children" role="group" aria-label={`Direct reports of ${node.name}`}>
+            {node.children.map((child) => (
+              <div key={child.agentId} className="org-flow-child-item">
+                <OrgMemberNode
+                  node={child}
+                  allMembers={allMembers}
+                  depth={depth + 1}
+                  viewMode={viewMode}
+                  expandedFlowNodes={expandedFlowNodes}
+                  onToggleFlowNode={onToggleFlowNode}
+                  busy={busy}
+                  onOpenChat={onOpenChat}
+                  onRenameSession={onRenameSession}
+                  onDeleteSession={onDeleteSession}
+                  onQuickAssign={onQuickAssign}
+                  onQuickAddReport={onQuickAddReport}
+                  onSelectTask={onSelectTask}
+                  onSetSupervisor={onSetSupervisor}
+                  onUpdateMember={onUpdateMember}
+                  onRemoveMember={onRemoveMember}
+                  onGetMemberModel={onGetMemberModel}
+                  onSetMemberModel={onSetMemberModel}
+                  onClearMemberModel={onClearMemberModel}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={`org-tree-branch depth-${Math.min(depth, 4)}`} data-agent-id={node.agentId}>
       <div className={`org-member-card ${node.isLeader ? "is-leader" : ""}`}>
@@ -242,281 +699,7 @@ function OrgMemberNode({
           </div>
         </div>
 
-        {node.activeTask && (
-          <button
-            type="button"
-            className="org-active-task"
-            onClick={() => onSelectTask?.(node.teamId, node.activeTask.id)}
-          >
-            <span className="org-active-task-kicker">Working on</span>
-            <span className="org-active-task-brief">{node.activeTask.brief}</span>
-          </button>
-        )}
-
-        <div className="org-member-meta-bar">
-          <button
-            type="button"
-            className="org-member-sessions-toggle"
-            aria-expanded={sessionsExpanded}
-            onClick={() => setSessionsExpanded((prev) => !prev)}
-          >
-            {sessionsExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            <span>Conversations ({memberSessions.length})</span>
-          </button>
-          <div className="org-member-stats">
-            {node.taskCounts.active > 0 && <span>{node.taskCounts.active} active</span>}
-            {node.taskCounts.attention > 0 && (
-              <span className="org-stat-attention">{node.taskCounts.attention} need review</span>
-            )}
-            {sessionsExpanded && (
-              <button
-                type="button"
-                className="agent-btn ghost xs"
-                disabled={busy}
-                onClick={() =>
-                  onOpenChat?.({
-                    teamId: node.teamId,
-                    agentId: node.agentId,
-                    forceNew: true,
-                  })
-                }
-              >
-                <Plus size={11} aria-hidden="true" />
-                <span>New</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div
-          className={`sidebar-collapse-wrap ${sessionsExpanded ? "is-open" : ""}`}
-          aria-hidden={!sessionsExpanded}
-          inert={!sessionsExpanded ? "" : undefined}
-        >
-          <div className="sidebar-collapse-inner">
-            <div className="org-member-session-list">
-              {memberSessions.length === 0 ? (
-                <div className="org-member-session-empty">
-                  <span>No conversations yet.</span>
-                  <button
-                    type="button"
-                    className="agent-btn secondary xs"
-                    disabled={busy}
-                    onClick={() =>
-                      onOpenChat?.({
-                        teamId: node.teamId,
-                        agentId: node.agentId,
-                        forceNew: true,
-                      })
-                    }
-                  >
-                    <Plus size={11} aria-hidden="true" />
-                    <span>Start conversation</span>
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {visibleSessions.map((sess) => (
-                    <div key={sess.runtimeSessionId} className="org-member-session-row">
-                      {renamingSessionId === sess.runtimeSessionId ? (
-                        <form
-                          className="org-session-rename-form"
-                          onSubmit={async (e) => {
-                            e.preventDefault();
-                            await onRenameSession?.(sess.runtimeSessionId, renameDraft, {
-                              teamId: node.teamId,
-                            });
-                            setRenamingSessionId("");
-                          }}
-                        >
-                          <input
-                            type="text"
-                            value={renameDraft}
-                            onChange={(e) => setRenameDraft(e.target.value)}
-                            placeholder="Conversation title"
-                            autoFocus
-                          />
-                          <button type="submit" className="agent-btn primary xs" disabled={busy}>
-                            Save
-                          </button>
-                          <button
-                            type="button"
-                            className="agent-btn ghost xs"
-                            onClick={() => setRenamingSessionId("")}
-                          >
-                            Cancel
-                          </button>
-                        </form>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="org-member-session-main"
-                            onClick={() =>
-                              onOpenChat?.({
-                                teamId: node.teamId,
-                                agentId: node.agentId,
-                                runtimeSessionId: sess.runtimeSessionId,
-                              })
-                            }
-                          >
-                            <span className={`agent-status-dot tone-${sess.tone}`} />
-                            <span className="org-member-session-title">{sess.title}</span>
-                            {sess.origin === "task" && (
-                              <span className="org-member-session-badge">Task</span>
-                            )}
-                            {sess.status && sess.status !== "Idle" && (
-                              <span className={`org-member-session-status tone-${sess.tone}`}>
-                                {sess.status}
-                              </span>
-                            )}
-                            {sess.ageText && (
-                              <span className="org-member-session-age">{sess.ageText}</span>
-                            )}
-                          </button>
-                          <div className="org-member-session-actions">
-                            <button
-                              type="button"
-                              className="icon-button xs"
-                              title="Rename conversation"
-                              aria-label={`Rename ${sess.title}`}
-                              onClick={() => {
-                                setRenamingSessionId(sess.runtimeSessionId);
-                                setRenameDraft(sess.title);
-                              }}
-                            >
-                              <Pencil size={11} aria-hidden="true" />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-button xs"
-                              title="Delete conversation"
-                              aria-label={`Delete ${sess.title}`}
-                              onClick={() =>
-                                onDeleteSession?.(sess.runtimeSessionId, { teamId: node.teamId })
-                              }
-                            >
-                              <Trash2 size={11} aria-hidden="true" />
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ))}
-                  {moreSessionsCount > 0 && (
-                    <button
-                      type="button"
-                      className="sidebar-load-more"
-                      onClick={() => setSessionLimit((prev) => prev + 5)}
-                    >
-                      <span>Show {moreSessionsCount} more</span>
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {modelOpen && (
-          <form className="org-member-edit-form" onSubmit={saveModelConfig}>
-            <div className="org-form-grid">
-              <label>
-                <span>Default Model ({modelSource || "folder"})</span>
-                <input
-                  type="text"
-                  value={modelInput}
-                  disabled={modelLoading}
-                  onChange={(e) => setModelInput(e.target.value)}
-                  placeholder="Leave empty to inherit runtime default"
-                />
-              </label>
-              <label>
-                <span>Provider (Optional)</span>
-                <input
-                  type="text"
-                  value={providerInput}
-                  disabled={modelLoading}
-                  onChange={(e) => setProviderInput(e.target.value)}
-                  placeholder="e.g. openai, anthropic"
-                />
-              </label>
-              <label>
-                <span>Reasoning Effort</span>
-                <SettingsSelect
-                  ariaLabel="Reasoning Effort"
-                  value={effortInput}
-                  disabled={modelLoading}
-                  onChange={(val) => setEffortInput(val)}
-                  options={[
-                    { value: "", label: "Default" },
-                    { value: "low", label: "Low" },
-                    { value: "medium", label: "Medium" },
-                    { value: "high", label: "High" },
-                  ]}
-                />
-              </label>
-            </div>
-            <div className="org-form-actions">
-              <button type="button" className="agent-btn ghost sm" onClick={() => setModelOpen(false)}>
-                Cancel
-              </button>
-              <button type="submit" className="agent-btn primary sm" disabled={busy || modelLoading}>
-                Save model defaults
-              </button>
-            </div>
-          </form>
-        )}
-
-        {editing && (
-          <form className="org-member-edit-form" onSubmit={saveEdits}>
-            <div className="org-form-grid">
-              <label>
-                <span>Position / Title</span>
-                <input
-                  type="text"
-                  value={position}
-                  onChange={(e) => setPosition(e.target.value)}
-                  placeholder="e.g. Frontend Architect, QA Lead"
-                />
-              </label>
-              <label>
-                <span>Reports To</span>
-                <SettingsSelect
-                  ariaLabel="Reports To"
-                  value={reportsTo}
-                  onChange={(val) => setReportsTo(val)}
-                  options={[
-                    { value: "", label: "None (Top level)" },
-                    ...allMembers
-                      .filter((m) => m.agentId !== node.agentId)
-                      .map((m) => ({
-                        value: m.agentId,
-                        label: `${m.name} (${m.position})`,
-                      })),
-                  ]}
-                />
-              </label>
-            </div>
-            <label>
-              <span>Responsibility</span>
-              <input
-                type="text"
-                value={responsibility}
-                onChange={(e) => setResponsibility(e.target.value)}
-                placeholder="Scope of ownership and deliverables…"
-              />
-            </label>
-            <div className="org-form-actions">
-              <button type="button" className="agent-btn ghost sm" onClick={() => setEditing(false)}>
-                Cancel
-              </button>
-              <button type="submit" className="agent-btn primary sm" disabled={busy}>
-                Save role
-              </button>
-            </div>
-          </form>
-        )}
+        {detailsBody}
       </div>
 
       {node.children?.length > 0 && (
@@ -527,6 +710,9 @@ function OrgMemberNode({
               node={child}
               allMembers={allMembers}
               depth={depth + 1}
+              viewMode={viewMode}
+              expandedFlowNodes={expandedFlowNodes}
+              onToggleFlowNode={onToggleFlowNode}
               busy={busy}
               onOpenChat={onOpenChat}
               onRenameSession={onRenameSession}
@@ -594,6 +780,29 @@ export function TeamView({
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [orgViewMode, setOrgViewModeState] = useState(() => getOrgViewMode());
+  const [expandedFlowNodes, setExpandedFlowNodes] = useState(() => new Set());
+
+  useEffect(() => {
+    setOrgViewModeState(getOrgViewMode());
+    return subscribeOrgViewMode((nextMode) => setOrgViewModeState(nextMode));
+  }, []);
+
+  function handleChangeOrgViewMode(nextMode) {
+    setOrgViewMode(nextMode);
+  }
+
+  function handleToggleFlowNode(agentId) {
+    setExpandedFlowNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) {
+        next.delete(agentId);
+      } else {
+        next.add(agentId);
+      }
+      return next;
+    });
+  }
 
   const team = teamSummary?.team;
   const members = teamSummary?.members || [];
@@ -773,6 +982,30 @@ export function TeamView({
         </div>
 
         <div className="agents-surface-actions">
+          {activeTab === "organization" && (
+            <div className="agents-segmented org-view-switcher" role="group" aria-label="Organization layout view">
+              <button
+                type="button"
+                className={`agents-seg-btn ${orgViewMode === "minimal" ? "active" : ""}`}
+                aria-pressed={orgViewMode === "minimal"}
+                title="Minimalist workflow tree view"
+                onClick={() => handleChangeOrgViewMode("minimal")}
+              >
+                <GitFork size={12} aria-hidden="true" />
+                <span>Flow</span>
+              </button>
+              <button
+                type="button"
+                className={`agents-seg-btn ${orgViewMode === "detailed" ? "active" : ""}`}
+                aria-pressed={orgViewMode === "detailed"}
+                title="Detailed member cards view"
+                onClick={() => handleChangeOrgViewMode("detailed")}
+              >
+                <LayoutList size={12} aria-hidden="true" />
+                <span>Cards</span>
+              </button>
+            </div>
+          )}
           <button
             type="button"
             className="agent-btn secondary sm"
@@ -1012,7 +1245,7 @@ export function TeamView({
 
           <div className="agents-surface-main panel-scroll">
           {activeTab === "organization" ? (
-            <div className="org-view-container">
+            <div className={`org-view-container ${orgViewMode === "minimal" ? "is-flow-view" : "is-cards-view"}`}>
               {orgRoots.length === 0 ? (
                 <div className="agents-empty-hero">
                   <FolderGit2 size={26} aria-hidden="true" />
@@ -1025,6 +1258,34 @@ export function TeamView({
                     <span>Add First Member</span>
                   </button>
                 </div>
+              ) : orgViewMode === "minimal" ? (
+                <div className="org-flow-canvas" role="tree" aria-label={`${team.name} organization hierarchy`}>
+                  <div className="org-flow-roots">
+                    {orgRoots.map((rootNode) => (
+                      <OrgMemberNode
+                        key={rootNode.agentId}
+                        node={rootNode}
+                        allMembers={members}
+                        viewMode="minimal"
+                        expandedFlowNodes={expandedFlowNodes}
+                        onToggleFlowNode={handleToggleFlowNode}
+                        busy={busy}
+                        onOpenChat={onOpenChat}
+                        onRenameSession={onRenameSession}
+                        onDeleteSession={onDeleteSession}
+                        onQuickAssign={handleQuickAssign}
+                        onQuickAddReport={handleQuickAddReport}
+                        onSelectTask={onSelectTask}
+                        onSetSupervisor={onSetSupervisor}
+                        onUpdateMember={onUpdateMember}
+                        onRemoveMember={onRemoveMember}
+                        onGetMemberModel={onGetMemberModel}
+                        onSetMemberModel={onSetMemberModel}
+                        onClearMemberModel={onClearMemberModel}
+                      />
+                    ))}
+                  </div>
+                </div>
               ) : (
                 <div className="org-chart-tree" role="tree" aria-label={`${team.name} organization hierarchy`}>
                   {orgRoots.map((rootNode) => (
@@ -1032,6 +1293,9 @@ export function TeamView({
                       key={rootNode.agentId}
                       node={rootNode}
                       allMembers={members}
+                      viewMode="detailed"
+                      expandedFlowNodes={expandedFlowNodes}
+                      onToggleFlowNode={handleToggleFlowNode}
                       busy={busy}
                       onOpenChat={onOpenChat}
                       onRenameSession={onRenameSession}

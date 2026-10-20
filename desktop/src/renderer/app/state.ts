@@ -1,4 +1,4 @@
-import { emptyAgentsSnapshot } from "../agents-model.ts"
+import { DEFAULT_ORG_VIEW_MODE, emptyAgentsSnapshot, type OrgViewMode } from "../agents-model.ts"
 import { mergeSlashCatalog } from "../desktop-slash.ts"
 import { INSPECTOR_WIDTH } from "../inspector-model.ts"
 import { type ModelOption } from "../composer-select.ts"
@@ -100,6 +100,16 @@ export const state: AppState = {
   collapsedTeams: new Set(),
   expandedSidebarMembers: new Set(),
   expandedOrgMembers: new Set(),
+  expandedFlowNodes: new Set(),
+  orgViewMode: (() => {
+    try {
+      const saved = typeof window !== "undefined" ? window.localStorage?.getItem("rind:orgViewMode") : null
+      if (saved === "detailed" || saved === "minimal") return saved as OrgViewMode
+    } catch {
+      // ignore storage errors
+    }
+    return DEFAULT_ORG_VIEW_MODE
+  })(),
   managerExpanded: false,
   agentItemMenuKey: "",
   agentSessionLimits: {},

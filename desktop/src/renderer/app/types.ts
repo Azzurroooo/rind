@@ -1,5 +1,5 @@
 import { type DesktopFileListing, type DesktopFilePreview, type DesktopGoal, type DesktopProject, type DesktopRecentSession, type DesktopSessionSummary, type DesktopSettings, type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
-import { type AgentsSnapshotData, type DesktopAgentSurfaceState, type SessionAgentContext } from "../agents-model.ts"
+import { type AgentsSnapshotData, type DesktopAgentSurfaceState, type OrgViewMode, type SessionAgentContext } from "../agents-model.ts"
 import { type PendingInput } from "../composer-region.ts"
 import { type ModelOption } from "../composer-select.ts"
 import { type QuestionSelection } from "../question-state.ts"
@@ -127,6 +127,8 @@ export type AppState = {
   collapsedTeams: Set<string>
   expandedSidebarMembers: Set<string>
   expandedOrgMembers: Set<string>
+  expandedFlowNodes: Set<string>
+  orgViewMode: OrgViewMode
   managerExpanded: boolean
   agentItemMenuKey: string
   agentSessionLimits: Record<string, number>

@@ -3,8 +3,9 @@
 .menu-root { position: relative; display: inline-flex; align-items: center; }
 .menu-root[data-open="true"] { z-index: 60; }
 .menu {
-  position: absolute; z-index: 100; isolation: isolate; pointer-events: auto; min-width: 180px; padding: var(--space-1);
-  display: grid; gap: 1px;
+  position: absolute; z-index: 100; isolation: isolate; pointer-events: auto;
+  min-width: 180px; width: max-content; max-width: min(320px, calc(100vw - 16px)); padding: var(--space-1);
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card);
   box-shadow: var(--shadow-popover);
   animation: pop-in var(--motion-pop) var(--ease);
@@ -14,17 +15,17 @@
 .menu-end { right: 0; }
 .menu-start { left: 0; }
 .menu-item {
-  display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  display: flex; align-items: center; gap: var(--space-2); width: 100%; min-width: 0;
   height: var(--control-md); padding: 0 var(--space-2);
   border: 0; border-radius: var(--radius-control); background: transparent;
   color: var(--text); font-size: var(--text-ui); text-align: left; white-space: nowrap;
 }
 .menu-item:hover:not(:disabled), .menu-item:focus-visible { background: var(--fill-1); outline: none; }
 .menu-item.danger { color: var(--danger); }
-.menu-icon { display: inline-grid; place-items: center; width: 16px; color: var(--muted); }
+.menu-icon { flex: none; display: inline-grid; place-items: center; width: 16px; color: var(--muted); }
 .menu-item.danger .menu-icon { color: var(--danger); }
 .menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.menu-hint { color: var(--dim); font-size: var(--text-meta); }
+.menu-hint { flex: none; color: var(--dim); font-size: var(--text-meta); }
 .menu-separator { height: 1px; margin: var(--space-1) 0; background: var(--line); }
 
 .dialog-scrim {

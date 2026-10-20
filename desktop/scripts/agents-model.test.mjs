@@ -434,10 +434,32 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
     busy: false,
     artifactPreview: null,
   })
-  assert.match(memberMenuOpenOrgHtml, /org-member-card menu-open/)
+  assert.match(memberMenuOpenOrgHtml, /org-flow-canvas/)
+  assert.match(memberMenuOpenOrgHtml, /org-flow-node org-member-card menu-open/)
   assert.match(memberMenuOpenOrgHtml, /project-menu-wrap menu-open/)
   assert.doesNotMatch(memberMenuOpenOrgHtml, /Make leader/)
   assert.doesNotMatch(memberMenuOpenOrgHtml, /data-agent-make-leader/)
+
+  const detailedOrgHtml = renderTeamSurfaceHtml({
+    snapshot: sampleSnapshot,
+    surface: {
+      kind: "team",
+      teamId: "team-1",
+      tab: "organization",
+      assigneeFilter: "",
+      selectedTaskId: "",
+      addMemberOpen: false,
+      memberMode: "workspace",
+      assignOpen: false,
+      assignAgentId: "",
+      deleteConfirmOpen: false,
+    },
+    orgViewMode: "detailed",
+    busy: false,
+    artifactPreview: null,
+  })
+  assert.match(detailedOrgHtml, /org-tree-root/)
+  assert.match(detailedOrgHtml, /Reports to lead/)
 
   const sidebarMemberMenuOpenHtml = renderSidebarAgentsHtml({
     snapshot: sampleSnapshot,

@@ -1096,6 +1096,150 @@ function renderAgentSidebarSessionRow(options: {
   `
 }
 
+export type OrgViewMode = "minimal" | "detailed"
+export const DEFAULT_ORG_VIEW_MODE: OrgViewMode = "minimal"
+
+export function renderOrgFlowNodeHtml(
+  node: OrgMemberSummary,
+  depth = 0,
+  expandedFlowNodes: ReadonlySet<string> = new Set(),
+  expandedOrgMembers: ReadonlySet<string> = new Set(),
+  viewedSessionId = "",
+  sessionLimits: Record<string, number> = {},
+  itemMenuKey = "",
+): string {
+  const isSessionsOpen = expandedOrgMembers.has(node.agentId)
+  const sessions = node.sessions || []
+  const limitKey = `org:${node.agentId}`
+  const limit = sessionLimits[limitKey] || DEFAULT_SIDEBAR_SESSIONS_LIMIT
+  const visibleSessions = sessions.slice(0, limit)
+  const memberMenuKey = `org-member:${node.agentId}`
+  const memberMenuOpen = itemMenuKey === memberMenuKey
+  const isNodeExpanded = expandedFlowNodes.has(node.agentId) || isSessionsOpen || memberMenuOpen
+  const hasChildren = node.children.length > 0
+
+  const childrenHtml = hasChildren
+    ? `<div class="org-flow-children" role="group" aria-label="Direct reports of ${escapeAttribute(node.name)}">${node.children
+        .map(
+          (c) =>
+            `<div class="org-flow-child-item">${renderOrgFlowNodeHtml(
+              c,
+              depth + 1,
+              expandedFlowNodes,
+              expandedOrgMembers,
+              viewedSessionId,
+              sessionLimits,
+              itemMenuKey,
+            )}</div>`,
+        )
+        .join("")}</div>`
+    : ""
+  const branchMenuOpen = memberMenuOpen || childrenHtml.includes(" menu-open")
+
+  const metaItems: string[] = []
+  if (node.reportsToName) metaItems.push(`Reports to ${escapeHtml(node.reportsToName)}`)
+  if (node.responsibility) metaItems.push(escapeHtml(node.responsibility))
+
+  const expandedBodyHtml = isNodeExpanded
+    ? `<div class="org-flow-node-body">
+        ${metaItems.length > 0 ? `<div class="org-member-sub">${metaItems.join(" · ")}</div>` : ""}
+        <div class="org-flow-node-actions org-member-actions">
+          <button type="button" class="agent-btn primary sm" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(node.latestRuntimeSessionId)}">Chat</button>
+          <button type="button" class="agent-btn secondary sm" data-agent-quick-assign="${escapeAttribute(node.agentId)}">Assign</button>
+          <div class="project-menu-wrap${memberMenuOpen ? " menu-open" : ""}">
+            <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(memberMenuKey)}" title="Member actions" aria-label="Actions for ${escapeAttribute(node.name)}" aria-haspopup="menu" aria-expanded="${String(memberMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
+            ${
+              memberMenuOpen
+                ? `<div class="project-menu" role="menu">
+                    <button type="button" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">New chat</button>
+                    <button type="button" data-agent-quick-assign="${escapeAttribute(node.agentId)}" role="menuitem">Assign task</button>
+                    <button type="button" data-agent-remove="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">Remove</button>
+                  </div>`
+                : ""
+            }
+          </div>
+        </div>
+        ${
+          node.activeTask
+            ? `<button type="button" class="org-active-task" data-agent-select-task="${escapeAttribute(node.activeTask.id)}" data-agent-team="${escapeAttribute(node.teamId)}"><span class="org-active-task-kicker">Working on</span><span class="org-active-task-brief">${escapeHtml(String(node.activeTask.brief || ""))}</span></button>`
+            : ""
+        }
+        <div class="org-member-meta-bar">
+          <button type="button" class="org-sessions-toggle" data-org-toggle-member-sessions="${escapeAttribute(node.agentId)}" aria-expanded="${String(isSessionsOpen)}">
+            <span>${isSessionsOpen ? "▾" : "▸"}</span>
+            <span>Conversations (${sessions.length})</span>
+          </button>
+          <div class="org-member-stats">
+            ${node.taskCounts.active > 0 ? `<span>${node.taskCounts.active} active</span>` : ""}
+            ${node.taskCounts.attention > 0 ? `<span class="org-stat-attention">${node.taskCounts.attention} need review</span>` : ""}
+            ${isSessionsOpen ? `<button type="button" class="agent-btn ghost sm" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">+ New</button>` : ""}
+          </div>
+        </div>
+        ${
+          isSessionsOpen
+            ? `<div class="org-member-sessions-list">
+                ${
+                  sessions.length === 0
+                    ? `<div class="org-sessions-empty">No conversations yet.</div>`
+                    : visibleSessions
+                        .map((sess) => {
+                          const isCurrent = sess.runtimeSessionId === viewedSessionId
+                          return `
+                            <div class="org-session-item${isCurrent ? " is-active" : ""}">
+                              <button type="button" class="org-session-open" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}">
+                                <span class="agent-status-dot tone-${sess.tone}"></span>
+                                <span class="org-session-title">${escapeHtml(sess.title || "Conversation")}</span>
+                                ${sess.origin === "task" ? `<span class="org-role-pill">Task</span>` : ""}
+                                <span class="org-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
+                              </button>
+                            </div>
+                          `
+                        })
+                        .join("") +
+                      (sessions.length > limit
+                        ? `<button type="button" class="sidebar-load-more" data-agent-more-sessions="${escapeAttribute(limitKey)}">Show ${sessions.length - limit} more</button>`
+                        : "")
+                }
+              </div>`
+            : ""
+        }
+      </div>`
+    : ""
+
+  return `
+    <div class="org-flow-branch depth-${Math.min(depth, 6)}${isNodeExpanded ? " is-node-expanded" : ""}${branchMenuOpen ? " menu-open" : ""}" data-agent-id="${escapeAttribute(node.agentId)}">
+      <div class="org-flow-node-wrap${hasChildren ? " has-children" : ""}${depth > 0 ? " has-parent" : ""}">
+        ${depth > 0 ? `<span class="org-flow-port in" aria-hidden="true"></span>` : ""}
+        <div class="org-flow-node org-member-card${memberMenuOpen ? " menu-open" : ""} tone-${node.tone}${node.isLeader ? " is-leader" : ""}${isNodeExpanded ? " is-expanded" : ""}" data-flow-node="${escapeAttribute(node.agentId)}">
+          <button type="button" class="org-flow-node-trigger" data-org-toggle-flow-node="${escapeAttribute(node.agentId)}" aria-expanded="${String(isNodeExpanded)}">
+            <div class="org-flow-node-head">
+              <span class="agent-status-dot tone-${node.tone}"></span>
+              <strong class="org-flow-node-name org-member-name">${escapeHtml(node.name)}</strong>
+              ${node.isLeader ? `<span class="org-leader-badge">Leader</span>` : ""}
+              <span class="org-flow-node-chevron" aria-hidden="true">${isNodeExpanded ? "▾" : "▸"}</span>
+            </div>
+            <div class="org-flow-node-subrow">
+              <span class="org-role-pill">${escapeHtml(node.position)}</span>
+              ${node.worktreeOf ? `<span class="org-worktree-pill" title="${escapeAttribute(node.worktreeOf)}">Worktree</span>` : ""}
+              ${node.status && node.status !== "Idle" ? `<span class="agent-status-pill tone-${node.tone}">${escapeHtml(node.status)}</span>` : ""}
+              ${!isNodeExpanded && sessions.length > 0 ? `<span class="org-flow-mini-stat" title="${sessions.length} conversation(s)">${sessions.length}</span>` : ""}
+              ${!isNodeExpanded && node.taskCounts.attention > 0 ? `<span class="org-flow-mini-stat attention">!${node.taskCounts.attention}</span>` : ""}
+            </div>
+            ${
+              !isNodeExpanded && node.activeTask
+                ? `<div class="org-flow-mini-task" title="${escapeAttribute(String(node.activeTask.brief || ""))}"><span class="org-flow-mini-task-dot"></span><span class="org-flow-mini-task-text">${escapeHtml(String(node.activeTask.brief || ""))}</span></div>`
+                : ""
+            }
+          </button>
+          ${expandedBodyHtml}
+        </div>
+        ${hasChildren ? `<span class="org-flow-port out" aria-hidden="true"></span>` : ""}
+      </div>
+      ${childrenHtml}
+    </div>
+  `
+}
+
 export function renderOrgNodeHtml(
   node: OrgMemberSummary,
   depth = 0,
@@ -1784,6 +1928,8 @@ export function renderTeamSurfaceHtml(options: {
   snapshot: AgentsSnapshotData
   surface: Extract<DesktopAgentSurfaceState, { kind: "team" }>
   teamSessions?: Array<Record<string, any>>
+  orgViewMode?: OrgViewMode
+  expandedFlowNodes?: ReadonlySet<string>
   expandedOrgMembers?: ReadonlySet<string>
   viewedSessionId?: string
   sessionLimits?: Record<string, number>
@@ -1795,6 +1941,7 @@ export function renderTeamSurfaceHtml(options: {
 }): string {
   const snapshot = normalizeAgentsSnapshot(options.snapshot)
   const { surface, busy, artifactPreview } = options
+  const orgViewMode: OrgViewMode = options.orgViewMode === "detailed" ? "detailed" : DEFAULT_ORG_VIEW_MODE
   const summary = buildTeamSummary(snapshot, surface.teamId, options.teamSessions || [])
   if (!summary) {
     return `<div class="agent-surface-empty"><h2>Team not found</h2><p>Select another team from the sidebar.</p></div>`
@@ -1900,22 +2047,36 @@ export function renderTeamSurfaceHtml(options: {
 
   const bodyHtml =
     surface.tab === "organization"
-      ? `<div class="agent-org-canvas">
+      ? `<div class="agent-org-canvas ${orgViewMode === "minimal" ? "is-flow-view" : "is-cards-view"}">
           ${
             orgRoots.length === 0
               ? `<div class="agent-empty-box"><h3>No members yet</h3><p>Add a team leader and specialists to start collaborating.</p><button type="button" class="agent-btn primary sm" data-team-toggle-add-member="1">+ Add Member</button></div>`
-              : `<div class="org-tree-root" role="tree" aria-label="${escapeAttribute(team.name)} organization hierarchy">${orgRoots
-                  .map((rootNode) =>
-                    renderOrgNodeHtml(
-                      rootNode,
-                      0,
-                      options.expandedOrgMembers || new Set(),
-                      options.viewedSessionId || "",
-                      options.sessionLimits || {},
-                      itemMenuKey,
-                    ),
-                  )
-                  .join("")}</div>`
+              : orgViewMode === "minimal"
+                ? `<div class="org-flow-canvas" role="tree" aria-label="${escapeAttribute(team.name)} organization hierarchy"><div class="org-flow-roots">${orgRoots
+                    .map((rootNode) =>
+                      renderOrgFlowNodeHtml(
+                        rootNode,
+                        0,
+                        options.expandedFlowNodes || new Set(),
+                        options.expandedOrgMembers || new Set(),
+                        options.viewedSessionId || "",
+                        options.sessionLimits || {},
+                        itemMenuKey,
+                      ),
+                    )
+                    .join("")}</div></div>`
+                : `<div class="org-tree-root" role="tree" aria-label="${escapeAttribute(team.name)} organization hierarchy">${orgRoots
+                    .map((rootNode) =>
+                      renderOrgNodeHtml(
+                        rootNode,
+                        0,
+                        options.expandedOrgMembers || new Set(),
+                        options.viewedSessionId || "",
+                        options.sessionLimits || {},
+                        itemMenuKey,
+                      ),
+                    )
+                    .join("")}</div>`
           }
         </div>`
       : `<div class="agent-tasks-canvas">
@@ -1979,6 +2140,14 @@ export function renderTeamSurfaceHtml(options: {
             ${counts.tasksAttention > 0 ? `<span class="agent-metric-pill tone-attention">${counts.tasksAttention} need review</span>` : ""}
           </div>
           <div class="agent-surface-actions">
+            ${
+              surface.tab === "organization"
+                ? `<div class="agent-segmented org-view-switcher" role="group" aria-label="Organization layout view">
+                    <button type="button" class="agent-seg-btn${orgViewMode === "minimal" ? " is-active" : ""}" data-org-view-mode="minimal" aria-pressed="${String(orgViewMode === "minimal")}" title="Minimalist workflow tree view">Flow</button>
+                    <button type="button" class="agent-seg-btn${orgViewMode === "detailed" ? " is-active" : ""}" data-org-view-mode="detailed" aria-pressed="${String(orgViewMode === "detailed")}" title="Detailed member cards view">Cards</button>
+                  </div>`
+                : ""
+            }
             <button type="button" class="agent-btn secondary sm" data-team-toggle-add-member="1">+ Member</button>
             <button type="button" class="agent-btn primary sm" data-team-toggle-assign="1">+ Task</button>
             <div class="project-menu-wrap${headerMenuOpen ? " menu-open" : ""}">

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildInboxItems, buildTeamSummary, groupTeamTasks } from "../../lib/agentsModel.js";
+import { buildInboxItems, buildTeamSummary, groupTeamTasks, getOrgViewMode, setOrgViewMode } from "../../lib/agentsModel.js";
 import { TeamView } from "./TeamView.jsx";
 import { InboxView } from "./InboxView.jsx";
 import { BackgroundView } from "./BackgroundView.jsx";
@@ -9,7 +9,10 @@ import { ChatHeader } from "../shell/ChatHeader.jsx";
 import { ProjectSelector } from "../shell/ProjectSelector.jsx";
 import { Inspector } from "../inspector/Inspector.jsx";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setOrgViewMode("minimal");
+});
 
 const mockSnapshot = {
   seq: 5,
@@ -92,9 +95,21 @@ describe("Native Multi-Agent Views", () => {
       />,
     );
 
-    // Organization tree renders leader and direct report
+    // Organization tree defaults to minimalist flow mode (leader and direct report compact until clicked)
+    expect(getOrgViewMode()).toBe("minimal");
+    expect(screen.getByRole("button", { name: /^Flow$/i }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("alpha-lead")).not.toBeNull();
     expect(screen.getByText("ui-specialist")).not.toBeNull();
+    expect(screen.queryByText("Reports to alpha-lead")).toBeNull();
+
+    // Clicking a minimalist member node inflates it to show reporting line & actions
+    fireEvent.click(screen.getByText("ui-specialist"));
+    expect(screen.getByText("Reports to alpha-lead")).not.toBeNull();
+
+    // One-click switch to detailed Cards view updates global orgViewMode
+    fireEvent.click(screen.getByRole("button", { name: /^Cards$/i }));
+    expect(getOrgViewMode()).toBe("detailed");
+    expect(screen.getByRole("button", { name: /^Cards$/i }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("Reports to alpha-lead")).not.toBeNull();
 
     // Switch to Tasks tab

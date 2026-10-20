@@ -229,6 +229,28 @@ export function renderAgentsUI() {
     sessionAgentContext.innerHTML = breadcrumbHtml
   }
   sessionAgentContext.hidden = !breadcrumbHtml || isAgentSurface
+  if (state.headerSessionsMenuOpen && !sessionAgentContext.hidden) {
+    const menuEl = sessionAgentContext.querySelector<HTMLElement>(".header-sessions-menu")
+    const wrapEl = sessionAgentContext.querySelector<HTMLElement>(".header-sessions-dropdown-wrap")
+    if (menuEl && wrapEl) {
+      menuEl.style.left = ""
+      menuEl.style.right = ""
+      const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0
+      const margin = 8
+      const menuRect = menuEl.getBoundingClientRect()
+      const wrapRect = wrapEl.getBoundingClientRect()
+      if (viewportWidth > 0 && menuRect.width > 0) {
+        if (menuRect.right > viewportWidth - margin) {
+          const targetLeft = Math.max(margin, viewportWidth - margin - menuRect.width)
+          menuEl.style.left = `${Math.round(targetLeft - wrapRect.left)}px`
+          menuEl.style.right = "auto"
+        } else if (menuRect.left < margin) {
+          menuEl.style.left = `${Math.round(margin - wrapRect.left)}px`
+          menuEl.style.right = "auto"
+        }
+      }
+    }
+  }
 
   // Sidebar navigation — only update DOM when the actual rendered HTML changes, and preserve scroll position
   const activeSidebarInput = sidebarAgents.querySelector<HTMLInputElement>("input:focus")
@@ -274,6 +296,8 @@ export function renderAgentsUI() {
           snapshot,
           surface: state.agentSurface,
           teamSessions: state.teamSessionsByTeam[state.agentSurface.teamId] || [],
+          orgViewMode: state.orgViewMode,
+          expandedFlowNodes: state.expandedFlowNodes,
           expandedOrgMembers: state.expandedOrgMembers,
           viewedSessionId: state.viewedSessionId,
           sessionLimits: state.agentSessionLimits,
@@ -813,6 +837,33 @@ export function bindAgentsEvents(): () => void {
         render()
         animateExpand(findMemberSessionsElement(memberKey))
       }
+      return
+    }
+
+    const orgViewModeBtn = target.closest<HTMLElement>("[data-org-view-mode]")
+    if (orgViewModeBtn?.dataset.orgViewMode) {
+      const nextMode = orgViewModeBtn.dataset.orgViewMode === "detailed" ? "detailed" : "minimal"
+      state.orgViewMode = nextMode
+      try {
+        window.localStorage?.setItem("rind:orgViewMode", nextMode)
+      } catch {
+        // ignore storage errors
+      }
+      render()
+      return
+    }
+
+    const toggleFlowNodeBtn = target.closest<HTMLElement>("[data-org-toggle-flow-node]")
+    if (toggleFlowNodeBtn?.dataset.orgToggleFlowNode) {
+      const agentId = toggleFlowNodeBtn.dataset.orgToggleFlowNode
+      state.agentItemMenuKey = ""
+      if (state.expandedFlowNodes.has(agentId) || state.expandedOrgMembers.has(agentId)) {
+        state.expandedFlowNodes.delete(agentId)
+        state.expandedOrgMembers.delete(agentId)
+      } else {
+        state.expandedFlowNodes.add(agentId)
+      }
+      render()
       return
     }
 

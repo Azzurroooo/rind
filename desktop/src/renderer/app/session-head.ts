@@ -50,8 +50,8 @@ function resolveCurrentSessionTitle(): string {
     if (brief) return brief
   }
   for (const entry of state.conversation.entries) {
-    if (entry.kind === "user" && entry.text) {
-      const firstLine = entry.text.split(/\r?\n/).map((l) => l.trim()).find(Boolean)
+    if (entry.kind === "user" && entry.content) {
+      const firstLine = entry.content.split(/\r?\n/).map((l: string) => l.trim()).find(Boolean)
       if (firstLine) return firstLine.length > 64 ? `${firstLine.slice(0, 63)}…` : firstLine
     }
   }
