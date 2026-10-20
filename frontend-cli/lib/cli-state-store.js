@@ -17,11 +17,6 @@ const SPINNERS = Object.freeze([
     frames: Object.freeze(["█▒░░░", "▒█▒░░", "░▒█▒░", "░░▒█▒", "░░░▒█", "░░▒█▒", "░▒█▒░", "▒█▒░░"]),
   },
   {
-    name: "sparkle",
-    label: "Sparkle",
-    frames: Object.freeze(["·", "✧", "✦", "✧", "·", "∗", "✴", "∗"]),
-  },
-  {
     name: "pulse",
     label: "Pulse",
     frames: Object.freeze(["░", "▒", "▓", "█", "▓", "▒"]),
@@ -38,7 +33,7 @@ const SPINNERS = Object.freeze([
   },
 ]);
 
-let activeSpinner = SPINNERS[4];
+let activeSpinner = SPINNERS[3];
 
 export function isBriefMode() {
   return briefMode;
@@ -70,7 +65,7 @@ export function spinnerOptions() {
 export function setSpinner(value) {
   const key = String(value || "").trim().toLowerCase();
   if (!key) return null;
-  const byIndex = /^[1-5]$/.test(key) ? SPINNERS[Number(key) - 1] : null;
+  const byIndex = /^[1-4]$/.test(key) ? SPINNERS[Number(key) - 1] : null;
   const found = byIndex || SPINNERS.find((item) => item.name === key || item.label.toLowerCase() === key);
   if (!found) return null;
   activeSpinner = found;
@@ -78,7 +73,7 @@ export function setSpinner(value) {
 }
 
 export function resetSpinner() {
-  activeSpinner = SPINNERS[4];
+  activeSpinner = SPINNERS[3];
   return currentSpinner();
 }
 

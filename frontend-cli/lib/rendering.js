@@ -678,6 +678,27 @@ export function modelMenuText(items, selectedIndex = 0) {
 }
 
 export function settingsMenuText(items, selectedIndex = 0, level = "root") {
+  if (level === "brief") {
+    const visible = menuWindow(items, selectedIndex);
+    if (!visible.items.length) {
+      return "";
+    }
+    const lines = [dim("  Settings · Brief output")];
+    const labelWidth = Math.max(6, ...items.map((item) => visibleLength(clipSingleLine(item?.label || item?.name, 24))));
+    const descWidth = Math.max(12, ...items.map((item) => visibleLength(clipSingleLine(item?.description, 56))));
+    for (const [index, item] of visible.items.entries()) {
+      const active = index === visible.activeIndex;
+      const marker = active ? accent("›") : dim("·");
+      const label = padRight(clipSingleLine(item?.label || item?.name, 24), labelWidth);
+      const name = active ? bold(label) : dim(label);
+      const rawDesc = clipSingleLine(item?.description, 56);
+      const desc = rawDesc ? dim(padRight(rawDesc, descWidth)) : "";
+      const suffix = item?.current ? dim("current") : "";
+      lines.push(`  ${marker} ${name}${desc ? `  ${desc}` : ""}${suffix ? `  ${suffix}` : ""}`.trimEnd());
+    }
+    lines.push(dim("    ↑↓ select · enter apply · esc back"));
+    return `${lines.join("\n")}\n`;
+  }
   if (level === "theme") {
     const visible = menuWindow(items, selectedIndex);
     if (!visible.items.length) {
@@ -747,11 +768,11 @@ export function settingsMenuText(items, selectedIndex = 0, level = "root") {
     const name = active ? bold(label) : dim(label);
     const rawValue = String(item.value || "");
     const paddedValue = padRight(rawValue, valueWidth);
-    const value = item.enabled || (item.submenu && active) ? accent(paddedValue) : dim(paddedValue);
+    const value = active ? accent(paddedValue) : dim(paddedValue);
     const description = item.description ? `  ${dim(clipSingleLine(item.description, descWidth))}` : "";
     lines.push(`  ${marker} ${name}  ${value}${description}`);
   }
-  lines.push(dim("    ↑↓ select · space toggle · enter open/apply · esc cancel"));
+  lines.push(dim("    ↑↓ select · enter open · esc cancel"));
   return `${lines.join("\n")}\n`;
 }
 

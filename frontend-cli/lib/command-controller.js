@@ -34,7 +34,7 @@ export function createCommandController({
         await input.runSettingsSelector();
         return true;
       }
-      if ((sub === "theme" || sub === "spinner") && !subArg && input.isTerminal && input.runSettingsSelector) {
+      if ((sub === "brief" || sub === "theme" || sub === "spinner") && !subArg && input.isTerminal && input.runSettingsSelector) {
         await input.runSettingsSelector(sub);
         return true;
       }

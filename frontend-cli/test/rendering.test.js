@@ -779,7 +779,15 @@ test("prompt shows background task count after cwd with monitor hint", () => {
   assert.match(text, /m1 · E:\\project · \[bg:2\] \(ctrl\+b monitor\)/);
 });
 
-test("settingsMenuText theme and spinner submenus render options with current marker", () => {
+test("settingsMenuText brief, theme, and spinner submenus render options with current marker", () => {
+  const briefText = settingsMenuText([
+    { name: "off", label: "Off", description: "Show each tool call in full", current: true },
+    { name: "on", label: "On", description: "Collapse consecutive tool calls into one live line", current: false },
+  ], 1, "brief").replace(/\x1b\[[0-9;]*m/g, "");
+  assert.match(briefText, /Settings · Brief output/);
+  assert.match(briefText, /· Off\s+Show each tool call in full\s+current/);
+  assert.match(briefText, /› On\s+Collapse consecutive tool calls into one live line/);
+
   const text = settingsMenuText([
     { name: "latte", label: "Latte", current: false },
     { name: "catppuccin-mocha", label: "Catppuccin Mocha", current: true },
@@ -806,8 +814,8 @@ test("settingsMenuText theme and spinner submenus render options with current ma
   delete process.env.NO_COLOR;
   try {
     const rootColored = settingsMenuText([
-      { id: "brief", label: "Brief output", value: "off", enabled: false, description: "desc" },
-      { id: "theme", label: "Theme", value: "Frappé ›", submenu: true, description: "desc" },
+      { id: "brief", label: "Brief output", value: "off ›", description: "desc" },
+      { id: "theme", label: "Theme", value: "Frappé ›", description: "desc" },
     ], 0, "root");
     assert.ok(rootColored.includes(paintRaw.bold("Brief output    ")), "active option name is bold");
     assert.ok(rootColored.includes(paintRaw.dim("Theme           ")), "inactive option name is dim");

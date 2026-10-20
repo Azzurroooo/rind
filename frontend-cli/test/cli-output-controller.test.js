@@ -175,15 +175,23 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
     state.input.session.settingsState.selectedIndex(),
     state.input.session.settingsState.level(),
   ));
-  assert.match(initialMenu, /› Brief output .* off/);
-  assert.match(initialMenu, /space toggle · enter open\/apply · esc cancel/);
-  actions.handleTerminalInput(" ");
-  const toggledMenu = stripAnsi(settingsMenuText(
+  assert.match(initialMenu, /› Brief output .* off ›/);
+  assert.match(initialMenu, /↑↓ select · enter open · esc cancel/);
+  actions.handleTerminalInput("\r");
+  const briefSubmenu = stripAnsi(settingsMenuText(
     state.input.session.settingsState.items(),
     state.input.session.settingsState.selectedIndex(),
     state.input.session.settingsState.level(),
   ));
-  assert.match(toggledMenu, /› Brief output .* on/);
+  assert.match(briefSubmenu, /Settings · Brief output/);
+  assert.match(briefSubmenu, /› Off .* current/);
+  actions.handleTerminalInput("\x1b[B");
+  const selectedOnMenu = stripAnsi(settingsMenuText(
+    state.input.session.settingsState.items(),
+    state.input.session.settingsState.selectedIndex(),
+    state.input.session.settingsState.level(),
+  ));
+  assert.match(selectedOnMenu, /› On .* Collapse consecutive tool calls/);
   actions.handleTerminalInput("\r");
   const chosen = await menuPromise;
   assert.deepEqual(chosen, {

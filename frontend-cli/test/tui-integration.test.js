@@ -1054,18 +1054,31 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     await settle(virtual);
     let screen = virtual.getViewport().join("\n");
     assert.match(screen, /\/settings/);
-    assert.match(screen, /› Brief output .* off/);
+    assert.match(screen, /› Brief output .* off ›/);
     assert.match(screen, /· Theme .* ›/);
     assert.match(screen, /· Working spinner .* Orbit ›/);
     assert.match(screen, /· Skill imports .* 1 of 2 on ›/);
 
-    // 2. Toggle Brief output ON with Space
-    inputActions.handleTerminalInput(" ");
+    // 2. Press Enter on Brief output to open its Level 2 submenu, select On (Down + Enter)
+    inputActions.handleTerminalInput("\r");
     await settle(virtual);
     screen = virtual.getViewport().join("\n");
-    assert.match(screen, /› Brief output .* on/);
+    assert.match(screen, /Settings · Brief output/);
+    assert.match(screen, /› Off\s+Show each tool call in full\s+current/);
+    inputActions.handleTerminalInput("\x1b[B");
+    await settle(virtual);
+    assert.match(virtual.getViewport().join("\n"), /› On\s+Collapse consecutive tool calls/);
+    inputActions.handleTerminalInput("\r");
+    await settingsDone;
+    await settle(virtual);
+    assert.equal(isBriefMode(), true);
+    screen = virtual.getViewport().join("\n");
+    assert.match(screen, /◉ read → read b\.js · 2 tools/, "existing tool group collapsed via live replay");
+    assert.match(screen, /Brief output enabled\./);
 
-    // 3. Navigate down past Theme and Working spinner to Skill imports and press Enter to open Level 2 submenu
+    // 3. Open /settings again, navigate to Skill imports, and press Enter to open Level 2 submenu
+    const importDone = commandController.handle("/settings");
+    await settle(virtual);
     inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\x1b[B");
@@ -1090,15 +1103,12 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     assert.match(screen, /Applying breaks the prompt cache\./);
     inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\r");
-    await settingsDone;
+    await importDone;
     await settle(virtual);
 
-    // 6. Verify both Brief output and Skill imports applied, and existing transcript replayed into brief mode!
-    assert.equal(isBriefMode(), true);
-    assert.deepEqual(executedCommands, ["/import", "/import codex_user=on"]);
+    // 6. Verify Skill imports applied
+    assert.deepEqual(executedCommands, ["/import", "/import", "/import codex_user=on"]);
     screen = virtual.getViewport().join("\n");
-    assert.match(screen, /◉ read → read b\.js · 2 tools/, "existing tool group collapsed via live replay");
-    assert.match(screen, /Brief output enabled\./);
     assert.match(screen, /Skill imports updated\./);
 
     // 7. Open /settings theme directly, select Dracula (Down + Enter), and verify theme update
