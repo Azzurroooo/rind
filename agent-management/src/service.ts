@@ -242,7 +242,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     const pending = taskDelegations(state, task.id);
     requireValue(!pending.some(d => awaitingDelegation(d) || !d.returned), "WORK_OUTSTANDING",
       pending.some(awaitingDelegation)
-        ? "Your delegated work is still running. Call delegate({wait: true}) or end your turn to receive the results before reporting."
+        ? "Your delegated work is still running. End your turn to be resumed automatically when it settles (or call delegate({wait: true}) once), then call report."
         : "Delegated results are ready. Call delegate({wait: true}) to read them before reporting.");
     const delivery = validateReport({ outcome: p.outcome, summary: p.summary, evidence: p.evidence ?? [], artifacts: [] });
     for (const file of p.artifacts === undefined ? [] : strings(p.artifacts, "Artifacts")) {

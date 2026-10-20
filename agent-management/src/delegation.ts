@@ -2,7 +2,7 @@ import { activeRun, awaitingDelegation, memberKey, type Delegation, type Session
 import { supervisor } from "./organization.js";
 import { directReports } from "./tools.js";
 
-export const DELEGATE_NEXT = "Keep working in parallel, call delegate({wait: true}) only if this turn is blocked on the result right now, or tell the user what was started and end your turn to receive results when they settle.";
+export const DELEGATE_NEXT = "Dispatch any other independent delegations or continue your own work in parallel; once your work for this turn is done, call delegate({wait: true}) once for an immediate result, or end your turn to be resumed automatically when delegated work settles.";
 
 export const nameOf = (state: State, id: string) => id === "user" ? "the user" : state.agents[id]?.name || id;
 export const taskDelegations = (state: State, taskId: string) => Object.values(state.delegations).filter(d => d.taskId === taskId && !d.parentDelegationId);
@@ -72,7 +72,7 @@ export function claimWaitResult(state: State, ids: string[], outcome: { timedOut
     : settled.length
       ? resultsText(state, settled)
       : outcome.timedOut
-        ? "Timed out waiting for delegated work; still running: " + running.map(d => nameOf(state, d.assigneeAgentId) + " (task " + d.id + ")").join(", ") + "."
+        ? "Timed out waiting for delegated work; still running: " + running.map(d => nameOf(state, d.assigneeAgentId) + " (task " + d.id + ")").join(", ") + ". Do not call delegate({wait: true}) again; continue local work or end your turn to be resumed automatically when they settle."
         : "No pending delegated work.";
   return {
     settled: settled.map(d => ({

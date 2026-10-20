@@ -88,6 +88,7 @@ test("delegate({ wait: true }) collects settled results in-turn, supports timeou
   assert.equal(timedOut.timedOut, true);
   assert.equal(timedOut.settled.length, 0);
   assert.equal(timedOut.running.length, 2);
+  assert.match(timedOut.output, /Do not call delegate\(\{wait: true\}\) again; continue local work or end your turn to be resumed automatically when they settle\./);
 
   // Release wait wakes an active wait immediately without claiming results.
   const waitingPromise = f.call("delegate", { wait: true, timeoutMs: 30000 }, actor);
@@ -235,4 +236,31 @@ test("a shared conversation receives settled deliveries even when no window host
   assert.equal(f.delivered[0].runtimeSessionId, "shared-leader");
   assert.match(f.delivered[0].text, /Delivered to shared session/);
   assert.equal(f.service.isConnected(session.id), true);
+});
+
+
+test("concurrent single-turn delegate calls start existing and newly registered members in parallel and auto-deliver after wait timeout", async t => {
+  const f = await fixture(t);
+  const ui = await f.member("ui");
+  const { session, actor } = await leaderConversation(f);
+  await f.call("hostTurnStart", { sessionId: session.id, runtimeSessionId: "leader-chat" });
+  const [first, second] = await Promise.all([
+    f.call("delegate", { to: ui.id, brief: "Build UI component" }, actor),
+    f.call("delegate", { new: { name: "qa", responsibility: "Verification" }, brief: "Prepare test plan" }, actor),
+  ]);
+  assert.match(first.next, /Dispatch any other independent delegations/);
+  assert.ok(second.agentId && second.workspace);
+  await eventually(() => f.store.state.delegations[first.taskId]?.status === "running" && f.store.state.delegations[second.taskId]?.status === "running");
+
+  // Leader checks once with wait, times out, and ends its turn instead of polling in a loop.
+  const timedOut = await f.call("delegate", { wait: true, timeoutMs: 1000 }, actor);
+  assert.equal(timedOut.timedOut, true);
+  assert.match(timedOut.output, /Do not call delegate\(\{wait: true\}\) again/);
+  await f.call("hostTurnEnd", { sessionId: session.id, runtimeSessionId: "leader-chat", outcome: "turn_completed" });
+
+  await finishDelegation(f, first.taskId, "UI component ready");
+  await finishDelegation(f, second.taskId, "Test plan ready");
+  await eventually(() => f.delivered.length === 1);
+  assert.match(f.delivered[0].text, /ui · task .* · delivered: UI component ready/);
+  assert.match(f.delivered[0].text, /qa · task .* · delivered: Test plan ready/);
 });
