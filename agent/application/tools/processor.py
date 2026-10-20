@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import time
 from dataclasses import dataclass
@@ -57,12 +58,14 @@ class ToolCallProcessor:
         tool_output_store=None,
         user_question_responder: UserQuestionResponder | None = None,
         task_notifications: TaskNotifications | None = None,
+        thread_pool=None,
     ):
         self._tool_executor = tool_executor
         self._tool_result_normalizer = tool_result_normalizer or ToolResultNormalizer()
         self._tool_output_store = tool_output_store
         self._user_question_responder = user_question_responder
         self._task_notifications = task_notifications
+        self._thread_pool = thread_pool
 
     def set_user_question_responder(self, responder: UserQuestionResponder | None) -> None:
         """Set the callback used to collect answers for ask_user_question."""
@@ -282,7 +285,8 @@ class ToolCallProcessor:
                 def _sync_run():
                     return self._tool_executor.execute_sync(call.name, execution_args)
 
-                task = asyncio.create_task(asyncio.to_thread(_sync_run))
+                ctx = contextvars.copy_context()
+                task = asyncio.get_running_loop().run_in_executor(self._thread_pool, ctx.run, _sync_run)
                 try:
                     result = await asyncio.shield(task)
                 except asyncio.CancelledError:

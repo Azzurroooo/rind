@@ -69,6 +69,7 @@ class ExecutionCoordinator:
         session_dir: str | None,
         provider_service: ProviderServiceImpl,
         external_tool=None,
+        max_concurrent_turns: int = 8,
     ):
         self._shared_resources = shared_resources
         self._shell_tools = shell_tools
@@ -101,6 +102,7 @@ class ExecutionCoordinator:
         self._external_tool = external_tool
         self._session_options: dict[str, tuple] = {}
         self._lock = asyncio.Lock()
+        self._turn_semaphore = asyncio.Semaphore(max(1, int(max_concurrent_turns)))
 
     async def configure_session(self, session_id: str, external_tool, enable_user_question: bool) -> None:
         clean = validate_session_id(session_id)
@@ -498,7 +500,7 @@ class ExecutionCoordinator:
         terminal_type = ""
         business_started = not compact
         try:
-            async with execution.turn_slot:
+            async with execution.turn_slot, self._turn_semaphore:
                 # Stop suppresses automatic continuation, not explicit maintenance.
                 # Keep the marker: compact must not restart a stopped goal afterward.
                 if self._closed or (clean in self._suppressed and not compact) or (continuation and execution.queued_turn_starts > 1):
@@ -847,6 +849,7 @@ class ExecutionCoordinator:
         clean = validate_session_id(session_id)
         if permanent:
             self._closed_sessions.add(clean)
+            await self._shell_tools.close_session(clean)
         starting = self._starting.get(clean)
         if starting:
             await asyncio.gather(asyncio.shield(starting), return_exceptions=True)

@@ -580,3 +580,42 @@ test("renameTeam enforces uniqueness and authority, updates member instructions,
   assert.equal(f.store.state.delegations[child.taskId].status, "cancelled");
   await eventually(() => Object.values(f.store.state.runs).find(r => r.delegationId === child.taskId)?.status === "cancelled");
 });
+
+test("scheduler caps concurrent active runs at MAX_CONCURRENT_RUNS and yields slots when parents wait on children", async t => {
+  const f = await fixture(t);
+  const m1 = await f.member("m1"), m2 = await f.member("m2"), m3 = await f.member("m3"), m4 = await f.member("m4"), m5 = await f.member("m5");
+  for (const m of [m1, m2, m3, m4, m5]) {
+    await f.call("delegate", { to: m.id, brief: "work " + m.name }, { kind: "agent", sessionId: (await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id })).id });
+  }
+  await eventually(() => f.starts.length === 4);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(f.starts.length, 4, "5th delegation stays queued while 4 runs are active");
+  f.starts[0].finish({ content: "done 1" });
+  await eventually(() => f.starts.length === 5);
+  for (const s of f.starts.slice(1)) s.finish({ content: "done" });
+});
+
+test("delegation depth is capped at MAX_DELEGATION_DEPTH and leaf members do not receive the delegate tool", async t => {
+  const f = await fixture(t);
+  const d1 = await f.member("d1"), d2 = await f.member("d2"), d3 = await f.member("d3"), d4 = await f.member("d4");
+  await f.call("setSupervisor", { teamId: f.team.id, agentId: d2.id, reportsToAgentId: d1.id });
+  await f.call("setSupervisor", { teamId: f.team.id, agentId: d3.id, reportsToAgentId: d2.id });
+  await f.call("setSupervisor", { teamId: f.team.id, agentId: d4.id, reportsToAgentId: d3.id });
+
+  await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "root" });
+  await eventually(() => f.starts.length === 1);
+  await f.call("delegate", { to: d1.id, brief: "level 1" }, f.runner(f.starts[0]));
+  await eventually(() => f.starts.length === 2);
+  await f.call("delegate", { to: d2.id, brief: "level 2" }, f.runner(f.starts[1]));
+  await eventually(() => f.starts.length === 3);
+  await f.call("delegate", { to: d3.id, brief: "level 3" }, f.runner(f.starts[2]));
+  await eventually(() => f.starts.length === 4);
+
+  // At depth 3, d3 cannot delegate to d4 (neither in instructions nor via RPC).
+  assert.doesNotMatch(f.starts[3].input.instructions, /Delegate parts of the work with delegate/);
+  await assert.rejects(
+    f.call("delegate", { to: d4.id, brief: "level 4" }, f.runner(f.starts[3])),
+    { code: "DELEGATION_DEPTH_EXCEEDED" },
+  );
+  for (const s of f.starts) s.finish({ content: "done" });
+});

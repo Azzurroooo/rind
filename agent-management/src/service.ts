@@ -10,7 +10,7 @@ import { retain } from "./retention.js";
 
 import { supervisor, manages, setSupervisor } from "./organization.js";
 import { dissolveTeam, dropSession, expireApprovals, pruneAgents, unbindSessions } from "./teams.js";
-import { MEMBER_OPERATIONS, directReports, memberInstructions, supervises } from "./tools.js";
+import { MAX_DELEGATION_DEPTH, MEMBER_OPERATIONS, delegationDepth, directReports, memberInstructions, supervises } from "./tools.js";
 import { publishArtifact } from "./artifacts.js";
 import { newWorkspacePath, addWorktree, removeWorktree } from "./workspaces.js";
 
@@ -22,13 +22,22 @@ interface WaitPending { [WAIT_PENDING]: { sessionId: string; ids: string[]; time
 const teamNameTaken = (state: State, name: string) => Object.values(state.teams).some(t => !t.archive && t.name.trim().toLowerCase() === name.trim().toLowerCase());
 const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listArchive", "listModels", "getMemberModel", "listFolderDefaults"]);
 const MEMBER_MODEL_PARTS = { model: "model", reasoningEffort: "reasoning_effort" } as const;
-export function createService({ store, paths, adapters, toolConfig, folderDefaults, deliver }: {
+const DEFAULT_MAX_CONCURRENT_RUNS = 4;
+function resolveMaxConcurrentRuns(configured?: number) {
+  const raw = configured ?? process.env.RIND_MAX_CONCURRENT_RUNS;
+  if (raw === undefined || raw === "") return DEFAULT_MAX_CONCURRENT_RUNS;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : DEFAULT_MAX_CONCURRENT_RUNS;
+}
+export function createService({ store, paths, adapters, toolConfig, folderDefaults, deliver, maxConcurrentRuns }: {
   store: Store; paths: Paths; adapters: Record<string, Adapter>;
   toolConfig: (principal: Principal) => object;
   folderDefaults: FolderDefaults;
   // Runs a message as the next turn of a Runtime conversation.
   deliver: (runtimeSessionId: string, text: string) => Promise<void>;
+  maxConcurrentRuns?: number;
 }) {
+  const runLimit = resolveMaxConcurrentRuns(maxConcurrentRuns);
   let serial: Promise<unknown> = Promise.resolve();
   let stopped = false;
   let scheduling = false;
@@ -202,6 +211,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   const sessionDelegations = (state: State, sessionId: string) => Object.values(state.delegations).filter(d => d.originSessionId === sessionId && !d.parentDelegationId);
   function ownDelegations(state: State, session: Session) {
     const run = Object.values(state.runs).find(r => activeRun(r) && r.sessionId === session.id);
+
     if (run?.delegationId) return childDelegations(state, run.delegationId);
     if (run?.taskId) return taskDelegations(state, run.taskId);
     return sessionDelegations(state, session.id);
@@ -254,6 +264,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     const team = teamAccess(state, actor, teamId);
     requireValue(team.leaderAgentId, "LEADER_REQUIRED", "Choose a team leader before assigning work.");
     requireMember(state, teamId, assigneeAgentId);
+
     const by = actor.kind === "manager" ? "manager" : "user";
     const id = randomUUID();
     const task: Task = { id, teamId, assigneeAgentId, createdBy: by, brief, status: "queued", ...(start ? { dispatch: true } : {}) };
@@ -265,7 +276,9 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     const team = state.teams[teamId];
     requireValue(team?.leaderAgentId, "LEADER_REQUIRED", "Choose a team leader before assigning work.");
     requireMember(state, teamId, assigneeAgentId);
+
     const run = Object.values(state.runs).find(r => activeRun(r) && r.sessionId === session.id);
+
     const parent = run?.delegationId ? state.delegations[run.delegationId] : undefined;
     const taskId = parent ? parent.taskId : run?.taskId;
     const originSessionId = parent ? parent.originSessionId : !taskId ? session.id : undefined;
@@ -376,6 +389,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       let set = waiters.get(sessionId);
       if (!set) { set = new Set(); waiters.set(sessionId, set); }
       set.add(onRelease);
+      void schedule().catch(reportServiceError);
     });
   }
   function resolveDirectReport(state: State, teamId: string, me: string, target: string) {
@@ -398,6 +412,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       + (forms.length === 0 && p.brief !== undefined ? " Direct reports: " + JSON.stringify(directReports(state, teamId, me)) : ""));
     if (p.task !== undefined) return followUp(state, actor, text(p.task, "Task"), p, prefetched);
     if (p.retire !== undefined) return retire(state, teamId, me, text(p.retire, "retire", 200));
+    requireValue(delegationDepth(state, session) < MAX_DELEGATION_DEPTH, "DELEGATION_DEPTH_EXCEEDED", "Maximum delegation depth (" + MAX_DELEGATION_DEPTH + ") reached; complete this work directly.");
     const brief = text(p.brief, "Brief");
     let to: string;
     if (p.new !== undefined) to = (await addReport(state, actor, teamId, me, p.new)).id;
@@ -1249,6 +1264,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     } catch (error) { await failRun(runId, error); }
     finally { live.delete(runId); cancelling.delete(runId); const s = store.state.runs[runId]?.sessionId; if (s) releaseSessionWait(s); void schedule().catch(reportServiceError); }
   }
+  const activeManagedRuns = (state: State) =>
+    Object.values(state.runs).filter(r => (r.taskId || r.delegationId) && (r.status === "starting" || r.status === "running") && !waiters.get(r.sessionId)?.size).length;
   const hasDispatchableWork = (state: State) =>
     Object.values(state.tasks).some(t => t.status === "queued" && Boolean(t.dispatch)) ||
     Object.values(state.delegations).some(d => d.status === "queued" && Boolean(d.dispatch));
@@ -1270,7 +1287,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
             const team = state.teams[task.teamId];
             const agent = state.agents[task.assigneeAgentId];
             if (!team?.leaderAgentId || !state.memberships[memberKey(task.teamId, task.assigneeAgentId)]) { task.status = "needs_attention"; task.error = "Team leadership or membership changed."; delete task.dispatch; continue; }
-            if (workspaceBusy(state, agent.canonicalWorkspace)) continue;
+            if (activeManagedRuns(state) >= runLimit || workspaceBusy(state, agent.canonicalWorkspace)) continue;
             try { await canonicalDirectory(agent.canonicalWorkspace); }
             catch (error) { task.status = "needs_attention"; task.error = String(error); delete task.dispatch; continue; }
             const previous = Object.values(state.runs).filter(r => r.taskId === task.id && !r.delegationId).map(r => state.sessions[r.sessionId]).filter(Boolean).at(-1);
@@ -1289,7 +1306,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
             if (!team?.leaderAgentId || !state.memberships[memberKey(d.teamId, d.assigneeAgentId)] || !state.memberships[memberKey(d.teamId, d.fromAgentId)]) {
               d.status = "failed"; d.error = "Team leadership or membership changed."; delete d.dispatch; wakeDelegator(state, d); scheduleRequested = true; continue;
             }
-            if (workspaceBusy(state, agent.canonicalWorkspace)) continue;
+            if (activeManagedRuns(state) >= runLimit || workspaceBusy(state, agent.canonicalWorkspace)) continue;
             try { await canonicalDirectory(agent.canonicalWorkspace); }
             catch (error) { d.status = "failed"; d.error = String(error); delete d.dispatch; wakeDelegator(state, d); scheduleRequested = true; continue; }
             const previous = Object.values(state.runs).filter(r => r.delegationId === d.id).map(r => state.sessions[r.sessionId]).filter(Boolean).at(-1);

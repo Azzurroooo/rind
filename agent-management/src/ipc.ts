@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime, stopSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 import { listenOwned, EndpointOccupiedError } from "../../rind-runtime-client/endpoint.js";
-import { managerInstructions, memberInstructions, supervises, toolsFor } from "./tools.js";
+import { canDelegate, managerInstructions, memberInstructions, toolsFor } from "./tools.js";
 
 const RUNTIME_START_MS = 30000;
 const daemonEntry = Boolean(process.argv[1]?.endsWith("server.js"));
@@ -222,7 +222,7 @@ export async function startServer(options: { home?: string; python?: string; rep
     const manager = principal.kind === "manager";
     const managed = session?.origin === "managed";
     const task = managed && !session.delegationId;
-    const tools = toolsFor(manager ? "manager" : "agent", { supervises: Boolean(session?.teamId && supervises(store.state, session.teamId, session.agentId)), task });
+    const tools = toolsFor(manager ? "manager" : "agent", { supervises: canDelegate(store.state, session), task });
     return {
       skill_files: principal.kind === "manager" ? [] : skills.filter(ref => path.isAbsolute(ref)),
       command: process.execPath, args: [bridge], env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: token },

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -38,6 +39,7 @@ class SharedRuntimeResources:
     compaction_service: CompactionService
     tool_output_store: ToolOutputStore = field(default_factory=ToolOutputStore)
     file_mutation_queue: FileMutationQueue = field(default_factory=FileMutationQueue)
+    tool_thread_pool: ThreadPoolExecutor | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +149,7 @@ def build_agent_container(
         tool_executor=tool_executor,
         tool_result_normalizer=tool_result_normalizer,
         tool_output_store=tool_output_store,
+        thread_pool=shared_resources.tool_thread_pool if shared_resources else None,
         task_notifications=task_notifications,
     )
     stream_parser = shared_resources.stream_parser if shared_resources else MessageStreamParser()

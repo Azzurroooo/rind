@@ -1,4 +1,4 @@
-import { memberKey, type Delegation, type Session, type State, type Task } from "./model.js";
+import { activeRun, memberKey, type Delegation, type Session, type State, type Task } from "./model.js";
 import { supervisor } from "./organization.js";
 
 // What each kind of conversation may call: the declarations sent to the Rind
@@ -74,6 +74,25 @@ export function supervises(state: State, teamId: string, agentId: string) {
   return state.teams[teamId]?.leaderAgentId === agentId || directReports(state, teamId, agentId).length > 0;
 }
 
+export const MAX_DELEGATION_DEPTH = 3;
+
+export function delegationDepth(state: State, session?: Session): number {
+  if (!session) return 0;
+  let id = session.delegationId || Object.values(state.runs).find(r => activeRun(r) && r.sessionId === session.id)?.delegationId;
+  let depth = 0;
+  const seen = new Set<string>();
+  while (id && !seen.has(id)) {
+    seen.add(id);
+    depth += 1;
+    id = state.delegations[id]?.parentDelegationId;
+  }
+  return depth;
+}
+
+export function canDelegate(state: State, session?: Session): boolean {
+  return Boolean(session?.teamId && supervises(state, session.teamId, session.agentId) && delegationDepth(state, session) < MAX_DELEGATION_DEPTH);
+}
+
 // The Manager has every Rind tool; this is what keeps its changes on the approved path.
 export function managerInstructions(rindHome: string) {
   return [
@@ -95,7 +114,7 @@ export function memberInstructions(state: State, session: Session, work?: Task |
   const role = state.memberships[memberKey(team.id, agent.id)];
   const boss = supervisor(state, team.id, agent.id);
   const reports = directReports(state, team.id, agent.id);
-  const lead = supervises(state, team.id, agent.id);
+  const lead = canDelegate(state, session);
   return [
     agent.hint, role?.responsibility && "Your responsibility: " + role.responsibility,
     "You are " + agent.name + " (agent ID " + agent.id + ") in team " + team.name + ".",

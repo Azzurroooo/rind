@@ -22,7 +22,8 @@ from agent.infrastructure.persistence.task_output import TaskOutput, read_output
 class ProcessSupervisor:
     TERMINATION_GRACE_SECONDS = 1.0
 
-    def __init__(self, max_tasks: int = 8, journal: TaskJournal | None = None) -> None:
+    def __init__(self, max_tasks: int = 8, max_total_tasks: int = 32, journal: TaskJournal | None = None) -> None:
+        self.max_total_tasks = max_total_tasks
         self.max_tasks = max_tasks
         self._processes: dict[str, ProcessRecord] = {}
         self._origins: dict[tuple[str, str], str] = {}
@@ -51,9 +52,12 @@ class ProcessSupervisor:
             return await self._result("bash", record, "finished" if record.finished.is_set() else "yield_timeout")
         if self._closed or session_id in self._closed_sessions:
             return error_result(RuntimeError("Worker is shutting down."))
-        if (len(self._processes) if self.journal else sum(
-                r.status not in TERMINAL_STATES for r in self._processes.values())) >= self.max_tasks:
+        if sum(r.session_id == session_id and r.status not in TERMINAL_STATES for r in self._processes.values()) >= self.max_tasks:
             return ToolExecutionResult(status="error", error_type="TaskLimitExceeded", error_msg=f"Running task limit reached ({self.max_tasks}).")
+
+        if sum(r.status not in TERMINAL_STATES for r in self._processes.values()) >= self.max_total_tasks:
+            return ToolExecutionResult(status="error", error_type="TaskLimitExceeded", error_msg=f"Global running task limit reached ({self.max_total_tasks}).")
+
         record = ProcessRecord(task_id=f"task_{uuid.uuid4().hex}", session_id=session_id,
             command=command, cwd=state.cwd, shell_backend=state.shell_backend,
             shell_executable=state.shell_executable, call_id=call_id, notify=notify,
@@ -258,7 +262,7 @@ class ProcessSupervisor:
         if self.journal:
             for task_id, record in list(self._processes.items()):
                 if (record.finished.is_set() and not record.persistence_error
-                        and not (record.process is not None and record.status == "lost")
+                        and not (record.process is not None and record.process.returncode is None and record.status == "lost")
                         and (record.monitor is None or record.monitor.done())):
                     self._processes.pop(task_id)
                     self._origins.pop((record.session_id, record.call_id), None)

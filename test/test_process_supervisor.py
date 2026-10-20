@@ -149,3 +149,53 @@ async def test_unix_tree_kill_targets_process_group(monkeypatch) -> None:
     await process_tree.terminate_tree(process, 1)
 
     assert signals == [process_tree._SIGTERM, process_tree._SIGKILL]
+
+
+@pytest.mark.asyncio
+async def test_process_supervisor_enforces_per_session_and_global_limits_and_ignores_terminal_records(tmp_path: Path) -> None:
+    from agent.infrastructure.persistence.task_journal import TaskJournal
+    from agent.infrastructure.tools.shell.process import ProcessRecord
+
+    journal = TaskJournal(tmp_path / "sessions")
+    supervisor = ProcessSupervisor(max_tasks=2, max_total_tasks=3, journal=journal)
+
+    # A finished record still in _processes (e.g., pending persistence retry) must not consume a running slot.
+    finished = ProcessRecord(
+        task_id="task_done",
+        session_id="s1",
+        command="echo ok",
+        cwd=str(tmp_path),
+        shell_backend="bash",
+        shell_executable=sys.executable,
+        status="completed",
+    )
+    finished.finished.set()
+    supervisor._processes[finished.task_id] = finished
+
+    def make_running(task_id: str, session_id: str) -> ProcessRecord:
+        rec = ProcessRecord(
+            task_id=task_id,
+            session_id=session_id,
+            command="sleep 10",
+            cwd=str(tmp_path),
+            shell_backend="bash",
+            shell_executable=sys.executable,
+            status="running",
+        )
+        supervisor._processes[task_id] = rec
+        return rec
+
+    make_running("t1", "s1")
+    make_running("t2", "s1")
+    state = ShellState(cwd=str(tmp_path), env={}, shell_executable=sys.executable, shell_backend="bash")
+
+    per_session_exceeded = await supervisor.run("print('hi')", state, "s1")
+    assert per_session_exceeded.status == "error"
+    assert per_session_exceeded.error_type == "TaskLimitExceeded"
+    assert "Running task limit reached (2)" in per_session_exceeded.error_msg
+
+    make_running("t3", "s2")
+    global_exceeded = await supervisor.run("print('hi')", state, "s2")
+    assert global_exceeded.status == "error"
+    assert global_exceeded.error_type == "TaskLimitExceeded"
+    assert "Global running task limit reached (3)" in global_exceeded.error_msg
