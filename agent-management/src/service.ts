@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, rm, stat, copyFile, readFile, readdir } from "node:fs/promises";
+import { mkdir, rm, copyFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { activeRun, awaitingDelegation, entryTask, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Delegation, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
@@ -7,15 +7,14 @@ import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
 import { sessionStatus, memberStatus, queuedReason, priorityRank, teamBriefing, managerOverview, projectionIndex, type LiveSession } from "./projection.js";
 import { retain } from "./retention.js";
-
 import { supervisor, manages, setSupervisor } from "./organization.js";
 import { dissolveTeam, dropSession, expireApprovals, pruneAgents, unbindSessions } from "./teams.js";
 import { MEMBER_OPERATIONS, directReports, memberInstructions, supervises } from "./tools.js";
 import { publishArtifact } from "./artifacts.js";
-import { newWorkspacePath, addWorktree, removeWorktree } from "./workspaces.js";
+import { newWorkspacePath, addWorktree, removeWorktree, copyPreview } from "./workspaces.js";
+import { DELEGATE_NEXT, nameOf, taskDelegations, childDelegations, sessionDelegations, ownDelegations, returnDelegations, resumeWork, wakeDelegator, claimWaitResult, resolveDirectReport, cancelDelegationTree, cancelTaskDelegations, markDelivered } from "./delegation.js";
 
 type Params = Record<string, any>;
-const DELEGATE_NEXT = "Keep working in parallel, call delegate({wait: true}) only if this turn is blocked on the result right now, or tell the user what was started and end your turn to receive results when they settle.";
 const WAIT_PENDING = Symbol("waitPending");
 interface WaitPending { [WAIT_PENDING]: { sessionId: string; ids: string[]; timeoutMs: number; includeReturned: boolean } }
 // Teams are picked by name in the sidebar and in `rind agents`; two live teams never share one.
@@ -197,58 +196,6 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     state.notes[id] = { id, taskId, author: by, text: message, createdAt: new Date().toISOString() };
     return state.notes[id];
   }
-  const taskDelegations = (state: State, taskId: string) => Object.values(state.delegations).filter(d => d.taskId === taskId && !d.parentDelegationId);
-  const childDelegations = (state: State, delegationId: string) => Object.values(state.delegations).filter(d => d.parentDelegationId === delegationId);
-  const sessionDelegations = (state: State, sessionId: string) => Object.values(state.delegations).filter(d => d.originSessionId === sessionId && !d.parentDelegationId);
-  function ownDelegations(state: State, session: Session) {
-    const run = Object.values(state.runs).find(r => activeRun(r) && r.sessionId === session.id);
-    if (run?.delegationId) return childDelegations(state, run.delegationId);
-    if (run?.taskId) return taskDelegations(state, run.taskId);
-    return sessionDelegations(state, session.id);
-  }
-  // Whoever delegated the work hears back once all of it has settled: a parent
-  // task or delegation runs again, a conversation gets a delivery. While the
-  // delegator is still running its own turn (or actively waiting in-turn),
-  // results remain unreturned so delegate({wait: true}) can claim them first.
-  function wakeDelegator(state: State, d: Delegation) {
-    if (d.parentDelegationId) {
-      const parent = state.delegations[d.parentDelegationId];
-      if (!parent || parent.status !== "waiting") return;
-      const children = childDelegations(state, parent.id);
-      if (!children.some(awaitingDelegation)) returnDelegations(state, children, text => resumeWork(parent, text));
-    } else if (d.taskId) {
-      const parent = state.tasks[d.taskId];
-      if (!parent || parent.status !== "blocked" || parent.blockedOn?.responder !== "children") return;
-      const children = taskDelegations(state, parent.id);
-      if (!children.some(awaitingDelegation)) returnDelegations(state, children, text => resumeWork(parent, text));
-    } else if (d.originSessionId) {
-      const sessionId = d.originSessionId;
-      if (waiters.has(sessionId) || Object.values(state.runs).some(r => activeRun(r) && r.sessionId === sessionId)) return;
-      const children = sessionDelegations(state, sessionId);
-      if (!children.some(awaitingDelegation)) returnDelegations(state, children, text => { (state.deliveries[sessionId] ||= { texts: [] }).texts.push(text); });
-    }
-  }
-  function returnDelegations(state: State, delegations: Delegation[], send: (text: string) => void) {
-    const fresh = delegations.filter(d => !d.returned && !awaitingDelegation(d));
-    if (!fresh.length) return;
-    for (const d of fresh) d.returned = true;
-    send(resultsText(state, fresh));
-  }
-  const nameOf = (state: State, id: string) => id === "user" ? "the user" : state.agents[id]?.name || id;
-  function resultsText(state: State, delegations: Delegation[]) {
-    return ["Delegated work settled:", ...delegations.map(d => {
-      const head = "- " + nameOf(state, d.assigneeAgentId) + " · task " + d.id + " · ";
-      if (d.status === "done") return head + "delivered: " + (d.reply || "");
-      return head + d.status + (d.error ? ": " + d.error : "");
-    })].join("\n");
-  }
-  // The task or delegation runs again, told why.
-  function resumeWork(work: Task | Delegation, message: string) {
-    work.resume = work.resume ? work.resume + "\n\n" + message : message;
-    work.status = "queued"; work.dispatch = true;
-    if ("blockedOn" in work) delete work.blockedOn;
-    delete work.error;
-  }
   // An entry task assigned by the user or Manager. It owns the 1-page report.
   function newTask(state: State, actor: Principal, teamId: string, assigneeAgentId: string, brief: string, start: boolean) {
     const team = teamAccess(state, actor, teamId);
@@ -306,29 +253,6 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     note(state, task.id, author(state, actor), "Delivery submitted; awaiting confirmed execution completion.");
     return { taskId: task.id, delivered: true, next: "End your turn; your delivery goes to the user." };
   }
-  function claimWaitResult(state: State, ids: string[], outcome: { timedOut: boolean; released: boolean }, canClaim: boolean, includeReturned: boolean) {
-    const targets = ids.map(id => state.delegations[id]).filter(Boolean);
-    const settled = outcome.released || !canClaim ? [] : targets.filter(d => (includeReturned || !d.returned) && !awaitingDelegation(d));
-    const running = targets.filter(awaitingDelegation);
-    for (const d of settled) d.returned = true;
-    const output = outcome.released
-      ? "Wait interrupted by new input; delegated work continues in the background."
-      : settled.length
-        ? resultsText(state, settled)
-        : outcome.timedOut
-          ? "Timed out waiting for delegated work; still running: " + running.map(d => nameOf(state, d.assigneeAgentId) + " (task " + d.id + ")").join(", ") + "."
-          : "No pending delegated work.";
-    return {
-      settled: settled.map(d => ({
-        taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: d.status,
-        ...(d.reply ? { reply: d.reply } : {}), ...(d.error ? { error: d.error } : {}),
-      })),
-      running: running.map(d => ({ taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: d.status })),
-      timedOut: outcome.timedOut,
-      ...(outcome.released ? { released: true } : {}),
-      output,
-    };
-  }
   function prepareWait(state: State, actor: Principal, session: Session, p: Params): WaitPending | ReturnType<typeof claimWaitResult> {
     requireValue(p.to === undefined && p.new === undefined && p.brief === undefined && p.message === undefined && p.cancel === undefined && p.retire === undefined && p.interrupt === undefined,
       "INVALID_INPUT", "Use {wait: true, task?, timeoutMs?} without other delegate actions.");
@@ -377,15 +301,6 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       if (!set) { set = new Set(); waiters.set(sessionId, set); }
       set.add(onRelease);
     });
-  }
-  function resolveDirectReport(state: State, teamId: string, me: string, target: string) {
-    if (state.memberships[memberKey(teamId, target)] && supervisor(state, teamId, target) === me) return target;
-    const reports = directReports(state, teamId, me);
-    const exact = reports.filter(r => r.name === target);
-    if (exact.length === 1) return exact[0].id;
-    const lower = target.toLowerCase();
-    const matched = reports.filter(r => r.name.trim().toLowerCase() === lower);
-    return matched.length === 1 ? matched[0].id : undefined;
   }
   async function delegate(state: State, actor: Principal, p: Params, prefetched?: any) {
     const session = sessionOf(state, actor)!;
@@ -461,20 +376,9 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   function dropMember(state: State, teamId: string, agentId: string) {
     delete state.memberships[memberKey(teamId, agentId)];
     for (const task of Object.values(state.tasks)) if (task.teamId === teamId && task.assigneeAgentId === agentId && !["done", "cancelled"].includes(task.status)) { task.status = "needs_attention"; delete task.dispatch; task.error = "Member removed from team."; }
-    for (const d of Object.values(state.delegations)) if (d.teamId === teamId && d.assigneeAgentId === agentId && awaitingDelegation(d)) { d.status = "failed"; delete d.dispatch; d.error = "Member removed from team."; wakeDelegator(state, d); }
+    for (const d of Object.values(state.delegations)) if (d.teamId === teamId && d.assigneeAgentId === agentId && awaitingDelegation(d)) { d.status = "failed"; delete d.dispatch; d.error = "Member removed from team."; wakeDelegator(state, d, waiters); }
     const released = unbindSessions(state, s => s.teamId === teamId && s.agentId === agentId, openInWindow);
     pruneAgents(state, new Set([agentId, ...released]));
-  }
-  function cancelDelegationTree(state: State, delegationId: string) {
-    for (const child of childDelegations(state, delegationId)) {
-      cancelDelegationTree(state, child.id);
-      if (!["done", "cancelled"].includes(child.status)) { child.status = "cancelled"; delete child.dispatch; child.returned = true; }
-    }
-  }
-  function cancelTaskDelegations(state: State, taskId: string) {
-    for (const d of Object.values(state.delegations)) if (d.taskId === taskId && !["done", "cancelled"].includes(d.status)) {
-      d.status = "cancelled"; delete d.dispatch; d.returned = true;
-    }
   }
   async function followUp(state: State, actor: Principal, id: string, p: Params, prefetched?: any) {
     const d = state.delegations[id];
@@ -490,7 +394,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       const run = Object.values(state.runs).find(r => r.delegationId === d.id && activeRun(r));
       if (run && live.has(run.id)) { d.status = "cancelled"; delete d.dispatch; return { runId: run.id, cancelling: true, taskId: d.id, status: "cancelled" }; }
       requireValue(!["done", "cancelled"].includes(d.status), "TASK_FINISHED", "This task has already finished.");
-      d.status = "cancelled"; delete d.dispatch; wakeDelegator(state, d);
+      d.status = "cancelled"; delete d.dispatch; wakeDelegator(state, d, waiters);
       return { taskId: d.id, status: "cancelled" };
     }
     requireValue(d.status !== "cancelled", "TASK_FINISHED", "This task was cancelled.");
@@ -524,7 +428,6 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       next: DELEGATE_NEXT,
     };
   }
-  function markDelivered(task: Task) { task.status = "done"; task.deliveredAt = new Date().toISOString(); delete task.blockedOn; }
   function deleteTeam(state: State, teamId: string) {
     requireValue(!Object.values(state.runs).some(r => activeRun(r) && state.sessions[r.sessionId]?.teamId === teamId), "TEAM_BUSY", "Stop or resolve the team's running work before deleting it.");
     return dissolveTeam(state, teamId, (taskId, message) => note(state, taskId, "system", message), openInWindow);
@@ -912,7 +815,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
               if (d && !["done", "cancelled"].includes(d.status)) {
                 d.status = "failed";
                 d.error = "Execution finished while management was disconnected.";
-                wakeDelegator(state, d);
+                wakeDelegator(state, d, waiters);
               }
             }
           } else if (run.taskId) {
@@ -967,7 +870,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           if (d && !["done", "cancelled"].includes(d.status)) {
             d.status = "failed";
             d.error ||= "Execution stopped after unconfirmed state.";
-            wakeDelegator(state, d);
+            wakeDelegator(state, d, waiters);
           }
         } else if (run.taskId) {
           const task = state.tasks[run.taskId];
@@ -1181,7 +1084,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           if (run.status === "unknown" && d.taskId && state.tasks[d.taskId]) {
             const task = state.tasks[d.taskId];
             task.status = "needs_attention"; task.error = String(error); delete task.dispatch; delete task.blockedOn;
-          } else wakeDelegator(state, d);
+          } else wakeDelegator(state, d, waiters);
         }
       } else if (run.taskId) {
         const task = state.tasks[run.taskId];
@@ -1228,7 +1131,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           else if (children.some(c => !c.returned)) returnDelegations(next, children, text => resumeWork(d, text));
           else if (content.trim()) { d.status = "done"; d.reply = content.trim(); delete d.error; }
           else { d.status = "failed"; d.error = "Ended without a reply."; }
-          wakeDelegator(next, d);
+          wakeDelegator(next, d, waiters);
           return;
         }
         const task = next.tasks[run.taskId!];
@@ -1287,11 +1190,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
             const team = state.teams[d.teamId];
             const agent = state.agents[d.assigneeAgentId];
             if (!team?.leaderAgentId || !state.memberships[memberKey(d.teamId, d.assigneeAgentId)] || !state.memberships[memberKey(d.teamId, d.fromAgentId)]) {
-              d.status = "failed"; d.error = "Team leadership or membership changed."; delete d.dispatch; wakeDelegator(state, d); scheduleRequested = true; continue;
+              d.status = "failed"; d.error = "Team leadership or membership changed."; delete d.dispatch; wakeDelegator(state, d, waiters); scheduleRequested = true; continue;
             }
             if (workspaceBusy(state, agent.canonicalWorkspace)) continue;
             try { await canonicalDirectory(agent.canonicalWorkspace); }
-            catch (error) { d.status = "failed"; d.error = String(error); delete d.dispatch; wakeDelegator(state, d); scheduleRequested = true; continue; }
+            catch (error) { d.status = "failed"; d.error = String(error); delete d.dispatch; wakeDelegator(state, d, waiters); scheduleRequested = true; continue; }
             const previous = Object.values(state.runs).filter(r => r.delegationId === d.id).map(r => state.sessions[r.sessionId]).filter(Boolean).at(-1);
             const session: Session = previous || { id: randomUUID(), agentId: agent.id, teamId: d.teamId, runtimeSessionId: "", origin: "managed", shared: true, delegationId: d.id };
             session.shared = true; session.delegationId = d.id;
@@ -1393,22 +1296,4 @@ function reportServiceError(error: unknown) { console.error(`[${new Date().toISO
 function strings(value: unknown, label: string): string[] {
   requireValue(Array.isArray(value) && value.length <= 100 && value.every(v => typeof v === "string" && v.length <= 4000), "INVALID_INPUT", label + " must be a list of at most 100 strings.");
   return value;
-}
-async function copyPreview(sourcePath: string) {
-  const source = await canonicalDirectory(sourcePath);
-  const files: string[] = []; const excluded: string[] = []; let bytes = 0;
-  async function visit(directory: string) {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const absolute = path.join(directory, entry.name); const relative = path.relative(source, absolute);
-      if (entry.isSymbolicLink() || /^(?:\.git|\.rind|\.env(?:\..*)?|node_modules|\.venv|dist|build|.*\.(?:pem|key|p12|pfx))$/i.test(entry.name)) { excluded.push(relative); continue; }
-      if (entry.isDirectory()) await visit(absolute);
-      else if (entry.isFile()) { files.push(relative); bytes += (await stat(absolute)).size; }
-      requireValue(files.length < 10000 && bytes < 512 * 1024 * 1024, "COPY_TOO_LARGE", "Copy exceeds 10,000 files or 512 MiB. Prepare an independent directory manually.");
-    }
-  }
-  await visit(source);
-  files.sort(); excluded.sort();
-  const fingerprint = createHash("sha256");
-  for (const file of files) { fingerprint.update(file); fingerprint.update(await readFile(path.join(source, file))); }
-  return { source, files, excluded, bytes, fingerprint: fingerprint.digest("hex") };
 }
