@@ -331,12 +331,11 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
   const bgHtml = renderBackgroundSurfaceHtml({
     snapshot: sampleSnapshot,
     serviceInfo: { service: { pid: 4321 }, runtime: { host: "127.0.0.1", port: 8900 } },
-    logView: { title: "Management Service Log", content: "Service healthy" },
     busy: false,
   })
   assert.match(bgHtml, /Running \(PID 4321\)/)
   assert.match(bgHtml, /127\.0\.0\.1:8900/)
-  assert.match(bgHtml, /Service healthy/)
+  assert.doesNotMatch(bgHtml, /Service Log|Runtime Log/)
 
   const archiveHtml = renderArchiveSurfaceHtml({
     snapshot: sampleSnapshot,

@@ -303,7 +303,6 @@ export function renderAgentsUI() {
         nextSurfaceHtml = renderBackgroundSurfaceHtml({
           snapshot,
           serviceInfo: state.agentsService,
-          logView: state.serviceLogView,
           busy: state.agentsBusy,
         })
       } else if (state.agentSurface.kind === "archive") {
@@ -1134,26 +1133,6 @@ export function bindAgentsEvents(): () => void {
       const noticeId = dismissNoticeBtn.dataset.inboxDismissNotice
       runAction(() => runManagementOp({ op: "dismissNotice", noticeId }))
       return
-    }
-
-    const readLogBtn = target.closest<HTMLElement>("[data-bg-read-log]")
-    if (readLogBtn?.dataset.bgReadLog) {
-      const logTarget = readLogBtn.dataset.bgReadLog === "runtime" ? "runtime" : "service"
-      runAction(async () => {
-        const res = await runManagementOp({ op: "serviceLog", target: logTarget })
-        const lines = Array.isArray(res.lines) ? res.lines.join("\n") : asRecordText(res.log)
-        state.serviceLogView = {
-          title: logTarget === "runtime" ? "Shared Python Runtime Log" : "Management Service Log",
-          content: lines || "(Log is empty)",
-        }
-        render()
-      })
-      return
-    }
-
-    if (target.closest("[data-bg-close-log]")) {
-      state.serviceLogView = null
-      render()
     }
   }
 

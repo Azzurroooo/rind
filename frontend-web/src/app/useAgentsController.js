@@ -36,7 +36,17 @@ export function useAgentsController(ctx) {
   // | { kind: "team", teamId: string, tab: "organization" | "tasks", selectedTaskId?: string }
   const [surface, setSurface] = useState({ kind: "chat" });
   const [activeAgentOverride, setActiveAgentOverride] = useState(null);
-  const wsSupported = Boolean(ctx.info?.methods?.includes?.(methods.agentsGet));
+  const wsSupported = Boolean(
+    ctx.info?.gateway?.agents ||
+      ctx.info?.methods?.includes?.(methods.agentsGet) ||
+      ctx.info?.methods?.includes?.(methods.agentsRequest),
+  );
+  const isDesktopGateway = Boolean(ctx.info?.gateway?.desktop);
+  const canUseHttpBridge =
+    !wsSupported &&
+    !isDesktopGateway &&
+    (ctx.connection?.phase === "online" || ctx.connection?.phase === "syncing") &&
+    Array.isArray(ctx.info?.methods);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -60,6 +70,8 @@ export function useAgentsController(ctx) {
     }
     if (typeof payload.connection === "string") {
       setConnection((prev) => (prev === payload.connection ? prev : payload.connection));
+    } else if (payload.snapshot || Array.isArray(payload.teams)) {
+      setConnection((prev) => (prev === "connecting" || prev === "offline" ? "connected" : prev));
     }
     if ("service" in payload) {
       const nextService = payload.service || null;
@@ -69,16 +81,35 @@ export function useAgentsController(ctx) {
 
   const requestAgent = useCallback(
     async (method, params = {}) => {
-      if (ctx.refs.info.current?.methods?.includes?.(methods.agentsRequest)) {
+      const infoNow = ctx.refs.info.current || ctx.info || {};
+      const hasWsAgents = Boolean(
+        infoNow?.gateway?.agents ||
+          infoNow?.methods?.includes?.(methods.agentsRequest) ||
+          infoNow?.methods?.includes?.(methods.agentsGet),
+      );
+      if (hasWsAgents) {
         const client = ctx.refs.client.current;
         if (!client) throw new Error("Runtime client not connected.");
+        const supportsAgentsGet = Boolean(infoNow?.methods?.includes?.(methods.agentsGet));
+        const fetchState = () =>
+          supportsAgentsGet
+            ? client.request(methods.agentsGet, {})
+            : client.request(methods.agentsRequest, {
+                operation: "getState",
+                method: "getState",
+                params: {},
+              });
         if (method === "getState") {
-          const state = await client.request(methods.agentsGet, {});
+          const state = await fetchState();
           acceptPayload(state);
           return state;
         }
-        const res = await client.request(methods.agentsRequest, { method, params });
-        const fresh = await client.request(methods.agentsGet, {}).catch(() => null);
+        const res = await client.request(methods.agentsRequest, {
+          operation: method,
+          method,
+          params,
+        });
+        const fresh = await fetchState().catch(() => null);
         if (fresh) acceptPayload(fresh);
         return res;
       }
@@ -96,24 +127,26 @@ export function useAgentsController(ctx) {
       }
       return data.result;
     },
-    [acceptPayload, ctx.refs.client, ctx.refs.info],
+    [acceptPayload, ctx.info, ctx.refs.client, ctx.refs.info],
   );
 
-  // Sync initial state when WebSocket advertises rind/agents/get
+  // Apply embedded agents_state from initialize response immediately when present
+  useEffect(() => {
+    if (ctx.info?.agents_state) {
+      acceptPayload(ctx.info.agents_state);
+    }
+  }, [ctx.info?.agents_state, acceptPayload]);
+
+  // Sync initial state when WebSocket advertises agents management
   useEffect(() => {
     if (!wsSupported) return undefined;
-    const client = ctx.refs.client.current;
-    if (!client) return undefined;
-    void client
-      .request(methods.agentsGet, {})
-      .then((res) => acceptPayload(res))
-      .catch(() => {});
+    void requestAgent("getState", {}).catch(() => {});
     return undefined;
-  }, [wsSupported, ctx.info?.session_id, acceptPayload, ctx.refs.client]);
+  }, [wsSupported, ctx.info?.session_id, ctx.connection?.phase, requestAgent]);
 
-  // Connect to /api/agents/stream SSE when running in browser dev server mode
+  // Connect to /api/agents/stream SSE only when running in standalone browser dev server mode
   useEffect(() => {
-    if (wsSupported) return undefined;
+    if (!canUseHttpBridge) return undefined;
     if (typeof window === "undefined" || typeof window.EventSource !== "function") {
       return undefined;
     }
@@ -137,7 +170,7 @@ export function useAgentsController(ctx) {
     return () => {
       es?.close?.();
     };
-  }, [wsSupported, acceptPayload]);
+  }, [canUseHttpBridge, acceptPayload]);
 
   const refreshAgentHistories = useCallback(
     async (targetTeamIds = null) => {

@@ -2199,7 +2199,6 @@ export function renderInboxSurfaceHtml(options: {
 export function renderBackgroundSurfaceHtml(options: {
   snapshot: AgentsSnapshotData
   serviceInfo: Record<string, any> | null
-  logView: { title: string; content: string } | null
   busy: boolean
 }): string {
   const snapshot = normalizeAgentsSnapshot(options.snapshot)
@@ -2214,10 +2213,6 @@ export function renderBackgroundSurfaceHtml(options: {
           <div class="agent-surface-headline-row">
             <h2 class="agent-surface-title">Background</h2>
             <span class="agent-metric-pill tone-working">${bg.runningCount} active</span>
-          </div>
-          <div class="agent-surface-actions">
-            <button type="button" class="agent-btn secondary sm" data-bg-read-log="service" ${options.busy ? "disabled" : ""}>Service Log</button>
-            <button type="button" class="agent-btn secondary sm" data-bg-read-log="runtime" ${options.busy ? "disabled" : ""}>Runtime Log</button>
           </div>
         </header>
         <div class="agent-surface-body panel-scroll">
@@ -2234,11 +2229,6 @@ export function renderBackgroundSurfaceHtml(options: {
             <span class="agent-health-sep">·</span>
             <span class="agent-health-item">${snapshot.connectedSessions.length} connected sessions</span>
           </div>
-          ${
-            options.logView
-              ? `<section class="agent-drawer-card"><div class="agent-card-header-row"><div class="agent-card-kicker">${escapeHtml(options.logView.title)}</div><button type="button" class="agent-btn ghost sm" data-bg-close-log="1">Close</button></div><pre class="agent-report-pre">${escapeHtml(options.logView.content)}</pre></section>`
-              : ""
-          }
           ${
             bg.unconfirmedRuns.length > 0
               ? `<section class="agent-bg-section">

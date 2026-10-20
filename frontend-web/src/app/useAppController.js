@@ -44,6 +44,7 @@ export function useAppController() {
     ...turn,
     ...command,
     onAgentsChanged: (event) => agents.acceptPayload(event),
+    refreshAgents: () => agents.requestAgent("getState", {}).catch(() => {}),
     toggleSidebar: layout.toggleSidebar,
     drawerOpen: () => Boolean(layout.drawer),
   };

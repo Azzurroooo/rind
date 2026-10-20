@@ -439,7 +439,6 @@ export function Shell() {
                   "Confirmed run stopped",
                 )
               }
-              onReadLog={(target) => agents.requestAgent("serviceLog", { target })}
               onOpenTask={(teamId, taskId) => agents.selectTask(teamId, taskId)}
               onOpenSession={(id, item) => {
                 if (item?.teamId || item?.agentId) {

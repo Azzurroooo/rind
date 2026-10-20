@@ -134,7 +134,7 @@ export type AppState = {
   newTeamOpen: boolean
   inboxSelectedTaskId: string
   artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
-  serviceLogView: { title: string; content: string } | null
+
 }
 // ---------- keyboard map (C11): one table for every shortcut ----------
 

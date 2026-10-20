@@ -32,6 +32,7 @@ const unscoped = new Set([
   "rind/folder_defaults/set",
   "rind/folder_defaults/unset",
   "rind/folder_defaults/resolve",
+  "agents/get",
   "agents/request",
   "agents/openSession",
   "agents/createSession",
@@ -152,8 +153,12 @@ export class DesktopGateway {
         }
       })
       this.unsubscribeAgents = this.bridge.subscribeAgents?.((state) => {
+        const eventPayload =
+          state && typeof state === "object" && !Array.isArray(state)
+            ? { type: "agents_changed", ...(state as Record<string, unknown>) }
+            : state
         for (const ws of this.clients.keys()) {
-          this.send(ws, { kind: "event", method: "agents/update", event: state })
+          this.send(ws, { kind: "event", method: "agents/update", event: eventPayload })
         }
       })
       this.publish(); return this.state()
@@ -343,13 +348,32 @@ export class DesktopGateway {
       client.selected = String(result.session_id || "")
       client.workspace = String(result.workspace_root || "")
       if (client.selected) client.subscriptions.add(client.selected)
-      const agentMethods = this.bridge.agentsRequest ? ["agents/request", "agents/openSession", "agents/createSession"] : []
+      const agentMethods = this.bridge.agentsRequest
+        ? ["agents/get", "agents/request", "agents/openSession", "agents/createSession"]
+        : []
       const caps = Array.isArray(result.capabilities) ? result.capabilities : []
       const capabilities = this.bridge.agentsRequest ? [...new Set([...caps, "agents_management"])] : caps
-      return { ...result, capabilities, methods: [...new Set([...allowed, "initialize", "ping", "session/subscribe", "session/unsubscribe", ...agentMethods])], gateway: { desktop: true, files_follow_session: true, agents: Boolean(this.bridge.agentsRequest) } }
+      const agentsState = this.bridge.agentsRequest
+        ? await this.bridge.agentsRequest("getState", {}).catch(() => null)
+        : null
+      return {
+        ...result,
+        capabilities,
+        methods: [...new Set([...allowed, "initialize", "ping", "session/subscribe", "session/unsubscribe", ...agentMethods])],
+        gateway: { desktop: true, files_follow_session: true, agents: Boolean(this.bridge.agentsRequest) },
+        ...(agentsState ? { agents_state: agentsState } : {}),
+      }
     }
-    if (method === "agents/request" || method === "agents/openSession" || method === "agents/createSession") {
+    if (
+      method === "agents/get" ||
+      method === "agents/request" ||
+      method === "agents/openSession" ||
+      method === "agents/createSession"
+    ) {
       if (!this.bridge.agentsRequest) throw new Error("Agents management is not available on this gateway.")
+      if (method === "agents/get") {
+        return this.bridge.agentsRequest("getState", {})
+      }
       if (method === "agents/openSession") {
         const res = object(await this.bridge.agentsRequest("openSession", params))
         client.selected = String(res.runtimeSessionId || "")
@@ -364,7 +388,12 @@ export class DesktopGateway {
         if (client.selected && client.subscriptions.size < 128) client.subscriptions.add(client.selected)
         return res
       }
-      const op = typeof params.operation === "string" ? params.operation : ""
+      const op =
+        typeof params.operation === "string" && params.operation.trim()
+          ? params.operation.trim()
+          : typeof params.method === "string" && params.method.trim()
+            ? params.method.trim()
+            : ""
       if (!op) throw new Error("agents/request requires operation.")
       return this.bridge.agentsRequest(op, object(params.params))
     }

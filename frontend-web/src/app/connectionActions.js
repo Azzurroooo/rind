@@ -88,7 +88,7 @@ export function createConnectionActions(ctx) {
       return;
     }
 
-    if (event.type === "agents_changed") {
+    if (message?.method === "agents/update" || event.type === "agents_changed") {
       call().onAgentsChanged?.(event);
       return;
     }
@@ -237,6 +237,16 @@ export function createConnectionActions(ctx) {
       ctx.setCurrentModel(String(result?.model || result?.current_model || "").trim());
       ctx.setStats(result?.usage || {});
       ctx.setGoal(result?.goal || null);
+      if (result?.agents_state) {
+        call().onAgentsChanged?.(result.agents_state);
+      }
+      if (
+        result?.gateway?.agents ||
+        result?.methods?.includes?.(methods.agentsGet) ||
+        result?.methods?.includes?.(methods.agentsRequest)
+      ) {
+        void call().refreshAgents?.();
+      }
       const currentId = sessionIdOf(result);
       const workspace = String(result?.workspace_root || "").trim();
       ctx.setSelectedWorkspace(workspace);

@@ -107,7 +107,7 @@ export const state: AppState = {
   newTeamOpen: false,
   inboxSelectedTaskId: "",
   artifactPreview: null,
-  serviceLogView: null,
+
 }
 export const toolOpenRequests = new Map<string, number>()
 export const replayRequests = new Map<string, Promise<void>>()

@@ -1,16 +1,14 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   Activity,
   AlertTriangle,
   Check,
-  FileCode2,
   MessageSquare,
   MoreHorizontal,
   Power,
   RefreshCw,
   RotateCw,
   Square,
-  Terminal,
 } from "lucide-react";
 import { Menu } from "../overlays/Menu.jsx";
 import { buildBackgroundModel } from "../../lib/agentsModel.js";
@@ -26,39 +24,15 @@ export function BackgroundView({
   onStopServices,
   onCancelRun,
   onResolveRun,
-  onReadLog,
   onOpenTask,
   onOpenSession,
 }) {
-  const [logView, setLogView] = useState(null); // { target, path, lines }
-
   const model = useMemo(
     () => backgroundModel || buildBackgroundModel(snapshot, service),
     [backgroundModel, snapshot, service],
   );
   const runningNow = model.runningNow || [];
   const unconfirmedRuns = model.unconfirmedRuns || [];
-
-  async function handleOpenLog(target) {
-    if (logView?.target === target) {
-      setLogView(null);
-      return;
-    }
-    try {
-      const res = await onReadLog?.(target);
-      setLogView({
-        target,
-        path: res?.path || "",
-        lines: Array.isArray(res?.lines) ? res.lines : [],
-      });
-    } catch (error) {
-      setLogView({
-        target,
-        path: "",
-        lines: [error instanceof Error ? error.message : String(error)],
-      });
-    }
-  }
 
   return (
     <div className="agents-surface">
@@ -82,24 +56,6 @@ export function BackgroundView({
           >
             <RefreshCw size={13} aria-hidden="true" />
             <span>Refresh</span>
-          </button>
-          <button
-            type="button"
-            className="agent-btn secondary sm"
-            disabled={busy}
-            onClick={() => void handleOpenLog("service")}
-          >
-            <FileCode2 size={13} aria-hidden="true" />
-            <span>Service Log</span>
-          </button>
-          <button
-            type="button"
-            className="agent-btn secondary sm"
-            disabled={busy}
-            onClick={() => void handleOpenLog("runtime")}
-          >
-            <Terminal size={13} aria-hidden="true" />
-            <span>Runtime Log</span>
           </button>
           <Menu
             label="Service actions"
@@ -268,20 +224,6 @@ export function BackgroundView({
                   </div>
                 ))}
               </div>
-            </section>
-          )}
-
-          {logView && (
-            <section className="bg-card" aria-label="Diagnostic log">
-              <div className="bg-card-head">
-                <Terminal size={15} aria-hidden="true" />
-                <h3>{logView.target === "runtime" ? "Shared Runtime Log" : "Management Service Log"}</h3>
-                {logView.path && <code className="bg-log-path">{logView.path}</code>}
-                <button type="button" className="agent-btn ghost xs" onClick={() => setLogView(null)}>
-                  Close
-                </button>
-              </div>
-              <pre className="bg-log-output">{logView.lines.join("\n")}</pre>
             </section>
           )}
         </div>

@@ -151,12 +151,8 @@ describe("Native Multi-Agent Views", () => {
     await waitFor(() => expect(onAnswerBlocker).toHaveBeenCalledWith("task-2", "Use warm amber."));
   });
 
-  it("renders BackgroundView with active runs and service logs", async () => {
+  it("renders BackgroundView with active runs and omits log viewer buttons", async () => {
     const onCancelRun = vi.fn();
-    const onReadLog = vi.fn(async () => ({
-      path: "C:/Users/admin/.rind/agents/state/service.log",
-      lines: ["[service] ready on port 49100"],
-    }));
 
     render(
       <BackgroundView
@@ -164,14 +160,13 @@ describe("Native Multi-Agent Views", () => {
         connection="connected"
         service={{ pid: 4321, working: 1, runtime: { pid: 8765 } }}
         onCancelRun={onCancelRun}
-        onReadLog={onReadLog}
       />,
     );
 
     expect(screen.getByText(/4321/)).not.toBeNull();
     expect(screen.getByText("Confirm dark mode contrast")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Service Log/i }));
-    await waitFor(() => expect(screen.getByText(/\[service\] ready on port 49100/)).not.toBeNull());
+    expect(screen.queryByRole("button", { name: /Service Log/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Runtime Log/i })).toBeNull();
   });
 
   it("integrates two-mode Multi-Agent navigation into Sidebar and keeps Inspector strictly session-scoped", () => {

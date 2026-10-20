@@ -48,6 +48,7 @@ export const methods = Object.freeze({
   authLogout: "rind/auth/logout",
   backgroundList: "rind/background/list",
   backgroundOutput: "rind/background/output",
+  agentsGet: "agents/get",
   agentsRequest: "agents/request",
   agentsOpenSession: "agents/openSession",
   agentsCreateSession: "agents/createSession",
@@ -61,4 +62,3 @@ export function parseSlashCommand(value) {
 export function sessionIdOf(value) {
   return String(value?.id || value?.session_id || "").trim();
 }
-
