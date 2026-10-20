@@ -2,7 +2,9 @@
 
 .menu {
   position: absolute;
-  z-index: 20;
+  z-index: 100;
+  isolation: isolate;
+  pointer-events: auto;
   display: grid;
   min-width: 168px;
   padding: 4px;

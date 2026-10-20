@@ -26,6 +26,9 @@ export const runtimeMethods = {
   contextInspect: "rind/context/inspect",
   usageSummary: "rind/usage/summary",
   sessionNew: "session/new",
+  sessionCreate: "session/create",
+  sessionOpen: "session/open",
+  sessionDeliver: "rind/session/deliver",
   sessionReplay: "session/replay",
   sessionPrompt: "session/prompt",
   sessionDelete: "session/delete",
@@ -39,6 +42,11 @@ export const runtimeMethods = {
   modelList: "model/list",
   modelSet: "model/set",
   modelEffort: "model/effort",
+  folderDefaultsGet: "rind/folder_defaults/get",
+  folderDefaultsSet: "rind/folder_defaults/set",
+  folderDefaultsUnset: "rind/folder_defaults/unset",
+  folderDefaultsApply: "rind/folder_defaults/apply",
+  folderDefaultsResolve: "rind/folder_defaults/resolve",
   fileRead: "file/read",
   fileList: "file/list",
   fileWrite: "file/write",
@@ -69,8 +77,10 @@ export const sessionScopedMethods = new Set<RuntimeMethod>([
   runtimeMethods.sessionReplay,
   runtimeMethods.sessionCancel,
   runtimeMethods.sessionDelete,
+  runtimeMethods.sessionDeliver,
   runtimeMethods.modelSet,
   runtimeMethods.modelEffort,
+  runtimeMethods.folderDefaultsApply,
   runtimeMethods.sessionSteer,
   runtimeMethods.sessionFollowUp,
   runtimeMethods.sessionPromoteFollowUp,
@@ -98,6 +108,7 @@ export const sessionScopedMethods = new Set<RuntimeMethod>([
 export const localOnlyRuntimeMethods = new Set<RuntimeMethod>([
   runtimeMethods.authLogin,
   runtimeMethods.authLogout,
+  runtimeMethods.sessionOpen,
 ])
 
 export const turnScopedMethods = new Set<RuntimeMethod>([
@@ -134,18 +145,52 @@ export type RuntimeEventEnvelope = {
   event: Record<string, unknown>
 }
 
+export type DesktopProviderAuthDetail = {
+  type: "oauth" | "api_key"
+  maskedKey?: string
+  expiresAt?: number | null
+}
+
+export type DesktopCustomProvider = {
+  id: string
+  name: string
+  api: string
+  baseUrl: string
+  envKey?: string
+  models: string[]
+}
+
 export type DesktopSettings = {
+  provider?: string
   model: string
   baseUrl: string
   reasoningEffort: string
   hasApiKey: boolean
+  authDetails?: Record<string, DesktopProviderAuthDetail>
+  customProviders?: DesktopCustomProvider[]
 }
 
 export type DesktopSettingsPatch = {
+  provider?: string
   apiKey?: string
   model?: string
   baseUrl?: string
   reasoningEffort?: string
+  customProvider?: {
+    id?: string
+    name: string
+    api: string
+    baseUrl: string
+    defaultModel?: string
+    apiKey?: string
+    envKey?: string
+  }
+  deleteCustomProviderId?: string
+  providerCredential?: {
+    providerId: string
+    apiKey: string
+  }
+  removeProviderCredentialId?: string
 }
 
 export type DesktopTheme = "system" | "dark" | "light"
@@ -342,6 +387,12 @@ export type DesktopApi = {
   files: {
     list: (projectPath: string, path?: string) => Promise<DesktopFileListing>
     preview: (projectPath: string, path: string) => Promise<DesktopFilePreview>
+  }
+  agents: {
+    request: (method: string, params?: Record<string, unknown>) => Promise<unknown>
+    openSession: (params: Record<string, unknown>) => Promise<unknown>
+    createSession: (params: Record<string, unknown>) => Promise<unknown>
+    subscribe: (listener: (state: Record<string, unknown>) => void) => () => void
   }
   quit: () => Promise<void>
   platform: string

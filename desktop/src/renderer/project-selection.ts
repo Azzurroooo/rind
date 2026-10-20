@@ -26,6 +26,10 @@ export function defaultNewChatProjectPath(
   return projects.find((project) => project.available)?.path || ""
 }
 
-export function workingDirectorySelectionEnabled(projectCount: number, viewedSessionId: string) {
-  return projectCount > 0 && !viewedSessionId
+export function workingDirectorySelectionEnabled(
+  projectCount: number,
+  viewedSessionId: string,
+  agentLocked = false,
+) {
+  return projectCount > 0 && !viewedSessionId && !agentLocked
 }

@@ -73,7 +73,23 @@
 .starter-chip:hover { background: var(--fill-1); }
 .starter-chip svg { color: var(--dim); }
 
-/* Change summary and working line. */
+.message.user.is-delivery { align-items: flex-end; }
+.delivery-badge {
+  display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-pill);
+  background: var(--accent-soft); color: var(--accent);
+  font: 600 10.5px/1 var(--font-mono); letter-spacing: .03em; text-transform: uppercase;
+}
+.message.user.is-delivery .user-bubble {
+  border: 1px solid var(--line-strong); background: var(--surface);
+}
+
+/* Change summary card and working line. */
+.change-summary-card {
+  align-self: flex-start; display: flex; flex-direction: column; gap: var(--space-2);
+  max-width: 100%; min-width: min(360px, 100%);
+}
+.change-summary-bar { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .change-summary {
   align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-2);
   height: var(--control-md); padding: 0 var(--space-3);
@@ -81,9 +97,66 @@
   color: var(--muted); font-size: var(--text-dense);
 }
 .change-summary:hover { background: var(--fill-1); color: var(--text); }
+.change-summary-jump {
+  height: var(--control-sm); padding: 0 var(--space-2);
+  border: 0; border-radius: var(--radius-chip); background: transparent;
+  color: var(--dim); font-size: var(--text-meta);
+}
+.change-summary-jump:hover { background: var(--fill-1); color: var(--text); }
+.change-file-list {
+  display: flex; flex-direction: column; gap: 2px; padding: var(--space-1);
+  border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface);
+}
+.change-file-row {
+  display: flex; align-items: center; gap: var(--space-2); min-height: 28px; padding: 0 var(--space-2);
+  border-radius: var(--radius-chip); font-size: var(--text-dense);
+}
+.change-file-row:hover { background: var(--fill-1); }
+.change-file-path {
+  flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; padding: 0;
+  border: 0; background: transparent; color: var(--text);
+  font-family: var(--font-mono); font-size: var(--text-meta); text-align: left;
+}
+.change-file-path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.change-file-path:hover { color: var(--accent); }
+.change-file-diff {
+  height: 22px; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--radius-chip);
+  background: var(--surface-soft); color: var(--muted); font: 10.5px var(--font-mono);
+}
+.change-file-diff:hover { border-color: var(--line-strong); color: var(--text); }
 .change-delta { font-family: var(--font-mono); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
 .change-delta .added { color: var(--success); }
 .change-delta .removed { color: var(--danger); }
+
+.quote-selection-pill {
+  position: absolute; z-index: 8; display: inline-flex; align-items: center; gap: 5px;
+  height: 28px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill);
+  background: var(--surface); box-shadow: var(--shadow-popover); color: var(--text);
+  font-size: var(--text-dense); font-weight: 500; animation: pop-in 120ms var(--ease);
+}
+.quote-selection-pill:hover { background: var(--fill-1); color: var(--accent); }
+
+.chat-minimap {
+  position: absolute; right: 10px; top: 50%; z-index: 3; transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  padding: 6px 4px; border-radius: var(--radius-pill);
+  opacity: .55; transition: opacity var(--motion-fast) var(--ease);
+}
+.chat-minimap:hover, .chat-minimap:focus-within { opacity: 1; background: var(--surface); box-shadow: var(--shadow-popover); }
+.chat-minimap-tick {
+  display: inline-flex; align-items: center; justify-content: flex-end;
+  width: 18px; height: 10px; padding: 0; border: 0; background: transparent;
+}
+.chat-minimap-bar {
+  width: 10px; height: 2px; border-radius: 2px; background: var(--line-strong);
+  transition: width var(--motion-fast) var(--ease), background var(--motion-fast) var(--ease);
+}
+.chat-minimap-tick.is-delivery .chat-minimap-bar { background: var(--accent); }
+.chat-minimap-tick:hover .chat-minimap-bar, .chat-minimap-tick:focus-visible .chat-minimap-bar {
+  width: 16px; background: var(--accent);
+}
+@media (max-width: 767px) { .chat-minimap { display: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   .caret { animation: none; }
 }

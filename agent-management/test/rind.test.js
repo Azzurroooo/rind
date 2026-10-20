@@ -321,7 +321,7 @@ test("leader delegates in background, steers running sub-agent mid-turn, collect
           delta = { tool_calls: [{ index: 0, id: "del-slow", type: "function", function: { name: "delegate", arguments: JSON.stringify({ to: "Builder", brief: "Slow work" }) } }] };
         } else if (turnTools.length === 1) {
           slowTaskId = JSON.parse(turnTools[0].content).data.taskId;
-          setTimeout(() => resolveWaitStarted(), 250);
+
           delta = { tool_calls: [{ index: 0, id: "wait-slow", type: "function", function: { name: "delegate", arguments: JSON.stringify({ wait: true, timeoutMs: 30000 }) } }] };
         } else if (turnTools.length === 2) {
           releasedWaitPayload = JSON.parse(turnTools[1].content).data;
@@ -375,7 +375,7 @@ test("leader delegates in background, steers running sub-agent mid-turn, collect
   memberAgentId = member.id;
 
   const session = await user.request("attachSession", { agentId: leader.id, teamId: team.id, shared: true });
-  window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }) });
+  window = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", leaderWorkspace], externalTools: await user.request("sessionTools", { sessionId: session.id }), onMessage(msg) { if (msg?.event?.type === "tool_call_started" && msg.event.tool_call_id === "wait-slow") setTimeout(() => resolveWaitStarted(), 300); } });
   const info = await window.request("session/create", {});
   await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
 

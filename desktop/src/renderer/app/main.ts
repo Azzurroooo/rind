@@ -1,4 +1,5 @@
 import "./dom.ts"
+import { bindAgentsEvents } from "./agents-ui.ts"
 import { clearSlashCommandPending } from "./composer.ts"
 import { requiredElement } from "./dom.ts"
 import { remoteAccess } from "./remote-instance.ts"
@@ -21,6 +22,7 @@ import { bindGoalEvents } from "./inspector-goal.ts"
 import { bindTasksEvents, stopTaskPolling } from "./inspector-tasks.ts"
 import { bindPaletteEvents } from "./palette-ui.ts"
 import { bindOverlays } from "./overlays.ts"
+import { bindCustomSelects } from "../custom-select.ts"
 
 
 requiredElement("open-remote").addEventListener("click", remoteAccess.open)
@@ -38,6 +40,8 @@ bindGoalEvents()
 bindTasksEvents()
 bindPaletteEvents()
 bindOverlays()
+bindCustomSelects()
+const unsubscribeAgents = bindAgentsEvents()
 
 const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   state.runtime = snapshot
@@ -70,6 +74,7 @@ const onThemeMediaChange = () => { if (state.theme === "system") renderTheme() }
 if (typeof themeMedia.addEventListener === "function") themeMedia.addEventListener("change", onThemeMediaChange)
 window.addEventListener("beforeunload", () => {
   remoteAccess.dispose()
+  unsubscribeAgents()
   unsubscribeStatus()
   unsubscribeEvents()
   unsubscribeNotifyActivate()

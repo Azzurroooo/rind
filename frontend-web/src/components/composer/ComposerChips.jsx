@@ -1,4 +1,4 @@
-import { Brain, Check, ChevronDown } from "lucide-react";
+import { Brain, ChevronDown } from "lucide-react";
 import { Menu } from "../overlays/Menu.jsx";
 import { REASONING_EFFORTS } from "../../app/constants.js";
 import { formatTokens, usageFraction } from "../../lib/format.js";
@@ -16,7 +16,6 @@ export function EffortChip({ effort, disabled, onSelect }) {
     id: `effort-${option}`,
     label: labels[option] || option,
     selected: option === effort,
-    icon: <span className="model-option-check">{option === effort && <Check size={14} />}</span>,
     onSelect: () => option !== effort && onSelect?.(option),
   }));
   return (

@@ -154,7 +154,6 @@ export function ModelPicker({ model, providerId = "", models = [], providerNames
                         onSelect?.({ providerId: option.providerId, modelId: option.id });
                       }}
                     >
-                      <span className="model-option-check">{selected && <Check size={14} aria-label="Selected" />}</span>
                       <span className="model-option-name">{option.id}</span>
                       {option.imageInput && (
                         <span role="img" aria-label="Supports images" className="model-option-vision">
@@ -162,6 +161,7 @@ export function ModelPicker({ model, providerId = "", models = [], providerNames
                         </span>
                       )}
                       {context && <span className="model-option-meta">{context}</span>}
+                      <span className="model-option-check">{selected && <Check size={13} aria-label="Selected" />}</span>
                     </button>
                   );
                 })}

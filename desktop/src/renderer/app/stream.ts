@@ -1,7 +1,9 @@
 import { renderCommandResult } from "../command-results.ts"
+import { ChevronDown, ChevronRight, FileDiff, FileText, renderIcon } from "../icons.ts"
 import { isStreamingAssistant, latestAssistantId } from "../message-view.ts"
 import { questionCardMarkup, syncQuestionCard } from "../question-card.ts"
 import { type Entry } from "../timeline-model.ts"
+import { summarizeTurnFileChanges } from "../tool-display.ts"
 import { foldWorkSegments, isWorkSegment, segmentOpenMode, type StreamItem } from "../work-segments.ts"
 import { SegmentPresentation, reconcileToolElement } from "../segment-presentation.ts"
 import { canRetryLastPrompt } from "./composer.ts"
@@ -23,6 +25,13 @@ const idleContext: MessageContext = { openAssistantId: "", activeTurn: false, la
 let folds = new SegmentPresentation()
 let foldSession = ""
 let foldTimer: ReturnType<typeof setTimeout> | undefined
+const expandedChangeSummarySessions = new Set<string>()
+
+export function toggleChangeSummaryExpanded(sessionId = state.viewedSessionId) {
+  if (!sessionId) return
+  if (expandedChangeSummarySessions.has(sessionId)) expandedChangeSummarySessions.delete(sessionId)
+  else expandedChangeSummarySessions.add(sessionId)
+}
 
 export function renderStream() {
   const stickToBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
@@ -59,14 +68,14 @@ export function renderStream() {
     }
   }
   const extras = document.createElement("template")
-  extras.innerHTML = renderQuestion()
+  extras.innerHTML = `${renderQuestion()}${activeTurn ? "" : renderTurnChangeSummary(entries)}`
   const specialNodes = new Map<string, HTMLElement>()
   for (const node of messageStream.querySelectorAll<HTMLElement>("[data-stream-role]")) {
     if (node.dataset.streamRole) specialNodes.set(node.dataset.streamRole, node)
   }
   for (const next of Array.from(extras.content.children) as HTMLElement[]) {
     const current = next.dataset.streamRole ? specialNodes.get(next.dataset.streamRole) : undefined
-    if (current && current.dataset.questionId === next.dataset.questionId) {
+    if (next.dataset.streamRole === "question" && current && current.dataset.questionId === next.dataset.questionId) {
       nextNodes.push(current)
     } else {
       nextNodes.push(next)
@@ -94,6 +103,7 @@ export function renderStream() {
   } else {
     messageStream.querySelector(".stream-empty")?.remove()
   }
+  syncChatMiniMap(entries)
   if (stickToBottom) {
     messageStream.scrollTop = messageStream.scrollHeight
     jumpLatest.hidden = true
@@ -138,7 +148,7 @@ export function renderEntry(entry: Entry, context: MessageContext = idleContext)
 function renderEntryContent(entry: Entry, context: MessageContext): string {
   switch (entry.kind) {
     case "user":
-      return renderUserMessage(entry.id, entry.content, entry.time)
+      return renderUserMessage(entry.id, entry.content, entry.time, entry.delivery)
     case "assistant":
       return renderAssistantMessage(entry.id, entry.content, {
         streaming: isStreamingAssistant(entry.id, context.openAssistantId, context.activeTurn),
@@ -164,6 +174,62 @@ export function renderQuestion(): string {
   const question = state.conversation.question
   if (!question) return ""
   return questionCardMarkup(question, questionSelectionFor(question))
+}
+
+function renderTurnChangeSummary(entries: readonly Entry[]): string {
+  const files = summarizeTurnFileChanges(entries)
+  if (!files.length) return ""
+  const expanded = expandedChangeSummarySessions.has(state.viewedSessionId)
+  const totalAdded = files.reduce((sum, file) => sum + file.added, 0)
+  const totalRemoved = files.reduce((sum, file) => sum + file.removed, 0)
+  const firstToolId = files[0]?.toolCallId || ""
+  const chevron = renderIcon(expanded ? ChevronDown : ChevronRight, "change-summary-chevron")
+  const icon = renderIcon(FileDiff, "change-summary-icon")
+  const fileRows = expanded
+    ? `<div class="change-file-list" role="list">${files.map((file) => `
+        <div class="change-file-row" role="listitem">
+          <button type="button" class="change-file-path" data-open-file="${escapeAttribute(file.path)}" title="Preview ${escapeAttribute(file.path)} in Files">
+            ${renderIcon(FileText, "change-file-icon")}
+            <span>${escapeHtml(file.path)}</span>
+          </button>
+          <span class="change-delta"><span class="added">+${file.added}</span> <span class="removed">−${file.removed}</span></span>
+          ${file.toolCallId ? `<button type="button" class="change-file-diff" data-jump-tool="${escapeAttribute(file.toolCallId)}" title="Scroll to edit in conversation">Diff</button>` : ""}
+        </div>
+      `).join("")}</div>`
+    : ""
+  return `<div class="change-summary-card${expanded ? " is-expanded" : ""}" data-stream-role="change-summary">
+    <div class="change-summary-bar">
+      <button type="button" class="change-summary" data-toggle-change-summary aria-expanded="${String(expanded)}">
+        ${chevron}${icon}
+        <span>Changed ${files.length} ${files.length === 1 ? "file" : "files"}</span>
+        <span class="change-delta"><span class="added">+${totalAdded}</span> <span class="removed">−${totalRemoved}</span></span>
+      </button>
+      ${firstToolId ? `<button type="button" class="change-summary-jump" data-jump-tool="${escapeAttribute(firstToolId)}" title="Jump to first diff in conversation">Jump to diff</button>` : ""}
+    </div>
+    ${fileRows}
+  </div>`
+}
+
+function syncChatMiniMap(entries: readonly Entry[]) {
+  const wrap = messageStream.parentElement
+  if (!wrap) return
+  const userTurns = entries.filter((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && Boolean(entry.id))
+  let nav = wrap.querySelector<HTMLElement>(".chat-minimap")
+  if (userTurns.length < 2) {
+    nav?.remove()
+    return
+  }
+  if (!nav) {
+    nav = document.createElement("nav")
+    nav.className = "chat-minimap"
+    nav.setAttribute("aria-label", "Turn landmarks")
+    wrap.append(nav)
+  }
+  const markup = userTurns.map((turn, index) => {
+    const preview = turn.content.replace(/\s+/g, " ").trim().slice(0, 72) || `Turn ${index + 1}`
+    return `<button type="button" class="chat-minimap-tick${turn.delivery ? " is-delivery" : ""}" data-turn-jump="${escapeAttribute(turn.id)}" title="${escapeAttribute(`${index + 1}. ${preview}`)}" aria-label="${escapeAttribute(`Jump to turn ${index + 1}: ${preview}`)}"><span class="chat-minimap-bar"></span></button>`
+  }).join("")
+  if (nav.innerHTML !== markup) nav.innerHTML = markup
 }
 
 export function toolHeaderOffset(id: string) {

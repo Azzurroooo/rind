@@ -1,4 +1,5 @@
 import { type RuntimeMethod, runtimeMethods, sessionScopedMethods, turnScopedMethods } from "../../preload/types.ts"
+import { resolveSessionAgentContext } from "../agents-model.ts"
 import { sameProjectPath as samePath } from "../project-selection.ts"
 import { createQuestionSelection, type QuestionSelection } from "../question-state.ts"
 import { mergeSlashCatalog } from "../desktop-slash.ts"
@@ -160,7 +161,34 @@ export function draftModelSelection() {
 export async function ensureSession(workspaceRoot: string, requestedSessionId?: string, selection = draftModelSelection()) {
   const currentSessionId = requestedSessionId === undefined ? state.viewedSessionId : requestedSessionId
   if (currentSessionId) return currentSessionId
-  const created = asRecord(await request(runtimeMethods.sessionNew, { workspace_root: workspaceRoot }))
+  const agentCtx =
+    state.agentChatContext && state.agentChatContext.kind !== "independent"
+      ? state.agentChatContext
+      : resolveSessionAgentContext(state.agentsSnapshot, "", workspaceRoot)
+  let created: Record<string, unknown>
+  if (agentCtx && agentCtx.kind !== "independent" && window.api.agents) {
+    const res = asRecord(
+      await window.api.agents.createSession({
+        managementSessionId: agentCtx.managementSessionId,
+        manager: agentCtx.kind === "manager",
+        teamId: agentCtx.kind === "member" ? agentCtx.teamId : undefined,
+        agentId: agentCtx.kind === "member" ? agentCtx.agentId : undefined,
+        workspace_root: workspaceRoot,
+        model_id: selection.model.trim() || undefined,
+        provider_id: selection.provider || undefined,
+        reasoning_effort: selection.effort || undefined,
+      }),
+    )
+    created = asRecord(res.runtimeSession || res)
+    const managementSessionId = asRecordText(res.managementSessionId) || agentCtx.managementSessionId
+    state.agentChatContext = {
+      ...agentCtx,
+      ...(managementSessionId ? { managementSessionId } : {}),
+      workspaceRoot,
+    }
+  } else {
+    created = asRecord(await request(runtimeMethods.sessionNew, { workspace_root: workspaceRoot }))
+  }
   const sessionId = asRecordText(created.session_id)
   if (!sessionId) throw new Error("Runtime did not create a session.")
   const selectedModel = selection.model.trim() || asRecordText(created.model)
@@ -206,7 +234,7 @@ export async function loadReplay(sessionId = state.viewedSessionId) {
 export async function loadReplayNow(sessionId: string) {
   if (!sessionId) return
   const session = knownSessions().find((item) => item.id === sessionId)
-  if (!session) return
+  if (!session && sessionId !== state.viewedSessionId) return
   await ensureRuntime()
   const result = asRecord(await requestForSession(runtimeMethods.sessionReplay, sessionId))
   const messages = Array.isArray(result.messages) ? result.messages : []

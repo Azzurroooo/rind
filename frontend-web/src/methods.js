@@ -2,11 +2,14 @@ export const methods = Object.freeze({
   initialize: "initialize",
   sessionList: "session/list",
   sessionNew: "session/new",
+  sessionCreate: "session/create",
+  sessionOpen: "session/open",
   sessionSwitch: "session/switch",
   sessionReplay: "session/replay",
   sessionPrompt: "session/prompt",
   sessionCancel: "session/cancel",
   sessionDelete: "session/delete",
+  sessionDeliver: "rind/session/deliver",
   sessionSteer: "rind/session/steer",
   sessionFollowUp: "rind/session/follow_up",
   sessionPromoteFollowUp: "rind/session/promote_follow_up",
@@ -24,6 +27,11 @@ export const methods = Object.freeze({
   goalSet: "rind/goal/set",
   goalStatus: "rind/goal/status",
   goalClear: "rind/goal/clear",
+  folderDefaultsGet: "rind/folder_defaults/get",
+  folderDefaultsSet: "rind/folder_defaults/set",
+  folderDefaultsUnset: "rind/folder_defaults/unset",
+  folderDefaultsApply: "rind/folder_defaults/apply",
+  folderDefaultsResolve: "rind/folder_defaults/resolve",
   fileList: "file/list",
   fileRead: "file/read",
   fileWrite: "file/write",
@@ -36,8 +44,14 @@ export const methods = Object.freeze({
   contextInspect: "rind/context/inspect",
   usageSummary: "rind/usage/summary",
   authList: "rind/auth/list",
+  authLogin: "rind/auth/login",
+  authLogout: "rind/auth/logout",
   backgroundList: "rind/background/list",
   backgroundOutput: "rind/background/output",
+  agentsGet: "agents/get",
+  agentsRequest: "agents/request",
+  agentsOpenSession: "agents/openSession",
+  agentsCreateSession: "agents/createSession",
 });
 
 export function parseSlashCommand(value) {
@@ -48,4 +62,3 @@ export function parseSlashCommand(value) {
 export function sessionIdOf(value) {
   return String(value?.id || value?.session_id || "").trim();
 }
-

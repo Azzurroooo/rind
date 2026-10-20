@@ -100,6 +100,39 @@ input.on("line", (line) => {
     respond(request, { session_id: "fake-session", model: "fake-model", reasoning_effort: reasoningEffort })
     return
   }
+  if (request.method === "session/create") {
+    const params = requireParams(request)
+    const sessionId = String(params.session_id || "fake-session")
+    respond(request, {
+      session_id: sessionId,
+      model: String(params.model_id || "fake-model"),
+      reasoning_effort: String(params.reasoning_effort || reasoningEffort),
+      workspace_root: String(params.workspace_root || "/workspace"),
+      name: String(params.name || ""),
+    })
+    return
+  }
+  if (request.method === "session/open") {
+    const params = requireParams(request)
+    respond(request, {
+      session_id: String(params.session_id || ""),
+      model: "fake-model",
+      reasoning_effort: reasoningEffort,
+      workspace_root: String(params.workspace_root || "/workspace"),
+      history: [],
+      pending_inputs: [],
+    })
+    return
+  }
+  if (request.method === "rind/session/deliver") {
+    const params = requireParams(request)
+    respond(request, {
+      ok: true,
+      session_id: String(params.session_id || "fake-session"),
+      delivery: params.delivery || {},
+    })
+    return
+  }
   if (request.method === "session/prompt") {
     const params = requireParams(request)
     for (const type of ["turn_started", "assistant_message_completed", "turn_completed"]) {
@@ -211,6 +244,31 @@ input.on("line", (line) => {
   if (request.method === "rind/goal/clear") {
     goal = null
     respond(request, { goal: null })
+    return
+  }
+  if (
+    request.method === "rind/folder_defaults/get" ||
+    request.method === "rind/folder_defaults/set" ||
+    request.method === "rind/folder_defaults/unset" ||
+    request.method === "rind/folder_defaults/resolve"
+  ) {
+    const params = requireParams(request)
+    respond(request, {
+      workspace_root: String(params.workspace_root || "/workspace"),
+      defaults: {
+        provider_id: String(params.provider_id || ""),
+        model_id: String(params.model_id || "fake-model"),
+        reasoning_effort: String(params.reasoning_effort || reasoningEffort),
+      },
+    })
+    return
+  }
+  if (request.method === "rind/folder_defaults/apply") {
+    const params = requireParams(request)
+    respond(request, {
+      ok: true,
+      session_id: String(params.session_id || "fake-session"),
+    })
     return
   }
   if (request.method === "emit") {

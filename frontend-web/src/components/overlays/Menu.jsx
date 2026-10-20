@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Check } from "lucide-react";
 
 // Dropdown menu with roving focus (ArrowUp/Down, Home/End), Esc and outside-click close.
 // Items: { id, label, icon?, danger?, disabled?, onSelect } or { separator: true }.
@@ -21,6 +22,34 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
   }, [setOpen]);
 
   useEffect(() => { if (disabled) close(false); }, [disabled, close]);
+
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const clampToViewport = () => {
+      const listEl = listRef.current;
+      const rootEl = rootRef.current;
+      if (!listEl || !rootEl || typeof window === "undefined") return;
+      listEl.style.left = "";
+      listEl.style.right = "";
+      const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
+      if (!viewportWidth) return;
+      const margin = 8;
+      const menuRect = listEl.getBoundingClientRect();
+      const rootRect = rootEl.getBoundingClientRect();
+      if (menuRect.width <= 0 && menuRect.right === 0) return;
+      if (menuRect.right > viewportWidth - margin) {
+        const targetLeft = Math.max(margin, viewportWidth - margin - menuRect.width);
+        listEl.style.left = `${Math.round(targetLeft - rootRect.left)}px`;
+        listEl.style.right = "auto";
+      } else if (menuRect.left < margin) {
+        listEl.style.left = `${Math.round(margin - rootRect.left)}px`;
+        listEl.style.right = "auto";
+      }
+    };
+    clampToViewport();
+    window.addEventListener("resize", clampToViewport);
+    return () => window.removeEventListener("resize", clampToViewport);
+  }, [open, align, placement, items]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -88,6 +117,7 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
           aria-label={label}
           className={`menu menu-${align} menu-${placement}`}
           onKeyDown={onKeyDown}
+          onClick={(event) => event.stopPropagation()}
         >
           {items.map((item, index) =>
             item.separator ? (
@@ -109,6 +139,11 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
                 {item.icon && <span className="menu-icon" aria-hidden="true">{item.icon}</span>}
                 <span className="menu-label">{item.label}</span>
                 {item.hint && <span className="menu-hint">{item.hint}</span>}
+                {selection && (
+                  <span className="model-option-check" aria-hidden="true">
+                    {item.selected && <Check size={13} />}
+                  </span>
+                )}
               </button>
             ),
           )}

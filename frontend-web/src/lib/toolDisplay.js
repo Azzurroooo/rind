@@ -5,7 +5,7 @@
 import { changeStats, filePath, formatEditFile, formatGlob, formatGrep, formatReadFile, formatWriteFile } from "./tools/fileTools.js";
 import { formatCreate, formatFetchWebPage, formatGeneric, formatSearchWeb, formatUpdateGoal } from "./tools/miscTools.js";
 import { errorMessage, parseToolArguments, payloadParts, splitError, singleLine } from "./tools/parse.js";
-import { formatBash, formatBashOutput, formatDelegate, formatTaskControl } from "./tools/runTools.js";
+import { formatAgentManagement, formatBash, formatBashOutput, formatDelegate, formatReport, formatTaskControl } from "./tools/runTools.js";
 import { CAPS, meta } from "./tools/caps.js";
 
 export { parseToolArguments, parseToolResult, partialJsonStrings } from "./tools/parse.js";
@@ -27,6 +27,8 @@ const FORMATTERS = {
   web_search: formatSearchWeb,
   fetch_web_page: formatFetchWebPage,
   delegate: formatDelegate,
+  report: formatReport,
+  agent_management: formatAgentManagement,
   agent_create: formatCreate("agent"),
   update_goal: formatUpdateGoal,
 };
@@ -117,6 +119,32 @@ export function summarizeChanges(entries) {
     removed: stats.reduce((sum, file) => sum + file.removed, 0),
     firstToolCallId: String(touched[0].entry.tool_call_id || touched[0].entry.id || ""),
   };
+}
+
+export function summarizeTurnFileList(entries) {
+  let start = entries.length;
+  while (start > 0) {
+    const role = entries[start - 1]?.role;
+    if (role === "user" || role === "queued") break;
+    start -= 1;
+  }
+  const byPath = new Map();
+  for (const entry of entries.slice(start)) {
+    if (entry?.role !== "tool") continue;
+    const files = toolChangeStats(String(entry.name || ""), entry);
+    const callId = String(entry.tool_call_id || entry.id || "");
+    for (const file of files) {
+      if (!file.path) continue;
+      const prev = byPath.get(file.path) || { path: file.path, added: 0, removed: 0, toolCallId: callId };
+      byPath.set(file.path, {
+        path: file.path,
+        added: prev.added + (Number(file.added) || 0),
+        removed: prev.removed + (Number(file.removed) || 0),
+        toolCallId: prev.toolCallId || callId,
+      });
+    }
+  }
+  return [...byPath.values()];
 }
 
 export function formatDuration(durationMs) {

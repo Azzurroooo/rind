@@ -20,7 +20,7 @@ try {
   $applicationName = [IO.Path]::GetFileNameWithoutExtension($program)
   $automaticBlocks = @(Get-NetFirewallApplicationFilter -PolicyStore PersistentStore -Program $program -ErrorAction SilentlyContinue | Get-NetFirewallRule | Where-Object {
     $rule = $_
-    $promptName = $rule.Name -like 'TCP Query User*' -or ($rule.Name -match '^\\{[0-9a-f-]{36}\\}$' -and $rule.DisplayName -eq $applicationName -and $rule.Description -eq $applicationName -and -not $rule.Group)
+    $promptName = $rule.Name -like 'TCP Query User*' -or ($rule.Name -match '^\\{[0-9a-f-]{36}\\}$' -and (($rule.DisplayName -eq $applicationName -and $rule.Description -eq $applicationName) -or $rule.DisplayName -in @($applicationName, 'Electron', 'Rind')) -and -not $rule.Group)
     if (-not $promptName -or $rule.Direction -ne 'Inbound' -or $rule.Action -ne 'Block') { return $false }
     $ports = $rule | Get-NetFirewallPortFilter
     $addresses = $rule | Get-NetFirewallAddressFilter
@@ -28,7 +28,7 @@ try {
   })
   $existing = Get-NetFirewallRule -PolicyStore PersistentStore -Name $name -ErrorAction SilentlyContinue
   if ($existing) { $existing | Remove-NetFirewallRule }
-  New-NetFirewallRule -PolicyStore PersistentStore -Name $name -DisplayName 'Rind Remote Access' -Group 'Rind Remote Access' -Direction Inbound -Action Allow -Enabled True -Profile Any -Program $program -Protocol TCP -LocalPort ${port} -RemoteAddress LocalSubnet -EdgeTraversalPolicy Block | Out-Null
+  New-NetFirewallRule -PolicyStore PersistentStore -Name $name -DisplayName 'Rind Remote Access' -Group 'Rind Remote Access' -Direction Inbound -Action Allow -Enabled True -Profile Any -Program $program -Protocol TCP -LocalPort ${port} -RemoteAddress LocalSubnet,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10 -EdgeTraversalPolicy Block | Out-Null
   $automaticBlocks | Remove-NetFirewallRule
   # An explicit block wins over an allow. Do not report success while one
   # still covers the current port; custom/managed policy needs its owner.

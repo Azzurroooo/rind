@@ -1,5 +1,6 @@
 import { methods, sessionIdOf } from "../methods.js";
 import { isAuthError } from "../runtimeClient.js";
+import { isManagedAgentWorkspace } from "../lib/agentsModel.js";
 import { finalAssistantText, showNotification, truncateFirstLine } from "../lib/notifications.js";
 import { readPreference } from "../lib/sessionPreferences.js";
 import { fetchTicket, loginErrorMessage, unauthorizedMessage } from "../ticket.js";
@@ -18,13 +19,94 @@ export function createConnectionActions(ctx) {
     if (!event || typeof event !== "object") return;
     const envelopeSession = String(message.session_id || event.session_id || "");
     const currentSession = String(refs.info.current.session_id || "");
-    call().trackRunning(envelopeSession || currentSession, event.type, message.turn_id || event.turn_id);
-    if (event.type === "turn_started" || event.type === "queued_input_delivered") call().touchSession(envelopeSession || currentSession);
+    const targetSession = envelopeSession || currentSession;
+
+    if (event.type === "session_renamed" && targetSession) {
+      const nextName = event.name !== undefined ? String(event.name || "") : undefined;
+      const nextTitle = String(event.title || event.name || "");
+      ctx.setSessions((sessions) => sessions.map((session) => (
+        sessionIdOf(session) === targetSession
+          ? { ...session, ...(nextName !== undefined ? { name: nextName } : {}), ...(nextTitle ? { title: nextTitle } : {}) }
+          : session
+      )));
+      if (targetSession === currentSession) {
+        refs.info.current = { ...refs.info.current, ...(nextName !== undefined ? { name: nextName } : {}), ...(nextTitle ? { title: nextTitle } : {}) };
+        ctx.setInfo((current) => ({ ...current, ...(nextName !== undefined ? { name: nextName } : {}), ...(nextTitle ? { title: nextTitle } : {}) }));
+      }
+      return;
+    }
+
+    if (event.type === "session_settings_changed" && targetSession) {
+      const nextModel = String(event.model || "").trim();
+      const nextProvider = String(event.provider || "").trim();
+      const nextEffort = String(event.reasoning_effort || "").trim();
+      ctx.setSessions((sessions) => sessions.map((session) => (
+        sessionIdOf(session) === targetSession
+          ? {
+              ...session,
+              ...(nextProvider ? { provider: nextProvider } : {}),
+              ...(nextModel ? { model: nextModel } : {}),
+              ...(nextEffort ? { reasoning_effort: nextEffort } : {}),
+            }
+          : session
+      )));
+      if (targetSession === currentSession) {
+        if (nextModel) {
+          refs.currentModel.current = nextModel;
+          ctx.setCurrentModel(nextModel);
+        }
+        if (nextProvider) {
+          refs.currentProvider.current = nextProvider;
+          ctx.setCurrentProvider(nextProvider);
+        }
+        refs.info.current = {
+          ...refs.info.current,
+          ...(nextProvider ? { provider: nextProvider } : {}),
+          ...(nextModel ? { model: nextModel } : {}),
+          ...(nextEffort ? { reasoning_effort: nextEffort } : {}),
+        };
+        ctx.setInfo((current) => ({
+          ...current,
+          ...(nextProvider ? { provider: nextProvider } : {}),
+          ...(nextModel ? { model: nextModel } : {}),
+          ...(nextEffort ? { reasoning_effort: nextEffort } : {}),
+        }));
+      }
+      return;
+    }
+
+    if ((event.type === "session_deleted" || event.type === "session_discarded") && targetSession) {
+      refs.subscribed.current.delete(targetSession);
+      ctx.setSessions((sessions) => sessions.filter((session) => sessionIdOf(session) !== targetSession));
+      if (targetSession === currentSession) {
+        call().clearActiveSession(refs.workspace.current || refs.info.current.workspace_root || "");
+      }
+      return;
+    }
+
+    if (event.type === "folder_defaults_changed") {
+      void call().refreshSessions();
+      return;
+    }
+
+    if (message?.method === "agents/update" || event.type === "agents_changed") {
+      call().onAgentsChanged?.(event);
+      return;
+    }
+
+    call().trackRunning(targetSession, event.type, message.turn_id || event.turn_id);
+    if (event.type === "turn_started" || event.type === "queued_input_delivered") call().touchSession(targetSession);
     if (refs.switching.current) { refs.loadingEvents.current.push(message); return; }
     // Events from other sessions never enter this conversation: a durable
     // event lights the unread dot instead; replay rebuilds it on open.
     if (envelopeSession && currentSession && envelopeSession !== currentSession) {
       if (String(message.durability) === "durable") call().markUnread(envelopeSession);
+      if (
+        event.type === "turn_completed" ||
+        (event.type === "turn_started" && !refs.sessions.current.some((s) => sessionIdOf(s) === envelopeSession))
+      ) {
+        void call().refreshSessions();
+      }
       return;
     }
     if (event.type === "goal_updated") ctx.setGoal(event.goal || null);
@@ -42,7 +124,7 @@ export function createConnectionActions(ctx) {
       // Only when the tab is hidden AND permission was granted explicitly.
       showNotification({ title: "Rind reply ready", body: truncateFirstLine(finalAssistantText(refs.conv.current)) });
       // A brand-new session lands in the index after its first turn.
-      void call().refreshSessions(refs.workspace.current || refs.info.current.workspace_root);
+      void call().refreshSessions();
       void call().refreshContext();
     }
     if (event.type === "context_compacted") void call().refreshContext();
@@ -162,8 +244,29 @@ export function createConnectionActions(ctx) {
       ctx.setCurrentModel(String(result?.model || result?.current_model || "").trim());
       ctx.setStats(result?.usage || {});
       ctx.setGoal(result?.goal || null);
+      if (result?.agents_state) {
+        call().onAgentsChanged?.(result.agents_state);
+      }
+      if (
+        result?.gateway?.agents ||
+        result?.methods?.includes?.(methods.agentsGet) ||
+        result?.methods?.includes?.(methods.agentsRequest)
+      ) {
+        void call().refreshAgents?.();
+      }
       const currentId = sessionIdOf(result);
-      const workspace = String(result?.workspace_root || "").trim();
+      const rawWorkspace = String(result?.workspace_root || "").trim();
+      const hasHostWorkspaces = Array.isArray(result?.workspaces);
+      const hostWorkspaces = hasHostWorkspaces
+        ? [...new Set(result.workspaces.map((w) => String(w || "").trim()).filter(Boolean))]
+        : [];
+      const workspace = hasHostWorkspaces
+        ? (hostWorkspaces.includes(rawWorkspace) ? rawWorkspace : (hostWorkspaces[0] || ""))
+        : rawWorkspace;
+      if (hasHostWorkspaces) {
+        ctx.setWorkspaces(hostWorkspaces);
+      }
+      refs.workspace.current = workspace;
       ctx.setSelectedWorkspace(workspace);
       ctx.setWorkspaceDraft(workspace);
       if (previous && previous !== currentId) {
@@ -171,12 +274,17 @@ export function createConnectionActions(ctx) {
         catch (error) { if (error.type === "SessionNotFound" && currentId) await call().loadSession(currentId, true, true); else throw error; }
       } else if (currentId) await call().loadSession(currentId, true, true);
       if (run !== refs.connectionRun.current) return;
-      await call().refreshSessions(refs.info.current.workspace_root || workspace);
+      await call().refreshSessions(refs.workspace.current || workspace);
       if (run !== refs.connectionRun.current) return;
-      const allSessions = await client.request(methods.sessionList, { limit: SESSION_LIMIT_MAX });
-      if (run === refs.connectionRun.current) {
-        const roots = (allSessions?.sessions || []).map((session) => session.workspace_root);
-        ctx.setWorkspaces([...new Set([workspace, refs.info.current.workspace_root, ...roots].filter(Boolean))]);
+      if (!hasHostWorkspaces) {
+        const allSessions = await client.request(methods.sessionList, { limit: SESSION_LIMIT_MAX });
+        if (run === refs.connectionRun.current) {
+          const agentsSnapshot = result?.agents_state?.snapshot || result?.agents_state;
+          const roots = (allSessions?.sessions || []).map((session) => session.workspace_root);
+          ctx.setWorkspaces(
+            [...new Set([workspace, refs.info.current.workspace_root, ...roots].filter((root) => root && !isManagedAgentWorkspace(root, agentsSnapshot)))],
+          );
+        }
       }
       void call().refreshModels(refs.info.current.session_id);
       void call().refreshProviders();

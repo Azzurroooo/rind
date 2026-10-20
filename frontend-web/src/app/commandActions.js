@@ -61,9 +61,40 @@ export function createCommandActions(ctx) {
     const text = argument ? `/${name} ${argument}` : `/${name}`;
     const client = refs.client.current;
     const sessionId = refs.info.current.session_id;
-    const result = await client.request(methods.commandExecute, { session_id: sessionId, input: text });
+    const workspaceRoot = ctx.selectedWorkspace || refs.info.current.workspace_root || "";
+    const result = await client.request(methods.commandExecute, {
+      ...(sessionId ? { session_id: sessionId } : {}),
+      ...(workspaceRoot ? { workspace_root: workspaceRoot } : {}),
+      input: text,
+    });
     if (refs.client.current !== client || refs.info.current.session_id !== sessionId) return;
-    ctx.dispatchConversation({ kind: "message", role: "system", content: result?.text || formatResult(result), display: result?.display });
+    if (Array.isArray(result?.display?.commands) && result.display.commands.length) {
+      ctx.setInfo((current) => ({ ...current, commands: result.display.commands }));
+    }
+    if (result?.display?.type === "session_renamed" && sessionId) {
+      const nextName = result.display.name !== undefined ? String(result.display.name || "") : undefined;
+      const nextTitle = String(result.display.title || result.display.name || "");
+      ctx.setSessions((sessions) => sessions.map((session) => (
+        (session.id || session.session_id) === sessionId
+          ? { ...session, ...(nextName !== undefined ? { name: nextName } : {}), ...(nextTitle ? { title: nextTitle } : {}) }
+          : session
+      )));
+      ctx.setInfo((current) => ({ ...current, ...(nextName !== undefined ? { name: nextName } : {}), ...(nextTitle ? { title: nextTitle } : {}) }));
+    }
+    const content = result?.text ?? formatResult(result);
+    if (content) {
+      ctx.dispatchConversation({ kind: "message", role: "system", content, display: result?.display });
+    }
+    if (typeof result?.prompt_prefill === "string" && result.prompt_prefill) {
+      refs.input.current = result.prompt_prefill;
+      ctx.setInput(result.prompt_prefill);
+      refs.composer.current?.focus();
+    }
+    const nextPrompt = result?.next_prompt && typeof result.next_prompt === "object" ? result.next_prompt : null;
+    const followUp = typeof nextPrompt?.input === "string" ? nextPrompt.input.trim() : "";
+    if (followUp) {
+      await call().submit(followUp, { transientSystemMessages: nextPrompt?.transient_system_messages });
+    }
   }
 
   function showHelp() {

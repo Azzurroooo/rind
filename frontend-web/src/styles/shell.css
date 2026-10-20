@@ -25,17 +25,19 @@
 
 /* Chat header: 44px, title left, actions right. */
 .chat-header {
-  flex: none; display: flex; align-items: center; gap: var(--space-2);
+  position: relative;
+  flex: none; display: flex; align-items: center; gap: var(--space-2); min-width: 0;
   height: var(--header-height); padding: 0 var(--space-2) 0 var(--space-3);
   border-bottom: 1px solid var(--line); background: var(--bg);
 }
+.chat-header:has(.menu-root[data-open="true"]) { z-index: 40; }
 .chat-title {
-  min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; flex: 1 1 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--text-ui); font-weight: 600;
 }
-.chat-header-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.chat-header-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 2px; }
 .status-chip.accent { background: var(--accent-soft); color: var(--text); }
-.chat-header .status-chip { min-width: 54px; justify-content: center; white-space: nowrap; }
+.chat-header .status-chip { flex: none; min-width: 54px; justify-content: center; white-space: nowrap; }
 .status-chip.danger { background: var(--danger-soft); color: var(--danger); }
 .status-chip.muted { background: var(--fill-1); color: var(--muted); }
 

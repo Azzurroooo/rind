@@ -1,18 +1,143 @@
-import { requiredElement, saveSettingsButton, settingsApiKey, settingsBaseUrl, settingsDialog, settingsForm, settingsKeyStatus, settingsModel, settingsNotifications, settingsReasoning } from "./dom.ts"
-import { bindProviderEvents, loadProviders, renderProviders } from "./providers-ui.ts"
+import { type DesktopTheme, runtimeMethods } from "../../preload/types.ts"
 import { modelSelectionTarget, normalizeModelList, stringModelOptions } from "../composer-select.ts"
+import { Check, ChevronDown, renderIcon } from "../icons.ts"
+import {
+  requiredElement,
+  saveSettingsButton,
+  settingsDialog,
+  settingsForm,
+  settingsGeneralEdit,
+  settingsModel,
+  settingsModelMenu,
+  settingsNotifications,
+  settingsProvider,
+  settingsProviderMenu,
+  settingsReasoning,
+  settingsReasoningMenu,
+} from "./dom.ts"
+import { escapeAttribute, escapeHtml } from "./html.ts"
+import {
+  bindProviderEvents,
+  getMergedProviders,
+  getModelReasoningEfforts,
+  getProviderModels,
+  groupConfiguredProviders,
+  loadProviders,
+  renderProviders,
+  setOnProvidersUpdated,
+} from "./providers-ui.ts"
 import { requestForSession, runAction, runtimeTurnActive } from "./runtime.ts"
-import { currentRuntimeSnapshot } from "./sessions.ts"
-import { runtimeMethods } from "../../preload/types.ts"
-import { render } from "./shell.ts"
+import { applyOverview, currentRuntimeSnapshot } from "./sessions.ts"
+import { render, setTheme, shortcutRows } from "./shell.ts"
 import { state } from "./state.ts"
 
 const settingsTabs = ["general", "providers", "preferences"] as const
-type SettingsTab = typeof settingsTabs[number]
+type SettingsTab = (typeof settingsTabs)[number]
+type GeneralDropdownKind = "provider" | "model" | "reasoning"
 let activeSettingsTab: SettingsTab = "general"
+let generalEditing = false
+let openGeneralDropdown: GeneralDropdownKind | null = null
+
+const TAB_HEADINGS: Record<SettingsTab, { title: string; desc: string }> = {
+  general: {
+    title: "General",
+    desc: "Global default provider and model configuration (~/.rind/settings.json).",
+  },
+  providers: {
+    title: "Providers",
+    desc: "Manage OAuth accounts, custom API endpoints (~/.rind/providers.json), and built-in provider keys (~/.rind/auth.json).",
+  },
+  preferences: {
+    title: "Preferences",
+    desc: "Appearance, desktop notifications, and keyboard shortcuts.",
+  },
+}
+
+const EFFORT_LABELS: Record<string, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Maximum",
+}
 
 function isSettingsTab(value: unknown): value is SettingsTab {
   return settingsTabs.includes(value as SettingsTab)
+}
+
+function getTriggerValue(trigger: HTMLButtonElement): string {
+  return trigger.dataset.value ?? ""
+}
+
+function renderSelectTriggerHtml(label: string, opts?: { badge?: string; mono?: boolean }): string {
+  const badgeHtml = opts?.badge
+    ? `<span class="settings-select-badge">${escapeHtml(opts.badge)}</span>`
+    : ""
+  const labelClass = opts?.mono
+    ? "settings-select-trigger-label is-mono"
+    : "settings-select-trigger-label"
+  return `
+    <span class="settings-select-trigger-content">
+      <span class="${labelClass}">${escapeHtml(label)}</span>
+      ${badgeHtml}
+    </span>
+    ${renderIcon(ChevronDown, "settings-select-chevron")}
+  `
+}
+
+function renderSelectOptionHtml(
+  value: string,
+  label: string,
+  selected: boolean,
+  opts?: { badge?: string; mono?: boolean },
+): string {
+  const badgeHtml = opts?.badge
+    ? `<span class="settings-select-badge">${escapeHtml(opts.badge)}</span>`
+    : ""
+  const labelClass = opts?.mono
+    ? "settings-select-option-label is-mono"
+    : "settings-select-option-label"
+  const checkHtml = selected ? renderIcon(Check, "settings-select-check-icon") : ""
+  return `
+    <button type="button" role="option" class="settings-select-option${selected ? " is-selected" : ""}" aria-selected="${selected}" data-select-option="${escapeAttribute(value)}">
+      <span class="settings-select-option-content">
+        <span class="${labelClass}">${escapeHtml(label)}</span>
+        ${badgeHtml}
+      </span>
+      <span class="settings-select-check" aria-hidden="true">${checkHtml}</span>
+    </button>
+  `
+}
+
+function setGeneralDropdownOpen(kind: GeneralDropdownKind | null) {
+  openGeneralDropdown = generalEditing && !state.settingsSaving ? kind : null
+  const pairs: Array<[GeneralDropdownKind, HTMLButtonElement, HTMLElement]> = [
+    ["provider", settingsProvider, settingsProviderMenu],
+    ["model", settingsModel, settingsModelMenu],
+    ["reasoning", settingsReasoning, settingsReasoningMenu],
+  ]
+  for (const [k, trigger, menu] of pairs) {
+    const isOpen = openGeneralDropdown === k && !trigger.disabled
+    trigger.setAttribute("aria-expanded", String(isOpen))
+    menu.hidden = !isOpen
+    trigger.closest(".settings-select")?.classList.toggle("is-open", isOpen)
+  }
+}
+
+function syncGeneralEditingState() {
+  const locked = !generalEditing || state.settingsSaving
+  settingsProvider.disabled = locked
+  settingsModel.disabled = locked
+  settingsReasoning.disabled = locked
+  if (locked) {
+    setGeneralDropdownOpen(null)
+  }
+  settingsGeneralEdit.disabled = state.settingsSaving
+  settingsGeneralEdit.textContent = generalEditing ? "Cancel" : "Edit"
+  settingsGeneralEdit.classList.toggle("ghost-button", generalEditing)
+  settingsGeneralEdit.classList.toggle("secondary-button", !generalEditing)
+  saveSettingsButton.disabled = !generalEditing || state.settingsSaving
+  saveSettingsButton.textContent = state.settingsSaving ? "Saving..." : "Save changes"
 }
 
 function renderSettingsTabs() {
@@ -24,43 +149,166 @@ function renderSettingsTabs() {
   for (const panel of settingsDialog.querySelectorAll<HTMLElement>("[data-settings-panel]")) {
     panel.hidden = panel.dataset.settingsPanel !== activeSettingsTab
   }
-  // Provider sign-in applies immediately; only the other sections need Save.
-  saveSettingsButton.hidden = activeSettingsTab === "providers"
+  const heading = TAB_HEADINGS[activeSettingsTab]
+  const titleEl = document.getElementById("settings-active-title")
+  const descEl = document.getElementById("settings-active-desc")
+  if (titleEl) titleEl.textContent = heading.title
+  if (descEl) descEl.textContent = heading.desc
+  const hasConfigured = getMergedProviders().some((p) => p.configured)
+  saveSettingsButton.hidden = activeSettingsTab !== "general" || !hasConfigured
+  syncGeneralEditingState()
 }
 
 export function selectSettingsTab(tab: SettingsTab, focus = false) {
+  if (tab !== "general") {
+    generalEditing = false
+  }
+  setGeneralDropdownOpen(null)
   activeSettingsTab = tab
   renderSettingsTabs()
   if (tab === "providers") void loadProviders()
+  if (tab === "general") populateGeneralControls()
   if (focus) settingsDialog.querySelector<HTMLButtonElement>(`[data-settings-tab="${tab}"]`)?.focus()
+}
+
+function populateGeneralControls(preferredProvider?: string, preferredModel?: string, preferredEffort?: string) {
+  const groups = groupConfiguredProviders(getMergedProviders())
+  const configured = groups.flatMap((g) => g.providers)
+
+  const emptyEl = document.getElementById("settings-general-empty")
+  const cardEl = document.getElementById("settings-general-card")
+
+  if (configured.length === 0) {
+    if (emptyEl) emptyEl.hidden = false
+    if (cardEl) cardEl.hidden = true
+    saveSettingsButton.hidden = true
+    setGeneralDropdownOpen(null)
+    return
+  }
+
+  if (emptyEl) emptyEl.hidden = true
+  if (cardEl) cardEl.hidden = false
+  if (activeSettingsTab === "general") saveSettingsButton.hidden = false
+
+  const desiredProvider = preferredProvider ?? (getTriggerValue(settingsProvider) || state.settings.provider || "")
+  const activeProviderObj = configured.find((p) => p.id === desiredProvider) ?? configured[0]
+  const activeProvider = activeProviderObj.id
+  const activeGroup = groups.find((g) => g.providers.some((p) => p.id === activeProvider))
+
+  settingsProvider.dataset.value = activeProvider
+  settingsProvider.innerHTML = renderSelectTriggerHtml(activeProviderObj.name || activeProviderObj.id, {
+    badge: activeGroup?.key,
+  })
+  settingsProviderMenu.innerHTML = groups
+    .map((group) => {
+      const optionsHtml = group.providers
+        .map((p) =>
+          renderSelectOptionHtml(p.id, p.name || p.id, p.id === activeProvider, {
+            badge: group.key,
+          }),
+        )
+        .join("")
+      return `<div class="settings-select-group" role="group" aria-label="${escapeAttribute(group.label)}"><div class="settings-select-group-title">${escapeHtml(group.label)}</div>${optionsHtml}</div>`
+    })
+    .join("")
+
+  populateModelSelect(activeProvider, preferredModel ?? (getTriggerValue(settingsModel) || state.settings.model))
+  populateReasoningSelect(
+    activeProvider,
+    getTriggerValue(settingsModel),
+    preferredEffort ?? (getTriggerValue(settingsReasoning) || state.settings.reasoningEffort),
+  )
+  syncGeneralEditingState()
+}
+
+function populateModelSelect(providerId: string, preferredModel = "") {
+  const models = getProviderModels(providerId)
+  const activeModel = models.includes(preferredModel)
+    ? preferredModel
+    : models[0] || preferredModel || ""
+
+  const optionIds = models.length > 0 ? models : activeModel ? [activeModel] : []
+  settingsModel.dataset.value = activeModel
+  settingsModel.innerHTML = renderSelectTriggerHtml(activeModel || "No models", { mono: true })
+  settingsModelMenu.innerHTML = optionIds
+    .map((id) => renderSelectOptionHtml(id, id, id === activeModel, { mono: true }))
+    .join("")
+}
+
+function populateReasoningSelect(providerId: string, modelId: string, preferredEffort = "") {
+  const row = document.getElementById("settings-reasoning-row")
+  const efforts = getModelReasoningEfforts(providerId, modelId)
+  if (!efforts || efforts.length === 0) {
+    if (row) row.hidden = true
+    settingsReasoning.dataset.value = ""
+    settingsReasoning.innerHTML = renderSelectTriggerHtml("Default")
+    settingsReasoningMenu.innerHTML = renderSelectOptionHtml("", "Default", true)
+    if (openGeneralDropdown === "reasoning") {
+      setGeneralDropdownOpen(null)
+    }
+    return
+  }
+
+  if (row) row.hidden = false
+  const activeEffort = efforts.includes(preferredEffort) ? preferredEffort : ""
+  const activeLabel = activeEffort ? EFFORT_LABELS[activeEffort] || activeEffort : "Default"
+  settingsReasoning.dataset.value = activeEffort
+  settingsReasoning.innerHTML = renderSelectTriggerHtml(activeLabel)
+  settingsReasoningMenu.innerHTML = [
+    renderSelectOptionHtml("", "Default", activeEffort === ""),
+    ...efforts.map((effort) =>
+      renderSelectOptionHtml(effort, EFFORT_LABELS[effort] || effort, effort === activeEffort),
+    ),
+  ].join("")
+}
+
+function renderPreferencesControls() {
+  const themeGroup = document.getElementById("settings-theme-group")
+  if (themeGroup) {
+    for (const btn of themeGroup.querySelectorAll<HTMLButtonElement>("[data-theme-option]")) {
+      const active = btn.dataset.themeOption === state.theme
+      btn.setAttribute("aria-checked", String(active))
+      btn.classList.toggle("is-active", active)
+    }
+  }
+  settingsNotifications.checked = state.notificationsEnabled
+
+  const shortcutsList = document.getElementById("settings-shortcuts-list")
+  if (shortcutsList && !shortcutsList.dataset.rendered) {
+    shortcutsList.dataset.rendered = "1"
+    shortcutsList.innerHTML = shortcutRows
+      .map(
+        ([combo, label]) =>
+          `<div class="shortcut-row"><span>${escapeHtml(label)}</span><code>${escapeHtml(combo)}</code></div>`,
+      )
+      .join("")
+  }
 }
 
 export function renderSettings() {
   if (state.settingsOpen && !settingsDialog.open) settingsDialog.showModal()
   if (!state.settingsOpen && settingsDialog.open) settingsDialog.close()
-  settingsKeyStatus.textContent = state.settings.hasApiKey ? "An API key is available." : "No API key is configured."
-  saveSettingsButton.disabled = state.settingsSaving
-  saveSettingsButton.textContent = state.settingsSaving ? "Saving..." : "Save"
-  settingsNotifications.checked = state.notificationsEnabled
+  renderPreferencesControls()
   renderSettingsTabs()
 }
 
-// The runtime target reads model/list (provider-aware, all signed-in
-// providers); the settings target falls back to the main-process catalog
-// fetch of the configured OpenAI-compatible endpoint.
 export async function loadAvailableModels() {
   const target = modelSelectionTarget(currentRuntimeSnapshot().status, runtimeTurnActive())
   if (target === "runtime") {
     const sessionId = state.viewedSessionId
     const workspace = state.chatProjectPath
-    const listing = normalizeModelList(await (sessionId
-      ? requestForSession(runtimeMethods.modelList, sessionId)
-      : window.api.runtime.request(runtimeMethods.modelList, {})))
+    const listing = normalizeModelList(
+      await (sessionId
+        ? requestForSession(runtimeMethods.modelList, sessionId)
+        : window.api.runtime.request(runtimeMethods.modelList, {})),
+    )
     if (sessionId !== state.viewedSessionId || workspace !== state.chatProjectPath) return
     state.models = listing.models
-    // Catalog refresh must not overwrite a new-session draft selection.
+    if (state.settingsOpen) populateGeneralControls()
     if (!sessionId) {
-      if (!state.modelProvider && state.model === listing.currentModelId) state.modelProvider = listing.currentProviderId
+      if (!state.modelProvider && state.model === listing.currentModelId) {
+        state.modelProvider = listing.currentProviderId
+      }
       return
     }
     if (listing.currentProviderId) state.modelProvider = listing.currentProviderId
@@ -76,14 +324,10 @@ export async function loadAvailableModels() {
 export async function loadSettings() {
   try {
     state.settings = await window.api.settings.get()
-    if (!state.model) state.model = state.settings.model
-    if (!state.settings.hasApiKey && !state.settingsAutoOpened) {
-      state.settingsAutoOpened = true
-      state.notice = "Configure the shared ~/.rind/settings.json before using the runtime."
-      openSettings()
-    } else {
-      render()
-    }
+    if (!state.model && state.settings.model) state.model = state.settings.model
+    if (!state.modelProvider && state.settings.provider) state.modelProvider = state.settings.provider
+    if (!state.effort && state.settings.reasoningEffort) state.effort = state.settings.reasoningEffort
+    render()
   } catch (error) {
     state.notice = error instanceof Error ? error.message : String(error)
     render()
@@ -93,63 +337,223 @@ export async function loadSettings() {
 export function openSettings(tab: SettingsTab = "general") {
   state.settingsOpen = true
   activeSettingsTab = tab
+  generalEditing = false
+  setGeneralDropdownOpen(null)
+  const initialProvider = state.settings.provider || "openai"
+  const initialModel = state.settings.model || "gpt-4o-mini"
+  const initialEffort = state.settings.reasoningEffort || ""
+  populateGeneralControls(initialProvider, initialModel, initialEffort)
+  void loadProviders().then(() => {
+    if (!generalEditing) {
+      populateGeneralControls(state.settings.provider, state.settings.model, state.settings.reasoningEffort)
+    }
+  })
   renderProviders()
-  if (tab === "providers") void loadProviders()
-  settingsApiKey.value = ""
-  settingsBaseUrl.value = state.settings.baseUrl
-  settingsModel.value = state.settings.model
-  settingsReasoning.value = state.settings.reasoningEffort
   render()
 }
 
 export async function saveSettings() {
-  const apiKey = settingsApiKey.value.trim()
-  if (!state.settings.hasApiKey && !apiKey) {
-    state.notice = "Enter an API key to start the runtime."
-    render()
-    settingsApiKey.focus()
+  if (activeSettingsTab !== "general" || !generalEditing) {
     return
   }
+  const provider = getTriggerValue(settingsProvider).trim() || state.settings.provider || "openai"
+  const model = getTriggerValue(settingsModel).trim() || state.settings.model || "gpt-4o-mini"
+  const reasoningEffort = getTriggerValue(settingsReasoning).trim()
+
   state.settingsSaving = true
+  setGeneralDropdownOpen(null)
   state.notice = "Saving settings..."
   render()
   try {
-    const runtimeConfigChanged = Boolean(apiKey)
-      || settingsBaseUrl.value.trim() !== state.settings.baseUrl
-      || settingsModel.value.trim() !== state.settings.model
-      || settingsReasoning.value.trim() !== state.settings.reasoningEffort
-    const hasRunningRuntime = state.runtime.status === "starting" || state.runtime.status === "ready"
     state.settings = await window.api.settings.save({
-      ...(apiKey ? { apiKey } : {}),
-      model: settingsModel.value.trim(),
-      baseUrl: settingsBaseUrl.value.trim(),
-      reasoningEffort: settingsReasoning.value.trim(),
+      provider,
+      model,
+      reasoningEffort,
     })
-    state.settingsOpen = false
+
+    if (state.runtime.status === "ready") {
+      await window.api.runtime
+        .request(runtimeMethods.folderDefaultsSet, {
+          scope: "global",
+          provider_id: provider,
+          model_id: model,
+          reasoning_effort: reasoningEffort,
+        })
+        .catch(() => undefined)
+      await loadAvailableModels().catch(() => undefined)
+    }
+
+    if (!state.viewedSessionId) {
+      state.modelProvider = provider
+      state.model = model
+      state.effort = reasoningEffort
+    }
+
+    generalEditing = false
     state.settingsAutoOpened = true
-    state.notice = runtimeConfigChanged && hasRunningRuntime
-      ? "Settings saved. Existing runtimes keep their current configuration until they restart."
-      : "Settings saved."
+    state.notice = `Saved global defaults (${provider} / ${model}).`
   } catch (error) {
     state.notice = error instanceof Error ? error.message : String(error)
   } finally {
     state.settingsSaving = false
+    syncGeneralEditingState()
     render()
   }
 }
 
 export function bindSettingsEvents(): void {
-  settingsForm.addEventListener("submit", (event) => { event.preventDefault(); runAction(saveSettings) })
+  setOnProvidersUpdated(() => {
+    if (state.settingsOpen && !generalEditing) populateGeneralControls()
+  })
 
-  requiredElement("close-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
+  settingsForm.addEventListener("submit", (event) => {
+    event.preventDefault()
+    runAction(saveSettings)
+  })
 
-  requiredElement("cancel-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
+  settingsGeneralEdit.addEventListener("click", () => {
+    if (generalEditing) {
+      generalEditing = false
+      setGeneralDropdownOpen(null)
+      populateGeneralControls(
+        state.settings.provider || "openai",
+        state.settings.model || "gpt-4o-mini",
+        state.settings.reasoningEffort || "",
+      )
+    } else {
+      generalEditing = true
+      syncGeneralEditingState()
+      settingsProvider.focus()
+    }
+  })
 
-  settingsDialog.addEventListener("cancel", () => { state.settingsOpen = false; render() })
+  requiredElement("close-settings").addEventListener("click", () => {
+    generalEditing = false
+    setGeneralDropdownOpen(null)
+    state.settingsOpen = false
+    render()
+  })
+
+  requiredElement("cancel-settings").addEventListener("click", () => {
+    generalEditing = false
+    setGeneralDropdownOpen(null)
+    state.settingsOpen = false
+    render()
+  })
+
+  settingsDialog.addEventListener("cancel", (event) => {
+    if (openGeneralDropdown) {
+      event.preventDefault()
+      setGeneralDropdownOpen(null)
+      return
+    }
+    generalEditing = false
+    state.settingsOpen = false
+    render()
+  })
+
+  settingsDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && openGeneralDropdown) {
+      event.preventDefault()
+      event.stopPropagation()
+      setGeneralDropdownOpen(null)
+    }
+  })
+
+  settingsDialog.addEventListener("click", (event) => {
+    if (
+      openGeneralDropdown &&
+      !(event.target instanceof Element && event.target.closest(".settings-select"))
+    ) {
+      setGeneralDropdownOpen(null)
+    }
+  })
+
+  settingsProvider.addEventListener("click", () => {
+    if (!generalEditing || settingsProvider.disabled) return
+    setGeneralDropdownOpen(openGeneralDropdown === "provider" ? null : "provider")
+  })
+
+  settingsModel.addEventListener("click", () => {
+    if (!generalEditing || settingsModel.disabled) return
+    setGeneralDropdownOpen(openGeneralDropdown === "model" ? null : "model")
+  })
+
+  settingsReasoning.addEventListener("click", () => {
+    if (!generalEditing || settingsReasoning.disabled) return
+    setGeneralDropdownOpen(openGeneralDropdown === "reasoning" ? null : "reasoning")
+  })
+
+  settingsProviderMenu.addEventListener("click", (event) => {
+    const btn =
+      event.target instanceof Element
+        ? event.target.closest<HTMLButtonElement>("[data-select-option]")
+        : null
+    if (!btn || !generalEditing) return
+    const nextProvider = btn.dataset.selectOption ?? ""
+    populateGeneralControls(nextProvider, "", "")
+    setGeneralDropdownOpen(null)
+    settingsProvider.focus()
+  })
+
+  settingsModelMenu.addEventListener("click", (event) => {
+    const btn =
+      event.target instanceof Element
+        ? event.target.closest<HTMLButtonElement>("[data-select-option]")
+        : null
+    if (!btn || !generalEditing) return
+    const nextModel = btn.dataset.selectOption ?? ""
+    const providerId = getTriggerValue(settingsProvider)
+    populateModelSelect(providerId, nextModel)
+    populateReasoningSelect(providerId, nextModel, getTriggerValue(settingsReasoning))
+    setGeneralDropdownOpen(null)
+    settingsModel.focus()
+  })
+
+  settingsReasoningMenu.addEventListener("click", (event) => {
+    const btn =
+      event.target instanceof Element
+        ? event.target.closest<HTMLButtonElement>("[data-select-option]")
+        : null
+    if (!btn || !generalEditing) return
+    const nextEffort = btn.dataset.selectOption ?? ""
+    populateReasoningSelect(
+      getTriggerValue(settingsProvider),
+      getTriggerValue(settingsModel),
+      nextEffort,
+    )
+    setGeneralDropdownOpen(null)
+    settingsReasoning.focus()
+  })
+
+  document.getElementById("settings-go-providers")?.addEventListener("click", () => {
+    selectSettingsTab("providers", true)
+  })
+
+  document.getElementById("settings-theme-group")?.addEventListener("click", (event) => {
+    const btn = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-theme-option]") : null
+    const theme = btn?.dataset.themeOption as DesktopTheme | undefined
+    if (theme) {
+      setTheme(theme)
+      renderPreferencesControls()
+    }
+  })
+
+  settingsNotifications.addEventListener("change", () => {
+    const enabled = settingsNotifications.checked
+    state.notificationsEnabled = enabled
+    runAction(async () => {
+      applyOverview(await window.api.prefs.update({ notificationsEnabled: enabled }))
+      render()
+    })
+  })
 
   const tablist = settingsDialog.querySelector<HTMLElement>("[role=tablist]")
   tablist?.addEventListener("click", (event) => {
-    const tab = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-settings-tab]")?.dataset.settingsTab : undefined
+    const tab =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>("[data-settings-tab]")?.dataset.settingsTab
+        : undefined
     if (isSettingsTab(tab)) selectSettingsTab(tab)
   })
   tablist?.addEventListener("keydown", (event) => {

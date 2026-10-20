@@ -1,13 +1,13 @@
 import { type RuntimeEvent } from "../../preload/types.ts"
 import { mergeTasks, normalizeTask } from "../task-monitor.ts"
-import { reduceEvent } from "../timeline-model.ts"
+import { createConversation, reduceEvent } from "../timeline-model.ts"
 import { decideTurnEvent } from "../turn-state.ts"
 import { asRecordText } from "./html.ts"
 import { refreshInspector } from "./inspector.ts"
 import { loadGoal } from "./inspector-goal.ts"
 import { renderTaskBadge, renderTasksSection } from "./inspector-tasks.ts"
 import { deliverPendingInput } from "./pending-inputs.ts"
-import { activeTurnIdFor, conversationFor, finalAssistantPreview, maybeNotify, runAction, setConversationFor } from "./runtime.ts"
+import { activeTurnIdFor, conversationFor, finalAssistantPreview, maybeNotify, resetConversationPresentation, runAction, setConversationFor } from "./runtime.ts"
 import { loadSessions, recordRecentSession } from "./sessions.ts"
 import { render, scheduleRender } from "./shell.ts"
 import { renderRecentSessions } from "./sidebar.ts"
@@ -26,9 +26,67 @@ export function handleRuntimeEvent(envelope: RuntimeEvent) {
   }
   if (envelope.sequence <= vars.lastRuntimeSequence) return
   vars.lastRuntimeSequence = envelope.sequence
+
+  if (envelope.type === "folder_defaults_changed") {
+    runAction(() => loadSessions())
+    return
+  }
+
   const sessionId = envelope.sessionId
   const eventSessionId = asRecordText(envelope.event.session_id)
   if (!sessionId || (eventSessionId && eventSessionId !== sessionId)) return
+
+  if (envelope.type === "session_renamed") {
+    const nextTitle = asRecordText(envelope.event.title) || asRecordText(envelope.event.name)
+    if (nextTitle) {
+      state.recentSessions = state.recentSessions.map((item) => item.id === sessionId ? { ...item, title: nextTitle } : item)
+      for (const [projectPath, list] of Object.entries(state.sessionPages)) {
+        state.sessionPages[projectPath] = list.map((item) => item.id === sessionId ? { ...item, title: nextTitle } : item)
+      }
+      state.projects = state.projects.map((project) => ({
+        ...project,
+        sessions: project.sessions.map((item) => item.id === sessionId ? { ...item, title: nextTitle } : item),
+      }))
+    }
+    runAction(() => loadSessions(), sessionId)
+    scheduleRender()
+    return
+  }
+
+  if (envelope.type === "session_settings_changed") {
+    const nextModel = asRecordText(envelope.event.model)
+    const nextProvider = asRecordText(envelope.event.provider)
+    const nextEffort = asRecordText(envelope.event.reasoning_effort)
+    if (nextModel) state.sessionModels[sessionId] = nextModel
+    if (nextEffort) state.sessionEfforts[sessionId] = nextEffort
+    if (sessionId === state.viewedSessionId) {
+      if (nextModel) state.model = nextModel
+      if (nextProvider) state.modelProvider = nextProvider
+      if (nextEffort) state.effort = nextEffort
+      scheduleRender()
+    }
+    return
+  }
+
+  if (envelope.type === "session_deleted" || envelope.type === "session_discarded") {
+    delete state.activeTurnIds[sessionId]
+    delete state.pendingInputs[sessionId]
+    delete state.runtimeTurnPending[sessionId]
+    delete state.conversationCache[sessionId]
+    state.recentSessions = state.recentSessions.filter((item) => item.id !== sessionId)
+    for (const [projectPath, list] of Object.entries(state.sessionPages)) {
+      state.sessionPages[projectPath] = list.filter((item) => item.id !== sessionId)
+    }
+    if (sessionId === state.viewedSessionId) {
+      state.viewedSessionId = ""
+      state.conversation = createConversation()
+      resetConversationPresentation()
+    }
+    runAction(() => loadSessions())
+    scheduleRender()
+    return
+  }
+
   if (envelope.type === "task_updated" || envelope.type === "task_output") {
     if (sessionId === state.viewedSessionId) {
       const task = normalizeTask(envelope.event.task)

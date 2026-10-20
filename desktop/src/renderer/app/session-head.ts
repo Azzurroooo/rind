@@ -1,5 +1,6 @@
 // Conversation header (spec section 2): truncated session title, a running or
 // idle status chip, and the tasks, inspector and overflow icon buttons.
+import { currentSessionAgentContext } from "./agents-ui.ts"
 import { requiredElement, sessionTitle } from "./dom.ts"
 import { runAction, runtimeTurnActive } from "./runtime.ts"
 import { exportSession, forkCurrentSession, knownSessions } from "./sessions.ts"
@@ -14,9 +15,53 @@ const menu = requiredElement("session-head-menu")
 const exportButton = requiredElement<HTMLButtonElement>("export-session")
 const forkButton = requiredElement<HTMLButtonElement>("fork-session")
 
+function cleanDesktopSessionTitle(value: unknown, sid: string): string {
+  const text = String(value || "").replace(/\s+/g, " ").trim()
+  if (!text || (sid && text === sid)) return ""
+  const lower = text.toLowerCase()
+  if (lower === "new conversation" || lower === "untitled") return ""
+  return text
+}
+
+function resolveCurrentSessionTitle(): string {
+  const sid = state.viewedSessionId
+  const agentCtx = currentSessionAgentContext()
+  const isAgentScoped = agentCtx.kind === "member" || agentCtx.kind === "manager"
+  if (!sid) {
+    return isAgentScoped ? `${agentCtx.agentName} conversation` : "New chat"
+  }
+  const known = knownSessions().find((item) => item.id === sid)
+  const knownTitle = cleanDesktopSessionTitle(known?.title, sid)
+  if (knownTitle) return knownTitle
+  const mgrMatch = state.managerSessions.find(
+    (s) => String(s.runtimeSessionId || s.session_id || s.id || "") === sid,
+  )
+  const mgrTitle = cleanDesktopSessionTitle(mgrMatch?.title, sid)
+  if (mgrTitle) return mgrTitle
+  for (const list of Object.values(state.teamSessionsByTeam)) {
+    const match = list.find((s) => String(s.runtimeSessionId || s.session_id || s.id || "") === sid)
+    const matchTitle = cleanDesktopSessionTitle(match?.title, sid)
+    if (matchTitle) return matchTitle
+  }
+  const managedSession = state.agentsSnapshot.sessions.find((s) => String(s.runtimeSessionId || "") === sid)
+  if (managedSession?.taskId) {
+    const task = state.agentsSnapshot.tasks.find((t) => t.id === managedSession.taskId)
+    const brief = cleanDesktopSessionTitle(task?.brief, sid)
+    if (brief) return brief
+  }
+  for (const entry of state.conversation.entries) {
+    if (entry.kind === "user" && entry.content) {
+      const firstLine = entry.content.split(/\r?\n/).map((l: string) => l.trim()).find(Boolean)
+      if (firstLine) return firstLine.length > 64 ? `${firstLine.slice(0, 63)}…` : firstLine
+    }
+  }
+  if (agentCtx.kind === "member") return `${agentCtx.agentName} conversation`
+  if (agentCtx.kind === "manager") return "Manager conversation"
+  return "Session"
+}
+
 export function renderSessionHead() {
-  const current = knownSessions().find((item) => item.id === state.viewedSessionId)
-  const title = current?.title || (state.viewedSessionId ? "Session" : "New session")
+  const title = resolveCurrentSessionTitle()
   sessionTitle.textContent = title
   sessionTitle.title = title
   const running = runtimeTurnActive()

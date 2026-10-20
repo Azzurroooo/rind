@@ -118,13 +118,13 @@ test("rind run shares the one Runtime and reuses its worker", { timeout: 180000 
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: fixture.url } } }));
   t.after(async () => { await stopServices(home); await removeRindHome(home); await new Promise(resolve => fixture.provider.close(resolve)); });
 
-  const first = await runCli(home, workspace, "run", "--prompt", "hello", "--dir", workspace);
-  assert.equal(first.code, 0, first.stderr);
-  assert.match(first.stdout, /Finished/);
-  const host = await connectSharedRuntime({ ...runtimeOptions(home), start: false });
+  const host = await connectSharedRuntime(runtimeOptions(home));
   t.after(() => host.close());
   const hostPid = (await host.request("runtime/info")).pid;
   const workerPid = (await host.request("runtime/observe")).pid;
+  const first = await runCli(home, workspace, "run", "--prompt", "hello", "--dir", workspace);
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /Finished/);
 
   const second = await runCli(home, workspace, "run", "--prompt", "again", "--dir", workspace);
   assert.equal(second.code, 0, second.stderr);

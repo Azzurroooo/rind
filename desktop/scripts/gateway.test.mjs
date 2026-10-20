@@ -190,3 +190,89 @@ test("stopping during gateway startup leaves no server or access code", async (t
   assert.equal(gateway.state().accessCode, "")
   assert.equal((await gateway.start({ scope: "loopback", port: 0 })).running, true)
 })
+
+test("gateway proxies agents management requests, binds opened sessions, and broadcasts agents/update events", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "rind-gateway-agents-"))
+  const web = join(dir, "web")
+  const agentWorkspace = join(dir, "agent-workspace")
+  await mkdir(web)
+  await mkdir(agentWorkspace)
+  await writeFile(join(web, "index.html"), "Rind")
+  await writeFile(join(agentWorkspace, "NOTE.md"), "agent workspace file")
+  const agentListeners = new Set()
+  const agentCalls = []
+  const bridge = {
+    initialize: async () => ({ session_id: "s0", protocol_version: "2", methods: ["session/prompt"], capabilities: [] }),
+    request: async (method, params) => ({ method, params }),
+    subscribe: () => () => {},
+    agentsRequest: async (method, params) => {
+      agentCalls.push([method, params])
+      if (method === "openSession") {
+        return {
+          managementSessionId: "ms-1",
+          agentId: "a-1",
+          teamId: "t-1",
+          manager: false,
+          workspaceRoot: agentWorkspace,
+          runtimeSessionId: String(params.runtimeSessionId || ""),
+          session: { session_id: String(params.runtimeSessionId || ""), workspace_root: agentWorkspace },
+        }
+      }
+      if (method === "createSession") {
+        return {
+          session_id: "s-created",
+          workspace_root: agentWorkspace,
+          managementSessionId: "ms-1",
+        }
+      }
+      return { ok: true, method, params }
+    },
+    subscribeAgents: (fn) => {
+      agentListeners.add(fn)
+      return () => agentListeners.delete(fn)
+    },
+  }
+  const gateway = new DesktopGateway(bridge, web)
+  t.after(async () => { await gateway.stop(); await rm(dir, { recursive: true, force: true }) })
+  const state = await gateway.start({ scope: "loopback", port: 0 })
+  const origin = state.addresses[0]
+  const ticketRes = await fetch(`${origin}/ticket`, { headers: { Authorization: `Bearer ${state.accessCode}` } })
+  const { ticket } = await ticketRes.json()
+  const ws = new WebSocket(`${origin.replace("http:", "ws:")}/ws?ticket=${ticket}`, { origin })
+  await once(ws, "open")
+  t.after(() => ws.terminate())
+  let seq = 0
+  const pending = new Map()
+  const events = []
+  ws.on("message", (data) => {
+    const msg = JSON.parse(data.toString())
+    if (msg.kind === "event") events.push(msg)
+    else { pending.get(msg.request_id)?.(msg); pending.delete(msg.request_id) }
+  })
+  const request = (method, params = {}) => new Promise((resolve) => {
+    const id = ++seq
+    pending.set(id, resolve)
+    ws.send(JSON.stringify({ kind: "request", request_id: id, method, params }))
+  })
+
+  const init = await request("initialize")
+  assert.equal(init.result.methods.includes("agents/request"), true)
+  assert.equal(init.result.capabilities.includes("agents_management"), true)
+
+  // Draft agent session (before runtimeSessionId is created) sets client.workspace so file/list works:
+  const openedDraft = await request("agents/openSession", { teamId: "t-1", agentId: "a-1" })
+  assert.equal(openedDraft.result.workspaceRoot, agentWorkspace)
+  const draftFiles = await request("file/list", {})
+  assert.equal(draftFiles.result.entries.some((e) => e.name === "NOTE.md"), true)
+
+  // Creating the session binds client.selected to s-created:
+  const created = await request("agents/createSession", { managementSessionId: "ms-1" })
+  assert.equal(created.result.session_id, "s-created")
+
+  // Broadcast agents/update and workspace/folder changes:
+  for (const fn of agentListeners) fn({ connection: "connected", snapshot: { seq: 5, teams: [{ id: "t-1", name: "Core" }] } })
+  gateway.notifyWorkspacesChanged()
+  await request("ping")
+  assert.equal(events.some((e) => e.method === "agents/update" && e.event.snapshot.seq === 5), true)
+  assert.equal(events.some((e) => e.method === "session/update" && e.event?.type === "folder_defaults_changed"), true)
+})

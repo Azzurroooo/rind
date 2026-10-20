@@ -1,9 +1,11 @@
 /* Overlays: menus, dialogs, toasts, tooltips (surface-design-v2 section 7). */
 
-.menu-root { position: relative; display: inline-flex; }
+.menu-root { position: relative; display: inline-flex; align-items: center; }
+.menu-root[data-open="true"] { z-index: 60; }
 .menu {
-  position: absolute; z-index: 40; min-width: 180px; padding: var(--space-1);
-  display: grid; gap: 1px;
+  position: absolute; z-index: 100; isolation: isolate; pointer-events: auto;
+  min-width: 180px; width: max-content; max-width: min(320px, calc(100vw - 16px)); padding: var(--space-1);
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card);
   box-shadow: var(--shadow-popover);
   animation: pop-in var(--motion-pop) var(--ease);
@@ -13,17 +15,17 @@
 .menu-end { right: 0; }
 .menu-start { left: 0; }
 .menu-item {
-  display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  display: flex; align-items: center; gap: var(--space-2); width: 100%; min-width: 0;
   height: var(--control-md); padding: 0 var(--space-2);
   border: 0; border-radius: var(--radius-control); background: transparent;
   color: var(--text); font-size: var(--text-ui); text-align: left; white-space: nowrap;
 }
 .menu-item:hover:not(:disabled), .menu-item:focus-visible { background: var(--fill-1); outline: none; }
 .menu-item.danger { color: var(--danger); }
-.menu-icon { display: inline-grid; place-items: center; width: 16px; color: var(--muted); }
+.menu-icon { flex: none; display: inline-grid; place-items: center; width: 16px; color: var(--muted); }
 .menu-item.danger .menu-icon { color: var(--danger); }
 .menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.menu-hint { color: var(--dim); font-size: var(--text-meta); }
+.menu-hint { flex: none; color: var(--dim); font-size: var(--text-meta); }
 .menu-separator { height: 1px; margin: var(--space-1) 0; background: var(--line); }
 
 .dialog-scrim {
@@ -32,20 +34,20 @@
   animation: fade-in var(--motion-pop) var(--ease);
 }
 .dialog {
-  width: min(520px, 100%); max-height: calc(100vh - 32px); overflow: auto;
-  display: grid; gap: var(--space-4); padding: var(--space-5);
+  width: min(520px, 100%); max-height: calc(100dvh - 32px); overflow: hidden;
+  display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-5);
   background: var(--surface); color: var(--text);
   border: 1px solid var(--line); border-radius: var(--radius-frame); box-shadow: var(--shadow-dialog);
   animation: pop-in var(--motion-pop) var(--ease);
 }
 .dialog-sm { width: min(420px, 100%); }
-.dialog-lg { width: min(760px, 100%); height: min(560px, calc(100vh - 32px)); padding: 0; gap: 0; overflow: hidden; }
-.dialog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.dialog-lg .dialog-head { padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5); border-bottom: 1px solid var(--line); }
+.dialog-lg { width: min(840px, 100%); height: min(620px, calc(100dvh - 32px)); padding: 0; gap: 0; overflow: hidden; }
+.dialog-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.dialog-lg .dialog-head { padding: var(--space-3) var(--space-4) var(--space-3) var(--space-5); border-bottom: 1px solid var(--line); background: var(--surface); z-index: 2; }
 .dialog-title { font-size: var(--text-lg); font-weight: 600; }
 .dialog-description { color: var(--muted); }
-.dialog-body { min-height: 0; }
-.dialog-footer { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.dialog-body { flex: 1; min-height: 0; overflow-y: auto; }
+.dialog-footer { flex: none; display: flex; justify-content: flex-end; gap: var(--space-2); }
 
 .toast-region {
   position: fixed; left: 50%; bottom: var(--space-6); z-index: 70; transform: translateX(-50%);

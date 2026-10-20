@@ -4,58 +4,130 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 .sidebar-actions .primary-button { min-width: 0; }
 
-.project-list { display: grid; align-content: start; gap: 5px; }
-.recent-sessions { min-width: 0; margin: -2px 0 12px; }
-.recent-list { display: grid; gap: 2px; }
-.project-item { min-width: 0; }
+.project-list { display: grid; align-content: start; gap: 1px; }
+.recent-sessions { min-width: 0; margin: 8px 0 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.recent-list { display: grid; gap: 1px; }
+.project-item { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.project-item.menu-open,
+.project-item:has(.menu-open),
+.project-item:has(.project-menu-trigger[aria-expanded="true"]),
+.project-item:has(.session-menu-trigger[aria-expanded="true"]) {
+  z-index: 60;
+}
 .project-row { position: relative; min-width: 0; }
+.project-row.menu-open,
+.project-row:has(> .project-menu-wrap.menu-open),
+.project-row:has(> .project-menu-wrap .project-menu-trigger[aria-expanded="true"]) {
+  z-index: 60;
+}
 .project-trigger {
   width: 100%;
   min-width: 0;
-  padding: 7px 38px 7px 8px;
-  border: 1px solid transparent;
+  padding: 4px 32px 4px 8px;
+  border: 0;
   border-radius: var(--radius-sm);
   text-align: left;
   color: var(--text);
   background: transparent;
 }
-.project-trigger:hover { background: var(--fill-2); }
+.project-trigger:hover,
+.project-row:hover > .project-trigger,
+.project-row.menu-open > .project-trigger { background: var(--fill-2); }
 .project-name, .project-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-name { font-size: 14px; font-weight: 600; }
-.project-path { margin-top: 2px; color: var(--dim); font-family: var(--font-mono); font-size: 10.5px; direction: rtl; text-align: left; }
-.project-menu-wrap { position: absolute; top: 4px; right: 4px; }
-.project-menu-trigger { display: grid; width: 26px; height: 26px; padding: 0; place-items: center; color: var(--dim); }
+.project-name { font-size: 13px; font-weight: 600; line-height: 1.25; }
+.project-path { margin-top: 1px; color: var(--dim); font-family: var(--font-mono); font-size: 10.5px; line-height: 1.2; direction: rtl; text-align: left; }
+.project-menu-wrap {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  right: 3px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  transform: none;
+}
+.project-menu-wrap.menu-open,
+.project-menu-wrap:has(.project-menu-trigger[aria-expanded="true"]) {
+  z-index: 60;
+}
+.project-menu-trigger {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--dim);
+  background: transparent;
+}
+.project-row .project-menu-trigger {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-hover) var(--ease), background-color var(--dur-hover) var(--ease), color var(--dur-hover) var(--ease);
+}
+.project-row:hover .project-menu-trigger,
+.project-row.menu-open .project-menu-trigger,
+.project-row .project-menu-trigger[aria-expanded="true"],
+.project-row .project-menu-trigger:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.project-menu-trigger:focus-visible { outline-offset: 0; }
 .project-menu-icon { display: block; width: 14px; height: 14px; fill: currentColor; }
-.project-menu-trigger:hover:not(:disabled), .project-menu-trigger[aria-expanded="true"] { color: var(--text); background: var(--fill-2); }
+.project-menu-trigger:hover:not(:disabled), .project-menu-trigger[aria-expanded="true"] { color: var(--text); background: var(--fill-3); }
+@media (hover: none) {
+  .project-row .project-menu-trigger { opacity: 1; pointer-events: auto; }
+}
 .project-menu {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  z-index: 10;
-  min-width: 108px;
+  z-index: 100;
+  isolation: isolate;
+  pointer-events: auto;
+  display: grid;
+  gap: 1px;
+  min-width: 148px;
   padding: 4px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--surface);
   box-shadow: var(--shadow-popover);
 }
-.project-menu button { width: 100%; min-height: 28px; padding: 4px 8px; border: 0; border-radius: 4px; text-align: left; color: var(--danger); background: transparent; font-size: 12px; }
-.project-menu button:hover:not(:disabled) { background: var(--fill-2); }
-.project-missing { margin: 3px 8px 6px; color: var(--danger); font-size: 11px; }
-.project-sessions { display: grid; gap: 1px; margin: 2px 0 8px 12px; padding-left: 7px; border-left: 1px solid var(--line); animation: project-sessions-reveal 260ms cubic-bezier(.16, 1, .3, 1); transform-origin: top; }
-.project-sessions.collapsing { margin-top: 0; margin-bottom: 0; overflow: hidden; animation: project-sessions-collapse 260ms cubic-bezier(.16, 1, .3, 1) forwards; transition: height 260ms cubic-bezier(.16, 1, .3, 1), margin 260ms cubic-bezier(.16, 1, .3, 1); }
-.project-list.skip-project-animation .project-sessions { animation: none; }
-@keyframes project-sessions-reveal {
-  from { opacity: 0; transform: translateY(-5px); }
-  to { opacity: 1; transform: translateY(0); }
+.project-menu button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  font-size: 12px;
+  white-space: nowrap;
 }
-@keyframes project-sessions-collapse {
-  from { opacity: 1; transform: translateY(0); }
-  to { opacity: 0; transform: translateY(-5px); }
+.project-menu button[data-remove-project],
+.project-menu button[data-agent-remove],
+.project-menu button[data-sidebar-team-action="delete"],
+.project-menu button[data-team-toggle-delete] {
+  color: var(--danger);
+}
+.project-menu button:hover:not(:disabled) { background: var(--fill-2); }
+.project-missing { margin: 2px 8px 4px; color: var(--danger); font-size: 11px; }
+.project-sessions { display: grid; gap: 1px; margin: 1px 0 4px 12px; padding-left: 7px; border-left: 1px solid var(--line); }
+.project-sessions:has(.menu-open),
+.project-sessions:has(.project-menu-trigger[aria-expanded="true"]),
+.project-sessions:has(.session-menu-trigger[aria-expanded="true"]) {
+  position: relative;
+  z-index: 60;
 }
 .sidebar-empty { display: grid; gap: 5px; padding: 10px 6px; color: var(--muted); font-size: 12px; }
 .sidebar-empty span { color: var(--dim); }
@@ -99,31 +171,6 @@
 .file-preview .hljs-title, .file-preview .hljs-function .hljs-title, .file-preview .hljs-section { color: var(--code-title); }
 .file-preview .hljs-type, .file-preview .hljs-built_in, .file-preview .hljs-params { color: var(--code-type); }
 .file-preview img { display: block; max-width: 100%; max-height: 420px; margin: 0 auto; object-fit: contain; }
-
-@media (max-width: 760px) {
-  .topbar { gap: 8px; padding-inline: 8px; }
-  body[data-platform="win32"] .topbar { padding-right: 142px; }
-  body[data-platform="darwin"] .topbar { padding-left: 80px; }
-  .connection { display: none; }
-  .topbar-actions { gap: 4px; }
-  .layout {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
-  }
-  .sidebar { display: none; }
-  .conversation-head { height: 48px; padding-inline: 12px 6px; }
-  .session-actions .head-button { width: 36px; height: 36px; }
-  .composer { padding-inline: 10px; }
-  .composer-footer { gap: 3px; padding-inline: 5px; }
-  .slash-command-option, .command-list-item { grid-template-columns: minmax(0, 1fr); gap: 3px; }
-  .slash-command-usage, .command-list-item > code { justify-self: start; text-align: left; }
-  .command-check { grid-template-columns: 8px minmax(0, 1fr); }
-  .command-check small { grid-column: 2; }
-  .command-usage { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .command-usage strong { grid-column: 1 / -1; }
-  .model-control { width: min(108px, 30vw); }
-  .project-control { width: min(126px, 34vw); }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .pip-running, .connection-starting .status-pip, .chip-spinner { animation: none; }

@@ -1,6 +1,6 @@
 import brandMarkUrl from "../assets/brand-mark.svg"
 import { composerRegionMarkup } from "../composer-region.ts"
-import { ArrowDown, Bell, ChartNoAxesColumn, Ellipsis, Keyboard, KeyRound, ListTodo, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
+import { ArrowDown, Bell, ChartNoAxesColumn, Ellipsis, Keyboard, KeyRound, ListTodo, Maximize2, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
 import { INSPECTOR_TAB_LABELS, INSPECTOR_TABS } from "../inspector-model.ts"
 import { remoteAccessMarkup } from "../remote-access.ts"
 import { escapeHtml } from "./html.ts"
@@ -36,26 +36,39 @@ appRoot.innerHTML = `
     <main class="layout">
       <aside id="sidebar" class="sidebar" aria-label="Projects and sessions">
         <div id="sidebar-resize-handle" class="sidebar-resize-handle" role="separator" aria-label="Resize projects sidebar" aria-orientation="vertical"></div>
-        <div class="sidebar-actions">
-          <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
+        <div id="sidebar-mode-switcher" class="sidebar-mode-switcher" role="tablist" aria-label="Sidebar mode">
+          <button id="sidebar-mode-workspaces" type="button" role="tab" class="sidebar-mode-tab is-active" data-sidebar-mode="workspaces" aria-selected="true">
+            <span>Workspaces</span>
+          </button>
+          <button id="sidebar-mode-agents" type="button" role="tab" class="sidebar-mode-tab" data-sidebar-mode="agents" aria-selected="false">
+            <span>Agents &amp; Teams</span>
+            <span id="sidebar-mode-agents-badges" class="sidebar-mode-badges"></span>
+          </button>
         </div>
-        <div class="sidebar-body panel-scroll">
-          <div class="session-search-wrap">
-            ${renderIcon(Search, "session-search-icon")}
-            <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search loaded sessions" autocomplete="off" />
+        <div id="sidebar-workspaces-pane" class="sidebar-workspaces-pane">
+          <div class="sidebar-actions">
+            <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
           </div>
-          <section class="sidebar-projects" aria-label="Projects"><div class="sidebar-heading"><h2 class="sidebar-section-title">Projects</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
-          <div id="project-list" class="project-list"></div></section>
-          <section id="recent-sessions" class="recent-sessions" aria-label="Recent sessions" hidden>
-            <h2 class="sidebar-section-title">Recent sessions</h2>
-            <div id="recent-list" class="recent-list"></div>
-          </section>
+          <div class="sidebar-body panel-scroll">
+            <div class="session-search-wrap">
+              ${renderIcon(Search, "session-search-icon")}
+              <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search loaded sessions" autocomplete="off" />
+            </div>
+            <section class="sidebar-projects" aria-label="Workspaces"><div class="sidebar-heading"><h2 class="sidebar-section-title">Workspaces</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add workspace">Add</button></div>
+            <div id="project-list" class="project-list"></div></section>
+            <section id="recent-sessions" class="recent-sessions" aria-label="Recent sessions" hidden>
+              <h2 class="sidebar-section-title">Recent sessions</h2>
+              <div id="recent-list" class="recent-list"></div>
+            </section>
+          </div>
         </div>
+        <div id="sidebar-agents" class="sidebar-agents" aria-label="Multi-agent navigation" hidden></div>
         <div class="sidebar-footer"><button id="open-usage" type="button" class="sidebar-footer-button">${renderIcon(ChartNoAxesColumn)}<span>Usage</span></button></div>
       </aside>
       <section class="conversation">
         <header class="conversation-head">
           <div class="conversation-title">
+            <div id="session-agent-context" class="session-agent-context" hidden></div>
             <h1 id="session-title" class="session-title">New session</h1>
             <span id="session-status" class="session-status" role="status" hidden><span class="session-status-dot" aria-hidden="true"></span><span id="session-status-text">Idle</span></span>
           </div>
@@ -72,7 +85,8 @@ appRoot.innerHTML = `
           </div>
         </header>
         <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Retry</button></div>
-        <div class="stream-wrap">
+        <div id="agents-surface" class="agents-surface" hidden></div>
+        <div id="stream-wrap" class="stream-wrap">
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
           <button id="jump-latest" type="button" class="jump-latest" data-tooltip="Jump to latest" aria-label="Jump to latest" hidden>${renderIcon(ArrowDown)}</button>
         </div>
@@ -84,6 +98,7 @@ appRoot.innerHTML = `
           <div class="inspector-tabs" role="tablist" aria-label="Inspector sections">
             ${INSPECTOR_TABS.map((tab) => `<button id="inspector-tab-${tab}" type="button" role="tab" class="inspector-tab" data-inspector-tab="${tab}" aria-controls="inspector-panel-${tab}" aria-selected="false" tabindex="-1">${INSPECTOR_TAB_LABELS[tab]}</button>`).join("")}
           </div>
+          <button id="maximize-inspector" type="button" class="icon-button inspector-close" data-tooltip="Expand inspector" aria-label="Expand inspector">${renderIcon(Maximize2)}</button>
           <button id="close-inspector" type="button" class="icon-button inspector-close" data-tooltip="Close inspector" aria-label="Close inspector">${renderIcon(X)}</button>
         </div>
         <div id="inspector-scope" class="inspector-scope">Current session</div>
@@ -109,11 +124,11 @@ appRoot.innerHTML = `
         </section>
       </aside>
     </main>
-    <dialog id="usage-dialog" class="settings-dialog usage-dialog" aria-labelledby="usage-title"><div class="settings-heading"><div><h2 id="usage-title">Usage</h2><p>Across all projects and sessions on this Rind computer.</p></div><button id="close-usage" type="button" class="icon-button" aria-label="Close usage">${renderIcon(X)}</button></div><div class="usage-toolbar"><span class="subtle">Last 7 days</span><button id="refresh-usage" type="button" class="ghost-button usage-refresh">Refresh</button></div><div id="inspector-usage"></div></dialog>
+    <dialog id="usage-dialog" class="settings-dialog usage-dialog" aria-labelledby="usage-title"><div class="settings-heading"><div><h2 id="usage-title">Usage</h2><p>Across all projects and sessions on this Rind computer.</p></div><button id="close-usage" type="button" class="icon-button" aria-label="Close usage">${renderIcon(X)}</button></div><div class="usage-toolbar"><span class="subtle">Last 7 days</span><button id="refresh-usage" type="button" class="ghost-button usage-refresh">Refresh</button></div><div id="inspector-usage" class="panel-scroll"></div></dialog>
     ${remoteAccessMarkup()}
     <dialog id="settings-dialog" class="settings-dialog settings-shell" aria-labelledby="settings-title">
       <form id="settings-form" method="dialog" class="settings-layout">
-      <nav class="settings-nav" aria-label="Settings sections">
+      <nav class="settings-nav panel-scroll" aria-label="Settings sections">
         <h2 id="settings-title" class="settings-title">Settings</h2>
         <div role="tablist" aria-orientation="vertical" aria-label="Settings sections" class="settings-tabs">
         <button id="settings-tab-general" type="button" role="tab" class="settings-tab" data-settings-tab="general" aria-controls="settings-panel-general" aria-selected="true">${renderIcon(SlidersHorizontal, "settings-tab-icon")}<span>General</span></button>
@@ -122,31 +137,117 @@ appRoot.innerHTML = `
         </div>
       </nav>
       <div class="settings-content">
-        <button id="close-settings" type="button" class="icon-button settings-close" aria-label="Close settings" data-tooltip="Close">${renderIcon(X)}</button>
-        <section id="settings-panel-general" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-general" data-settings-panel="general">
-          <h3 class="settings-section-title">Model provider</h3>
-          <p class="settings-section-desc">Shared ~/.rind/settings.json used when no provider sign-in is configured.</p>
-          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-api-key">API key</label></span><span class="settings-row-desc"><span id="settings-key-status"></span></span></div><div class="settings-row-control"><input id="settings-api-key" type="password" autocomplete="new-password" placeholder="Leave blank to keep" /></div></div>
-          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-base-url">Base URL</label></span></div><div class="settings-row-control"><input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" /></div></div>
-          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-model">Model</label></span></div><div class="settings-row-control"><input id="settings-model" type="text" placeholder="Default model" /></div></div>
-          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-reasoning">Reasoning effort</label></span></div><div class="settings-row-control"><select id="settings-reasoning"><option value="">Provider default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Maximum</option></select></div></div>
+        <header class="settings-content-head">
+          <div class="settings-content-head-meta">
+            <h3 id="settings-active-title" class="settings-section-title">General</h3>
+            <p id="settings-active-desc" class="settings-section-desc">Global default provider and model configuration (~/.rind/settings.json).</p>
+          </div>
+          <button id="close-settings" type="button" class="icon-button settings-close" aria-label="Close settings" data-tooltip="Close">${renderIcon(X)}</button>
+        </header>
+        <section id="settings-panel-general" class="settings-panel panel-scroll" role="tabpanel" aria-labelledby="settings-tab-general" data-settings-panel="general">
+          <div id="settings-general-empty" class="settings-group-card settings-empty-card" hidden>
+            <div class="settings-row-text">
+              <span class="settings-row-label">No providers connected</span>
+              <span class="settings-row-desc">Connect a provider or add a custom API in Providers to configure your defaults.</span>
+            </div>
+            <button id="settings-go-providers" type="button" class="secondary-button">Configure providers</button>
+          </div>
+          <div id="settings-general-card" class="settings-group-card">
+            <div class="settings-group-head">
+              <div class="settings-group-head-text">
+                <span class="settings-group-title">Global Default Configuration</span>
+                <span class="settings-group-badge">~/.rind/settings.json</span>
+              </div>
+              <button id="settings-general-edit" type="button" class="secondary-button settings-edit-btn">Edit</button>
+            </div>
+            <p class="settings-group-desc">Global defaults applied to new conversations across all workspaces. Click Edit to unlock changes, then Save changes to apply.</p>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <span id="settings-provider-label" class="settings-row-label">Default provider</span>
+                <span class="settings-row-desc">Connected provider (grouped by OAuth, Custom, or Built-in) used for new conversations.</span>
+              </div>
+              <div class="settings-row-control">
+                <div class="settings-select" data-settings-select="provider">
+                  <button id="settings-provider" type="button" class="settings-select-trigger" aria-labelledby="settings-provider-label" aria-haspopup="listbox" aria-expanded="false" disabled></button>
+                  <div id="settings-provider-menu" class="settings-select-menu panel-scroll" role="listbox" aria-labelledby="settings-provider-label" hidden></div>
+                </div>
+              </div>
+            </div>
+            <div id="settings-model-row" class="settings-row">
+              <div class="settings-row-text">
+                <span id="settings-model-label" class="settings-row-label">Default model</span>
+                <span class="settings-row-desc">Default model for the selected provider.</span>
+              </div>
+              <div class="settings-row-control">
+                <div class="settings-select" data-settings-select="model">
+                  <button id="settings-model" type="button" class="settings-select-trigger" aria-labelledby="settings-model-label" aria-haspopup="listbox" aria-expanded="false" disabled></button>
+                  <div id="settings-model-menu" class="settings-select-menu panel-scroll" role="listbox" aria-labelledby="settings-model-label" hidden></div>
+                </div>
+              </div>
+            </div>
+            <div id="settings-reasoning-row" class="settings-row">
+              <div class="settings-row-text">
+                <span id="settings-reasoning-label" class="settings-row-label">Reasoning effort</span>
+                <span class="settings-row-desc">Thinking budget for reasoning-capable models.</span>
+              </div>
+              <div class="settings-row-control">
+                <div class="settings-select" data-settings-select="reasoning">
+                  <button id="settings-reasoning" type="button" class="settings-select-trigger" aria-labelledby="settings-reasoning-label" aria-haspopup="listbox" aria-expanded="false" disabled></button>
+                  <div id="settings-reasoning-menu" class="settings-select-menu panel-scroll" role="listbox" aria-labelledby="settings-reasoning-label" hidden></div>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
-        <section id="settings-panel-providers" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-providers" data-settings-panel="providers" hidden>
-          <h3 class="settings-section-title">Providers</h3>
-          <p class="settings-section-desc">Sign in to model providers. Keys are stored by the runtime on this computer and never shared with remote devices.</p>
+        <section id="settings-panel-providers" class="settings-panel panel-scroll" role="tabpanel" aria-labelledby="settings-tab-providers" data-settings-panel="providers" hidden>
           <div id="settings-providers" class="provider-list" aria-live="polite"></div>
         </section>
-        <section id="settings-panel-preferences" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-preferences" data-settings-panel="preferences" hidden>
-          <h3 class="settings-section-title">Preferences</h3>
-          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-notifications">Desktop notifications</label></span><span class="settings-row-desc"><span>Notify when a turn finishes while the window is not focused.</span></span></div><div class="settings-row-control"><input id="settings-notifications" type="checkbox" class="settings-switch" /></div></div>
+        <section id="settings-panel-preferences" class="settings-panel panel-scroll" role="tabpanel" aria-labelledby="settings-tab-preferences" data-settings-panel="preferences" hidden>
+          <div class="settings-group-card">
+            <div class="settings-group-head">
+              <span class="settings-group-title">Appearance &amp; Behavior</span>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <span class="settings-row-label">Color theme</span>
+                <span class="settings-row-desc">Follow system appearance or lock to light/dark mode.</span>
+              </div>
+              <div class="settings-row-control">
+                <div id="settings-theme-group" class="settings-segmented" role="radiogroup" aria-label="Color theme">
+                  <button type="button" role="radio" class="settings-segment" data-theme-option="system" aria-checked="true">System</button>
+                  <button type="button" role="radio" class="settings-segment" data-theme-option="light" aria-checked="false">Light</button>
+                  <button type="button" role="radio" class="settings-segment" data-theme-option="dark" aria-checked="false">Dark</button>
+                </div>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <span class="settings-row-label"><label for="settings-notifications">Desktop notifications</label></span>
+                <span class="settings-row-desc"><span>Notify when a turn finishes while the window is not focused.</span></span>
+              </div>
+              <div class="settings-row-control">
+                <input id="settings-notifications" type="checkbox" class="settings-switch" />
+              </div>
+            </div>
+          </div>
+          <div class="settings-group-card">
+            <div class="settings-group-head">
+              <span class="settings-group-title">Keyboard Shortcuts</span>
+            </div>
+            <div id="settings-shortcuts-list" class="shortcut-table settings-shortcut-table"></div>
+          </div>
         </section>
-        <div class="settings-actions"><button id="cancel-settings" type="button" class="ghost-button">Cancel</button><button id="save-settings" type="submit" class="primary-button">Save</button></div>
+        <footer id="settings-footer" class="settings-actions">
+          <button id="cancel-settings" type="button" class="ghost-button">Close</button>
+          <button id="save-settings" type="submit" class="primary-button" disabled>Save changes</button>
+        </footer>
       </div>
       </form>
     </dialog>
     <dialog id="auth-prompt-dialog" class="settings-dialog auth-prompt-dialog" aria-labelledby="auth-prompt-title">
       <form id="auth-prompt-form" method="dialog">
-        <div class="settings-heading"><h2 id="auth-prompt-title">Provider sign-in</h2></div>
+        <div class="settings-heading"><h2 id="auth-prompt-title">Provider sign-in</h2><button id="auth-prompt-close" type="button" class="icon-button" aria-label="Close sign-in">${renderIcon(X)}</button></div>
+        <div id="auth-prompt-oauth-box" class="auth-prompt-oauth-box" hidden></div>
         <label id="auth-prompt-label" class="auth-prompt-label"><span id="auth-prompt-message"></span><span id="auth-prompt-field" class="auth-prompt-field"></span></label>
         <div class="settings-actions"><button id="auth-prompt-cancel" type="button" class="ghost-button">Cancel</button><button id="auth-prompt-submit" type="submit" class="primary-button">Continue</button></div>
       </form>
@@ -154,7 +255,7 @@ appRoot.innerHTML = `
     <dialog id="shortcuts-dialog" class="settings-dialog shortcuts-dialog" aria-labelledby="shortcuts-title">
       <form method="dialog">
         <div class="settings-heading"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button id="close-shortcuts" type="button" class="icon-button" aria-label="Close shortcuts">${renderIcon(X)}</button></div>
-        <div class="shortcut-table" id="shortcut-table"></div>
+        <div class="shortcut-table panel-scroll" id="shortcut-table"></div>
       </form>
     </dialog>
     <div id="command-palette" class="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
@@ -174,7 +275,19 @@ export const projectMenu = requiredElement("project-menu")
 export const projectList = requiredElement("project-list")
 export const recentSessions = requiredElement("recent-sessions")
 export const recentList = requiredElement("recent-list")
+export const sidebarModeSwitcher = requiredElement("sidebar-mode-switcher")
+export const sidebarModeWorkspaces = requiredElement<HTMLButtonElement>("sidebar-mode-workspaces")
+export const sidebarModeAgents = requiredElement<HTMLButtonElement>("sidebar-mode-agents")
+export const sidebarModeAgentsBadges = requiredElement("sidebar-mode-agents-badges")
+export const sidebarWorkspacesPane = requiredElement("sidebar-workspaces-pane")
+export const sidebarAgents = requiredElement("sidebar-agents")
+export const conversationHead = appRoot.querySelector<HTMLElement>(".conversation-head")!
+export const sessionAgentContext = requiredElement("session-agent-context")
 export const sessionTitle = requiredElement("session-title")
+export const agentsSurface = requiredElement("agents-surface")
+export const streamWrap = requiredElement("stream-wrap")
+export const composerRegion = appRoot.querySelector<HTMLElement>(".composer-region")!
+export const maximizeInspectorButton = requiredElement<HTMLButtonElement>("maximize-inspector")
 export const modelMenuTrigger = requiredElement<HTMLButtonElement>("model-menu-trigger")
 export const modelMenuLabel = requiredElement("model-menu-label")
 export const modelMenu = requiredElement("model-menu")
@@ -222,11 +335,13 @@ export const newSessionButton = requiredElement<HTMLButtonElement>("new-session"
 export const sidebarToggle = requiredElement<HTMLButtonElement>("toggle-sidebar")
 export const settingsDialog = requiredElement<HTMLDialogElement>("settings-dialog")
 export const settingsForm = requiredElement<HTMLFormElement>("settings-form")
-export const settingsApiKey = requiredElement<HTMLInputElement>("settings-api-key")
-export const settingsBaseUrl = requiredElement<HTMLInputElement>("settings-base-url")
-export const settingsModel = requiredElement<HTMLInputElement>("settings-model")
-export const settingsReasoning = requiredElement<HTMLSelectElement>("settings-reasoning")
-export const settingsKeyStatus = requiredElement("settings-key-status")
+export const settingsGeneralEdit = requiredElement<HTMLButtonElement>("settings-general-edit")
+export const settingsProvider = requiredElement<HTMLButtonElement>("settings-provider")
+export const settingsProviderMenu = requiredElement("settings-provider-menu")
+export const settingsModel = requiredElement<HTMLButtonElement>("settings-model")
+export const settingsModelMenu = requiredElement("settings-model-menu")
+export const settingsReasoning = requiredElement<HTMLButtonElement>("settings-reasoning")
+export const settingsReasoningMenu = requiredElement("settings-reasoning-menu")
 export const settingsNotifications = requiredElement<HTMLInputElement>("settings-notifications")
 export const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
 export const settingsProviders = requiredElement("settings-providers")

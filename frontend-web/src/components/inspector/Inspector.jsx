@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { X } from "lucide-react";
+import { Maximize2, Minimize2, X } from "lucide-react";
 import { FileTree } from "../FileTree.jsx";
 import { methods } from "../../methods.js";
 import { ContextTab } from "./ContextTab.jsx";
@@ -28,12 +28,13 @@ export function visibleTabs(info) {
 }
 
 // Inspector (spec section 2), after LobeHub's right panel: a 360px column of
-// tabs (Context, Activity, Files). Tabs follow the WAI-ARIA tabs
-// pattern with roving arrow keys.
+// tabs (Context, Activity, Files) scoped strictly to the current session and its folder.
 export function Inspector({
   tab,
   onTab,
   onClose,
+  maximized = false,
+  onToggleMaximize,
   info,
   stats,
   contextSnapshot,
@@ -74,9 +75,22 @@ export function Inspector({
   }
 
   const { className = "", ...attrs } = panelAttrs;
+  const folderName = String(workspace || "No folder selected").replace(/\\/g, "/").split("/").filter(Boolean).pop() || "No folder selected";
+  const scopeLabel =
+    current === "files"
+      ? `Workspace · ${folderName}`
+      : `Current session · ${folderName}`;
 
   return (
-    <aside ref={panelRef} id="inspector-panel" className={`inspector ${className}`.trim()} tabIndex={-1} aria-label="Inspector" style={style} {...attrs}>
+    <aside
+      ref={panelRef}
+      id="inspector-panel"
+      className={`inspector ${maximized ? "is-maximized" : ""} ${className}`.trim()}
+      tabIndex={-1}
+      aria-label="Inspector"
+      style={style}
+      {...attrs}
+    >
       <div className="inspector-head">
         <div className="inspector-tabs" role="tablist" aria-label="Inspector sections" onKeyDown={onTabKey}>
           {gates.tabs.map((name) => (
@@ -96,11 +110,22 @@ export function Inspector({
             </button>
           ))}
         </div>
+        {onToggleMaximize && (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={maximized ? "Restore inspector width" : "Expand inspector width"}
+            title={maximized ? "Restore inspector width" : "Expand inspector width"}
+            onClick={onToggleMaximize}
+          >
+            {maximized ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
+          </button>
+        )}
         <button type="button" className="icon-button" aria-label="Close inspector" onClick={onClose}>
           <X size={16} aria-hidden="true" />
         </button>
       </div>
-      <div className="inspector-scope">{current === "files" ? `Workspace · ${String(workspace || "No folder selected").replace(/\\/g, "/").split("/").filter(Boolean).pop()}` : "Current session"}</div>
+      <div className="inspector-scope">{scopeLabel}</div>
       <div className={`inspector-panel ${current === "files" ? "is-files" : "panel-scroll"}`} role="tabpanel" id="inspector-tabpanel" aria-labelledby={`inspector-tab-${current}`}>
         {current === "context" && (
           <ContextTab stats={stats} snapshot={contextSnapshot} contextInfo={contextInfo} compacting={compacting} canCompact={Boolean(sessionId)} onCompact={onCompact} />

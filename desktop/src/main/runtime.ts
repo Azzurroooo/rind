@@ -1,11 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { createInterface } from "node:readline"
 import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import log from "electron-log/main"
 import { RuntimeInputs } from "./runtime-inputs.ts"
 import { runtimeRequestTimeout } from "./runtime-request-policy.ts"
 import { buildRuntimeEnv, resolveSourcePython } from "../../../rind-runtime-client/runtime-env.js"
+import { resolveRindHome } from "../../../rind-runtime-client/local-files.js"
 
 import { buildAuthReply, parseAuthPrompt, parseAuthUpdate, validateAuthReply } from "./auth-messages.ts"
 import {
@@ -27,8 +28,16 @@ type PendingRequest = {
   timer: NodeJS.Timeout
 }
 
+type SharedRuntimeConnection = {
+  request: (method: string, params?: Record<string, unknown>) => Promise<unknown>
+  close: () => void
+}
+
 type RuntimeWorker = {
   child?: ChildProcessWithoutNullStreams
+  sharedClient?: SharedRuntimeConnection
+  sharedConnecting?: Promise<SharedRuntimeConnection>
+  workspace?: string
   pending: Map<string, PendingRequest>
   requestSequence: number
   snapshot: RuntimeSnapshot
@@ -43,11 +52,20 @@ const authPromptListeners = new Set<(prompt: DesktopAuthPrompt) => void>()
 const authUpdateListeners = new Set<(update: DesktopAuthUpdate) => void>()
 // Worker-initiated auth prompts still waiting for an answer from the window.
 let pendingAuthPrompts: ReadonlySet<string> = new Set()
+const sharedAuthResolvers = new Map<string, (value: string) => void>()
 const maxStderrChars = 4096
 const worker: RuntimeWorker = {
   pending: new Map(),
   requestSequence: 0,
   snapshot: { status: "stopped" },
+}
+
+function useSharedRuntime() {
+  return Boolean(process.versions.electron) && !process.env.RIND_RUNTIME_PATH
+}
+
+export function isSharedRuntime() {
+  return useSharedRuntime()
 }
 
 function setSnapshot(next: RuntimeSnapshot) {
@@ -58,6 +76,14 @@ function setSnapshot(next: RuntimeSnapshot) {
 function rejectPending(error: Error) {
   inputs.clear()
   pendingAuthPrompts = new Set()
+  for (const resolveAuth of sharedAuthResolvers.values()) {
+    try {
+      resolveAuth("")
+    } catch {
+      // Ignore auth cancellation errors.
+    }
+  }
+  sharedAuthResolvers.clear()
   for (const [requestId, request] of worker.pending) {
     clearTimeout(request.timer)
     request.reject(error)
@@ -73,6 +99,29 @@ function runtimeExitError(code: number | null, signal: NodeJS.Signals | null, st
   const status = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`
   const detail = stderr.trim().split(/\r?\n/).filter(Boolean).at(-1)
   return new Error(detail ? `Runtime exited unexpectedly (${status}): ${detail}` : `Runtime exited unexpectedly (${status}).`)
+}
+
+function dispatchRuntimeEnvelope(message: unknown) {
+  const authUpdate = parseAuthUpdate(message)
+  if (authUpdate) {
+    for (const listener of authUpdateListeners) listener(authUpdate)
+    return true
+  }
+  if (isRuntimeEventEnvelope(message)) {
+    const enriched = inputs.enrich(message)
+    const type = String(enriched.event.type || "")
+    for (const listener of eventListeners) listener({
+      type,
+      sequence: message.sequence,
+      durability: message.durability,
+      sessionId: message.session_id,
+      turnId: message.turn_id,
+      event: enriched.event,
+      generation: runtimeGeneration,
+    })
+    return true
+  }
+  return false
 }
 
 function handleLine(source: ChildProcessWithoutNullStreams, line: string) {
@@ -91,25 +140,7 @@ function handleLine(source: ChildProcessWithoutNullStreams, line: string) {
     for (const listener of authPromptListeners) listener(authPrompt)
     return
   }
-  const authUpdate = parseAuthUpdate(message)
-  if (authUpdate) {
-    for (const listener of authUpdateListeners) listener(authUpdate)
-    return
-  }
-  if (isRuntimeEventEnvelope(message)) {
-    const enriched = inputs.enrich(message)
-    const type = String(enriched.event.type || "")
-    for (const listener of eventListeners) listener({
-      type,
-      sequence: message.sequence,
-      durability: message.durability,
-      sessionId: message.session_id,
-      turnId: message.turn_id,
-      event: enriched.event,
-      generation: runtimeGeneration,
-    })
-    return
-  }
+  if (dispatchRuntimeEnvelope(message)) return
   if (!isRuntimeResponseEnvelope(message)) return
   const requestId = String(message.request_id)
   inputs.finish(requestId)
@@ -141,11 +172,86 @@ function runtimeLaunch() {
 }
 
 let runtimeGeneration = 0
+let sharedRuntimeModulePromise: Promise<any> | undefined
+
+function loadSharedRuntimeModule(repoRoot: string) {
+  if (!sharedRuntimeModulePromise) {
+    const sharedUrl = pathToFileURL(join(repoRoot, "rind-runtime-client", "shared-runtime.js")).href
+    sharedRuntimeModulePromise = import(/* @vite-ignore */ sharedUrl).catch((error) => {
+      sharedRuntimeModulePromise = undefined
+      throw error
+    })
+  }
+  return sharedRuntimeModulePromise
+}
+
+function ensureSharedClient(): Promise<SharedRuntimeConnection> {
+  if (worker.sharedClient) return Promise.resolve(worker.sharedClient)
+  if (worker.sharedConnecting) return worker.sharedConnecting
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
+  const rindHome = resolveRindHome(process.env.RIND_HOME)
+  const isSource = Boolean(process.env.ELECTRON_RENDERER_URL)
+  const packagedRuntimePath = !isSource
+    ? join(process.resourcesPath, "runtime", process.platform === "win32" ? "rind-runtime.exe" : "rind-runtime")
+    : undefined
+  buildRuntimeEnv(repoRoot, process.env, { sourceRuntime: isSource, rindHome })
+
+  worker.sharedConnecting = (async () => {
+    const { connectSharedRuntime } = await loadSharedRuntimeModule(repoRoot)
+    const conn = (await connectSharedRuntime({
+      rindHome,
+      repoRoot: isSource ? repoRoot : undefined,
+      python: isSource ? resolveSourcePython(process.env.RIND_PYTHON, repoRoot) : undefined,
+      runtimePath: packagedRuntimePath,
+      onMessage(message: unknown) {
+        dispatchRuntimeEnvelope(message)
+      },
+      onRequest(prompt: unknown) {
+        const authPrompt = parseAuthPrompt(prompt)
+        if (!authPrompt) return ""
+        pendingAuthPrompts = new Set([...pendingAuthPrompts, authPrompt.requestId])
+        return new Promise<string>((resolve) => {
+          sharedAuthResolvers.set(authPrompt.requestId, resolve)
+          for (const listener of authPromptListeners) listener(authPrompt)
+        })
+      },
+      onDisconnect() {
+        worker.sharedClient = undefined
+        if (worker.snapshot.status === "stopping" || worker.snapshot.status === "stopped") return
+        rejectPending(new Error("Runtime connection lost."))
+        setSnapshot({ status: "stopped" })
+      },
+    })) as SharedRuntimeConnection
+    worker.sharedClient = conn
+    return conn
+  })().finally(() => {
+    worker.sharedConnecting = undefined
+  })
+
+  return worker.sharedConnecting
+}
 
 export function startRuntime(workspace: string) {
   if (worker.snapshot.status === "stopping") throw new Error("Runtime is shutting down.")
-  if (worker.child && !worker.child.killed && worker.child.exitCode === null) return worker.snapshot
   if (!workspace) throw new Error("Workspace is required to start the runtime worker.")
+  worker.workspace = workspace
+
+  if (useSharedRuntime()) {
+    if (worker.sharedClient || worker.sharedConnecting || worker.snapshot.status === "ready") {
+      return worker.snapshot
+    }
+    setSnapshot({ status: "starting" })
+    runtimeGeneration += 1
+    worker.shutdownPromise = undefined
+    void ensureSharedClient().catch((error: Error) => {
+      if (worker.snapshot.status !== "stopped") {
+        setSnapshot({ status: "error", message: error?.message || "Runtime could not start." })
+      }
+    })
+    return worker.snapshot
+  }
+
+  if (worker.child && !worker.child.killed && worker.child.exitCode === null) return worker.snapshot
   setSnapshot({ status: "starting" })
   runtimeGeneration += 1
   const launch = runtimeLaunch()
@@ -192,7 +298,35 @@ export function startRuntime(workspace: string) {
   return worker.snapshot
 }
 
+async function requestShared(method: RuntimeServerMethod, params: Record<string, unknown> = {}) {
+  const client = await ensureSharedClient()
+  if (method !== "initialize" && method !== "shutdown" && worker.snapshot.status !== "ready") {
+    await initializeRuntime()
+  }
+  const requestId = `desktop-${++worker.requestSequence}`
+  inputs.begin(requestId, method, params)
+  try {
+    const sessionId = typeof params.session_id === "string" ? params.session_id.trim() : ""
+    if (method === "session/replay" && sessionId) {
+      await client.request("session/subscribe", { session_id: sessionId }).catch(() => {})
+    } else if (method === "session/delete" && sessionId) {
+      await client.request("session/unsubscribe", { session_id: sessionId }).catch(() => {})
+    }
+    return await client.request(method, params)
+  } catch (error: any) {
+    if (error && typeof error === "object" && typeof error.code === "string" && error.code) {
+      error.name = error.code
+    }
+    throw error
+  } finally {
+    inputs.finish(requestId)
+  }
+}
+
 function request(method: RuntimeServerMethod, params: Record<string, unknown> = {}, timeoutMs = 30_000) {
+  if (useSharedRuntime()) {
+    return requestShared(method, params)
+  }
   if (!worker.child?.stdin.writable) return Promise.reject(new Error("Runtime is not running."))
   const requestId = `desktop-${++worker.requestSequence}`
   const message: RuntimeRequestEnvelope = { kind: "request", request_id: requestId, method, params }
@@ -226,6 +360,13 @@ export async function initializeRuntime() {
 
 async function initializeWorker() {
   try {
+    if (useSharedRuntime()) {
+      const client = await ensureSharedClient()
+      const initialized = requireRuntimeInitialization(await client.request("initialize", {}))
+      await client.request("runtime/observe", {}).catch(() => {})
+      setSnapshot({ status: "ready" })
+      return initialized
+    }
     const initialized = requireRuntimeInitialization(await request("initialize"))
     setSnapshot({ status: "ready" })
     return initialized
@@ -243,6 +384,14 @@ export function requestRuntime(method: RuntimeMethod, params: Record<string, unk
 /** Answer a worker auth prompt. An empty value cancels the login. */
 export async function respondAuthPrompt(requestId: unknown, value: unknown): Promise<boolean> {
   const reply = validateAuthReply(pendingAuthPrompts, requestId, value)
+  if (useSharedRuntime()) {
+    if (!worker.sharedClient) return Promise.reject(new Error("Runtime is not running."))
+    pendingAuthPrompts = new Set([...pendingAuthPrompts].filter((id) => id !== reply.requestId))
+    const resolve = sharedAuthResolvers.get(reply.requestId)
+    sharedAuthResolvers.delete(reply.requestId)
+    resolve?.(reply.value)
+    return true
+  }
   if (!worker.child?.stdin.writable) return Promise.reject(new Error("Runtime is not running."))
   pendingAuthPrompts = new Set([...pendingAuthPrompts].filter((id) => id !== reply.requestId))
   const envelope = buildAuthReply(reply.requestId, reply.value)
@@ -268,6 +417,22 @@ export function shutdownRuntime() {
 }
 
 async function shutdownWorker(): Promise<{ ok: true }> {
+  if (useSharedRuntime()) {
+    const current = worker.sharedClient
+    if (!current && worker.snapshot.status === "stopped") {
+      return { ok: true }
+    }
+    setSnapshot({ status: "stopping" })
+    try {
+      await current?.request("shutdown", {}).catch(() => {})
+    } finally {
+      current?.close()
+      worker.sharedClient = undefined
+      rejectPending(new Error("Runtime stopped."))
+      setSnapshot({ status: "stopped" })
+    }
+    return { ok: true }
+  }
   const current = worker.child
   if (!current) {
     setSnapshot({ status: "stopped" })
@@ -300,7 +465,7 @@ export function subscribeRuntimeEvents(listener: (event: RuntimeEvent) => void) 
 }
 
 export function getRuntimeSnapshot() {
-  return worker.child || worker.snapshot.status !== "stopped" ? worker.snapshot : undefined
+  return worker.child || worker.sharedClient || worker.snapshot.status !== "stopped" ? worker.snapshot : undefined
 }
 
 function waitForChildExit(child: ChildProcessWithoutNullStreams) {

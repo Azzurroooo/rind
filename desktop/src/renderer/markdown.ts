@@ -1,4 +1,5 @@
 import { escapeAttribute, escapeHtml } from "./html-escape.ts"
+import { highlightCode } from "./syntax-highlight.ts"
 
 export function renderMarkdown(value: string): string {
   const lines = value.replace(/\r\n?/g, "\n").split("\n")
@@ -162,7 +163,8 @@ function renderTable(table: MarkdownTable) {
 }
 
 function renderCodeBlock(language: string, code: string) {
-  return `<pre><div class=\"code-head\"><span>${escapeHtml(language || "code")}</span><button class=\"copy-code\" type=\"button\" data-copy=\"${escapeAttribute(code)}\">Copy</button></div><code>${escapeHtml(code)}</code></pre>`
+  const highlighted = highlightCode(language, code)
+  return `<pre><div class=\"code-head\"><span>${escapeHtml(highlighted.language || "code")}</span><button class=\"copy-code\" type=\"button\" data-copy=\"${escapeAttribute(code)}\">Copy</button></div><code class=\"hljs\">${highlighted.html}</code></pre>`
 }
 
 function renderInline(value: string) {

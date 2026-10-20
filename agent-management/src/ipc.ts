@@ -121,7 +121,7 @@ export async function startServer(options: { home?: string; python?: string; rep
         if (message.event?.type === "folder_defaults_changed") { service.folderDefaultsChanged(); return; }
         if (message.event?.type === "wait_released" || message.event?.type === "turn_cancelled") { service.releaseWait(message.session_id); if (message.event?.type === "wait_released") return; }
         if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "background_wait_changed"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
-        const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === message.session_id);
+        const session = Object.values(store.state.sessions).filter(s => s.runtimeSessionId === message.session_id).at(-1);
         if (session) void reconcile(session);
       },
       onDisconnect() {
@@ -223,10 +223,11 @@ export async function startServer(options: { home?: string; python?: string; rep
     const managed = session?.origin === "managed";
     const task = managed && !session.delegationId;
     const tools = toolsFor(manager ? "manager" : "agent", { supervises: canDelegate(store.state, session), task });
+    const nodeEnv = process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {};
     return {
       skill_files: principal.kind === "manager" ? [] : skills.filter(ref => path.isAbsolute(ref)),
-      command: process.execPath, args: [bridge], env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: token },
-      lifecycle: { before: "hostTurnStart", after: "hostTurnEnd", env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: hostToken } },
+      command: process.execPath, args: [bridge], env: { ...nodeEnv, RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: token },
+      lifecycle: { before: "hostTurnStart", after: "hostTurnEnd", env: { ...nodeEnv, RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: hostToken } },
       tools,
       ...(manager ? { instructions: managerInstructions(path.dirname(paths.root)) }
         : managed || !session ? {} : { instructions: memberInstructions(store.state, session) }),

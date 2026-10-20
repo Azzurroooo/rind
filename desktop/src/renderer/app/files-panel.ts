@@ -4,6 +4,7 @@ import { projectRelativePath } from "../tool-display.ts"
 import { filePreview, filesUnavailable, fileTree } from "./dom.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
 import { showToast } from "./overlays.ts"
+import { animateCollapse, animateExpand } from "./accordion.ts"
 import { runAction } from "./runtime.ts"
 import { openInspector } from "./inspector.ts"
 import { viewedProject } from "./sessions.ts"
@@ -12,9 +13,23 @@ import { state } from "./state.ts"
 
 
 
+function activeWorkspacePath(): string {
+  const project = viewedProject()
+  if (project?.available) return project.path
+  if (
+    state.agentChatContext &&
+    state.agentChatContext.kind !== "independent" &&
+    state.agentChatContext.workspaceRoot
+  ) {
+    return state.agentChatContext.workspaceRoot
+  }
+  return ""
+}
+
 /** Inspector Files tab: the project tree, or a preview that replaces it. */
 export function renderFiles() {
-  const available = viewedProject()?.available === true
+  const workspacePath = activeWorkspacePath()
+  const available = Boolean(workspacePath)
   const preview = available ? state.filePreview : undefined
   filesUnavailable.hidden = available
   filesUnavailable.textContent = "Choose an available project to browse its files."
@@ -50,36 +65,45 @@ export function renderDirectory(path: string, depth = 0): string {
 }
 
 export async function loadDirectory(path: string) {
-  const project = viewedProject()
-  if (!project) return
-  const projectPath = project.path
+  const projectPath = activeWorkspacePath()
+  if (!projectPath) return
   const listing = await window.api.files.list(projectPath, path)
-  if (!samePath(viewedProject()?.path || "", projectPath)) return
+  if (!samePath(activeWorkspacePath(), projectPath)) return
   state.fileListings = { ...state.fileListings, [path]: listing }
   render()
 }
 
+function findDirectoryBranchElement(path: string): HTMLElement | null {
+  const trigger = [...fileTree.querySelectorAll<HTMLButtonElement>("[data-toggle-directory]")]
+    .find((item) => item.dataset.toggleDirectory === path)
+  return trigger?.closest<HTMLElement>(".file-directory")?.querySelector<HTMLElement>(":scope > .file-branch") || null
+}
+
 export async function toggleDirectory(path: string) {
-  const projectPath = viewedProject()?.path || ""
+  const projectPath = activeWorkspacePath()
   if (!projectPath) return
   const expanded = new Set(state.expandedDirectories)
-  if (expanded.has(path)) {
+  const wasExpanded = expanded.has(path)
+  if (wasExpanded) {
+    await animateCollapse(findDirectoryBranchElement(path))
     expanded.delete(path)
   } else {
     expanded.add(path)
     if (!state.fileListings[path]) await loadDirectory(path)
   }
-  if (!samePath(viewedProject()?.path || "", projectPath)) return
+  if (!samePath(activeWorkspacePath(), projectPath)) return
   state.expandedDirectories = expanded
   render()
+  if (!wasExpanded) {
+    animateExpand(findDirectoryBranchElement(path))
+  }
 }
 
 export async function previewFile(path: string) {
-  const project = viewedProject()
-  if (!project) return
-  const projectPath = project.path
+  const projectPath = activeWorkspacePath()
+  if (!projectPath) return
   const preview = await window.api.files.preview(projectPath, path)
-  if (!samePath(viewedProject()?.path || "", projectPath)) return
+  if (!samePath(activeWorkspacePath(), projectPath)) return
   state.filePreview = preview
   render()
 }
@@ -112,10 +136,10 @@ export function bindFilesPanelEvents(): void {
 
 /** Opens a path from a read_file row in the Files tab (spec section 5.3). */
 export async function openToolFile(path: string) {
-  const project = viewedProject()
-  const relative = project ? projectRelativePath(path, project.path) : undefined
-  if (!project?.available || !relative) {
-    showToast(project?.available ? "That file is outside this project." : "Choose an available project to open files.")
+  const projectPath = activeWorkspacePath()
+  const relative = projectPath ? projectRelativePath(path, projectPath) : undefined
+  if (!projectPath || !relative) {
+    showToast(projectPath ? "That file is outside this project." : "Choose an available project to open files.")
     return
   }
   await openInspector("files")

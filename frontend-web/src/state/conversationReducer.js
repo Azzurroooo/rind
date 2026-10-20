@@ -36,7 +36,7 @@
 // tracks the one card that can still be answered, while every card is ALSO a
 // stream entry (role "question") so the answered/cancelled card remains
 // readable in the transcript instead of vanishing.
-import { parseToolResult, summarizeChanges } from "../lib/toolDisplay.js";
+import { parseToolResult, summarizeChanges, summarizeTurnFileList } from "../lib/toolDisplay.js";
 
 // Stream length ceiling (audit #5): dropping the oldest keeps month-long
 // sessions bounded; the collapsed divider keeps the truncation honest.
@@ -59,6 +59,7 @@ export function emptyConversationState() {
     settledInputs: {}, // delivery/retrieval can arrive before the queue RPC reply
     collapsedCount: 0, // entries dropped by the TRANSCRIPT_CAP (oldest first)
     turnChanges: null, // { fileCount, added, removed, firstToolCallId } — last finished turn's mutations
+    turnFileList: [], // [{ path, added, removed, isNew, toolCallId }] — per-file summary for EditedFilesCard
     backgroundWait: null, // { count, startedAt } while the turn waits on background processes
     cursor: 0, // durable events applied for the current session
     seen: {}, // "session:turn:sequence" -> true (idempotence guard)
@@ -154,6 +155,7 @@ export function conversationView(state) {
     queued: state.queued,
     collapsedCount: state.collapsedCount,
     turnChanges: state.turnChanges,
+    turnFileList: state.turnFileList || [],
     backgroundWait: state.backgroundWait,
     cursor: state.cursor,
   };
@@ -194,7 +196,13 @@ function applyTurnEvent(state, event, context) {
     case "task_continuation_failed":
       return appendEntry(state, { role: "system", content: String(event.error || "Background continuation failed."), tone: "error" });
     case "turn_started":
-      return { ...confirmPrompt(state, event.input, event.client_input_id || turnId, event.ts), active: true, activeTurnId: turnId, operation: event.operation || "", streaming: { turnId, text: "" } };
+      return {
+        ...confirmPrompt(state, event.input || event.delivery_text, event.client_input_id || turnId, event.ts, event.delivery === true),
+        active: true,
+        activeTurnId: turnId,
+        operation: event.operation || "",
+        streaming: { turnId, text: "" },
+      };
 
     case "assistant_delta": {
       const streaming = state.streaming && state.streaming.turnId === turnId
@@ -328,6 +336,15 @@ function applyTurnEvent(state, event, context) {
       return withQuestionEntry({ ...state, question: nextQuestion }, nextQuestion);
     }
 
+    case "user_question_answered": {
+      const toolCallId = String(event.tool_call_id || "").trim();
+      if (!toolCallId) return state;
+      const key = `${context.sessionId}:${toolCallId}`;
+      const next = markQuestionEntry(state, key, { status: "answered", selectedAnswer: String(event.answer || "") });
+      const pointerMatches = next.question && (next.question.toolCallId === toolCallId || questionKey(next.question) === key);
+      return { ...next, question: pointerMatches ? null : next.question, resolvedQuestionKey: key };
+    }
+
     case "queued_input_delivered":
       // The queued chip converts into a normal user message in place.
       return deliverQueued(state, event.input_id, event.input, event.mode, event.ts);
@@ -376,6 +393,7 @@ function finalizeTurn(state, turnId) {
     backgroundWait: null,
     question: null, // pending question dies with its turn (§2.3 cancelled)
     turnChanges: summarizeChanges(entries),
+    turnFileList: summarizeTurnFileList(entries),
   };
 }
 
@@ -424,9 +442,16 @@ function flushStreaming(state) {
     : state;
 }
 
-function confirmPrompt(state, input, inputId, time) {
+function confirmPrompt(state, input, inputId, time, delivery = false) {
   if (!input || state.entries.some((entry) => entry.role === "user" && entry.inputId === inputId)) return state;
-  return appendEntry(flushStreaming(state), { id: `msg:input:${inputId}`, role: "user", content: String(input), inputId, time });
+  return appendEntry(flushStreaming(state), {
+    id: `msg:input:${inputId}`,
+    role: "user",
+    content: String(input),
+    inputId,
+    time,
+    ...(delivery ? { delivery: true, _rind_meta: { kind: "team_delivery" } } : {}),
+  });
 }
 
 // Question cards live in the stream so answered/cancelled history stays readable.
@@ -499,7 +524,13 @@ function definedOnly(patch) {
 // Initial history load via session/replay `messages` (existing flow, unchanged).
 function applyHistory(state, messages) {
   const fresh = emptyConversationState();
-  return { ...fresh, entries: normalizeHistoryMessages(messages) };
+  const entries = normalizeHistoryMessages(messages);
+  return {
+    ...fresh,
+    entries,
+    turnChanges: summarizeChanges(entries),
+    turnFileList: summarizeTurnFileList(entries),
+  };
 }
 
 // live_turn snapshot reconciliation (used right after a history load).
@@ -598,12 +629,15 @@ export function normalizeHistoryMessages(values) {
           ...(Number.isFinite(message.duration_ms) ? { duration_ms: Number(message.duration_ms) } : {}),
         };
       }
+      const meta = message._rind_meta || message.meta || null;
+      const isDelivery = Boolean(message.delivery || meta?.kind === "team_delivery");
       return {
         id: message.id || `history-${index}`,
         role: message.role,
         content: contentText(message.content),
         meta: "",
-        ...(message._rind_meta ? { _rind_meta: message._rind_meta } : {}),
+        ...(meta ? { _rind_meta: meta } : {}),
+        ...(isDelivery ? { delivery: true } : {}),
         ...(message.ts || message.created_at || message.timestamp ? { time: message.ts || message.created_at || message.timestamp } : {}),
       };
     })

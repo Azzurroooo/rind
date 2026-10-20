@@ -564,6 +564,8 @@ class RuntimeDispatcher:
         if resume and query.strip():
             await self._respond_error(request, "resume cannot include input.", "InvalidRequest")
             return
+        raw_client_input_id = params.get("client_input_id")
+        client_input_id = str(raw_client_input_id).strip() if isinstance(raw_client_input_id, str) else ""
         transient_system_messages = params.get("transient_system_messages")
         if not isinstance(transient_system_messages, list):
             transient_system_messages = None
@@ -585,6 +587,17 @@ class RuntimeDispatcher:
                 resume=resume,
                 **({"delivery": True} if delivery else {}),
             ):
+                if (
+                    event.get("type") == "turn_started"
+                    and query
+                    and not resume
+                    and not delivery
+                ):
+                    event = {
+                        **event,
+                        "input": query,
+                        **({"client_input_id": client_input_id} if client_input_id else {}),
+                    }
                 turn_session_id = turn_session_id or str(event.get("session_id") or "")
                 turn_id = turn_id or str(event.get("turn_id") or "")
                 await self._send_event(event)

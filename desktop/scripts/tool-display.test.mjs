@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { editCounts, projectRelativePath, toolError, toolView } from "../src/renderer/tool-display.ts"
+import { editCounts, projectRelativePath, summarizeTurnFileChanges, toolError, toolView } from "../src/renderer/tool-display.ts"
 import { appendInput, partialArguments } from "../src/renderer/tool-input.ts"
 
 function result(data, meta = {}, ok = true, extra = {}) {
@@ -125,6 +125,43 @@ test("delegate uses management fields for the assignee, brief and task ID", () =
   const view = toolView(tool("delegate", { to: "agent-id", brief: "Review the diff" }, { result: result({ taskId: "task-id", assignee: "Reviewer", status: "queued" }) }))
   assert.equal(view.target, "Reviewer: Review the diff")
   assert.ok(metaText(view).includes("task task-id"))
+})
+
+test("delegate wait, retire, report and agent_management format cleanly", () => {
+  const waitView = toolView(tool("delegate", { wait: true, task: "t-9" }, { result: result({ settled: [{ taskId: "t-9" }], output: "All checks passed." }) }))
+  assert.equal(waitView.verb, "Waited for")
+  assert.equal(waitView.target, "task t-9")
+  assert.ok(metaText(waitView).includes("1 settled"))
+  assert.equal(waitView.body.text, "All checks passed.")
+
+  const retireView = toolView(tool("delegate", { retire: "scout" }, { result: result({}) }))
+  assert.equal(retireView.verb, "Retired")
+  assert.equal(retireView.target, "scout")
+
+  const reportDone = toolView(tool("report", { outcome: "completed", summary: "Fixed bug", evidence: ["npm test passed"], artifacts: ["/tmp/patch.diff"] }, { result: result({ delivered: true }) }))
+  assert.equal(reportDone.verb, "Reported")
+  assert.equal(reportDone.target, "completed")
+  assert.ok(metaText(reportDone).includes("delivered"))
+  assert.ok(reportDone.body.text.includes("Fixed bug"))
+
+  const reportBlocked = toolView(tool("report", { blocked: { responder: "lead", action: "Needs API key" }, summary: "Paused on auth" }, { result: result({}) }))
+  assert.equal(reportBlocked.verb, "Reported")
+  assert.equal(reportBlocked.target, "blocked")
+  assert.ok(metaText(reportBlocked).includes("needs lead: Needs API key"))
+
+  const mgmtView = toolView(tool("agent_management", { action: "create_team", name: "Core Platform" }, { result: result({ status: "ok", summary: "Created team Core Platform." }) }))
+  assert.equal(mgmtView.verb, "Managed agents")
+  assert.equal(mgmtView.target, "create team: Core Platform")
+  assert.equal(mgmtView.body.text, "Created team Core Platform.")
+})
+
+test("summarizeTurnFileChanges aggregates file mutations in the trailing turn", () => {
+  const edit = tool("edit_file", { path: "src/a.ts" }, { toolCallId: "c-edit", result: result(null, { files: [{ path: "src/a.ts", added_lines: 3, removed_lines: 1 }] }) })
+  const write = tool("write_file", { path: "src/b.ts", content: "one\ntwo\n" }, { toolCallId: "c-write", result: result(null) })
+  assert.deepEqual(summarizeTurnFileChanges([{ kind: "user" }, edit, write]), [
+    { path: "src/a.ts", added: 3, removed: 1, toolCallId: "c-edit" },
+    { path: "src/b.ts", added: 2, removed: 0, toolCallId: "c-write" },
+  ])
 })
 
 test("agent_create describes what was created", () => {

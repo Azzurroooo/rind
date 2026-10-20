@@ -54,6 +54,8 @@ const formatters: Record<string, Formatter> = {
   search_web: searchWeb,
   fetch_web_page: fetchPage,
   delegate,
+  report: reportTool,
+  agent_management: agentManagementTool,
   agent_create: agentCreate,
   update_goal: updateGoal,
 }
@@ -219,15 +221,122 @@ function terminalBody(tool: ToolEntry, data: Record<string, unknown>): ToolBody 
 
 // ---------- agents, goals ----------
 
+function unwrapData(rawData: unknown): Record<string, unknown> {
+  let current = rec(rawData)
+  if (typeof rawData === "string") {
+    try {
+      current = rec(JSON.parse(rawData))
+    } catch {
+      // Plain string data.
+    }
+  }
+  if (current.result && typeof current.result === "object" && !Array.isArray(current.result)) {
+    return rec(current.result)
+  }
+  return current
+}
+
 function delegate(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
-  const data = rec(tool.result?.data)
-  const agent = str(data.assignee) || str(tool.arguments.to) || str(rec(tool.arguments.new).name) || str(tool.arguments.agent_id) || str(data.agent_id)
+  const data = unwrapData(tool.result?.data)
+  if (tool.arguments.wait === true || Array.isArray(data.settled)) {
+    const settled = arr(data.settled)
+    const taskId = str(tool.arguments.task)
+    const target = taskId ? `task ${taskId}` : "delegated tasks"
+    const output = (str(data.output) || str(data.summary)).trim()
+    return {
+      verb: "Waited for",
+      target,
+      path: false,
+      meta: [
+        { text: `${settled.length} settled` },
+        ...(data.timedOut ? [{ text: "timed out", tone: "danger" as const }] : data.released ? [{ text: "released" }] : []),
+        ...durationMeta(tool),
+      ],
+      body: output ? { type: "markdown", text: output, preview: bodyCaps.markdownPreview } : undefined,
+    }
+  }
+  const retire = str(tool.arguments.retire)
+  if (retire) {
+    return {
+      verb: "Retired",
+      target: retire,
+      path: false,
+      meta: durationMeta(tool),
+    }
+  }
+  const newName = str(rec(tool.arguments.new).name)
+  const isNew = Boolean(newName && !str(data.assignee) && !str(tool.arguments.to))
+  const baseAgent = str(data.assignee) || str(tool.arguments.to) || newName || str(tool.arguments.agent_id) || str(data.agent_id)
+  const agent = isNew ? `${baseAgent} (new)` : baseAgent
   const task = clipLine(str(tool.arguments.brief) || str(tool.arguments.message) || str(tool.arguments.task), 80)
   const status = str(data.status)
   const summary = str(data.summary).trim()
   return {
     verb: "Delegated to", target: [agent, task].filter(Boolean).join(": "), path: false,
     meta: [...(str(data.taskId) ? [{ text: "task " + str(data.taskId) }] : []), ...(status ? [{ text: status }] : []), ...durationMeta(tool)],
+    body: summary ? { type: "markdown", text: summary, preview: bodyCaps.markdownPreview } : undefined,
+  }
+}
+
+function reportTool(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
+  const data = unwrapData(tool.result?.data)
+  const blocked = rec(tool.arguments.blocked)
+  if (Object.keys(blocked).length > 0) {
+    const responder = str(blocked.responder) || "lead"
+    const action = str(blocked.action)
+    const summary = str(tool.arguments.summary).trim()
+    return {
+      verb: "Reported",
+      target: "blocked",
+      path: false,
+      meta: [{ text: action ? `needs ${responder}: ${action}` : `needs ${responder}`, tone: "danger" }],
+      body: summary ? { type: "markdown", text: summary, preview: bodyCaps.markdownPreview } : undefined,
+    }
+  }
+  const outcome = str(tool.arguments.outcome) || str(data.outcome) || str(data.status) || "completed"
+  const delivered = Boolean(data.delivered)
+  const summary = (str(tool.arguments.summary) || str(data.summary)).trim()
+  const evidence = arr(tool.arguments.evidence).map((x) => str(x).trim()).filter(Boolean)
+  const artifacts = arr(tool.arguments.artifacts)
+    .map((x) => str(x).trim().split(/[\\/]/).pop() || "")
+    .filter(Boolean)
+  const sections = [
+    summary,
+    evidence.length ? `**Evidence:** ${evidence.join(" · ")}` : "",
+    artifacts.length ? `**Files:** \`${artifacts.join("`, `")}\`` : "",
+  ].filter(Boolean)
+  return {
+    verb: "Reported",
+    target: outcome,
+    path: false,
+    meta: [
+      ...(delivered ? [{ text: "delivered", tone: "success" as const }] : []),
+      ...(artifacts.length ? [{ text: plural(artifacts.length, "file") }] : []),
+    ],
+    body: sections.length ? { type: "markdown", text: sections.join("\n\n"), preview: bodyCaps.markdownPreview } : undefined,
+  }
+}
+
+function agentManagementTool(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
+  const data = unwrapData(tool.result?.data)
+  const rawAction = str(tool.arguments.action) || str(tool.arguments.operation) || str(data.action) || "update"
+  const actionLabel = rawAction.replace(/[_-]+/g, " ")
+  const subject =
+    str(tool.arguments.name) ||
+    str(tool.arguments.team) ||
+    str(tool.arguments.agent) ||
+    str(tool.arguments.member) ||
+    str(tool.arguments.taskId) ||
+    str(data.name) ||
+    str(rec(data.team).name) ||
+    str(rec(data.agent).name)
+  const summary = (str(data.summary) || str(tool.arguments.brief) || str(tool.arguments.description)).trim()
+  const status = str(data.status)
+  return {
+    verb: "Managed agents",
+    target: subject ? `${actionLabel}: ${subject}` : actionLabel,
+    path: false,
+    meta: status ? [{ text: status }] : [],
     body: summary ? { type: "markdown", text: summary, preview: bodyCaps.markdownPreview } : undefined,
   }
 }
@@ -360,6 +469,36 @@ export function projectRelativePath(path: string, root: string): string | undefi
   if (same(target, base)) return ""
   const prefix = target.slice(0, base.length + 1)
   return same(prefix, `${base}/`) ? target.slice(base.length + 1) : undefined
+}
+
+export type TurnFileChange = { path: string; added: number; removed: number; toolCallId: string }
+
+export function summarizeTurnFileChanges(entries: ReadonlyArray<{ kind: string; id?: string; toolCallId?: string; toolName?: string } & Record<string, unknown>>): TurnFileChange[] {
+  let start = entries.length
+  while (start > 0) {
+    const kind = entries[start - 1]?.kind
+    if (kind === "user") break
+    start -= 1
+  }
+  const byPath = new Map<string, TurnFileChange>()
+  for (const entry of entries.slice(start)) {
+    if (entry.kind !== "tool") continue
+    const tool = entry as unknown as ToolEntry
+    if (tool.toolName !== "write_file" && tool.toolName !== "edit_file") continue
+    const path = argPath(tool)
+    if (!path) continue
+    const counts = tool.toolName === "write_file"
+      ? { added: num(resultFile(tool).added_lines) ?? textLines(str(tool.arguments.content)).length, removed: 0 }
+      : editCounts(tool) || { added: 0, removed: 0 }
+    const prev = byPath.get(path)
+    byPath.set(path, {
+      path,
+      added: (prev?.added || 0) + counts.added,
+      removed: (prev?.removed || 0) + counts.removed,
+      toolCallId: prev?.toolCallId || tool.toolCallId || tool.id,
+    })
+  }
+  return [...byPath.values()]
 }
 
 function str(value: unknown) { return typeof value === "string" ? value : "" }

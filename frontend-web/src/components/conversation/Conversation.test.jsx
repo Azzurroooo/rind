@@ -95,4 +95,37 @@ describe("Conversation", () => {
     expect(document.querySelector(".collapsed-divider").textContent).toBe("Earlier messages have been collapsed (4)");
     expect(document.querySelector(".change-summary").textContent).toContain("Changed 2 files");
   });
+
+  it("expands the edited files list and opens a file when clicked", () => {
+    const onOpenFile = vi.fn();
+    render(
+      <Conversation
+        messages={thread}
+        turnChanges={{ fileCount: 2, added: 10, removed: 3, firstToolCallId: "tc-1" }}
+        turnFileList={[
+          { path: "src/app.js", added: 8, removed: 2, toolCallId: "tc-1" },
+          { path: "src/lib.js", added: 2, removed: 1, toolCallId: "tc-2" },
+        ]}
+        onOpenFile={onOpenFile}
+      />,
+    );
+    fireEvent.click(document.querySelector(".change-summary"));
+    expect(document.querySelectorAll(".change-file-row")).toHaveLength(2);
+    fireEvent.click(screen.getByText("src/app.js"));
+    expect(onOpenFile).toHaveBeenCalledWith("src/app.js");
+  });
+
+  it("renders a Team delivery badge on delivered user turns and shows the turn minimap", () => {
+    render(
+      <Conversation
+        messages={[
+          { id: "u-1", role: "user", content: "Task report delivered", delivery: true },
+          { id: "a-1", role: "assistant", content: "Acknowledged" },
+          { id: "u-2", role: "user", content: "Follow up" },
+        ]}
+      />,
+    );
+    expect(document.querySelector(".delivery-badge").textContent).toBe("Team delivery");
+    expect(document.querySelectorAll(".chat-minimap-tick")).toHaveLength(2);
+  });
 });

@@ -56,14 +56,14 @@ export function renderProjects() {
     const total = state.sessionTotals[project.path] ?? project.totalSessions
     const showSessions = expanded || (searching && sessions.length)
     const projectNode = document.createElement("section")
-    projectNode.className = `project-item${expanded ? " expanded" : ""}`
+    projectNode.className = `project-item${expanded ? " expanded" : ""}${menuOpen ? " menu-open" : ""}`
     projectNode.innerHTML = `
-      <div class="project-row">
+      <div class="project-row${menuOpen ? " menu-open" : ""}">
         <button type="button" class="project-trigger" data-project-path="${escapeAttribute(project.path)}" title="${escapeAttribute(project.path)}">
           <span class="project-name">${escapeHtml(project.name)}</span>
           <span class="project-path">${escapeHtml(project.path)}</span>
         </button>
-        <div class="project-menu-wrap">
+        <div class="project-menu-wrap${menuOpen ? " menu-open" : ""}">
           <button type="button" class="project-menu-trigger ghost-button" data-project-menu="${escapeAttribute(project.path)}" title="Project actions" aria-label="Project actions for ${escapeAttribute(project.name)}" aria-haspopup="menu" aria-expanded="${String(menuOpen)}"><svg class="project-menu-icon" viewBox="0 0 16 16" focusable="false" aria-hidden="true"><circle cx="3" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="13" cy="8" r="1.3" /></svg></button>
           ${menuOpen ? `<div class="project-menu" role="menu"><button type="button" data-remove-project="${escapeAttribute(project.path)}" role="menuitem">Remove</button></div>` : ""}
         </div>
@@ -81,18 +81,18 @@ const SPINNER = renderIcon(LoaderCircle, "session-spinner")
 
 // Shared session row (spec section 3): a 32px title row plus a hover
 // overflow menu with Fork, Export replay and a confirming Delete.
-export function renderSessionRow(item: DesktopSessionSummary, whenIso: string) {
+export function renderSessionRow(item: DesktopSessionSummary, whenIso: string, menuKey = item.id) {
   const title = item.title || "Untitled"
   const running = sessionTurnActive(item.id)
-  const menuOpen = state.sessionMenuId === item.id
+  const menuOpen = state.sessionMenuId === menuKey
   const when = whenIso ? relativeTime(whenIso) : ""
   return `
     <div class="session-item-row${menuOpen ? " menu-open" : ""}" data-session-row="${escapeAttribute(item.id)}">
       <button type="button" class="session-item${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" data-session-project="${escapeAttribute(item.workspaceRoot)}" title="${escapeAttribute(when ? `${title} - ${when}` : title)}">
         <span class="session-item-title">${running ? SPINNER : ""}<span class="session-item-title-text">${escapeHtml(title)}</span></span>
       </button>
-      <div class="session-menu-wrap">
-        <button type="button" class="session-menu-trigger" data-session-menu="${escapeAttribute(item.id)}" aria-label="Actions for ${escapeAttribute(title)}" aria-haspopup="menu" aria-expanded="${String(menuOpen)}">${renderIcon(Ellipsis, "session-menu-icon")}</button>
+      <div class="session-menu-wrap${menuOpen ? " menu-open" : ""}">
+        <button type="button" class="session-menu-trigger" data-session-menu="${escapeAttribute(menuKey)}" aria-label="Actions for ${escapeAttribute(title)}" aria-haspopup="menu" aria-expanded="${String(menuOpen)}">${renderIcon(Ellipsis, "session-menu-icon")}</button>
         ${menuOpen ? renderSessionMenu(item, title) : ""}
       </div>
     </div>
@@ -115,7 +115,7 @@ function renderSessionMenu(item: DesktopSessionSummary, title: string) {
 }
 
 export function renderProjectSession(item: DesktopSessionSummary) {
-  return renderSessionRow(item, item.updatedAt)
+  return renderSessionRow(item, item.updatedAt, `project:${item.workspaceRoot}:${item.id}`)
 }
 
 export function renderRecentSessions() {
@@ -144,7 +144,7 @@ export function renderRecentSessions() {
 }
 
 export function renderRecentSession(item: DesktopRecentSession) {
-  return renderSessionRow(item, item.lastInteractedAt)
+  return renderSessionRow(item, item.lastInteractedAt, `recent:${item.id}`)
 }
 
 export function syncSidebarSelection() {

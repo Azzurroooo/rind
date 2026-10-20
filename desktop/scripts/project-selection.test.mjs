@@ -33,8 +33,10 @@ test("new chat uses the first available project when recent and fallback project
   assert.equal(defaultNewChatProjectPath([unavailable], [], unavailable.path), "")
 })
 
-test("working directory selection is disabled for an existing session", () => {
+test("working directory selection is disabled for an existing session or agent-locked session", () => {
   assert.equal(workingDirectorySelectionEnabled(1, ""), true)
+  assert.equal(workingDirectorySelectionEnabled(1, "", false), true)
+  assert.equal(workingDirectorySelectionEnabled(1, "", true), false)
   assert.equal(workingDirectorySelectionEnabled(0, ""), false)
   assert.equal(workingDirectorySelectionEnabled(1, "session-1"), false)
 })

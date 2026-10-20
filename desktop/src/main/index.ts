@@ -1,14 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification } from "electron"
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, type NativeImage } from "electron"
 import log from "electron-log/main"
 import windowState from "electron-window-state"
+import { existsSync, rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopSettings, DesktopSettingsPatch, DesktopTheme, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
-import { asObject, readJsonObject, writeJsonObject } from "./json-store"
+import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopTheme, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
+import { asObject, readJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
 import { DesktopProjectStore, samePath } from "./projects"
+import { loadRuntimeSettings as loadSharedRuntimeSettings, resolveRindPaths, saveRuntimeSettings as saveSharedRuntimeSettings } from "./runtime-settings"
 import { readRindVersion } from "./version"
 import { wrapRuntimeIpcError } from "../shared/ipc-error"
 import { DesktopGateway } from "./gateway/server"
@@ -28,9 +30,118 @@ import {
   subscribeRuntime,
   subscribeRuntimeEvents,
 } from "./runtime"
+import {
+  closeManagement,
+  createAgentSession,
+  enrichSessionReplayParams,
+  forwardControlToSharedRuntimeIfNeeded,
+  getManagementState,
+  isManagedWorkspacePath,
+  openAgentSession,
+  requestManagement,
+  subscribeManagement,
+  subscribeSharedRuntimeEvents,
+  type ManagementStatePayload,
+} from "./management"
 
-const appId = "ai.rind.desktop"
+const appId = app.isPackaged ? "ai.rind.desktop" : "ai.rind.desktop.dev"
 const root = dirname(fileURLToPath(import.meta.url))
+const legacyUserDataDir = join(app.getPath("appData"), "rind-desktop")
+if (existsSync(legacyUserDataDir)) {
+  app.setPath("userData", legacyUserDataDir)
+}
+if (process.platform === "win32") {
+  app.setAppUserModelId(appId)
+}
+
+const RIND_LOGO_DATA_URL =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#243d2e"/><path d="M22 4h2a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-2Z" fill="#d6df9a"/></svg>',
+  )
+
+let cachedWindowIcon: NativeImage | null = null
+let cachedDockIcon: NativeImage | null = null
+
+function resourceDirs(): string[] {
+  const dirs = [
+    join(root, "../../resources"),
+    join( process.cwd(), "resources"),
+  ]
+  try {
+    dirs.unshift(join(app.getAppPath(), "resources"))
+  } catch {
+    // app.getAppPath() may not be ready in all contexts
+  }
+  if (typeof process.resourcesPath === "string" && process.resourcesPath) {
+    dirs.unshift(join(process.resourcesPath, "resources"), process.resourcesPath)
+  }
+  return Array.from(new Set(dirs))
+}
+
+function resolveWindowIconPath(): string | undefined {
+  const filenames = process.platform === "win32" ? ["icon.ico", "icon.png"] : ["icon.png", "icon.ico"]
+  for (const dir of resourceDirs()) {
+    for (const name of filenames) {
+      const candidate = join(dir, name)
+      if (existsSync(candidate)) return candidate
+    }
+  }
+  return undefined
+}
+
+function cleanupStaleDevStartMenuShortcut() {
+  if (process.platform !== "win32" || app.isPackaged) return
+  try {
+    const shortcutPath = join(app.getPath("appData"), "Microsoft", "Windows", "Start Menu", "Programs", "Rind.lnk")
+    if (existsSync(shortcutPath)) {
+      rmSync(shortcutPath, { force: true })
+    }
+  } catch {
+    // Non-fatal if Start Menu folder is read-only.
+  }
+}
+
+function resolveWindowIcon(purpose: "window" | "dock" = "window"): NativeImage | undefined {
+  if (purpose === "window" && cachedWindowIcon && !cachedWindowIcon.isEmpty()) return cachedWindowIcon
+  if (purpose === "dock" && cachedDockIcon && !cachedDockIcon.isEmpty()) return cachedDockIcon
+
+  const filenames =
+    process.platform === "win32" && purpose === "window"
+      ? ["icon.ico", "icon.png"]
+      : ["icon.png", "icon.ico"]
+
+  for (const dir of resourceDirs()) {
+    for (const name of filenames) {
+      const candidate = join(dir, name)
+      if (!existsSync(candidate)) continue
+      const img = nativeImage.createFromPath(candidate)
+      if (img.isEmpty()) continue
+      if (name.endsWith(".png") && purpose === "window") {
+        const size = img.getSize()
+        if (size.width > 256 || size.height > 256) {
+          const resized = img.resize({ width: 256, height: 256, quality: "best" })
+          if (!resized.isEmpty()) {
+            cachedWindowIcon = resized
+            return resized
+          }
+        }
+      }
+      if (purpose === "dock") cachedDockIcon = img
+      else cachedWindowIcon = img
+      return img
+    }
+  }
+
+  const fallback = nativeImage.createFromDataURL(RIND_LOGO_DATA_URL)
+  if (!fallback.isEmpty()) {
+    if (purpose === "dock") cachedDockIcon = fallback
+    else cachedWindowIcon = fallback
+    return fallback
+  }
+  return undefined
+}
+
 const themes: DesktopTheme[] = ["system", "dark", "light"]
 const themeSurfaces = {
   dark: { background: "#151d18", overlay: { color: "#151d18", symbolColor: "#a5b0a4" } },
@@ -42,23 +153,111 @@ let desktopProjectStore: DesktopProjectStore | undefined
 let quitting = false
 let runtimeShutdownComplete = false
 let windowFocused = false
-const maxSettingLength = 4096
 let remoteGateway: DesktopGateway | undefined
 
 function gateway() {
   remoteGateway ||= new DesktopGateway({
-    initialize: initializeRuntime,
-    request: (method, params) => {
-      if (!isRemoteRuntimeMethod(method)) throw new Error("Unsupported remote method.")
-      return requestRuntime(method, params)
+    initialize: async () => {
+      const initialized = asObject(await initializeRuntime()) || {}
+      const overview = await projectStore().overview().catch(() => null)
+      const availableProjects = (overview?.projects || []).filter((item) => item.available)
+      const registeredWorkspaces = availableProjects.map((item) => item.path)
+      const currentWs = typeof initialized.workspace_root === "string" ? initialized.workspace_root.trim() : ""
+      const runtimeDir = join(rindHomeDir(), "runtime")
+      const matchedProject = currentWs
+        ? availableProjects.find((item) => samePath(item.path, currentWs))
+        : undefined
+      const activeProject = overview?.activeProjectPath
+        ? availableProjects.find((item) => samePath(item.path, overview.activeProjectPath))
+        : undefined
+      const preferredProject = matchedProject || activeProject || availableProjects[0]
+      if (preferredProject) {
+        const nextSessionId = matchedProject
+          ? initialized.session_id
+          : (preferredProject.sessions[0]?.id || "")
+        return {
+          ...initialized,
+          workspace_root: preferredProject.path,
+          session_id: nextSessionId,
+          workspaces: registeredWorkspaces,
+        }
+      }
+      const isInternalOrManaged =
+        !currentWs ||
+        samePath(currentWs, runtimeDir) ||
+        (await isManagedWorkspacePath(currentWs))
+      return {
+        ...initialized,
+        ...(isInternalOrManaged ? { workspace_root: "", session_id: "" } : {}),
+        workspaces: registeredWorkspaces,
+      }
     },
-    subscribe: subscribeRuntimeEvents,
+    request: async (method, params) => {
+      if (!isRemoteRuntimeMethod(method)) throw new Error("Unsupported remote method.")
+      const nextParams = method === "session/replay"
+        ? await enrichSessionReplayParams(String(params.session_id || ""), params)
+        : params
+      try {
+        if (method === "session/list") {
+          const overview = await projectStore().overview().catch(() => null)
+          const availableProjects = (overview?.projects || []).filter((item) => item.available)
+          const registeredWorkspaces = availableProjects.map((item) => item.path)
+          const requestedWs = typeof params.workspace_root === "string" ? params.workspace_root.trim() : ""
+          const matchedProject = requestedWs
+            ? availableProjects.find((item) => samePath(item.path, requestedWs))
+            : (overview?.activeProjectPath
+                ? availableProjects.find((item) => samePath(item.path, overview.activeProjectPath))
+                : undefined) || availableProjects[0]
+          if (!matchedProject) {
+            return { sessions: [], workspaces: registeredWorkspaces }
+          }
+          const result = await requestRuntime(method, {
+            ...nextParams,
+            workspace_root: matchedProject.path,
+          })
+          const rawSessions =
+            result && typeof result === "object" && Array.isArray((result as Record<string, unknown>).sessions)
+              ? ((result as Record<string, unknown>).sessions as Array<Record<string, unknown>>)
+              : []
+          const filteredSessions = rawSessions.filter((s) => {
+            const ws = typeof s?.workspace_root === "string" ? s.workspace_root.trim() : ""
+            return Boolean(ws && samePath(ws, matchedProject.path))
+          })
+          return {
+            ...(result && typeof result === "object" ? (result as Record<string, unknown>) : {}),
+            sessions: filteredSessions,
+            workspaces: registeredWorkspaces,
+          }
+        }
+        return await requestRuntime(method, nextParams)
+      } catch (error: any) {
+        if (error?.name === "TurnNotActive" || error?.name === "QuestionNotFound") {
+          const forwarded = await forwardControlToSharedRuntimeIfNeeded(method, nextParams)
+          if (forwarded !== undefined) return forwarded
+        }
+        throw error
+      }
+    },
+    subscribe: (listener) => {
+      const offDirect = subscribeRuntimeEvents(listener)
+      const offShared = subscribeSharedRuntimeEvents(listener)
+      return () => {
+        offDirect()
+        offShared()
+      }
+    },
+    agentsRequest: (method, params) => requestManagement(method, params),
+    subscribeAgents: subscribeManagement,
+    settingsLoad: loadRuntimeSettings,
+    settingsSave: saveRuntimeSettings,
   }, app.isPackaged ? join(process.resourcesPath, "web") : join(app.getAppPath(), "../frontend-web/dist"),
   (state) => mainWindow?.webContents.send("gateway-changed", state))
   return remoteGateway
 }
 
 function configPath() {
+  const rindDesktopConfig = join(legacyUserDataDir, "desktop-settings.json")
+  if (existsSync(rindDesktopConfig)) return rindDesktopConfig
   return join(app.getPath("userData"), "desktop-settings.json")
 }
 
@@ -91,12 +290,16 @@ function notifyThemeChanged(theme: DesktopTheme) {
   mainWindow?.webContents.send("theme-changed", theme)
 }
 
+function rindHomeDir() {
+  return resolveRindPaths(process.env.RIND_HOME ? undefined : join(app.getPath("home"), ".rind")).rindHome
+}
+
 function runtimeSettingsPath() {
-  return join(app.getPath("home"), ".rind", "settings.json")
+  return join(rindHomeDir(), "settings.json")
 }
 
 function sessionIndexPath() {
-  return join(app.getPath("home"), ".rind", "session_index.json")
+  return join(rindHomeDir(), "session_index.json")
 }
 
 function appVersion() {
@@ -104,62 +307,15 @@ function appVersion() {
 }
 
 function legacyRecentSessionsPath() {
-  return join(app.getPath("home"), ".rind", "desktop", "recent-sessions.json")
-}
-
-function asTrimmedString(value: unknown) {
-  return typeof value === "string" ? value.trim() : ""
-}
-
-function publicSettings(data: Record<string, unknown>): DesktopSettings {
-  return {
-    model: asTrimmedString(data.model),
-    baseUrl: asTrimmedString(data.baseUrl),
-    reasoningEffort: asTrimmedString(data.reasoningEffort),
-    hasApiKey: Boolean(asTrimmedString(data.apiKey)),
-  }
-}
-
-function validateSettingsPatch(value: unknown): DesktopSettingsPatch {
-  const input = asObject(value)
-  if (!input) throw new Error("Settings must be an object.")
-  const patch: DesktopSettingsPatch = {}
-  const keys: Array<keyof DesktopSettingsPatch> = ["apiKey", "model", "baseUrl", "reasoningEffort"]
-  for (const key of keys) {
-    if (!Object.hasOwn(input, key)) continue
-    if (typeof input[key] !== "string") throw new Error(`${key} must be a string.`)
-    const setting = input[key].trim()
-    if (setting.length > maxSettingLength) throw new Error(`${key} is too long.`)
-    patch[key] = setting
-  }
-  if (patch.baseUrl) {
-    let url: URL
-    try {
-      url = new URL(patch.baseUrl)
-    } catch {
-      throw new Error("baseUrl must be a valid HTTP URL.")
-    }
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error("baseUrl must be a valid HTTP URL.")
-    }
-  }
-  return patch
+  return join(rindHomeDir(), "desktop", "recent-sessions.json")
 }
 
 async function loadRuntimeSettings() {
-  return publicSettings(await readJsonObject(runtimeSettingsPath()))
+  return loadSharedRuntimeSettings(rindHomeDir())
 }
 
 async function saveRuntimeSettings(value: unknown) {
-  const patch = validateSettingsPatch(value)
-  const path = runtimeSettingsPath()
-  const data = await readJsonObject(path)
-  for (const [key, setting] of Object.entries(patch)) {
-    if (key === "apiKey" && !setting) continue
-    data[key] = setting
-  }
-  await writeJsonObject(path, data)
-  return loadRuntimeSettings()
+  return saveSharedRuntimeSettings(value, rindHomeDir())
 }
 
 function projectStore() {
@@ -171,16 +327,23 @@ async function chooseProject() {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] })
   if (result.canceled || !result.filePaths[0]) return null
-  return projectStore().add(result.filePaths[0])
+  const overview = await projectStore().add(result.filePaths[0])
+  remoteGateway?.notifyWorkspacesChanged()
+  return overview
 }
 
 async function requireProject(path: unknown) {
   if (typeof path !== "string" || !path.trim()) throw new Error("Project path is required.")
   const overview = await projectStore().overview()
   const project = overview.projects.find((item) => samePath(item.path, path))
-  if (!project) throw new Error("Choose a registered project before browsing files.")
-  if (!project.available) throw new Error("The selected project folder is unavailable.")
-  return project.path
+  if (project) {
+    if (!project.available) throw new Error("The selected project folder is unavailable.")
+    return project.path
+  }
+  if (await isManagedWorkspacePath(path.trim())) {
+    return path.trim()
+  }
+  throw new Error("Choose a registered project before browsing files.")
 }
 
 function registerIpc() {
@@ -204,13 +367,48 @@ function registerIpc() {
     if (!isDesktopRuntimeMethod(method)) {
       throw new Error("Runtime method is not available to the desktop client.")
     }
-    const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
+    let safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
+    if (method === "session/replay") {
+      safeParams = await enrichSessionReplayParams(String(safeParams.session_id || ""), safeParams)
+    }
     // Return worker errors as a wrapped envelope instead of rejecting: Electron
     // prints a full stack for every rejected ipcMain.handle, which turned
     // expected races (e.g. TurnNotActive after a turn finished) into alarming
     // console noise. The preload bridge unwraps and re-throws for the renderer.
     try {
       return await requestRuntime(method, safeParams)
+    } catch (error: any) {
+      if (error?.name === "TurnNotActive" || error?.name === "QuestionNotFound") {
+        try {
+          const forwarded = await forwardControlToSharedRuntimeIfNeeded(method, safeParams)
+          if (forwarded !== undefined) return forwarded
+        } catch (sharedError) {
+          return wrapRuntimeIpcError(sharedError)
+        }
+      }
+      return wrapRuntimeIpcError(error)
+    }
+  })
+  ipcMain.handle("agents-request", async (_event, method: unknown, params: unknown) => {
+    const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
+    try {
+      return await requestManagement(String(method || ""), safeParams)
+    } catch (error) {
+      return wrapRuntimeIpcError(error)
+    }
+  })
+  ipcMain.handle("agents-open-session", async (_event, params: unknown) => {
+    const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
+    try {
+      return await openAgentSession(safeParams)
+    } catch (error) {
+      return wrapRuntimeIpcError(error)
+    }
+  })
+  ipcMain.handle("agents-create-session", async (_event, params: unknown) => {
+    const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
+    try {
+      return await createAgentSession(safeParams)
     } catch (error) {
       return wrapRuntimeIpcError(error)
     }
@@ -235,6 +433,7 @@ function registerIpc() {
   ipcMain.handle("projects-remove", async (_event, path: unknown) => {
     if (typeof path !== "string") throw new Error("Project path must be a string.")
     const overview = await projectStore().remove(path)
+    remoteGateway?.notifyWorkspacesChanged()
     return overview
   })
   ipcMain.handle("projects-recent-page", (_event, offset: number, limit?: number) => projectStore().recentPage(offset, limit))
@@ -289,16 +488,21 @@ function createMainWindow() {
   const isWin = process.platform === "win32"
   const resolved = resolvedTheme(nativeTheme.themeSource)
   const surfaces = themeSurfaces[resolved]
+  const windowIconPath = resolveWindowIconPath()
+  const windowIcon = resolveWindowIcon("window")
+  const effectiveIcon = (isWin && windowIconPath) ? windowIconPath : (windowIcon || windowIconPath)
   const win = new BrowserWindow({
     x: state.x,
     y: state.y,
-    width: state.width,
-    height: state.height,
+    width: Math.max(860, state.width || 1320),
+    height: Math.max(560, state.height || 860),
+    minWidth: 860,
+    minHeight: 560,
     show: false,
     title: "Rind",
     autoHideMenuBar: true,
     backgroundColor: surfaces.background,
-    icon: join(root, "../../resources/icon.png"),
+    ...(effectiveIcon && { icon: effectiveIcon }),
     ...(isMac && {
       titleBarStyle: "hidden",
       trafficLightPosition: { x: 14, y: 15 },
@@ -314,14 +518,36 @@ function createMainWindow() {
       sandbox: true,
     },
   })
+  const applyWinIcon = () => {
+    if (isMac || win.isDestroyed()) return
+    try {
+      if (windowIcon && !windowIcon.isEmpty()) {
+        win.setIcon(windowIcon)
+      } else if (isWin && windowIconPath) {
+        win.setIcon(windowIconPath)
+      }
+      if (isWin && typeof win.setOverlayIcon === "function") {
+        win.setOverlayIcon(null, "")
+      }
+    } catch {
+      // Ignore platform-specific setIcon errors
+    }
+  }
+  applyWinIcon()
   state.manage(win)
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
   if (rendererUrl) void win.loadURL(new URL("index.html", rendererUrl).toString())
   else void win.loadFile(join(root, "../renderer/index.html"))
-  win.once("ready-to-show", () => win.show())
+  win.once("ready-to-show", () => {
+    win.show()
+    applyWinIcon()
+  })
+  win.on("show", applyWinIcon)
   win.webContents.once("did-finish-load", () => {
+    applyWinIcon()
     const snapshot = getRuntimeSnapshot()
     if (snapshot) notifyRuntime(snapshot)
+    notifyAgentsState(getManagementState())
   })
   win.on("focus", () => { windowFocused = true })
   win.on("blur", () => { windowFocused = false })
@@ -339,6 +565,10 @@ function notifyRuntime(snapshot: RuntimeSnapshot) {
 
 function notifyRuntimeEvent(event: RuntimeEvent) {
   mainWindow?.webContents.send("runtime-event", event)
+}
+
+function notifyAgentsState(state: ManagementStatePayload) {
+  mainWindow?.webContents.send("agents-state", state)
 }
 
 function notifyAuthPrompt(prompt: DesktopAuthPrompt) {
@@ -361,7 +591,13 @@ function showDesktopNotification(payload: { title?: unknown; body?: unknown; ses
   if (!Notification.isSupported()) return false
   // Never interrupt a focused window; notifications are for background turns.
   if (mainWindow && !mainWindow.isDestroyed() && (mainWindow.isFocused() || windowFocused)) return false
-  const notification = new Notification({ title, body: body.slice(0, 200), silent: false })
+  const icon = resolveWindowIcon("window")
+  const notification = new Notification({
+    title,
+    body: body.slice(0, 200),
+    silent: false,
+    ...(icon && !icon.isEmpty() ? { icon } : {}),
+  })
   notification.on("click", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore()
@@ -387,9 +623,27 @@ if (!hasLock) {
   app.whenReady().then(async () => {
     log.initialize()
     app.setName("Rind")
-    app.setAppUserModelId(appId)
+    if (existsSync(legacyUserDataDir)) {
+      app.setPath("userData", legacyUserDataDir)
+    }
+    if (process.platform === "win32") {
+      cleanupStaleDevStartMenuShortcut()
+      app.setAppUserModelId(appId)
+    }
+    if (process.platform === "darwin" && app.dock) {
+      const dockIcon = resolveWindowIcon("dock")
+      if (dockIcon && !dockIcon.isEmpty()) {
+        try {
+          app.dock.setIcon(dockIcon)
+        } catch {
+          // Ignore dock icon errors in headless environments
+        }
+      }
+    }
     subscribeRuntime(notifyRuntime)
     subscribeRuntimeEvents(notifyRuntimeEvent)
+    subscribeSharedRuntimeEvents(notifyRuntimeEvent)
+    subscribeManagement(notifyAgentsState)
     subscribeAuthPrompts(notifyAuthPrompt)
     subscribeAuthUpdates(notifyAuthUpdate)
     registerIpc()
@@ -422,7 +676,11 @@ if (!hasLock) {
     event.preventDefault()
     if (quitting) return
     quitting = true
-    void (async () => { await remoteGateway?.stop(); await shutdownRuntime() })().finally(() => {
+    void (async () => {
+      await remoteGateway?.stop()
+      await closeManagement()
+      await shutdownRuntime()
+    })().finally(() => {
       runtimeShutdownComplete = true
       app.quit()
     })

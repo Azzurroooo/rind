@@ -1,4 +1,5 @@
 import { type DesktopFileListing, type DesktopFilePreview, type DesktopGoal, type DesktopProject, type DesktopRecentSession, type DesktopSessionSummary, type DesktopSettings, type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
+import { type AgentsSnapshotData, type DesktopAgentSurfaceState, type OrgViewMode, type SessionAgentContext } from "../agents-model.ts"
 import { type PendingInput } from "../composer-region.ts"
 import { type ModelOption } from "../composer-select.ts"
 import { type QuestionSelection } from "../question-state.ts"
@@ -68,6 +69,7 @@ export type AppState = {
   sidebarWidth: number
   inspectorOpen: boolean
   inspectorWidth: number
+  inspectorMaximized: boolean
   inspectorTab: InspectorTab
   inspectorContext: InspectorLoad<ContextDisplay>
   inspectorUsage: InspectorLoad<UsageSummary>
@@ -113,6 +115,28 @@ export type AppState = {
   shortcutsOpen: boolean
   lastPrompts: Record<string, string>
   notice: string
+  agentsSnapshot: AgentsSnapshotData
+  agentsService: Record<string, any> | null
+  agentsBusy: boolean
+  sidebarMode: "workspaces" | "agents"
+  agentSurface: DesktopAgentSurfaceState
+  agentChatContext: SessionAgentContext | null
+  teamSessionsByTeam: Record<string, Array<Record<string, any>>>
+  managerSessions: Array<Record<string, any>>
+  archivedTeams: Array<Record<string, any>>
+  collapsedTeams: Set<string>
+  expandedSidebarMembers: Set<string>
+  expandedOrgMembers: Set<string>
+  expandedFlowNodes: Set<string>
+  orgViewMode: OrgViewMode
+  managerExpanded: boolean
+  agentItemMenuKey: string
+  agentSessionLimits: Record<string, number>
+  headerSessionsMenuOpen: boolean
+  newTeamOpen: boolean
+  inboxSelectedTaskId: string
+  artifactPreview: { artifactId?: string; path: string; content: string; truncated: boolean } | null
+
 }
 // ---------- keyboard map (C11): one table for every shortcut ----------
 

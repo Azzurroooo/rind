@@ -29,11 +29,12 @@ export function filterSessions<T extends DesktopSessionSummary>(sessions: T[], q
 export function projectListStructureKey(state: SidebarStructureState) {
   const expandedProjects = new Set(state.expandedProjects)
   const search = (state.sessionSearch || "").trim().toLocaleLowerCase()
+  const sessionMenuId = state.sessionMenuId || ""
   return JSON.stringify({
     search,
     deleteConfirmId: state.deleteConfirmId || "",
     deleteBusyId: state.deleteBusyId || "",
-    sessionMenuId: state.sessionMenuId || "",
+    sessionMenuId: sessionMenuId.startsWith("recent:") ? "" : sessionMenuId,
     projects: state.projects.map((project) => {
       const sessions = state.sessionPages[project.path] || project.sessions
       return {
@@ -50,13 +51,14 @@ export function projectListStructureKey(state: SidebarStructureState) {
 }
 
 export function recentListStructureKey(state: SidebarStructureState) {
+  const sessionMenuId = state.sessionMenuId || ""
   return JSON.stringify({
     total: state.recentSessionTotal,
     loading: state.recentLoading,
     search: (state.sessionSearch || "").trim().toLocaleLowerCase(),
     deleteConfirmId: state.deleteConfirmId || "",
     deleteBusyId: state.deleteBusyId || "",
-    sessionMenuId: state.sessionMenuId || "",
+    sessionMenuId: sessionMenuId.startsWith("project:") ? "" : sessionMenuId,
     sessions: [...state.recentSessions]
       .sort((left, right) => right.lastInteractedAt.localeCompare(left.lastInteractedAt))
       .map((session) => ({

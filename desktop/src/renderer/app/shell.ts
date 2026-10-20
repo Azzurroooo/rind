@@ -2,6 +2,7 @@ import { type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
 import { type IconNode } from "lucide"
 import { Moon, renderIcon, Sun, SunMoon } from "../icons.ts"
 import { renderComposer, syncPendingInputDock } from "../composer-region.ts"
+import { currentSessionAgentContext, renderAgentsUI } from "./agents-ui.ts"
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
 import { renderSlashCommandMenu } from "./composer.ts"
@@ -9,7 +10,7 @@ import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigge
 import { escapeHtml } from "./html.ts"
 import { renderInspector } from "./inspector.ts"
 import { renderPalette } from "./palette-ui.ts"
-import { promoteFollowUp, recallPendingInput } from "./pending-inputs.ts"
+import { discardPendingInput, promoteFollowUp, recallPendingInput } from "./pending-inputs.ts"
 import { activeTurnIdFor, runAction, runtimeTurnActive } from "./runtime.ts"
 import { applyOverview, chatProject, currentRuntimeSnapshot } from "./sessions.ts"
 import { renderSessionHead, syncWorkingTimer } from "./session-head.ts"
@@ -27,8 +28,10 @@ export function render() {
   connectionText.textContent = runtimeStatusLabel(runtime.status)
   connection.className = `connection connection-${runtime.status}`
   connection.hidden = runtime.status === "starting"
+  const maxSidebar = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, window.innerWidth - 420))
+  const effectiveSidebarWidth = state.sidebarOpen ? Math.min(state.sidebarWidth, maxSidebar) : 0
   appRoot.classList.toggle("sidebar-open", state.sidebarOpen)
-  appRoot.style.setProperty("--sidebar-panel-width", `${state.sidebarOpen ? state.sidebarWidth : 0}px`)
+  appRoot.style.setProperty("--sidebar-panel-width", `${effectiveSidebarWidth}px`)
   sidebar.setAttribute("aria-hidden", String(!state.sidebarOpen))
   sidebar.inert = !state.sidebarOpen
   newSessionButton.title = chatProject()?.available ? `Start a new chat in ${chatProject()?.name}` : "Choose a project for a new chat"
@@ -36,6 +39,7 @@ export function render() {
   sidebarToggle.dataset.tooltip = sidebarLabel
   sidebarToggle.setAttribute("aria-label", sidebarLabel)
   sidebarToggle.setAttribute("aria-expanded", String(state.sidebarOpen))
+  renderAgentsUI()
   renderSessionHead()
   noticeText.textContent = state.notice || runtime.message || ""
   retry.hidden = runtime.status !== "error"
@@ -52,6 +56,7 @@ export function render() {
     state.pendingInputs[state.viewedSessionId] || [],
     (inputId) => runAction(() => promoteFollowUp(inputId), state.viewedSessionId),
     (inputId) => runAction(() => recallPendingInput(inputId), state.viewedSessionId),
+    (inputId) => runAction(() => discardPendingInput(inputId), state.viewedSessionId),
   )
   renderStream()
   renderComposerState()
@@ -65,10 +70,21 @@ export function render() {
 
 export function renderComposerState() {
   const runtime = currentRuntimeSnapshot()
+  const agentCtx = currentSessionAgentContext()
+  const isAgentScoped = agentCtx.kind === "member" || agentCtx.kind === "manager"
+  const hasWorkspace =
+    chatProject()?.available === true ||
+    Boolean(isAgentScoped && agentCtx.workspaceRoot)
+  const agentLabel =
+    agentCtx.kind === "manager"
+      ? "Manager"
+      : agentCtx.kind === "member"
+        ? `${agentCtx.agentName} (${agentCtx.teamName})`
+        : ""
   renderComposer(
     { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter, attachButton },
     {
-      ready: chatProject()?.available === true && state.settings.hasApiKey,
+      ready: hasWorkspace && (state.settings.hasApiKey || runtime.status === "ready" || state.models.length > 0),
       active: runtimeTurnActive(),
       readOnly: false,
       starting: runtime.status === "starting",
@@ -79,6 +95,7 @@ export function renderComposerState() {
       slashCommandPending: state.slashCommandPending,
       slashCommandInput: state.slashCommandInput,
       contextUsagePercent: state.conversation.contextUsagePercent,
+      agentLabel,
     },
   )
   renderSendMenu()
@@ -194,7 +211,8 @@ export function bindSidebarResize(handle: HTMLElement) {
     if (!start || start.target !== "sidebar" || start.pointerId !== event.pointerId) return
     const width = Math.round(start.width + event.clientX - start.x)
     vars.resizeStart = { ...start, lastWidth: width }
-    state.sidebarWidth = Math.max(0, Math.min(SIDEBAR_MAX, width))
+    const maxSidebar = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, window.innerWidth - 420))
+    state.sidebarWidth = Math.max(0, Math.min(maxSidebar, width))
     render()
   })
   handle.addEventListener("pointerup", (event) => finishSidebarResize(handle, event))

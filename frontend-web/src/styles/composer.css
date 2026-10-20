@@ -13,11 +13,13 @@
 .composer-activity.interrupt-hint { color: var(--danger); }
 
 .composer-context { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 26px; min-width: 0; padding-inline: 4px; }
-.workspace-hint { position: relative; flex: 0 1 auto; min-width: 0; }
+.workspace-hint { position: relative; flex: 0 1 auto; min-width: 0; max-width: calc(100% - 110px); }
 .workspace-hint summary { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; cursor: pointer; list-style: none; }
+.workspace-hint.is-agent-locked summary { padding: 2px 8px 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--fill-1); color: var(--text); }
+.composer-project-scope { display: inline-block; flex: 0 1 auto; max-width: 180px; height: 18px; line-height: 18px; padding: 0 6px; border-radius: 4px; overflow: hidden; background: var(--accent-soft); color: var(--text); font-size: 10.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-hint summary::-webkit-details-marker { display: none; }
 .workspace-hint summary svg { flex: none; }
-.workspace-hint summary span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-hint summary span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-detail { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 25; width: min(320px, calc(100vw - 40px)); padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-popover); }
 .workspace-detail > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
 .workspace-detail code { font: 11px/1.6 var(--font-mono); overflow-wrap: anywhere; }
@@ -76,40 +78,41 @@
 .chip-menu { min-width: 0; }
 
 /* Provider-grouped model picker (after Jan's provider groups and LobeHub's panel). */
-.model-picker { min-width: 264px; max-width: 340px; display: grid; gap: 2px; padding: var(--space-1); }
+.model-picker { min-width: 280px; max-width: 340px; display: flex; flex-direction: column; gap: 1px; padding: 5px; border-color: var(--line-strong); }
 .model-search {
   display: flex; align-items: center; gap: var(--space-2); height: var(--control-sm);
-  margin: 0 var(--space-1) var(--space-1); padding: 0 var(--space-2);
+  margin: 0 2px 4px; padding: 0 var(--space-2);
   border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--bg);
   color: var(--dim);
 }
 .model-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: var(--text-dense); outline: none; }
 .model-search input::placeholder { color: var(--dim); }
-.model-picker-list { min-width: 0; max-height: 280px; overflow-y: auto; overflow-x: hidden; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
-.model-group { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.model-picker-list { min-width: 0; max-height: 280px; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
+.model-group { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.model-group + .model-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
 .model-group-header {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
-  padding: 2px var(--space-2) var(--space-1);
+  padding: 4px 8px 3px;
 }
 .model-group-name {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--muted); font-size: var(--text-meta); font-weight: 600;
-  text-transform: uppercase; letter-spacing: .05em;
+  color: var(--dim); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; user-select: none;
 }
-.model-group-count { color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.model-group-count { color: var(--dim); font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; }
 .model-option {
-  display: flex; align-items: center; gap: var(--space-2); width: 100%; min-width: 0;
-  height: var(--control-md); padding: 0 var(--space-2);
-  border: 0; border-radius: var(--radius-control); background: transparent;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); width: 100%; min-width: 0;
+  min-height: 30px; padding: 4px 8px;
+  border: 0; border-radius: calc(var(--radius-control) - 1px); background: transparent;
   color: var(--text); font-size: var(--text-dense); text-align: left;
 }
-.model-option:hover:not(:disabled), .model-option:focus-visible { background: var(--fill-1); outline: none; }
-.model-option.selected { background: var(--accent-soft); }
-.chip-menu .menu-item.selected { background: var(--accent-soft); }
-.model-option-check { flex: none; display: inline-grid; place-items: center; width: 16px; color: var(--accent); }
-.model-option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-meta); }
+.model-option:hover:not(:disabled), .model-option:focus-visible { background: var(--fill-2); outline: none; }
+.model-option.selected { background: var(--accent-soft, var(--fill-2)); font-weight: 500; }
+.chip-menu .menu-item.selected { background: var(--accent-soft, var(--fill-2)); font-weight: 500; }
+.model-option-check { flex: none; display: inline-grid; place-items: center; width: 15px; height: 15px; color: var(--accent); }
+.model-option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; font-weight: 500; }
 .model-option-vision { flex: none; display: inline-grid; place-items: center; color: var(--dim); }
-.model-option-meta { flex: none; color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.model-option-meta { flex: none; color: var(--dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .model-picker-empty { padding: var(--space-2) var(--space-3); color: var(--muted); font-size: var(--text-dense); line-height: 1.6; }
 .composer-chip {
   display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 200px;

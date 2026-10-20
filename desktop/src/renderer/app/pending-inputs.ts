@@ -17,6 +17,7 @@ export function syncCurrentPendingInputs() {
     state.pendingInputs[state.viewedSessionId] || [],
     (inputId) => runAction(() => promoteFollowUp(inputId), state.viewedSessionId),
     (inputId) => runAction(() => recallPendingInput(inputId), state.viewedSessionId),
+    (inputId) => runAction(() => discardPendingInput(inputId), state.viewedSessionId),
   )
 }
 
@@ -105,6 +106,36 @@ export async function recallPendingInput(inputId: string) {
       if (pending.length === 0) delete state.pendingInputs[sessionId]
       setPrompt([asRecordText(item.input), prompt.value].filter((value) => value.trim()).join("\n\n"), true)
       showToast("The turn has ended; queued input was returned to the composer.")
+      render()
+      return
+    }
+    throw error
+  } finally {
+    item.recalling = false
+    syncCurrentPendingInputs()
+  }
+}
+
+export async function discardPendingInput(inputId: string) {
+  const sessionId = state.viewedSessionId
+  const pending = state.pendingInputs[sessionId]
+  const item = pending?.find((candidate) => candidate.inputId === inputId)
+  if (!item || item.promoting || item.recalling) return
+  item.recalling = true
+  syncCurrentPendingInputs()
+  try {
+    const method = item.mode === "steering"
+      ? runtimeMethods.sessionUnsteer
+      : runtimeMethods.sessionDequeueFollowUp
+    await requestForSession(method, sessionId, { input_id: item.inputId })
+    const index = pending.findIndex((candidate) => candidate.inputId === item.inputId)
+    if (index >= 0) pending.splice(index, 1)
+    if (!pending.length) delete state.pendingInputs[sessionId]
+  } catch (error) {
+    if (isTurnNotActive(error)) {
+      const index = pending.findIndex((candidate) => candidate.inputId === item.inputId)
+      if (index >= 0) pending.splice(index, 1)
+      if (pending.length === 0) delete state.pendingInputs[sessionId]
       render()
       return
     }

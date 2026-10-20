@@ -122,6 +122,11 @@ export function useShellLayout() {
     else update({ inspectorOpen: false });
   }, [narrow, closeDrawers, update]);
 
+  const [inspectorMaximized, setInspectorMaximized] = useState(false);
+  const toggleInspectorMaximized = useCallback(() => {
+    setInspectorMaximized((prev) => !prev);
+  }, []);
+
   const sidebarVisible = narrow ? drawer === "sidebar" : !layout.sidebarCollapsed;
   const inspectorVisible = narrow ? drawer === "inspector" : layout.inspectorOpen;
 
@@ -129,6 +134,7 @@ export function useShellLayout() {
     narrow,
     drawer,
     ...layout,
+    inspectorMaximized,
     sidebarVisible,
     inspectorVisible,
     sidebarToggleRef,
@@ -138,12 +144,16 @@ export function useShellLayout() {
     toggleSidebar,
     showSidebar,
     toggleInspector,
+    toggleInspectorMaximized,
     openInspector,
     closeInspector,
     closeDrawers,
     closeDrawersSilently,
     setSidebarWidth: (width) => update({ sidebarWidth: clampWidth(width, SIDEBAR_WIDTH) }),
-    setInspectorWidth: (width) => update({ inspectorWidth: clampWidth(width, INSPECTOR_WIDTH) }),
+    setInspectorWidth: (width) => {
+      setInspectorMaximized(false);
+      update({ inspectorWidth: clampWidth(width, INSPECTOR_WIDTH) });
+    },
     setInspectorTab: (tab) => INSPECTOR_TABS.includes(tab) && update({ inspectorTab: tab }),
   };
 }

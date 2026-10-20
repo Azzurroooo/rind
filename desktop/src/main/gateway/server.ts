@@ -14,11 +14,58 @@ type Bridge = {
   initialize: () => Promise<unknown>
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   subscribe: (listener: (event: RuntimeEvent) => void) => () => void
+  agentsRequest?: (method: string, params: Record<string, unknown>) => Promise<unknown>
+  subscribeAgents?: (listener: (state: unknown) => void) => () => void
+  settingsLoad?: () => Promise<unknown>
+  settingsSave?: (value: unknown) => Promise<unknown>
 }
 type Client = { subscriptions: Set<string>; pending: Set<string | number>; selected: string; workspace: string; alive: boolean }
 const allowed = new Set(Object.values(runtimeMethods).filter(isRemoteRuntimeMethod))
-const unscoped = new Set(["session/new", "session/list", "rind/usage/summary", "rind/auth/list", "model/list"])
-const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2" }
+const GLOBAL_SESSION_EVENTS = new Set([
+  "folder_defaults_changed",
+  "session_renamed",
+  "session_deleted",
+  "session_discarded",
+  "session_settings_changed",
+  "turn_started",
+  "turn_completed",
+  "turn_failed",
+  "turn_cancelled",
+])
+const unscoped = new Set([
+  "session/new",
+  "session/create",
+  "session/list",
+  "rind/usage/summary",
+  "rind/auth/list",
+  "model/list",
+  "rind/folder_defaults/get",
+  "rind/folder_defaults/set",
+  "rind/folder_defaults/unset",
+  "rind/folder_defaults/resolve",
+  "agents/get",
+  "agents/request",
+  "agents/openSession",
+  "agents/createSession",
+])
+const mime: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".ttf": "font/ttf",
+  ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".webp": "image/webp",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".txt": "text/plain; charset=utf-8",
+}
+const privateLanIpv4 = /^(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3})$/
 const secret = () => randomBytes(24).toString("base64url")
 // Packaged Rind clients serve only bundled assets at these fixed origins.
 // Origin is not authentication: every upgrade still consumes a one-time ticket.
@@ -29,6 +76,7 @@ export class DesktopGateway {
   private server?: Server
   private sockets?: WebSocketServer
   private unsubscribe?: () => void
+  private unsubscribeAgents?: () => void
   private accessCode = ""
   private tickets = new Map<string, number>()
   private attempts = new Map<string, { count: number; expires: number }>()
@@ -71,11 +119,12 @@ export class DesktopGateway {
       if (startEpoch !== this.epoch) throw new Error("Remote access startup cancelled.")
       this.options = { ...options, externalOrigin: external?.origin }
       this.accessCode = secret()
-      const hosts = new Set(["localhost", "127.0.0.1", "[::1]", hostname().toLowerCase()])
+      const machineHost = hostname().toLowerCase()
+      const hosts = new Set(["localhost", "127.0.0.1", "[::1]", machineHost, `${machineHost}.local`])
       const local = options.scope === "lan" ? localAddresses(undefined, await outboundAddress()).map((entry) => entry.address) : []
       if (startEpoch !== this.epoch) throw new Error("Remote access startup cancelled.")
-      for (const address of local) hosts.add(address)
-      if (external) hosts.add(external.hostname)
+      for (const address of local) hosts.add(address.toLowerCase())
+      if (external) hosts.add(external.hostname.toLowerCase())
       this.allowedHosts = hosts
       const server = createServer((request, response) => { void this.http(request, response).catch(() => { if (!response.headersSent) this.json(response, 500, { error: "Unable to serve this request." }); else response.end() }) })
       server.requestTimeout = 15000; server.headersTimeout = 10000; server.maxConnections = 64
@@ -107,7 +156,21 @@ export class DesktopGateway {
       }, 30000)
       this.heartbeat.unref()
       this.unsubscribe = this.bridge.subscribe((event) => {
-        for (const [ws, client] of this.clients) if (client.subscriptions.has(event.sessionId)) this.send(ws, { kind: "event", method: "session/update", sequence: event.sequence, durability: event.durability, session_id: event.sessionId, turn_id: event.turnId, event: event.event })
+        const globalEvent = !event.sessionId || GLOBAL_SESSION_EVENTS.has(event.type)
+        for (const [ws, client] of this.clients) {
+          if (globalEvent || client.subscriptions.has(event.sessionId)) {
+            this.send(ws, { kind: "event", method: "session/update", sequence: event.sequence, durability: event.durability, session_id: event.sessionId, turn_id: event.turnId, event: event.event })
+          }
+        }
+      })
+      this.unsubscribeAgents = this.bridge.subscribeAgents?.((state) => {
+        const eventPayload =
+          state && typeof state === "object" && !Array.isArray(state)
+            ? { type: "agents_changed", ...(state as Record<string, unknown>) }
+            : state
+        for (const ws of this.clients.keys()) {
+          this.send(ws, { kind: "event", method: "agents/update", event: eventPayload })
+        }
       })
       this.publish(); return this.state()
     } catch (error) { await this.stop(); throw error }
@@ -121,6 +184,17 @@ export class DesktopGateway {
     this.clients.clear(); this.publish(); return this.state()
   }
 
+  notifyWorkspacesChanged(): void {
+    for (const ws of this.clients.keys()) {
+      this.send(ws, {
+        kind: "event",
+        method: "session/update",
+        durability: "ephemeral",
+        event: { type: "folder_defaults_changed" },
+      })
+    }
+  }
+
   async stop(): Promise<void> {
     if (this.stopping) return this.stopping
     this.stopping = this.close()
@@ -128,6 +202,7 @@ export class DesktopGateway {
   }
   private async close() {
     ++this.epoch; this.unsubscribe?.(); this.unsubscribe = undefined
+    this.unsubscribeAgents?.(); this.unsubscribeAgents = undefined
     clearInterval(this.heartbeat); this.heartbeat = undefined
     this.tickets.clear(); this.attempts.clear(); this.accessCode = ""
     for (const ws of this.clients.keys()) ws.terminate()
@@ -137,12 +212,27 @@ export class DesktopGateway {
     this.port = 0; this.addresses = []; this.publish()
   }
 
+  private isAllowedHost(host: string) {
+    const normalized = host.toLowerCase()
+    if (this.allowedHosts.has(normalized)) return true
+    if (this.options.scope === "lan") {
+      if (privateLanIpv4.test(normalized)) {
+        this.allowedHosts.add(normalized)
+        return true
+      }
+      for (const entry of localAddresses()) {
+        this.allowedHosts.add(entry.address.toLowerCase())
+      }
+      if (this.allowedHosts.has(normalized)) return true
+    }
+    return false
+  }
   private requestUrl(request: IncomingMessage) {
     try {
       const path = request.url || "/"
       if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) return null
       const host = new URL(`http://${request.headers.host}`)
-      if (host.username || host.password || host.host !== request.headers.host?.toLowerCase() || !this.allowedHosts.has(host.hostname.toLowerCase())) return null
+      if (host.username || host.password || host.host !== request.headers.host?.toLowerCase() || !this.isAllowedHost(host.hostname)) return null
       return new URL(path, host)
     } catch { return null }
   }
@@ -151,15 +241,69 @@ export class DesktopGateway {
     try {
       const origin = new URL(request.headers.origin)
       if (origin.origin === this.options.externalOrigin) return true
-      return ["http:", "https:"].includes(origin.protocol) && origin.host === request.headers.host && this.allowedHosts.has(origin.hostname.toLowerCase())
+      return ["http:", "https:"].includes(origin.protocol) && origin.host === request.headers.host?.toLowerCase() && this.isAllowedHost(origin.hostname)
     } catch { return false }
   }
   private json(response: ServerResponse, status: number, value: unknown) {
     response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" }); response.end(JSON.stringify(value))
   }
+  private readJsonBody(request: IncomingMessage, maxBytes = 65536): Promise<Record<string, unknown>> {
+    return new Promise((resolveBody, rejectBody) => {
+      const chunks: Buffer[] = []
+      let total = 0
+      request.on("data", (chunk: Buffer) => {
+        total += chunk.length
+        if (total > maxBytes) {
+          rejectBody(new Error("Request payload too large."))
+          request.destroy()
+          return
+        }
+        chunks.push(chunk)
+      })
+      request.on("end", () => {
+        try {
+          const text = Buffer.concat(chunks).toString("utf8").trim()
+          resolveBody(text ? object(JSON.parse(text)) : {})
+        } catch (err) {
+          rejectBody(err)
+        }
+      })
+      request.on("error", rejectBody)
+    })
+  }
   private async http(request: IncomingMessage, response: ServerResponse) {
     const address = this.requestUrl(request)
     if (!address || !this.validOrigin(request)) { this.json(response, 403, { error: "Origin not allowed." }); return }
+    if (address.pathname === "/api/settings" && (request.method === "GET" || request.method === "POST")) {
+      if (this.clients.size === 0) {
+        const code = Buffer.from(request.headers.authorization?.replace(/^Bearer /i, "") || "")
+        const expected = Buffer.from(this.accessCode)
+        if (!expected.length || code.length !== expected.length || !timingSafeEqual(code, expected)) {
+          this.json(response, 401, { error: "Unauthorized." })
+          return
+        }
+      }
+      try {
+        if (request.method === "POST") {
+          if (!this.bridge.settingsSave) { this.json(response, 404, { error: "Settings API unavailable." }); return }
+          const body = await this.readJsonBody(request)
+          const saved = await this.bridge.settingsSave(body)
+          const authList = await this.bridge.request("rind/auth/list", {}).catch(() => ({ providers: [] }))
+          this.json(response, 200, { settings: saved, providers: object(authList).providers || [] })
+          return
+        }
+        if (!this.bridge.settingsLoad) { this.json(response, 404, { error: "Settings API unavailable." }); return }
+        const [settings, authList] = await Promise.all([
+          this.bridge.settingsLoad(),
+          this.bridge.request("rind/auth/list", {}).catch(() => ({ providers: [] })),
+        ])
+        this.json(response, 200, { settings, providers: object(authList).providers || [] })
+        return
+      } catch (err) {
+        this.json(response, 400, { error: err instanceof Error ? err.message : "Failed to process settings." })
+        return
+      }
+    }
     if (request.method !== "GET" && request.method !== "HEAD") { this.json(response, 405, { error: "Method not allowed." }); return }
     if (address.pathname === "/healthz") { this.json(response, 200, { ok: true }); return }
     if (address.pathname === "/ticket") {
@@ -187,7 +331,7 @@ export class DesktopGateway {
     response.writeHead(200, {
       "Content-Type": mime[extname(path)], "Cache-Control": extname(path) === ".html" ? "no-store" : "public, max-age=3600",
       "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
-      "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     })
     response.end(request.method === "HEAD" ? undefined : await readFile(path))
   }
@@ -226,7 +370,54 @@ export class DesktopGateway {
       client.selected = String(result.session_id || "")
       client.workspace = String(result.workspace_root || "")
       if (client.selected) client.subscriptions.add(client.selected)
-      return { ...result, methods: [...new Set([...allowed, "initialize", "ping", "session/subscribe", "session/unsubscribe"])], gateway: { desktop: true, files_follow_session: true } }
+      const agentMethods = this.bridge.agentsRequest
+        ? ["agents/get", "agents/request", "agents/openSession", "agents/createSession"]
+        : []
+      const caps = Array.isArray(result.capabilities) ? result.capabilities : []
+      const capabilities = this.bridge.agentsRequest ? [...new Set([...caps, "agents_management"])] : caps
+      const agentsState = this.bridge.agentsRequest
+        ? await this.bridge.agentsRequest("getState", {}).catch(() => null)
+        : null
+      return {
+        ...result,
+        capabilities,
+        methods: [...new Set([...allowed, "initialize", "ping", "session/subscribe", "session/unsubscribe", ...agentMethods])],
+        gateway: { desktop: true, files_follow_session: true, agents: Boolean(this.bridge.agentsRequest) },
+        ...(agentsState ? { agents_state: agentsState } : {}),
+      }
+    }
+    if (
+      method === "agents/get" ||
+      method === "agents/request" ||
+      method === "agents/openSession" ||
+      method === "agents/createSession"
+    ) {
+      if (!this.bridge.agentsRequest) throw new Error("Agents management is not available on this gateway.")
+      if (method === "agents/get") {
+        return this.bridge.agentsRequest("getState", {})
+      }
+      if (method === "agents/openSession") {
+        const res = object(await this.bridge.agentsRequest("openSession", params))
+        client.selected = String(res.runtimeSessionId || "")
+        if (typeof res.workspaceRoot === "string" && res.workspaceRoot) client.workspace = res.workspaceRoot
+        if (client.selected && client.subscriptions.size < 128) client.subscriptions.add(client.selected)
+        return res
+      }
+      if (method === "agents/createSession") {
+        const res = object(await this.bridge.agentsRequest("createSession", { ...params, workspace_root: params.workspace_root || client.workspace }))
+        client.selected = String(res.session_id || "")
+        if (typeof res.workspace_root === "string" && res.workspace_root) client.workspace = res.workspace_root
+        if (client.selected && client.subscriptions.size < 128) client.subscriptions.add(client.selected)
+        return res
+      }
+      const op =
+        typeof params.operation === "string" && params.operation.trim()
+          ? params.operation.trim()
+          : typeof params.method === "string" && params.method.trim()
+            ? params.method.trim()
+            : ""
+      if (!op) throw new Error("agents/request requires operation.")
+      return this.bridge.agentsRequest(op, object(params.params))
     }
     const sessionId = typeof params.session_id === "string" ? params.session_id.trim() : ""
     if (method === "session/unsubscribe") { client.subscriptions.delete(sessionId); return { ok: true } }
@@ -235,24 +426,34 @@ export class DesktopGateway {
       await this.bridge.request("session/subscribe", params); client.subscriptions.add(sessionId); return { ok: true }
     }
     if (method.startsWith("file/")) {
-      if (!["file/list", "file/read", "file/write"].includes(method) || !sessionId) throw new Error("Choose a session before browsing files.")
-      const session = object(await this.bridge.request("session/switch", { session_id: sessionId }))
-      if (typeof session.workspace_root !== "string") throw new Error("Session workspace unavailable.")
-      return workspaceFileRequest(session.workspace_root, method, params)
+      if (!["file/list", "file/read", "file/write"].includes(method)) throw new Error("Choose a session before browsing files.")
+      if (sessionId) {
+        const session = object(await this.bridge.request("session/switch", { session_id: sessionId }))
+        if (typeof session.workspace_root !== "string") throw new Error("Session workspace unavailable.")
+        return workspaceFileRequest(session.workspace_root, method, params)
+      }
+      if (client.workspace && !client.selected) {
+        return workspaceFileRequest(client.workspace, method, params)
+      }
+      throw new Error("Choose a session before browsing files.")
     }
     if (!isRemoteRuntimeMethod(method)) throw new Error("Method is not available through remote access.")
     if (!unscoped.has(method) && !sessionId) throw new Error("session_id is required.")
-    if (method === "session/new") {
+    if (method === "session/new" || method === "session/create") {
       const workspace = typeof params.workspace_root === "string" ? params.workspace_root.trim() : client.workspace
       if (!workspace) throw new Error("Choose a project folder on the Rind computer first.")
-      params = { ...params, workspace_root: workspace }
+      const { external_tools: _ignoredTools, enable_user_question: _ignoredQuestion, ...safeParams } = params
+      params = { ...safeParams, workspace_root: workspace }
+    } else if (method === "session/replay") {
+      const { external_tools: _ignoredTools, enable_user_question: _ignoredQuestion, ...safeParams } = params
+      params = safeParams
     }
     if (sessionId && client.subscriptions.size < 128) client.subscriptions.add(sessionId)
     const result = await this.bridge.request(method, params)
-    if (method === "session/switch" || method === "session/new") {
+    if (method === "session/switch" || method === "session/new" || method === "session/create") {
       client.selected = String(object(result).session_id || sessionId)
       client.workspace = String(object(result).workspace_root || params.workspace_root || client.workspace)
-      if (client.selected) client.subscriptions.add(client.selected)
+      if (client.selected && client.subscriptions.size < 128) client.subscriptions.add(client.selected)
     }
     return result
   }

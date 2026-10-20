@@ -6,7 +6,13 @@ import { state } from "./state.ts"
 export function renderActivityEmpty() {
   const monitor = state.taskMonitor
   const empty = requiredElement("activity-empty")
-  empty.hidden = Boolean(activePlan(state.conversation) || state.goal.value || monitor.tasks.length || monitor.error || state.conversation.backgroundWait?.count)
+  empty.hidden = Boolean(
+    activePlan(state.conversation) ||
+    state.goal.value ||
+    monitor.tasks.length ||
+    monitor.error ||
+    state.conversation.backgroundWait?.count,
+  )
   if (empty.hidden) return
   const loading = Boolean(state.viewedSessionId && !monitor.loaded && monitor.refreshing)
   requiredElement("activity-empty-title").textContent = loading ? "Loading activity" : state.viewedSessionId ? "No active work" : "No activity yet"

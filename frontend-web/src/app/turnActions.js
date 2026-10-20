@@ -22,14 +22,14 @@ export function createTurnActions(ctx) {
 
   // `composed` already carries attachment reference lines. While a turn runs
   // the text is queued: follow_up by default, steering with Alt+Enter.
-  async function submit(composed, { mode = QUEUE_MODES.followUp } = {}) {
+  async function submit(composed, { mode = QUEUE_MODES.followUp, transientSystemMessages } = {}) {
     if (refs.conv.current.operation === "compact" || refs.compactions.current.has(refs.info.current.session_id)) return;
     const text = String(composed ?? ctx.input).trim();
     if (!text || !client() || refs.switching.current) return;
     const run = refs.connectionRun.current;
     const submittedSession = refs.info.current.session_id || "";
     clearDraft(submittedSession);
-    if (text.startsWith("/")) {
+    if (text.startsWith("/") && !transientSystemMessages) {
       await call().runSlashCommand(text);
       return;
     }
@@ -41,7 +41,7 @@ export function createTurnActions(ctx) {
       await queueInput(text, submittedSession, mode === QUEUE_MODES.steering ? QUEUE_MODES.steering : QUEUE_MODES.followUp, turnId);
       return;
     }
-    await sendPrompt(text, submittedSession);
+    await sendPrompt(text, submittedSession, transientSystemMessages);
   }
 
   async function queueInput(text, sessionId, mode, turnId) {
@@ -67,7 +67,7 @@ export function createTurnActions(ctx) {
     }
   }
 
-  async function sendPrompt(text, submittedSession) {
+  async function sendPrompt(text, submittedSession, transientSystemMessages) {
     const run = refs.connectionRun.current;
     const loadId = refs.sessionLoad.current;
     // First-message auto-session: a brand-new workspace has no session yet.
@@ -105,7 +105,12 @@ export function createTurnActions(ctx) {
     refs.promptStarts.current.set(sessionId, starting);
     if (sessionId === refs.info.current.session_id) dispatchConversation({ kind: "message", role: "user", content: text, inputId });
     try {
-      await client().request(methods.sessionPrompt, { session_id: sessionId, input: text, client_input_id: inputId });
+      await client().request(methods.sessionPrompt, {
+        session_id: sessionId,
+        input: text,
+        client_input_id: inputId,
+        ...(Array.isArray(transientSystemMessages) ? { transient_system_messages: transientSystemMessages } : {}),
+      });
     } catch (error) {
       if (run !== refs.connectionRun.current) return;
       restoreDraft(text, sessionId);

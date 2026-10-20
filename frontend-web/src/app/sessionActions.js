@@ -1,5 +1,6 @@
 import { methods, sessionIdOf } from "../methods.js";
 import { exportConversation, writePreference } from "../lib/sessionPreferences.js";
+import { normalizePathKey } from "../lib/agentsModel.js";
 import { normalizeModelList } from "../lib/models.js";
 import { SESSION_LIMIT_MAX, SESSION_PAGE, errorText } from "./constants.js";
 import { applyInteractions, rememberInteraction } from "../lib/sessionActivity.js";
@@ -10,18 +11,61 @@ export function createSessionActions(ctx) {
   const { refs, endpoint, coalescer, dispatchConversation } = ctx;
   const call = () => ctx.call.current;
 
-  async function refreshSessions(workspace = ctx.selectedWorkspace || ctx.info.workspace_root, { limit = ctx.sessionLimit } = {}) {
+  function resolveSelectedWorkspace(explicitWorkspace) {
+    const hasHostWorkspaces = Array.isArray(refs.info.current?.workspaces);
+    if (hasHostWorkspaces) {
+      const hostWorkspaces = refs.info.current.workspaces;
+      const candidate = String(
+        explicitWorkspace ?? refs.workspace.current ?? ctx.selectedWorkspace ?? "",
+      ).trim();
+      const matched = candidate
+        ? hostWorkspaces.find((w) => normalizePathKey(w) === normalizePathKey(candidate))
+        : "";
+      return matched || hostWorkspaces[0] || "";
+    }
+    return String(
+      explicitWorkspace ??
+        refs.workspace.current ??
+        ctx.selectedWorkspace ??
+        refs.info.current.workspace_root ??
+        "",
+    ).trim();
+  }
+
+  async function refreshSessions(workspace, { limit = ctx.sessionLimit } = {}) {
     const client = refs.client.current;
     if (!client) return;
+    const targetWs = resolveSelectedWorkspace(workspace);
     const run = refs.connectionRun.current;
     const requestId = ++refs.listRequest.current;
     try {
-      const params = workspace ? { limit, workspace_root: workspace } : { limit };
+      const params = targetWs ? { limit, workspace_root: targetWs } : { limit };
       const result = await client.request(methods.sessionList, params);
       if (run !== refs.connectionRun.current || requestId !== refs.listRequest.current) return;
-      const list = Array.isArray(result?.sessions) ? result.sessions : [];
+      let resolvedWs = targetWs;
+      if (Array.isArray(result?.workspaces)) {
+        const nextWorkspaces = [...new Set(result.workspaces.map((w) => String(w || "").trim()).filter(Boolean))];
+        ctx.setWorkspaces(nextWorkspaces);
+        if (refs.info.current) {
+          refs.info.current = { ...refs.info.current, workspaces: nextWorkspaces };
+        }
+        resolvedWs = resolveSelectedWorkspace(workspace);
+        if (resolvedWs && resolvedWs !== targetWs) {
+          refs.workspace.current = resolvedWs;
+          ctx.setSelectedWorkspace(resolvedWs);
+          ctx.setWorkspaceDraft(resolvedWs);
+        }
+      }
+      const rawList = Array.isArray(result?.sessions) ? result.sessions : [];
+      const targetKey = normalizePathKey(resolvedWs);
+      const list = targetKey
+        ? rawList.filter((s) => {
+            const ws = String(s?.workspace_root || s?.workspaceRoot || "").trim();
+            return !ws || normalizePathKey(ws) === targetKey;
+          })
+        : rawList;
       ctx.setSessions(applyInteractions(list, client.url || endpoint));
-      ctx.setHasMoreSessions(list.length >= limit && limit < SESSION_LIMIT_MAX);
+      ctx.setHasMoreSessions(rawList.length >= limit && limit < SESSION_LIMIT_MAX);
       void syncSubscriptions(list);
     } catch {
       // Session list refresh is advisory; keep the current list on failure.
@@ -31,7 +75,7 @@ export function createSessionActions(ctx) {
   async function loadMoreSessions() {
     const next = Math.min(SESSION_LIMIT_MAX, ctx.sessionLimit + SESSION_PAGE);
     ctx.setSessionLimit(next);
-    await refreshSessions(refs.workspace.current || refs.info.current.workspace_root, { limit: next });
+    await refreshSessions(undefined, { limit: next });
   }
 
   // Listed sessions plus the current one are subscribed so unread dots and
@@ -123,23 +167,27 @@ export function createSessionActions(ctx) {
     if (sessionId) refs.drafts.current = { ...refs.drafts.current, [sessionId]: refs.input.current };
   }
 
-  async function replayWithRetry(client, target, loadId) {
-    let replay = await client.request(methods.sessionReplay, { session_id: target });
+  async function replayWithRetry(client, target, loadId, externalTools = null) {
+    const replayParams = externalTools
+      ? { session_id: target, external_tools: externalTools }
+      : { session_id: target };
+    let replay = await client.request(methods.sessionReplay, replayParams);
     // A completed turn can overtake the history read. Read once more when a
     // durable boundary arrived during it; never append overlapping deltas.
     const overtaken = () => refs.loadingEvents.current.some((item) => item.session_id === target && item.durability === "durable" && item.event?.type !== "task_updated");
     for (let retry = 0; retry < 3 && overtaken(); retry++) {
       if (loadId !== refs.sessionLoad.current) return null;
       refs.loadingEvents.current = [];
-      replay = await client.request(methods.sessionReplay, { session_id: target });
+      replay = await client.request(methods.sessionReplay, replayParams);
     }
     return replay;
   }
 
-  async function loadSession(sessionId, switchSession = true, throwOnError = false) {
+  async function loadSession(sessionId, switchSession = true, throwOnError = false, options = {}) {
     const target = String(sessionId || "").trim();
     const client = refs.client.current;
     if (!target || !client) return;
+    const externalTools = options?.externalTools || null;
     const loadId = ++refs.sessionLoad.current;
     const previousId = refs.info.current.session_id;
     if (previousId && previousId !== target) saveDraft(previousId);
@@ -149,30 +197,52 @@ export function createSessionActions(ctx) {
     call().clearUnread(target);
     ctx.setBusySession(true);
     try {
-      const switched = switchSession ? await client.request(methods.sessionSwitch, { session_id: target }) : refs.info.current;
+      const switchParams = externalTools
+        ? { session_id: target, external_tools: externalTools }
+        : { session_id: target };
+      const switched = switchSession ? await client.request(methods.sessionSwitch, switchParams) : refs.info.current;
       if (loadId !== refs.sessionLoad.current) return;
-      const replay = await replayWithRetry(client, target, loadId);
+      const replay = await replayWithRetry(client, target, loadId, externalTools);
       if (loadId !== refs.sessionLoad.current) return;
       const workspace = String(switched?.workspace_root || ctx.selectedWorkspace || "").trim();
       if (previousId && previousId !== target) saveDraft(previousId);
       const base = refs.info.current;
       const sessionModel = String(switched?.model || replay?.model || base.model || base.default_model || refs.currentModel.current || "").trim();
       const sessionEffort = String(switched?.reasoning_effort || replay?.reasoning_effort || base.reasoning_effort || "").trim();
+      const sessionName = typeof switched?.name === "string" ? switched.name : (typeof replay?.name === "string" ? replay.name : "");
+      const sessionTitleText = typeof switched?.title === "string" ? switched.title : (typeof replay?.title === "string" ? replay.title : "");
       ctx.setInfo((current) => ({
         ...current,
         ...(switched || {}),
         session_id: target,
+        name: sessionName,
+        title: sessionTitleText,
         workspace_root: workspace || current.workspace_root,
         model: sessionModel || current.model || current.default_model || "",
         reasoning_effort: sessionEffort || current.reasoning_effort || "",
       }));
       ctx.setCurrentModel(sessionModel);
-      refs.info.current = { ...refs.info.current, ...switched, session_id: target, workspace_root: workspace, model: sessionModel };
+      refs.info.current = {
+        ...refs.info.current,
+        ...switched,
+        session_id: target,
+        name: sessionName,
+        title: sessionTitleText,
+        workspace_root: workspace,
+        model: sessionModel,
+      };
       writePreference(`session:${client.url || endpoint}`, target);
       if (previousId !== target) ctx.setInput(refs.drafts.current[target] || "");
       void refreshModels(target);
       void refreshContext(target);
-      if (workspace) {
+      const hasRegisteredList = Array.isArray(refs.info.current?.workspaces);
+      const registeredList = hasRegisteredList ? refs.info.current.workspaces : ctx.workspaces;
+      const canSelectWorkspace =
+        !options?.preserveSelectedWorkspace &&
+        Boolean(workspace) &&
+        (!hasRegisteredList || registeredList.some((w) => normalizePathKey(w) === normalizePathKey(workspace)));
+      if (canSelectWorkspace) {
+        refs.workspace.current = workspace;
         ctx.setSelectedWorkspace(workspace);
         ctx.setWorkspaceDraft(workspace);
       }
@@ -230,10 +300,26 @@ export function createSessionActions(ctx) {
     try {
       const result = await refs.client.current.request(methods.sessionList, { limit, workspace_root: workspace });
       if (run !== refs.connectionRun.current || requestId !== refs.listRequest.current) return;
-      const nextSessions = Array.isArray(result?.sessions) ? result.sessions : [];
+      const rawSessions = Array.isArray(result?.sessions) ? result.sessions : [];
+      const workspaceKey = normalizePathKey(workspace);
+      const nextSessions = workspaceKey
+        ? rawSessions.filter((s) => {
+            const ws = String(s?.workspace_root || s?.workspaceRoot || "").trim();
+            return !ws || normalizePathKey(ws) === workspaceKey;
+          })
+        : rawSessions;
+      refs.workspace.current = workspace;
       ctx.setSelectedWorkspace(workspace);
       ctx.setWorkspaceDraft(workspace);
-      ctx.setWorkspaces((current) => [...new Set([...current, workspace])]);
+      if (Array.isArray(result?.workspaces)) {
+        const nextWorkspaces = [...new Set(result.workspaces.map((w) => String(w || "").trim()).filter(Boolean))];
+        ctx.setWorkspaces(nextWorkspaces);
+        if (refs.info.current) {
+          refs.info.current = { ...refs.info.current, workspaces: nextWorkspaces };
+        }
+      } else if (!Array.isArray(refs.info.current?.workspaces)) {
+        ctx.setWorkspaces((current) => [...new Set([...current, workspace])]);
+      }
       ctx.setSessions(applyInteractions(nextSessions, refs.client.current.url || endpoint));
       ctx.setHasMoreSessions(nextSessions.length >= limit && limit < SESSION_LIMIT_MAX);
       void syncSubscriptions(nextSessions);
@@ -257,10 +343,10 @@ export function createSessionActions(ctx) {
   function clearActiveSession(workspace) {
     ++refs.sessionLoad.current;
     saveDraft(refs.info.current.session_id);
-    refs.info.current = { ...refs.info.current, session_id: "", workspace_root: workspace };
+    refs.info.current = { ...refs.info.current, session_id: "", name: "", title: "", workspace_root: workspace };
     ctx.setInput("");
     ctx.setContextSnapshot(null);
-    ctx.setInfo((current) => ({ ...current, session_id: "", turn_state: null, live_turn: null, workspace_root: workspace }));
+    ctx.setInfo((current) => ({ ...current, session_id: "", name: "", title: "", turn_state: null, live_turn: null, workspace_root: workspace }));
     dispatchConversation({ kind: "reset" });
     void refreshModels("");
   }

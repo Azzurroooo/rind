@@ -1,4 +1,5 @@
 import { type DesktopProject, type DesktopSessionSummary, runtimeMethods } from "../../preload/types.ts"
+import { resolveSessionAgentContext, type SessionAgentContext } from "../agents-model.ts"
 import { defaultNewChatProjectPath, projectForPath as findProjectForPath, sameProjectPath as samePath } from "../project-selection.ts"
 import { replayMarkdown } from "../session-actions.ts"
 import { createTaskMonitorState } from "../task-monitor.ts"
@@ -13,6 +14,7 @@ import { resetGoal } from "./inspector-goal.ts"
 import { resetTasks, stopTaskPolling } from "./inspector-tasks.ts"
 import { activeTurnIdFor, loadReplay, requestForSession, resetConversationPresentation, runtimeTurnActive } from "./runtime.ts"
 import { showToast } from "./overlays.ts"
+import { animateCollapse, animateExpand } from "./accordion.ts"
 import { render } from "./shell.ts"
 import { state, vars } from "./state.ts"
 
@@ -113,9 +115,18 @@ export function applyOverview(overview: Awaited<ReturnType<typeof window.api.pro
   state.recentSessions = [...recent.values()].sort((a, b) => b.lastInteractedAt.localeCompare(a.lastInteractedAt)).slice(0, state.recentLimit)
   state.recentSessionTotal = overview.recentSessionTotal ?? overview.recentSessions.length
   state.fallbackProjectPath = overview.activeProjectPath
-  state.chatProjectPath = projectForPath(state.chatProjectPath)?.path
-    || defaultNewChatProjectPath(state.projects, state.recentSessions, state.fallbackProjectPath)
-  state.viewedProjectPath = projectForPath(state.viewedProjectPath)?.path || state.chatProjectPath
+  const agentWorkspace =
+    state.agentChatContext && state.agentChatContext.kind !== "independent"
+      ? state.agentChatContext.workspaceRoot || ""
+      : ""
+  if (agentWorkspace) {
+    state.chatProjectPath = agentWorkspace
+    state.viewedProjectPath = agentWorkspace
+  } else {
+    state.chatProjectPath = projectForPath(state.chatProjectPath)?.path
+      || defaultNewChatProjectPath(state.projects, state.recentSessions, state.fallbackProjectPath)
+    state.viewedProjectPath = projectForPath(state.viewedProjectPath)?.path || state.chatProjectPath
+  }
   if (!projectForPath(state.projectMenuPath)) state.projectMenuPath = ""
   state.sidebarOpen = overview.sidebarOpen
   state.sidebarWidth = overview.sidebarWidth
@@ -182,7 +193,15 @@ function resetSessionPanels() {
   state.taskMonitor = createTaskMonitorState()
 }
 
-export function currentDraftKey() { return state.viewedSessionId ? `${state.viewedSessionId}:draft` : state.chatProjectPath }
+export function currentDraftKey() {
+  if (state.viewedSessionId) return `${state.viewedSessionId}:draft`
+  if (state.agentChatContext && state.agentChatContext.kind !== "independent") {
+    return state.agentChatContext.kind === "manager"
+      ? "agent:manager:draft"
+      : `agent:${state.agentChatContext.teamId}:${state.agentChatContext.agentId}:draft`
+  }
+  return state.chatProjectPath
+}
 
 export function restoreProjectDraft() {
   prompt.value = state.drafts[currentDraftKey()] || ""
@@ -193,9 +212,52 @@ export function resolveNewChatProjectPath() {
   return defaultNewChatProjectPath(state.projects, state.recentSessions, state.fallbackProjectPath)
 }
 
+function syncWorkspaceAgentContext(sessionId: string, projectPath: string) {
+  const resolved = resolveSessionAgentContext(state.agentsSnapshot, sessionId, projectPath)
+  state.agentChatContext = resolved.kind !== "independent" ? resolved : null
+}
+
+/**
+ * Shared state preparation for starting a new conversation — reused by both
+ * Workspace `New chat` (agentContext = null, directory selectable) and
+ * Team Member / Manager `New session` (agentContext locked to that agent's workspace).
+ */
+export function prepareNewSessionState(options: {
+  workspacePath: string
+  agentContext?: SessionAgentContext | null
+}) {
+  closeComposerSelectMenus()
+  const prevDraftKey = currentDraftKey()
+  if (prevDraftKey) state.drafts[prevDraftKey] = prompt.value
+  const nextPath = options.workspacePath || ""
+  const folderChanged = !samePath(state.viewedProjectPath || "", nextPath)
+  state.agentSurface = { kind: "chat" }
+  state.agentChatContext =
+    options.agentContext && options.agentContext.kind !== "independent"
+      ? options.agentContext
+      : null
+  state.chatProjectPath = nextPath
+  state.viewedProjectPath = nextPath
+  state.viewedSessionId = ""
+  state.model = state.settings.model
+  state.modelProvider = ""
+  state.effort = state.settings.reasoningEffort
+  if (folderChanged) {
+    state.expandedDirectories = new Set([""])
+    state.fileListings = {}
+    state.filePreview = undefined
+  }
+  state.conversation = createConversation()
+  resetConversationPresentation()
+  resetSessionPanels()
+  restoreProjectDraft()
+  state.notice = ""
+}
+
 export async function addProject() {
   const overview = await window.api.projects.add()
   if (!overview) return
+  state.agentChatContext = null
   applyOverview(overview)
   resetProjectView()
   state.chatProjectPath = overview.activeProjectPath
@@ -206,36 +268,29 @@ export async function addProject() {
   await refreshInspector()
 }
 
+function findProjectSessionsElement(path: string): HTMLElement | null {
+  const trigger = [...projectList.querySelectorAll<HTMLButtonElement>("[data-project-path]")]
+    .find((item) => item.dataset.projectPath === path)
+  return trigger?.closest<HTMLElement>(".project-item")?.querySelector<HTMLElement>(".project-sessions") || null
+}
+
 export async function toggleProject(path: string) {
   const project = state.projects.find((item) => item.path === path)
   if (!project) return
-  if (state.expandedProjects.has(path)) {
-    const trigger = [...projectList.querySelectorAll<HTMLButtonElement>("[data-project-path]")]
-      .find((item) => item.dataset.projectPath === path)
-    const sessions = trigger?.closest<HTMLElement>(".project-item")?.querySelector<HTMLElement>(".project-sessions")
-    if (sessions && !sessions.classList.contains("collapsing") && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      await new Promise<void>((resolve) => {
-        const finish = () => {
-          window.clearTimeout(timeoutId)
-          sessions.removeEventListener("animationend", finish)
-          resolve()
-        }
-        sessions.style.height = `${sessions.offsetHeight}px`
-        sessions.classList.add("collapsing")
-        sessions.addEventListener("animationend", finish, { once: true })
-        requestAnimationFrame(() => { sessions.style.height = "0px" })
-        const timeoutId = window.setTimeout(finish, 260)
-      })
-    }
+  const wasExpanded = state.expandedProjects.has(path)
+  if (wasExpanded) {
+    await animateCollapse(findProjectSessionsElement(path))
     state.expandedProjects.delete(path)
-    projectList.classList.add("skip-project-animation")
   } else {
     state.expandedProjects.add(path)
   }
   state.notice = ""
   render()
-  if (projectList.classList.contains("skip-project-animation")) {
-    requestAnimationFrame(() => projectList.classList.remove("skip-project-animation"))
+  if (!wasExpanded) {
+    animateExpand(findProjectSessionsElement(path))
+    if (!state.viewedSessionId && (!samePath(path, state.chatProjectPath) || state.agentChatContext)) {
+      await selectChatProject(path)
+    }
   }
 }
 
@@ -249,6 +304,7 @@ export async function removeProject(path: string) {
   applyOverview(overview)
   delete state.drafts[path]
   if (removesViewedProject || removesChatProject) {
+    state.agentChatContext = null
     state.chatProjectPath = resolveNewChatProjectPath()
     state.viewedProjectPath = state.chatProjectPath
     resetProjectView()
@@ -260,26 +316,14 @@ export async function removeProject(path: string) {
 }
 
 export async function startNewChat() {
-  closeComposerSelectMenus()
-  if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
-  state.chatProjectPath = resolveNewChatProjectPath()
-  state.viewedProjectPath = state.chatProjectPath
-  const project = chatProject()
+  const targetPath = resolveNewChatProjectPath()
+  const project = projectForPath(targetPath)
   if (!project?.available) {
+    closeComposerSelectMenus()
     await addProject()
     return
   }
-  state.viewedSessionId = ""
-  state.model = state.settings.model
-  state.modelProvider = ""
-  state.effort = state.settings.reasoningEffort
-  state.filePreview = undefined
-  state.fileListings = {}
-  state.conversation = createConversation()
-  resetConversationPresentation()
-  resetSessionPanels()
-  restoreProjectDraft()
-  state.notice = ""
+  prepareNewSessionState({ workspacePath: project.path, agentContext: null })
   render()
   await refreshInspector()
 }
@@ -293,7 +337,13 @@ export async function loadMoreSessions(path: string) {
 }
 
 export async function switchSession(nextSessionId: string) {
-  if (nextSessionId === state.viewedSessionId) return
+  if (nextSessionId === state.viewedSessionId) {
+    if (state.agentSurface.kind !== "chat") {
+      state.agentSurface = { kind: "chat" }
+      render()
+    }
+    return
+  }
   const session = knownSessions().find((item) => item.id === nextSessionId)
   if (!session) {
     state.notice = "This session is unavailable in the registered Desktop projects."
@@ -301,14 +351,17 @@ export async function switchSession(nextSessionId: string) {
     return
   }
   const project = projectForPath(session.workspaceRoot)
-  if (!project) return
+  const resolvedWorkspace = project?.path || session.workspaceRoot
+  if (!resolvedWorkspace) return
   closeComposerSelectMenus()
+  state.agentSurface = { kind: "chat" }
+  syncWorkspaceAgentContext(nextSessionId, resolvedWorkspace)
   showCachedSession(nextSessionId)
   state.viewedSessionId = nextSessionId
   state.model = state.sessionModels[nextSessionId] || ""
   state.effort = state.sessionEfforts[nextSessionId] || ""
-  state.viewedProjectPath = project.path
-  state.chatProjectPath = project.path
+  state.viewedProjectPath = resolvedWorkspace
+  state.chatProjectPath = resolvedWorkspace
   state.expandedDirectories = new Set([""])
   state.fileListings = {}
   state.filePreview = undefined
@@ -326,21 +379,7 @@ export async function selectChatProject(path: string) {
   if (state.viewedSessionId) return
   const project = state.projects.find((item) => item.path === path)
   if (!project) return
-  closeComposerSelectMenus()
-  if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
-  state.chatProjectPath = project.path
-  state.viewedProjectPath = project.path
-  state.viewedSessionId = ""
-  state.model = state.settings.model
-  state.modelProvider = ""
-  state.effort = state.settings.reasoningEffort
-  state.conversation = createConversation()
-  state.expandedDirectories = new Set([""])
-  state.fileListings = {}
-  state.filePreview = undefined
-  resetConversationPresentation()
-  restoreProjectDraft()
-  resetSessionPanels()
+  prepareNewSessionState({ workspacePath: project.path, agentContext: null })
   render()
   await refreshInspector()
 }
