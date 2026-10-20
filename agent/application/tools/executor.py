@@ -20,6 +20,10 @@ class ToolExecutor:
         """Return whether the named tool should be awaited directly."""
         return self._registry.is_async(name)
 
+    def is_parallel_tool(self, name: str) -> bool:
+        """Return whether the named tool is safe to execute concurrently with other parallel tools."""
+        return self._registry.is_parallel(name)
+
     def execute_sync(self, name: str, args: dict) -> ToolExecutionResult:
         """Synchronous execution returning a structured ToolExecutionResult."""
         if not self._registry.has(name):

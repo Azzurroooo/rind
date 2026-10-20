@@ -24,6 +24,7 @@ class ToolSpec:
     accepted_arguments: frozenset[str] | None
     normalize_arguments: Callable[[dict], dict] | None
     advertised: bool
+    parallel: bool
 
     def __init__(
         self,
@@ -35,6 +36,7 @@ class ToolSpec:
         parameters: dict[str, Any] | None = None,
         normalize_arguments: Callable[[dict], dict] | None = None,
         advertised: bool = True,
+        parallel: bool = False,
     ) -> None:
         """`parameters` declares the JSON schema directly instead of deriving it from the handler."""
         if not isinstance(name, str) or not _TOOL_NAME_PATTERN.fullmatch(name):
@@ -68,3 +70,4 @@ class ToolSpec:
         object.__setattr__(self, "accepted_arguments", accepted_arguments)
         object.__setattr__(self, "normalize_arguments", normalize_arguments)
         object.__setattr__(self, "advertised", advertised)
+        object.__setattr__(self, "parallel", parallel)

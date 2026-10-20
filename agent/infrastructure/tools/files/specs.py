@@ -128,6 +128,7 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
             name="read_file",
             handler=read,
             normalize_arguments=_normalize_path_arguments,
+            parallel=True,
             description="Read UTF-8 text or a local image (PNG, JPEG, WebP, GIF, BMP). Images are sent as attachments, resized to at most 2000 pixels per edge; animations use the first frame. Omit offset/limit for images. Text reads return complete lines within a 25 KiB model budget, including next_offset. For LineTooLong, read character slices with bash/Python.",
             param_descriptions={
                 "path": "Absolute or relative file path",
@@ -160,6 +161,7 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
             name="glob",
             handler=find,
             normalize_arguments=_normalize_path_arguments,
+            parallel=True,
             description="Fast glob-pattern file lookup that returns paths and file sizes. Use it to locate candidate files before reading their contents.",
             param_descriptions={
                 "pattern": "Glob pattern such as **/*.py or src/**/*.ts.",
@@ -171,6 +173,7 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
             name="grep",
             handler=search,
             normalize_arguments=_normalize_path_arguments,
+            parallel=True,
             description="Search file contents with rg; returns matching files, line numbers, and text. Reports truncation when the result cap is hit.",
             param_descriptions={
                 "pattern": "Regular expression to search for (rg syntax)",

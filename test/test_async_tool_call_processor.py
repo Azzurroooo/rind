@@ -811,3 +811,65 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+
+@pytest.mark.asyncio
+async def test_parallel_tools_execute_concurrently_and_preserve_order_with_barriers() -> None:
+    active_count = 0
+    max_active_count = 0
+    execution_log: list[str] = []
+
+    class ConcurrentAwareExecutor:
+        def is_async_tool(self, name: str) -> bool:
+            return True
+
+        def is_parallel_tool(self, name: str) -> bool:
+            return name in {"read_file", "delegate"}
+
+        async def execute_async(self, name: str, args: dict):
+            nonlocal active_count, max_active_count
+            call_id = args.get("_idempotency_key")
+            active_count += 1
+            max_active_count = max(max_active_count, active_count)
+            execution_log.append(f"start:{call_id}")
+            try:
+                # Reverse completion times inside batch 1 so call_2 finishes before call_1
+                delay = 0.04 if call_id == "call_1" else 0.01
+                await asyncio.sleep(delay)
+                execution_log.append(f"end:{call_id}")
+                return ToolExecutionResult(
+                    status="ok",
+                    result_str=json.dumps({"ok": True, "tool": name, "data": {"id": call_id}}),
+                )
+            finally:
+                active_count -= 1
+
+    session = FakeSession()
+    processor = ToolCallProcessor(tool_executor=ConcurrentAwareExecutor())
+    calls = [
+        ParsedToolCall(call_id="call_1", name="delegate", raw_args='{"to":"ui","brief":"A"}'),
+        ParsedToolCall(call_id="call_2", name="delegate", raw_args='{"to":"api","brief":"B"}'),
+        ParsedToolCall(call_id="call_wait", name="delegate", raw_args='{"wait":true}'),
+        ParsedToolCall(call_id="call_3", name="read_file", raw_args='{"path":"a.txt"}'),
+        ParsedToolCall(call_id="call_4", name="read_file", raw_args='{"path":"b.txt"}'),
+    ]
+
+    events = [event async for event in processor.execute(session=session, tool_calls=calls, turn_id="turn_parallel")]
+
+    assert max_active_count == 2, f"Expected parallel batch of 2 concurrent calls, got max_active_count={max_active_count}"
+    # Both call_1 and call_2 must finish before call_wait starts; call_wait must finish before call_3 and call_4 start.
+    wait_start_idx = execution_log.index("start:call_wait")
+    wait_end_idx = execution_log.index("end:call_wait")
+    assert execution_log.index("end:call_1") < wait_start_idx
+    assert execution_log.index("end:call_2") < wait_start_idx
+    assert wait_end_idx < execution_log.index("start:call_3")
+    assert wait_end_idx < execution_log.index("start:call_4")
+
+    # Even though call_2 finished before call_1, ToolResultEvent and SessionStore persistence must stay in exact call order.
+    result_ids = [e.tool_call_id for e in events if isinstance(e, ToolResultEvent)]
+    assert result_ids == ["call_1", "call_2", "call_wait", "call_3", "call_4"]
+    persisted_ids = [c[0][0] for c in session.persisted_tool_calls]
+    assert persisted_ids == ["call_1", "call_2", "call_wait", "call_3", "call_4"]
+    message_ids = [m[1].get("tool_call_id") for m in session.persisted_messages]
+    assert message_ids == ["call_1", "call_2", "call_wait", "call_3", "call_4"]
