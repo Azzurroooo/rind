@@ -327,7 +327,9 @@ async function chooseProject() {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] })
   if (result.canceled || !result.filePaths[0]) return null
-  return projectStore().add(result.filePaths[0])
+  const overview = await projectStore().add(result.filePaths[0])
+  remoteGateway?.notifyWorkspacesChanged()
+  return overview
 }
 
 async function requireProject(path: unknown) {
@@ -431,6 +433,7 @@ function registerIpc() {
   ipcMain.handle("projects-remove", async (_event, path: unknown) => {
     if (typeof path !== "string") throw new Error("Project path must be a string.")
     const overview = await projectStore().remove(path)
+    remoteGateway?.notifyWorkspacesChanged()
     return overview
   })
   ipcMain.handle("projects-recent-page", (_event, offset: number, limit?: number) => projectStore().recentPage(offset, limit))

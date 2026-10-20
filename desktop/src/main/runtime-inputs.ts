@@ -22,7 +22,17 @@ export class RuntimeInputs {
     for (const [id, prompt] of this.prompts) {
       if (prompt.sessionId !== envelope.session_id) continue
       this.prompts.delete(id)
-      return { ...envelope, event: { ...envelope.event, input: prompt.input, client_input_id: prompt.inputId } }
+      return {
+        ...envelope,
+        event: {
+          ...envelope.event,
+          input: typeof envelope.event.input === "string" && envelope.event.input ? envelope.event.input : prompt.input,
+          client_input_id:
+            typeof envelope.event.client_input_id === "string" && envelope.event.client_input_id
+              ? envelope.event.client_input_id
+              : prompt.inputId,
+        },
+      }
     }
     return envelope
   }

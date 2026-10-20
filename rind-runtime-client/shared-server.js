@@ -14,6 +14,7 @@ const OBSERVE_EVENTS = new Set([
   "turn_started", "turn_completed", "turn_failed", "turn_cancelled",
   "user_question_requested", "user_question_answered", "background_wait_changed",
   "folder_defaults_changed", "wait_released", "session_discarded", "session_deleted",
+  "session_renamed", "session_settings_changed",
 ]);
 
 export async function startSharedServer(options) {

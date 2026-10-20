@@ -785,6 +785,9 @@ async function renderEvent(message) {
       || (turnStateData.id && nextTurnId !== turnStateData.id)) {
       return;
     }
+    if (!turnStateData.active && !message.event.delivery && typeof message.event.input === "string" && message.event.input.trim()) {
+      outputController.writeUserInput(message.event.input);
+    }
     clearActivityTimer();
     turnStateData.id = nextTurnId;
     displayState.lastTurnId = nextTurnId;

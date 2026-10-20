@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { buildRuntimeEnv, resolveSourcePython } from "../../../rind-runtime-client/runtime-env.js"
 import { resolveRindHome } from "../../../rind-runtime-client/local-files.js"
 import { runtimeMethods, type RuntimeEvent } from "../preload/types.ts"
-import { initializeRuntime, requestRuntime, startRuntime, getRuntimeSnapshot } from "./runtime.ts"
+import { initializeRuntime, isSharedRuntime, requestRuntime, startRuntime, getRuntimeSnapshot } from "./runtime.ts"
 
 export type AgentsSnapshot = {
   seq?: number
@@ -421,7 +421,7 @@ export function ensureManagementConnected({ start = true }: { start?: boolean } 
           teamId: attachment.teamId || undefined,
           manager: attachment.manager,
           ...(attachment.runtimeSessionId ? { runtimeSessionId: attachment.runtimeSessionId } : {}),
-          shared: false,
+          shared: isSharedRuntime(),
         })
         const tools = await connected.request("sessionTools", { sessionId: reattached.id })
         if (attachment.runtimeSessionId && !reattached.runtimeSessionId) {
@@ -784,14 +784,14 @@ export async function openAgentSession(params: {
     ).catch(() => ({ sessions: [] }))
     runtimeSessionId = String(history?.sessions?.[0]?.runtimeSessionId || "")
   }
-  // Attach with shared: false and pass runtimeSessionId when known so existing
+  // Attach with shared runtime flag and pass runtimeSessionId when known so existing
   // management sessions are reused instead of creating duplicate session entries.
   const attached = await active.request("attachSession", {
     ...(agentId ? { agentId } : {}),
     ...(teamId ? { teamId } : {}),
     ...(manager ? { manager: true } : {}),
     ...(runtimeSessionId ? { runtimeSessionId } : {}),
-    shared: false,
+    shared: isSharedRuntime(),
   })
   const externalTools = (await active.request("sessionTools", { sessionId: attached.id })) as Record<string, unknown>
   let snap = (await active.request("snapshot")) as AgentsSnapshot

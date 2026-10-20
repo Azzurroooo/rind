@@ -55,10 +55,9 @@ export function createCliInputActions({
 
   function deliverQueuedInput(input, _mode, inputId) {
     const index = state.input.pending.findIndex((entry) => entry.inputId === inputId);
-    if (index === -1) {
-      return;
+    if (index !== -1) {
+      state.input.pending.splice(index, 1);
     }
-    state.input.pending.splice(index, 1);
     output.writeUserInput(input);
   }
 

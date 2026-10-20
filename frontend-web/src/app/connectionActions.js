@@ -101,6 +101,12 @@ export function createConnectionActions(ctx) {
     // event lights the unread dot instead; replay rebuilds it on open.
     if (envelopeSession && currentSession && envelopeSession !== currentSession) {
       if (String(message.durability) === "durable") call().markUnread(envelopeSession);
+      if (
+        event.type === "turn_completed" ||
+        (event.type === "turn_started" && !refs.sessions.current.some((s) => sessionIdOf(s) === envelopeSession))
+      ) {
+        void call().refreshSessions();
+      }
       return;
     }
     if (event.type === "goal_updated") ctx.setGoal(event.goal || null);

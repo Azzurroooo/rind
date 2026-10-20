@@ -269,8 +269,10 @@ test("gateway proxies agents management requests, binds opened sessions, and bro
   const created = await request("agents/createSession", { managementSessionId: "ms-1" })
   assert.equal(created.result.session_id, "s-created")
 
-  // Broadcast agents/update event:
+  // Broadcast agents/update and workspace/folder changes:
   for (const fn of agentListeners) fn({ connection: "connected", snapshot: { seq: 5, teams: [{ id: "t-1", name: "Core" }] } })
+  gateway.notifyWorkspacesChanged()
   await request("ping")
   assert.equal(events.some((e) => e.method === "agents/update" && e.event.snapshot.seq === 5), true)
+  assert.equal(events.some((e) => e.method === "session/update" && e.event?.type === "folder_defaults_changed"), true)
 })

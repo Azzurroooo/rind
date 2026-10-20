@@ -64,6 +64,10 @@ function useSharedRuntime() {
   return Boolean(process.versions.electron) && !process.env.RIND_RUNTIME_PATH
 }
 
+export function isSharedRuntime() {
+  return useSharedRuntime()
+}
+
 function setSnapshot(next: RuntimeSnapshot) {
   worker.snapshot = next
   for (const listener of listeners) listener(worker.snapshot)

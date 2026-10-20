@@ -96,7 +96,7 @@ export function sessionTitle(sessions, sessionId, infoTitle = "", options = {}) 
       agentName: agentContext?.agentName,
     }) ||
     cleanTitleCandidate(match?.taskBrief, sessionId) ||
-    firstConversationSummary(messages) ||
+    (isMember || isManager ? firstConversationSummary(messages) : "") ||
     cleanTitleCandidate(match?.title, sessionId);
 
   return resolved || fallback;

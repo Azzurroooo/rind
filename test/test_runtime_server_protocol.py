@@ -231,7 +231,7 @@ def test_turn_prompt_preserves_input_text_and_resume_flag():
                 "kind": "request",
                 "request_id": 23,
                 "method": "session/prompt",
-                "params": {"session_id": "s1", "input": "  preserve surrounding text  "},
+                "params": {"session_id": "s1", "input": "  preserve surrounding text  ", "client_input_id": "in-23"},
             }
         )
         await server._dispatch(
@@ -243,6 +243,11 @@ def test_turn_prompt_preserves_input_text_and_resume_flag():
 
     asyncio.run(run())
 
+    started_events = [m["event"] for m in payloads if m.get("kind") == "event" and m["event"].get("type") == "turn_started"]
+    assert started_events[0]["input"] == "  preserve surrounding text  "
+    assert started_events[0]["client_input_id"] == "in-23"
+    assert "input" not in started_events[1]
+    assert "input" not in started_events[2]
     assert worker.execution.queries[0]["query"] == "  preserve surrounding text  "
     assert worker.execution.queries[0]["delivery"] is False
     assert worker.execution.queries[1]["resume"] is True

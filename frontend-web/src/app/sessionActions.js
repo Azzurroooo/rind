@@ -35,28 +35,29 @@ export function createSessionActions(ctx) {
   async function refreshSessions(workspace, { limit = ctx.sessionLimit } = {}) {
     const client = refs.client.current;
     if (!client) return;
-    const hasHostWorkspaces = Array.isArray(refs.info.current?.workspaces);
     const targetWs = resolveSelectedWorkspace(workspace);
-    if (hasHostWorkspaces && !targetWs) {
-      ctx.setSessions([]);
-      ctx.setHasMoreSessions(false);
-      return;
-    }
     const run = refs.connectionRun.current;
     const requestId = ++refs.listRequest.current;
     try {
       const params = targetWs ? { limit, workspace_root: targetWs } : { limit };
       const result = await client.request(methods.sessionList, params);
       if (run !== refs.connectionRun.current || requestId !== refs.listRequest.current) return;
+      let resolvedWs = targetWs;
       if (Array.isArray(result?.workspaces)) {
         const nextWorkspaces = [...new Set(result.workspaces.map((w) => String(w || "").trim()).filter(Boolean))];
         ctx.setWorkspaces(nextWorkspaces);
         if (refs.info.current) {
           refs.info.current = { ...refs.info.current, workspaces: nextWorkspaces };
         }
+        resolvedWs = resolveSelectedWorkspace(workspace);
+        if (resolvedWs && resolvedWs !== targetWs) {
+          refs.workspace.current = resolvedWs;
+          ctx.setSelectedWorkspace(resolvedWs);
+          ctx.setWorkspaceDraft(resolvedWs);
+        }
       }
       const rawList = Array.isArray(result?.sessions) ? result.sessions : [];
-      const targetKey = normalizePathKey(targetWs);
+      const targetKey = normalizePathKey(resolvedWs);
       const list = targetKey
         ? rawList.filter((s) => {
             const ws = String(s?.workspace_root || s?.workspaceRoot || "").trim();

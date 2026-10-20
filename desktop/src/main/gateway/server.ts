@@ -21,6 +21,17 @@ type Bridge = {
 }
 type Client = { subscriptions: Set<string>; pending: Set<string | number>; selected: string; workspace: string; alive: boolean }
 const allowed = new Set(Object.values(runtimeMethods).filter(isRemoteRuntimeMethod))
+const GLOBAL_SESSION_EVENTS = new Set([
+  "folder_defaults_changed",
+  "session_renamed",
+  "session_deleted",
+  "session_discarded",
+  "session_settings_changed",
+  "turn_started",
+  "turn_completed",
+  "turn_failed",
+  "turn_cancelled",
+])
 const unscoped = new Set([
   "session/new",
   "session/create",
@@ -145,7 +156,7 @@ export class DesktopGateway {
       }, 30000)
       this.heartbeat.unref()
       this.unsubscribe = this.bridge.subscribe((event) => {
-        const globalEvent = !event.sessionId || event.type === "folder_defaults_changed"
+        const globalEvent = !event.sessionId || GLOBAL_SESSION_EVENTS.has(event.type)
         for (const [ws, client] of this.clients) {
           if (globalEvent || client.subscriptions.has(event.sessionId)) {
             this.send(ws, { kind: "event", method: "session/update", sequence: event.sequence, durability: event.durability, session_id: event.sessionId, turn_id: event.turnId, event: event.event })
@@ -171,6 +182,17 @@ export class DesktopGateway {
     ++this.epoch; this.accessCode = secret(); this.tickets.clear(); this.attempts.clear()
     for (const ws of this.clients.keys()) ws.close(4401, "Access code changed")
     this.clients.clear(); this.publish(); return this.state()
+  }
+
+  notifyWorkspacesChanged(): void {
+    for (const ws of this.clients.keys()) {
+      this.send(ws, {
+        kind: "event",
+        method: "session/update",
+        durability: "ephemeral",
+        event: { type: "folder_defaults_changed" },
+      })
+    }
   }
 
   async stop(): Promise<void> {
