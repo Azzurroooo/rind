@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 
 import pytest
 
+from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.tools.external import ExternalTool
 from agent.infrastructure.tools.registry import DefaultToolRegistry
 
@@ -60,6 +62,29 @@ async def test_a_host_refusal_becomes_a_structured_tool_error(monkeypatch):
     assert payload["ok"] is False and payload["tool"] == "delegate"
     assert payload["error"] == "Share it explicitly."
     assert payload["error_type"] == "WORKSPACE_SHARED"
+
+
+@pytest.mark.asyncio
+async def test_cancelling_token_terminates_running_external_tool_process(tmp_path):
+    pid_file = tmp_path / "child.pid"
+    tool = _tool(args=["-c", f"import os, pathlib, time; pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid())); time.sleep(60)"])
+    registry = DefaultToolRegistry(tool.specs("session-1"))
+    source = CancellationTokenSource()
+
+    async def cancel_soon():
+        for _ in range(100):
+            if pid_file.exists():
+                break
+            await asyncio.sleep(0.02)
+        source.cancel("Turn interrupted")
+
+    canceller = asyncio.create_task(cancel_soon())
+    result = await registry.call_async("delegate", {"brief": "Wait", "_cancellation_token": source.token})
+    await canceller
+    payload = json.loads(result)
+    assert payload["ok"] is False
+    assert payload["error_type"] == "Cancelled"
+    assert payload["meta"]["reason"] == "Turn interrupted"
 
 
 @pytest.mark.parametrize("tools, message", [

@@ -37,6 +37,18 @@ async def wait_parent_exit(process: asyncio.subprocess.Process) -> int:
     return process.returncode
 
 
+async def _wait_group_exit(process: asyncio.subprocess.Process) -> None:
+    await wait_parent_exit(process)
+    while True:
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            pass
+        await asyncio.sleep(0.02)
+
+
 async def terminate_tree(
     process: asyncio.subprocess.Process, grace_seconds: float, job: int | None = None
 ) -> None:
@@ -54,7 +66,7 @@ async def terminate_tree(
         return
     try:
         await asyncio.wait_for(
-            wait_parent_exit(process), grace_seconds
+            _wait_group_exit(process), grace_seconds
         )
     except asyncio.TimeoutError:
         pass

@@ -1,6 +1,7 @@
 import net from "node:net";
+import { existsSync } from "node:fs";
 import { randomBytes, randomUUID, createHmac, timingSafeEqual } from "node:crypto";
-import { readFile, writeFile, unlink, link } from "node:fs/promises";
+import { appendFile, readFile, writeFile, unlink, link } from "node:fs/promises";
 import type { Principal } from "./model.js";
 import { ManagementError, requireValue } from "./model.js";
 import { managementPaths, privateDirectory } from "./paths.js";
@@ -17,6 +18,16 @@ import { listenOwned, EndpointOccupiedError } from "../../rind-runtime-client/en
 import { managerInstructions, memberInstructions, supervises, toolsFor } from "./tools.js";
 
 const RUNTIME_START_MS = 30000;
+const daemonEntry = Boolean(process.argv[1]?.endsWith("server.js"));
+const DEFAULT_IDLE_TTL_MS = 15 * 60 * 1000;
+
+function resolveIdleTtlMs(options: { idleTtlMs?: number }) {
+  const raw = options?.idleTtlMs ?? process.env.RIND_MANAGEMENT_IDLE_TTL_MS;
+  if (raw === undefined || raw === "") return DEFAULT_IDLE_TTL_MS;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_IDLE_TTL_MS;
+}
+
 // The work keeps going; only the caller stops waiting for it.
 function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -24,13 +35,17 @@ function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
-export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string; serviceNonce?: string; onShutdown?: () => void }) {
+export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string; serviceNonce?: string; idleTtlMs?: number; onShutdown?: () => void }) {
   const startedAt = new Date().toISOString();
   const recordNonce = options.serviceNonce || randomUUID();
   // Fingerprint the code this process loaded, before anything can rebuild it.
   const build = managementBuildId();
   const paths = managementPaths(options.home);
   await privateDirectory(paths.state);
+  const logFile = path.join(paths.state, "service.log");
+  const writeLog = (event: string, fields: Record<string, unknown> = {}) => existsSync(paths.state)
+    ? appendFile(logFile, `[${new Date().toISOString()}] ${event}${Object.entries(fields).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => ` ${k}=${v}`).join("")}\n`, { mode: 0o600 }).catch(() => {})
+    : Promise.resolve();
   let readyResolve: () => void;
   let readyReject: (error: unknown) => void;
   const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
@@ -41,6 +56,9 @@ export async function startServer(options: { home?: string; python?: string; rep
   let runtime: Awaited<ReturnType<typeof connectSharedRuntime>> | undefined;
   let runtimeConnecting: Promise<any> | undefined;
   let closing = false;
+  const idleTtlMs = resolveIdleTtlMs(options);
+  let idleSince = Date.now(), idleTimer: NodeJS.Timeout | undefined;
+  const touchActivity = () => { idleSince = Date.now(); };
   async function sessionToolsFor(session: any) {
     const agent = store.state.agents[session.agentId];
     if (!agent) return undefined;
@@ -214,8 +232,10 @@ export async function startServer(options: { home?: string; python?: string; rep
         : managed || !session ? {} : { instructions: memberInstructions(store.state, session) }),
     };
   }
+  const isIdle = () => sockets.size === 0 && workload().working === 0 && reconciling.size === 0;
   const server = net.createServer(socket => {
     sockets.add(socket);
+    touchActivity();
     socket.setEncoding("utf8");
     let buffer = ""; let unsubscribe: (() => void) | undefined;
     const attached: string[] = [];
@@ -294,7 +314,7 @@ export async function startServer(options: { home?: string; python?: string; rep
           if (message.params.restart === true) {
             requireValue(load.tasks === 0, "SERVICE_BUSY", load.tasks + (load.tasks === 1 ? " task is" : " tasks are") + " running here. Restart when they finish.", load);
             send({ id, result: { restarting: true, ...load } });
-            void close().catch(reportError).finally(() => options.onShutdown?.());
+            void close("restart").catch(reportError).finally(() => options.onShutdown?.());
             return;
           }
           requireValue(message.params.stopAgents === true || load.working === 0, "SERVICE_BUSY", load.working + (load.working === 1 ? " agent is" : " agents are") + " still working. Wait for them, or stop all agents.", load);
@@ -353,10 +373,21 @@ export async function startServer(options: { home?: string; python?: string; rep
       } catch (error) {
         const failure = error as Error & { code?: string; details?: unknown };
         send({ id, error: { code: failure.code || "MANAGEMENT_ERROR", message: failure.message, details: failure.details } });
+      } finally {
+        if (service && isIdle()) touchActivity();
       }
     }
     socket.on("error", () => {});
-    socket.on("close", () => { sockets.delete(socket); if (unsubscribe) watchRuntime(false); unsubscribe?.(); if (service && !closing) void service.disconnect(attached).catch(() => {}); });
+    socket.on("close", () => {
+      sockets.delete(socket);
+      if (unsubscribe) watchRuntime(false);
+      unsubscribe?.();
+      if (service && !closing) {
+        if (connectionPrincipal && connectionPrincipal.kind !== "user") service.releaseWait(connectionPrincipal.sessionId);
+        void service.disconnect(attached).catch(() => {});
+      }
+      if (service && isIdle()) touchActivity();
+    });
   });
   try {
     await listenOwned(server, paths.endpoint);
@@ -387,7 +418,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       await host.request("runtime/shutdown").catch(() => {});
     }
     await stopSharedRuntime({ rindHome: options.home }).catch(() => {});
-    await close();
+    await close("shutdown");
   }
   function releaseRecord() {
     return readFile(paths.record, "utf8").then(value => {
@@ -421,16 +452,31 @@ export async function startServer(options: { home?: string; python?: string; rep
     };
     service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig, folderDefaults, deliver });
     await service.recover();
+    await writeLog("service started", { pid: process.pid, home: paths.root, endpoint: paths.endpoint });
     if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) {
       await executionHost(false).catch(() => {});
       await Promise.allSettled(reconciling.values());
     }
+    if (daemonEntry || options.idleTtlMs !== undefined) {
+      const checkMs = Math.max(50, Math.min(idleTtlMs || 1000, 1000));
+      idleTimer = setInterval(async () => {
+        if (closing) return;
+        if (!isIdle()) { touchActivity(); return; }
+        const raw = await readFile(paths.record, "utf8").catch(() => null);
+        let recordOwned = false;
+        try { recordOwned = Boolean(raw && JSON.parse(raw).nonce === recordNonce); } catch {}
+        if (!recordOwned) { void close("record_removed").finally(() => options.onShutdown?.()); return; }
+        if (idleTtlMs > 0 && Date.now() - idleSince >= idleTtlMs) void close("idle_timeout").finally(() => options.onShutdown?.());
+      }, checkMs);
+      idleTimer.unref?.();
+    }
     readyResolve!();
   } catch (error) { readyReject!(error); for (const socket of sockets) socket.destroy(); server.close(); await releaseRecord(); throw error; }
   let closed: Promise<void> | undefined;
-  function close() {
+  function close(reason = "shutdown") {
     return closed ||= (async () => {
       closing = true;
+      if (idleTimer) { clearInterval(idleTimer); idleTimer = undefined; }
       if (probe) clearInterval(probe);
       // The process always lets go of its endpoint, even when stopping the
       // service failed: a service nobody can stop is worse than a loud error.
@@ -445,6 +491,7 @@ export async function startServer(options: { home?: string; python?: string; rep
         runtime?.close();
         for (const socket of sockets) socket.destroy();
         await new Promise<void>(resolve => server.close(() => resolve()));
+        await writeLog("service stopped", { pid: process.pid, reason });
         await releaseRecord();
       }
     })();

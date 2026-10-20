@@ -229,3 +229,19 @@ def test_schema_exposes_only_minimal_file_navigation_fields(build_builtin_tool_s
         if actual != fields:
             raise AssertionError(f"Unexpected {name} schema fields: {actual}")
 
+
+
+def test_glob_and_grep_drain_large_stderr_without_deadlock(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+    import agent.infrastructure.tools.files.queries as queries
+
+    write(tmp_path / "a.py", "needle\n")
+    real_popen = subprocess.Popen
+
+    def noisy_glob_popen(_cmd, **kwargs):
+        script = "import sys; sys.stderr.write('w' * 262144 + '\\n'); sys.stderr.flush(); sys.stdout.write('a.py\\n'); sys.stdout.flush()"
+        return real_popen([sys.executable, "-c", script], **kwargs)
+
+    monkeypatch.setattr(queries.subprocess, "Popen", noisy_glob_popen)
+    payload = assert_ok(glob_tool("*.py", path=str(tmp_path)))
+    assert [item["path"] for item in payload["data"]] == ["a.py"]

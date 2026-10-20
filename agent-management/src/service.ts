@@ -1352,9 +1352,9 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       for (const listener of listeners) listener();
       void flushDeliveries();
     },
-    releaseWait(runtimeSessionId: string) {
+    releaseWait(id: string) {
       for (const session of Object.values(store.state.sessions)) {
-        if (session.runtimeSessionId === runtimeSessionId) releaseSessionWait(session.id);
+        if (session.id === id || session.runtimeSessionId === id) releaseSessionWait(session.id);
       }
     },
     async disconnect(sessionIds: string[]) {

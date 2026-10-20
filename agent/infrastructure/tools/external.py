@@ -8,7 +8,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent.domain.tool_result import tool_error, tool_ok
+from agent.domain.tool_result import tool_cancelled, tool_error, tool_ok
+from agent.infrastructure.tools.shell.process_tree import close_process_tree, kill_tree_now, own_process_tree, spawn_group_args
 from agent.infrastructure.tools.spec import ToolSpec
 
 
@@ -54,8 +55,11 @@ class ExternalTool:
             self.command, *self.args,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             env={**os.environ, **(self.env if env is None else env)},
+            **spawn_group_args(),
         )
+        job = None
         try:
+            job = own_process_tree(process)
             payload = json.dumps({"method": method, "params": parameters, "runtimeSessionId": session_id}).encode()
             stdout, stderr = await asyncio.wait_for(process.communicate(payload), timeout=125)
             if process.returncode:
@@ -63,8 +67,9 @@ class ExternalTool:
             return json.loads(stdout)
         finally:
             if process.returncode is None:
-                process.kill()
+                kill_tree_now(process, job)
                 await process.wait()
+            close_process_tree(job)
 
     async def notify(self, phase: str, session_id: str, parameters: dict) -> None:
         if not self.lifecycle:
@@ -78,9 +83,21 @@ class ExternalTool:
 
     def _spec(self, session_id: str, declaration: HostToolDeclaration) -> ToolSpec:
         async def invoke(**arguments) -> str:
+            token = arguments.get("_cancellation_token")
+            if getattr(token, "is_cancelled", False):
+                return tool_cancelled(declaration.name, getattr(token, "reason", "User interrupted"))
             # Runtime-injected arguments (the cancellation token) stay in the runtime.
             visible = {key: value for key, value in arguments.items() if not key.startswith("_")}
-            reply = await self.call(session_id, declaration.name, visible)
+            task = asyncio.create_task(self.call(session_id, declaration.name, visible))
+            deregister = token.register_callback(task.cancel) if hasattr(token, "register_callback") else (lambda: None)
+            try:
+                reply = await task
+            except asyncio.CancelledError:
+                if getattr(token, "is_cancelled", False):
+                    return tool_cancelled(declaration.name, getattr(token, "reason", "User interrupted"))
+                raise
+            finally:
+                deregister()
             # The bridge envelope becomes the runtime's structured tool result, so
             # the outcome, the result and failures all keep their meaning.
             if reply.get("ok"):

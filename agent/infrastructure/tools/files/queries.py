@@ -38,9 +38,44 @@ def _is_filesystem_root(path: Path) -> bool:
     return path.is_dir() and path == path.parent
 
 
+def _popen_rg(command: list[str], cwd: Path | None = None) -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
 @contextmanager
 def _watch_rg(process: subprocess.Popen[str], token: CancellationToken | None, timeout: float = _RG_TIMEOUT_SECONDS):
-    state = {"timed_out": False}
+    stderr_chunks: list[str] = []
+    stderr_len = 0
+
+    def _drain_stderr() -> None:
+        nonlocal stderr_len
+        if process.stderr is None:
+            return
+        try:
+            while chunk := process.stderr.read(4096):
+                stderr_chunks.append(chunk)
+                stderr_len += len(chunk)
+                while stderr_len > 8192 and len(stderr_chunks) > 1:
+                    stderr_len -= len(stderr_chunks.pop(0))
+        except (OSError, ValueError):
+            pass
+
+    reader = threading.Thread(target=_drain_stderr, daemon=True)
+    reader.start()
+    state = {
+        "timed_out": False,
+        "read_stderr": lambda: (reader.join(timeout=1.0), "".join(stderr_chunks)[-4096:])[1],
+    }
 
     def _kill() -> None:
         if process.poll() is None:
@@ -215,6 +250,7 @@ def read_file(
     except OSError as exc:
         return tool_error("read_file", f"Failed to read file: {exc}", "ReadError")
 
+
 def glob(
     pattern: str,
     path: str = ".",
@@ -248,15 +284,7 @@ def glob(
     scan_limit = max(max_results * _GLOB_SCAN_MULTIPLIER, _GLOB_MIN_SCAN_LIMIT)
     scan_truncated = False
     try:
-        process = subprocess.Popen(
-            [rg, "--files", "--hidden", "--glob", pattern, *_SKIP_GLOBS, "."],
-            cwd=search_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        process = _popen_rg([rg, "--files", "--hidden", "--glob", pattern, *_SKIP_GLOBS, "."], cwd=search_path)
         assert process.stdout is not None
         paths: list[Path] = []
         with _watch_rg(process, _cancellation_token) as watch:
@@ -268,8 +296,8 @@ def glob(
                     process.terminate()
                     break
                 paths.append(search_path / line.rstrip("\r\n"))
-            stderr = process.stderr.read() if process.stderr is not None else ""
             return_code = process.wait()
+            stderr = watch["read_stderr"]()
         if cancelled := _cancelled("glob", _cancellation_token):
             return cancelled
         if watch["timed_out"]:
@@ -361,14 +389,7 @@ def grep(
     results: list[dict[str, object]] = []
     truncated = False
     try:
-        process = subprocess.Popen(
-            _rg_command(rg, pattern, search_path, glob),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        process = _popen_rg(_rg_command(rg, pattern, search_path, glob))
         assert process.stdout is not None
         with _watch_rg(process, _cancellation_token) as watch:
             for raw_line in process.stdout:
@@ -395,8 +416,8 @@ def grep(
                         "text": _clip_text(str(line_data.get("text") or "").rstrip("\r\n")),
                     }
                 )
-            stderr = process.stderr.read() if process.stderr is not None else ""
             return_code = process.wait()
+            stderr = watch["read_stderr"]()
         if cancelled := _cancelled("grep", _cancellation_token):
             return cancelled
         if watch["timed_out"]:

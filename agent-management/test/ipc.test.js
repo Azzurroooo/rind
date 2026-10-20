@@ -190,3 +190,68 @@ test("shared session credentials remain valid across management restart before a
   assert.equal(snap.sessions.find(s => s.id === session.id).runtimeSessionId, "shared-runtime-1");
 });
 
+
+test("service stops automatically when idle TTL expires or service.json is removed and logs lifecycle", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-idle-"));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  t.after(async () => { await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+
+  let idleStopped;
+  const idleExited = new Promise(resolve => { idleStopped = resolve; });
+  const server1 = await startServer({ home, repoRoot, idleTtlMs: 40, onShutdown: idleStopped });
+  await idleExited;
+  await server1.close();
+  const logAfterIdle = await readFile(path.join(server1.paths.state, "service.log"), "utf8");
+  assert.match(logAfterIdle, /service started/);
+  assert.match(logAfterIdle, /reason=idle_timeout/);
+
+  let recordStopped;
+  const recordExited = new Promise(resolve => { recordStopped = resolve; });
+  const server2 = await startServer({ home, repoRoot, idleTtlMs: 60_000, onShutdown: recordStopped });
+  await rm(server2.paths.record, { force: true });
+  await recordExited;
+  await server2.close();
+  const logAfterRecord = await readFile(path.join(server2.paths.state, "service.log"), "utf8");
+  assert.match(logAfterRecord, /reason=record_removed/);
+});
+
+test("disconnecting an agent connection while waiting in delegate({ wait: true }) releases the wait without losing child results", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-wait-disconnect-"));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const server = await startServer({ home, repoRoot });
+  const clients = [];
+  t.after(async () => { clients.forEach(c => c.close()); await server.close(); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  const token = (await readFile(server.paths.token, "utf8")).trim();
+  const connect = async (credential = token, runtimeSessionId) => {
+    const client = await connectClient({ endpoint: server.paths.endpoint, token: credential, runtimeSessionId }); clients.push(client); return client;
+  };
+  const user = await connect();
+  const leadDir = path.join(home, "lead"), childDir = path.join(home, "child");
+  await mkdir(leadDir); await mkdir(childDir);
+  const leader = await user.request("registerAgent", { workspace: leadDir, name: "Lead" });
+  const child = await user.request("registerAgent", { workspace: childDir, name: "Worker" });
+  const team = await user.request("createTeam", { name: "WaitDisconnectTeam" });
+  await user.request("addMember", { teamId: team.id, agentId: leader.id });
+  await user.request("addMember", { teamId: team.id, agentId: child.id, reportsToAgentId: leader.id });
+  await user.request("setLeader", { teamId: team.id, agentId: leader.id });
+
+  const childSession = await user.request("attachSession", { agentId: child.id, teamId: team.id });
+  await user.request("bindSession", { sessionId: childSession.id, runtimeSessionId: "rt-child" });
+  await user.request("beginRun", { sessionId: childSession.id });
+  const session = await user.request("attachSession", { agentId: leader.id, teamId: team.id });
+  await user.request("bindSession", { sessionId: session.id, runtimeSessionId: "rt-lead" });
+  const config = await user.request("sessionTools", { sessionId: session.id });
+  const host = await connect(config.lifecycle.env.RIND_MANAGEMENT_TOKEN, "rt-lead");
+  await host.request("hostTurnStart", {});
+  const model1 = await connect(config.env.RIND_MANAGEMENT_TOKEN, "rt-lead");
+  const { taskId } = await model1.request("delegate", { to: child.id, brief: "compute" });
+
+  const waiting = model1.request("delegate", { wait: true, timeoutMs: 30000 });
+  await new Promise(resolve => setTimeout(resolve, 40));
+  model1.close();
+  await assert.rejects(waiting, { code: "CONNECTION_LOST" });
+  await new Promise(resolve => setTimeout(resolve, 40));
+
+  const store = await openStore(server.paths.state);
+  assert.equal(Boolean(store.state.delegations[taskId].returned), false, "disconnecting the bridge socket must not consume unreturned results");
+});
