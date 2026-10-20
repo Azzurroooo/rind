@@ -6,7 +6,6 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
-from collections.abc import Awaitable, Callable
 from typing import AsyncIterator, Any
 
 from agent.application.ports.session_store import SessionStore
@@ -25,16 +24,19 @@ from agent.domain.events import (
     ToolCallStartedEvent,
     ToolProgressEvent,
     ToolResultEvent,
-    UserQuestionRequestedEvent,
     event_meta,
 )
 from agent.application.tools.executor import ToolExecutor
 from agent.application.tools.change_events import build_file_change_event
 from agent.application.tools.result_normalizer import NormalizedToolResult, ToolResultNormalizer
+from agent.application.tools.user_question import (
+    UserQuestionResponder,
+    build_user_question_event,
+    run_user_question,
+)
 from agent.domain.cancellation import CancellationToken, CancellationTokenSource
 from agent.application.task_notifications import TaskNotifications
 
-UserQuestionResponder = Callable[[UserQuestionRequestedEvent], str | Awaitable[str]]
 _HEARTBEAT_TOOLS = frozenset({"bash", "task_control", "bash_output"})
 
 
@@ -115,7 +117,7 @@ class ToolCallProcessor:
                 )
                 if call.name == "ask_user_question":
                     try:
-                        question_event = self._build_user_question_event(
+                        question_event = build_user_question_event(
                             session=session,
                             turn_id=turn_id,
                             call=call,
@@ -129,7 +131,10 @@ class ToolCallProcessor:
                         )
                     else:
                         yield question_event
-                        outcome = await self._run_user_question(question_event, cancellation_token)
+                        status, result, error_type = await run_user_question(
+                            self._user_question_responder, question_event, cancellation_token
+                        )
+                        outcome = _ToolCallOutcome(status=status, result=result, error_type=error_type)
                 else:
                     tool_execution = self._run_tool_call(
                         call=call,
@@ -357,122 +362,6 @@ class ToolCallProcessor:
             error_type=payload_status[1] if payload_status else error_type,
             result=result_content,
         )
-
-    def _build_user_question_event(
-        self,
-        *,
-        session: SessionStore,
-        turn_id: str,
-        call: ParsedToolCall,
-        parsed_args: dict,
-    ) -> UserQuestionRequestedEvent:
-        question = self._clean_required_text(parsed_args.get("question"))
-        if not question:
-            raise ValueError("ask_user_question requires a non-empty question string.")
-        if "recommended" in parsed_args:
-            raise ValueError("ask_user_question no longer accepts a top-level recommended field.")
-        options = self._clean_user_question_options(parsed_args.get("options"))
-        return UserQuestionRequestedEvent(
-            **event_meta(session, turn_id),
-            tool_call_id=call.call_id,
-            question=question,
-            options=options,
-        )
-
-    async def _run_user_question(
-        self, event: UserQuestionRequestedEvent, cancellation_token: CancellationToken | None,
-    ) -> _ToolCallOutcome:
-        if self._user_question_responder is None:
-            return _ToolCallOutcome(
-                status="unavailable",
-                error_type="UserQuestionUnsupported",
-                result=tool_error(
-                    "ask_user_question",
-                    "No user-question responder is available in this execution environment.",
-                    "UserQuestionUnsupported",
-                ),
-            )
-        try:
-            answer_value = self._user_question_responder(event)
-            if isinstance(answer_value, Awaitable):
-                answer_value = await answer_value
-        except (KeyboardInterrupt, EOFError) as exc:
-            return _ToolCallOutcome(
-                status="cancelled",
-                error_type=type(exc).__name__,
-                result=tool_error(
-                    "ask_user_question",
-                    "User question input was interrupted.",
-                    type(exc).__name__,
-                ),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            return _ToolCallOutcome(
-                status="failed",
-                error_type=type(exc).__name__,
-                result=tool_error("ask_user_question", str(exc), type(exc).__name__),
-            )
-
-        # Interrupting the turn releases the question; the user did not answer it.
-        if cancellation_token and cancellation_token.is_cancelled:
-            return _ToolCallOutcome(
-                status="cancelled",
-                error_type="Cancelled",
-                result=tool_cancelled("ask_user_question", cancellation_token.reason),
-            )
-        answer = str(answer_value or "").strip()
-        if not answer:
-            return _ToolCallOutcome(
-                status="failed",
-                error_type="UserQuestionEmptyAnswer",
-                result=tool_error(
-                    "ask_user_question",
-                    "User provided an empty answer.",
-                    "UserQuestionEmptyAnswer",
-                ),
-            )
-        return _ToolCallOutcome(
-            status="completed",
-            result=tool_ok("ask_user_question", {"answer": answer}),
-        )
-
-    def _clean_required_text(self, value: Any) -> str:
-        if not isinstance(value, str):
-            return ""
-        return value.strip()
-
-    def _clean_user_question_options(self, value: Any) -> list[dict[str, str]] | None:
-        if value is None:
-            return None
-        if not isinstance(value, list) or not value:
-            raise ValueError("ask_user_question options must be a non-empty array of option objects.")
-        cleaned: list[dict[str, str]] = []
-        labels: set[str] = set()
-        for index, item in enumerate(value):
-            if not isinstance(item, dict):
-                raise ValueError("Each ask_user_question option must be an object.")
-            unknown = set(item) - {"label", "description"}
-            if unknown:
-                raise ValueError(f"ask_user_question options contain unsupported fields: {sorted(unknown)!r}.")
-            label = item.get("label")
-            description = item.get("description")
-            if not isinstance(label, str) or not label.strip():
-                raise ValueError("Each ask_user_question option requires a non-empty label.")
-            if not isinstance(description, str) or not description.strip():
-                raise ValueError("Each ask_user_question option requires a non-empty description.")
-            label = label.strip()
-            if label in labels:
-                raise ValueError(f"ask_user_question option labels must be unique: {label!r}.")
-            labels.add(label)
-            has_recommended_suffix = label.endswith(" (Recommended)")
-            if index == 0 and not has_recommended_suffix:
-                raise ValueError('The first ask_user_question option label must end with " (Recommended)".')
-            if index > 0 and has_recommended_suffix:
-                raise ValueError('Only the first ask_user_question option may end with " (Recommended)".')
-            cleaned.append({"label": label, "description": description.strip()})
-        return cleaned
 
     async def _persist_tool_result(
         self,
