@@ -12,6 +12,8 @@
 }
 
 .conversation-head {
+  position: relative;
+  z-index: 20;
   display: flex;
   flex: none;
   align-items: center;
@@ -21,6 +23,7 @@
   padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--line);
 }
+.conversation-head:has([aria-expanded="true"]) { z-index: 40; }
 .conversation-title { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; }
 .session-title { flex: 0 1 auto; min-width: 0; max-width: 360px; margin: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .session-status {

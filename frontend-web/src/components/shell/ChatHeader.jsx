@@ -70,7 +70,7 @@ export function ChatHeader({
     ...scopedSessions.slice(0, 12).map((sess) => ({
       id: `sess:${sess.runtimeSessionId}`,
       label: sess.title,
-      active: sess.runtimeSessionId === activeSessionId,
+      selected: sess.runtimeSessionId === activeSessionId,
       hint: [sess.status !== "Idle" ? sess.status : "", sess.ageText].filter(Boolean).join(" · "),
       icon: <MessageSquare size={13} />,
       onSelect: () =>
@@ -137,9 +137,6 @@ export function ChatHeader({
           <PanelLeft size={16} aria-hidden="true" />
         </button>
       </Tooltip>
-      <h1 className="chat-title" title={title}>
-        {title}
-      </h1>
       {agentContext?.kind === "manager" && (
         <div className="header-agent-breadcrumb">
           <button
@@ -219,6 +216,9 @@ export function ChatHeader({
           </button>
         </div>
       )}
+      <h1 className="chat-title" title={title}>
+        {title}
+      </h1>
       {status && <span className={`status-chip ${status.tone || ""}`.trim()}>{status.label}</span>}
       <div className="chat-header-actions">
         {showTasks && (

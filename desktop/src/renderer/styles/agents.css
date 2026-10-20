@@ -429,13 +429,15 @@
   color: var(--muted);
   font-size: 10.5px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  transition: border-color var(--motion-fast), background-color var(--motion-fast), color var(--motion-fast);
+  transition: border-color var(--dur-hover) var(--ease), background-color var(--dur-hover) var(--ease), color var(--dur-hover) var(--ease);
 }
 
 .header-agent-action .settings-select-chevron {
   width: 11px;
   height: 11px;
+  transition: transform var(--dur-hover) var(--ease);
 }
 
 .header-agent-action:hover,
@@ -456,17 +458,18 @@
 
 .header-sessions-menu {
   position: absolute;
-  top: calc(100% + 5px);
-  right: 0;
-  left: auto;
-  z-index: 45;
-  width: min(280px, calc(100vw - 16px));
+  top: calc(100% + 6px);
+  left: 0;
+  right: auto;
+  z-index: 60;
+  width: min(300px, calc(100vw - 16px));
   max-width: calc(100vw - 16px);
   padding: 4px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   background: var(--surface);
-  box-shadow: 0 10px 28px rgb(0 0 0 / 26%), 0 2px 6px rgb(0 0 0 / 12%);
+  box-shadow: var(--shadow-popover);
+  animation: menu-in var(--dur-hover) var(--ease);
 }
 
 .header-sessions-menu-head {
@@ -480,6 +483,21 @@
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
+}
+
+.header-sessions-menu-head > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-sessions-menu-head .agent-btn.sm {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
 }
 
 .header-sessions-menu-list {
@@ -1571,36 +1589,43 @@
 }
 
 .org-session-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px;
-  border-radius: var(--radius-xs);
+  display: flex;
+  min-width: 0;
+  border-radius: var(--radius-sm);
 }
 
 .org-session-item.is-active {
   background: var(--accent-soft);
 }
 
+.org-session-item.is-active .org-session-title {
+  font-weight: 500;
+}
+
 .org-session-open {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
   min-width: 0;
-  padding: 4px 6px;
+  min-height: 30px;
+  padding: 4px 8px;
   border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   font-size: 12px;
   text-align: left;
+  transition: background-color var(--dur-hover) var(--ease), color var(--dur-hover) var(--ease);
 }
 
-.org-session-open:hover {
+.org-session-item:not(.is-active) .org-session-open:hover {
   background: var(--fill-1);
 }
 
 .org-session-title {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1610,6 +1635,7 @@
   flex: none;
   color: var(--dim);
   font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .org-member-stats {

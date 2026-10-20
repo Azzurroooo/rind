@@ -108,8 +108,6 @@
 }
 .model-option:hover:not(:disabled), .model-option:focus-visible { background: var(--fill-2); outline: none; }
 .model-option.selected { background: var(--accent-soft, var(--fill-2)); font-weight: 500; }
-.chip-menu .menu-item.selected { background: var(--accent-soft, var(--fill-2)); font-weight: 500; }
-.model-option-check { flex: none; display: inline-grid; place-items: center; width: 15px; height: 15px; color: var(--accent); }
 .model-option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; font-weight: 500; }
 .model-option-vision { flex: none; display: inline-grid; place-items: center; color: var(--dim); }
 .model-option-meta { flex: none; color: var(--dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }

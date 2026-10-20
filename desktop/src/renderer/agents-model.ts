@@ -1702,7 +1702,7 @@ export function renderHeaderAgentBreadcrumbHtml(
                           const isCurrent = sess.runtimeSessionId === options.viewedSessionId
                           return `
                             <div class="org-session-item${isCurrent ? " is-active" : ""}">
-                              <button type="button" class="org-session-open" ${
+                              <button type="button" role="menuitem" aria-current="${isCurrent ? "true" : "false"}" class="org-session-open" ${
                                 context.kind === "manager"
                                   ? `data-sidebar-open-manager-session="${escapeAttribute(sess.runtimeSessionId)}"`
                                   : `data-agent-chat="${escapeAttribute(context.agentId)}" data-agent-team="${escapeAttribute(context.teamId)}" data-agent-session="${escapeAttribute(sess.runtimeSessionId)}"`
@@ -1710,7 +1710,7 @@ export function renderHeaderAgentBreadcrumbHtml(
                                 <span class="agent-status-dot tone-${sess.tone}"></span>
                                 <span class="org-session-title">${escapeHtml(sess.title || "Conversation")}</span>
                                 <span class="org-session-time">${escapeHtml(relativeTimeLabel(sess.updatedAt))}</span>
-                                <span class="settings-select-check" aria-hidden="true">${isCurrent ? HEADER_CHECK_SVG : ""}</span>
+                                ${isCurrent ? `<span class="settings-select-check" aria-hidden="true">${HEADER_CHECK_SVG}</span>` : ""}
                               </button>
                             </div>
                           `

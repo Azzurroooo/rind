@@ -229,28 +229,6 @@ export function renderAgentsUI() {
     sessionAgentContext.innerHTML = breadcrumbHtml
   }
   sessionAgentContext.hidden = !breadcrumbHtml || isAgentSurface
-  if (state.headerSessionsMenuOpen && !sessionAgentContext.hidden) {
-    const menuEl = sessionAgentContext.querySelector<HTMLElement>(".header-sessions-menu")
-    const wrapEl = sessionAgentContext.querySelector<HTMLElement>(".header-sessions-dropdown-wrap")
-    if (menuEl && wrapEl) {
-      menuEl.style.left = ""
-      menuEl.style.right = ""
-      const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0
-      const margin = 8
-      const menuRect = menuEl.getBoundingClientRect()
-      const wrapRect = wrapEl.getBoundingClientRect()
-      if (viewportWidth > 0 && menuRect.width > 0) {
-        if (menuRect.right > viewportWidth - margin) {
-          const targetLeft = Math.max(margin, viewportWidth - margin - menuRect.width)
-          menuEl.style.left = `${Math.round(targetLeft - wrapRect.left)}px`
-          menuEl.style.right = "auto"
-        } else if (menuRect.left < margin) {
-          menuEl.style.left = `${Math.round(margin - wrapRect.left)}px`
-          menuEl.style.right = "auto"
-        }
-      }
-    }
-  }
 
   // Sidebar navigation — only update DOM when the actual rendered HTML changes, and preserve scroll position
   const activeSidebarInput = sidebarAgents.querySelector<HTMLInputElement>("input:focus")
@@ -352,6 +330,71 @@ export function renderAgentsUI() {
     }
   } else {
     lastSurfaceHtml = ""
+  }
+
+  clampOpenAgentMenus()
+}
+
+function clampMenuToContainer(menuEl: HTMLElement | null, wrapEl: HTMLElement | null) {
+  if (!menuEl || !wrapEl) return
+  menuEl.style.left = ""
+  menuEl.style.right = ""
+  menuEl.style.maxWidth = ""
+  const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0
+  if (viewportWidth <= 0) return
+  const margin = 8
+  let minX = margin
+  let maxX = viewportWidth - margin
+  const boundaryEl = wrapEl.closest<HTMLElement>(".conversation, .sidebar, .inspector, .agents-surface, .dialog")
+  if (boundaryEl) {
+    const boundaryRect = boundaryEl.getBoundingClientRect()
+    if (boundaryRect.width > 0) {
+      minX = Math.max(minX, Math.round(boundaryRect.left + margin))
+      maxX = Math.min(maxX, Math.round(boundaryRect.right - margin))
+    }
+  }
+  if (maxX > minX) {
+    menuEl.style.maxWidth = `${maxX - minX}px`
+  }
+  const menuRect = menuEl.getBoundingClientRect()
+  const wrapRect = wrapEl.getBoundingClientRect()
+  if (menuRect.width <= 0) return
+  if (menuRect.right > maxX) {
+    const targetLeft = Math.max(minX, maxX - menuRect.width)
+    menuEl.style.left = `${Math.round(targetLeft - wrapRect.left)}px`
+    menuEl.style.right = "auto"
+  } else if (menuRect.left < minX) {
+    menuEl.style.left = `${Math.round(minX - wrapRect.left)}px`
+    menuEl.style.right = "auto"
+  }
+}
+
+function clampOpenAgentMenus() {
+  if (state.headerSessionsMenuOpen && !sessionAgentContext.hidden) {
+    clampMenuToContainer(
+      sessionAgentContext.querySelector<HTMLElement>(".header-sessions-menu"),
+      sessionAgentContext.querySelector<HTMLElement>(".header-sessions-dropdown-wrap"),
+    )
+  }
+  if (state.sidebarMode === "agents" && (state.agentItemMenuKey || state.sessionMenuId)) {
+    const sidebarMenu = sidebarAgents.querySelector<HTMLElement>(".project-menu, .session-menu")
+    const sidebarBody = sidebarMenu?.closest<HTMLElement>(".sidebar-body")
+    if (sidebarMenu) {
+      sidebarMenu.classList.remove("menu-up")
+      if (sidebarBody && sidebarMenu.getBoundingClientRect().bottom > sidebarBody.getBoundingClientRect().bottom) {
+        sidebarMenu.classList.add("menu-up")
+      }
+      clampMenuToContainer(
+        sidebarMenu,
+        sidebarMenu.closest<HTMLElement>(".project-menu-wrap, .session-menu-wrap"),
+      )
+    }
+  }
+  if (!agentsSurface.hidden && state.agentItemMenuKey) {
+    const surfaceMenu = agentsSurface.querySelector<HTMLElement>(".project-menu")
+    if (surfaceMenu) {
+      clampMenuToContainer(surfaceMenu, surfaceMenu.closest<HTMLElement>(".project-menu-wrap"))
+    }
   }
 }
 
@@ -609,6 +652,9 @@ export function bindAgentsEvents(): () => void {
     }
 
     if (target.closest("[data-header-toggle-sessions]")) {
+      state.agentItemMenuKey = ""
+      state.sessionMenuId = ""
+      resetAgentSessionDeleteConfirm()
       state.headerSessionsMenuOpen = !state.headerSessionsMenuOpen
       render()
       return
@@ -617,6 +663,7 @@ export function bindAgentsEvents(): () => void {
     const itemMenuBtn = target.closest<HTMLElement>("[data-agent-item-menu]")
     if (itemMenuBtn?.dataset.agentItemMenu) {
       const key = itemMenuBtn.dataset.agentItemMenu
+      state.headerSessionsMenuOpen = false
       state.agentItemMenuKey = state.agentItemMenuKey === key ? "" : key
       state.sessionMenuId = ""
       resetAgentSessionDeleteConfirm()
@@ -627,6 +674,7 @@ export function bindAgentsEvents(): () => void {
     const sessMenuBtn = target.closest<HTMLElement>("[data-agent-session-menu]")
     if (sessMenuBtn?.dataset.agentSessionMenu) {
       const sid = sessMenuBtn.dataset.agentSessionMenu
+      state.headerSessionsMenuOpen = false
       state.agentItemMenuKey = ""
       resetAgentSessionDeleteConfirm()
       state.sessionMenuId = state.sessionMenuId === sid ? "" : sid
@@ -1506,6 +1554,20 @@ export function bindAgentsEvents(): () => void {
 
   const handleDocumentKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return
+    if (
+      state.headerSessionsMenuOpen ||
+      state.agentItemMenuKey ||
+      (state.sidebarMode === "agents" && (state.sessionMenuId || state.sessionDeleteConfirmId))
+    ) {
+      event.preventDefault()
+      event.stopPropagation()
+      resetAgentSessionDeleteConfirm()
+      state.headerSessionsMenuOpen = false
+      state.agentItemMenuKey = ""
+      state.sessionMenuId = ""
+      render()
+      return
+    }
     const activeEl = document.activeElement
     if (
       activeEl instanceof HTMLInputElement ||
@@ -1523,6 +1585,10 @@ export function bindAgentsEvents(): () => void {
       state.inboxSelectedTaskId = ""
       render()
     }
+  }
+
+  const handleWindowResize = () => {
+    clampOpenAgentMenus()
   }
 
   const handleDocumentPointerDown = (event: MouseEvent) => {
@@ -1561,6 +1627,7 @@ export function bindAgentsEvents(): () => void {
   agentsSurface.addEventListener("dblclick", handleSurfaceDoubleClick)
   document.addEventListener("pointerdown", handleDocumentPointerDown)
   document.addEventListener("keydown", handleDocumentKeyDown)
+  window.addEventListener("resize", handleWindowResize)
 
   let unsubscribe = () => {}
   if (window.api.agents) {
@@ -1589,5 +1656,6 @@ export function bindAgentsEvents(): () => void {
     agentsSurface.removeEventListener("dblclick", handleSurfaceDoubleClick)
     document.removeEventListener("pointerdown", handleDocumentPointerDown)
     document.removeEventListener("keydown", handleDocumentKeyDown)
+    window.removeEventListener("resize", handleWindowResize)
   }
 }

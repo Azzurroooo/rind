@@ -31,18 +31,32 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
       if (!listEl || !rootEl || typeof window === "undefined") return;
       listEl.style.left = "";
       listEl.style.right = "";
+      listEl.style.maxWidth = "";
       const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
       if (!viewportWidth) return;
       const margin = 8;
+      let minX = margin;
+      let maxX = viewportWidth - margin;
+      const boundaryEl = rootEl.closest(".main-column, .sidebar, .inspector, .agents-surface, .dialog");
+      if (boundaryEl) {
+        const boundaryRect = boundaryEl.getBoundingClientRect();
+        if (boundaryRect.width > 0) {
+          minX = Math.max(minX, Math.round(boundaryRect.left + margin));
+          maxX = Math.min(maxX, Math.round(boundaryRect.right - margin));
+        }
+      }
+      if (maxX > minX) {
+        listEl.style.maxWidth = `${maxX - minX}px`;
+      }
       const menuRect = listEl.getBoundingClientRect();
       const rootRect = rootEl.getBoundingClientRect();
       if (menuRect.width <= 0 && menuRect.right === 0) return;
-      if (menuRect.right > viewportWidth - margin) {
-        const targetLeft = Math.max(margin, viewportWidth - margin - menuRect.width);
+      if (menuRect.right > maxX) {
+        const targetLeft = Math.max(minX, maxX - menuRect.width);
         listEl.style.left = `${Math.round(targetLeft - rootRect.left)}px`;
         listEl.style.right = "auto";
-      } else if (menuRect.left < margin) {
-        listEl.style.left = `${Math.round(margin - rootRect.left)}px`;
+      } else if (menuRect.left < minX) {
+        listEl.style.left = `${Math.round(minX - rootRect.left)}px`;
         listEl.style.right = "auto";
       }
     };
@@ -128,7 +142,8 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
                 type="button"
                 role={selection ? "option" : "menuitem"}
                 aria-selected={selection ? Boolean(item.selected) : undefined}
-                className={`menu-item${item.danger ? " danger" : ""}${selection && item.selected ? " selected" : ""}`}
+                aria-current={!selection && item.selected ? "true" : undefined}
+                className={`menu-item${item.danger ? " danger" : ""}${item.selected ? " selected" : ""}`}
                 disabled={item.disabled}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -139,7 +154,7 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
                 {item.icon && <span className="menu-icon" aria-hidden="true">{item.icon}</span>}
                 <span className="menu-label">{item.label}</span>
                 {item.hint && <span className="menu-hint">{item.hint}</span>}
-                {selection && (
+                {(selection || item.selected) && (
                   <span className="model-option-check" aria-hidden="true">
                     {item.selected && <Check size={13} />}
                   </span>

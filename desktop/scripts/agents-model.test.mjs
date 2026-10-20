@@ -497,6 +497,23 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
   assert.match(sidebarTeamMenuOpenHtml, /team-project-item expanded menu-open/)
   assert.doesNotMatch(sidebarTeamMenuOpenHtml, /sidebar-org-branch menu-open/)
   assert.doesNotMatch(sidebarTeamMenuOpenHtml, /member-project-item[^"]*menu-open/)
+
+  const managerBreadcrumbMenuHtml = renderHeaderAgentBreadcrumbHtml(
+    { kind: "manager", agentName: "Manager", workspace: "/rind/manager", status: "Idle" },
+    {
+      sessions: [
+        { runtimeSessionId: "rt-mgr-1", title: "你好", updatedAt: "2026-10-18T10:00:00Z", status: "Idle", tone: "idle", origin: "direct" },
+        { runtimeSessionId: "rt-mgr-2", title: "Read/write verification", updatedAt: "2026-10-12T10:00:00Z", status: "Idle", tone: "idle", origin: "direct" },
+      ],
+      viewedSessionId: "rt-mgr-1",
+      menuOpen: true,
+    },
+  )
+  assert.match(managerBreadcrumbMenuHtml, /header-sessions-menu" role="menu"/)
+  assert.match(managerBreadcrumbMenuHtml, /Manager conversations/)
+  assert.match(managerBreadcrumbMenuHtml, /role="menuitem" aria-current="true" class="org-session-open" data-sidebar-open-manager-session="rt-mgr-1"/)
+  assert.match(managerBreadcrumbMenuHtml, /role="menuitem" aria-current="false" class="org-session-open" data-sidebar-open-manager-session="rt-mgr-2"/)
+  assert.equal((managerBreadcrumbMenuHtml.match(/settings-select-check"/g) || []).length, 1)
 })
 
 

@@ -288,5 +288,16 @@ describe("Native Multi-Agent Views", () => {
 
     const header = container.querySelector("header.chat-header");
     expect(header?.classList.contains("has-agent-context")).toBe(true);
+    const breadcrumb = header?.querySelector(".header-agent-breadcrumb");
+    const titleEl = header?.querySelector(".chat-title");
+    expect(breadcrumb).not.toBeNull();
+    expect(titleEl).not.toBeNull();
+    expect(Boolean(breadcrumb.compareDocumentPosition(titleEl) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
+    const sessionsTrigger = screen.getByRole("button", { name: /Sessions \(1\)/i });
+    fireEvent.click(sessionsTrigger);
+    const activeItem = screen.getByRole("menuitem", { name: /Design org hierarchy/i });
+    expect(activeItem.classList.contains("selected")).toBe(true);
+    expect(activeItem.getAttribute("aria-current")).toBe("true");
   });
 });

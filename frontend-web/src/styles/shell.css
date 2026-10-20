@@ -35,6 +35,10 @@
   min-width: 0; flex: 1 1 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--text-ui); font-weight: 600;
 }
+.chat-header.has-agent-context .chat-title {
+  flex: 0 1 auto;
+  max-width: 360px;
+}
 .chat-header-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 2px; }
 .status-chip.accent { background: var(--accent-soft); color: var(--text); }
 .chat-header .status-chip { flex: none; min-width: 54px; justify-content: center; white-space: nowrap; }

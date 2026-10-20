@@ -100,6 +100,7 @@
   background: var(--surface);
   box-shadow: var(--shadow-popover);
 }
+.project-menu.menu-up { top: auto; bottom: calc(100% + 4px); }
 .project-menu button {
   display: flex;
   align-items: center;
@@ -107,7 +108,7 @@
   min-height: 28px;
   padding: 4px 8px;
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   text-align: left;
   color: var(--text);
   background: transparent;
