@@ -444,11 +444,7 @@ export function createCliInputActions({
   function askSettingsMenu({ brief = false, sources = [], initialLevel = "root" } = {}) {
     return new Promise((resolve) => {
       const settingsState = createSettingsMenuState({ brief, sources, initialLevel });
-      const inputText = initialLevel === "theme"
-        ? "/settings theme"
-        : initialLevel === "import"
-          ? "/settings import"
-          : "/settings";
+      const inputText = initialLevel !== "root" ? `/settings ${initialLevel}` : "/settings";
       const session = { mode: "settings", inputText, settingsState, resolve };
       state.input.session = session;
       state.input.active = true;

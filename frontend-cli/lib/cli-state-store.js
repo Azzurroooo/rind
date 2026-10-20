@@ -8,6 +8,38 @@ let cachedMtimeMs = -1;
 let cachedState = null;
 let briefMode = false;
 
+export const DEFAULT_SPINNER = "orbit";
+
+const SPINNERS = Object.freeze([
+  {
+    name: "sweep",
+    label: "Sweep",
+    frames: Object.freeze(["█▒░░░", "▒█▒░░", "░▒█▒░", "░░▒█▒", "░░░▒█", "░░▒█▒", "░▒█▒░", "▒█▒░░"]),
+  },
+  {
+    name: "sparkle",
+    label: "Sparkle",
+    frames: Object.freeze(["·", "✧", "✦", "✧", "·", "∗", "✴", "∗"]),
+  },
+  {
+    name: "pulse",
+    label: "Pulse",
+    frames: Object.freeze(["░", "▒", "▓", "█", "▓", "▒"]),
+  },
+  {
+    name: "bars",
+    label: "Bars",
+    frames: Object.freeze(["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂"]),
+  },
+  {
+    name: "orbit",
+    label: "Orbit",
+    frames: Object.freeze(["◐", "◓", "◑", "◒"]),
+  },
+]);
+
+let activeSpinner = SPINNERS[4];
+
 export function isBriefMode() {
   return briefMode;
 }
@@ -15,6 +47,45 @@ export function isBriefMode() {
 export function setBriefMode(enabled) {
   briefMode = Boolean(enabled);
   return briefMode;
+}
+
+export function currentSpinner() {
+  return { name: activeSpinner.name, label: activeSpinner.label, frames: activeSpinner.frames };
+}
+
+export function spinnerNames() {
+  return SPINNERS.map((item) => item.name);
+}
+
+export function spinnerOptions() {
+  return SPINNERS.map((item) => ({
+    name: item.name,
+    label: item.label,
+    frames: item.frames,
+    preview: item.frames.join(" "),
+    current: item.name === activeSpinner.name,
+  }));
+}
+
+export function setSpinner(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) return null;
+  const byIndex = /^[1-5]$/.test(key) ? SPINNERS[Number(key) - 1] : null;
+  const found = byIndex || SPINNERS.find((item) => item.name === key || item.label.toLowerCase() === key);
+  if (!found) return null;
+  activeSpinner = found;
+  return currentSpinner();
+}
+
+export function resetSpinner() {
+  activeSpinner = SPINNERS[4];
+  return currentSpinner();
+}
+
+export function spinnerFrame(frame) {
+  const frames = activeSpinner.frames;
+  const index = Math.floor(Math.abs(Number(frame) || 0)) % frames.length;
+  return frames[index];
 }
 
 // CLI-owned runtime preferences, separate from the shared ~/.rind/settings.json
@@ -48,8 +119,9 @@ export function loadCliState(rindHome) {
 
 export function saveCliState(patch, rindHome) {
   const file = cliStatePath(rindHome);
-  if (patch && typeof patch === "object" && "brief" in patch) {
-    setBriefMode(patch.brief);
+  if (patch && typeof patch === "object") {
+    if ("brief" in patch) setBriefMode(patch.brief);
+    if ("spinner" in patch && patch.spinner) setSpinner(patch.spinner);
   }
   try {
     const next = { ...loadCliState(rindHome), ...patch };
@@ -68,7 +140,8 @@ export function saveCliState(patch, rindHome) {
 
 // Every surface (chat and `rind agents`) draws with the preferences chosen in cli-state.json.
 export function applySavedTheme(rindHome) {
-  const { theme, brief } = loadCliState(rindHome);
+  const { theme, brief, spinner } = loadCliState(rindHome);
   if (theme) setTheme(theme);
   setBriefMode(brief === true);
+  setSpinner(spinner || DEFAULT_SPINNER);
 }

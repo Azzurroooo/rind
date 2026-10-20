@@ -1,7 +1,7 @@
 import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells, wrapTextWithAnsi } from "./text-width.js";
 import { formatDuration } from "./tool-display.js";
 import { DEFAULT_THEME, paint, paintRaw, flavorSwatch, themeNames, breathingAccent } from "./theme.js";
-import { isBriefMode } from "./cli-state-store.js";
+import { DEFAULT_SPINNER, isBriefMode, spinnerFrame, spinnerNames } from "./cli-state-store.js";
 import { homedir } from "node:os";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
@@ -489,7 +489,7 @@ export function promptActivityLine(state = {}) {
   }
   const elapsed = formatActivityDuration(state.elapsedMs);
   const label = singleLine(state.label) || "Working";
-  return `  ${accent(activityFrame(state.frame))} ${bold(label)} ${dim(`(${elapsed}) ctrl+c interrupt`)}`;
+  return `  ${accent(spinnerFrame(state.frame))} ${bold(label)} ${dim(`(${elapsed}) ctrl+c interrupt`)}`;
 }
 
 export function backgroundWaitingLine(count = 1) {
@@ -599,6 +599,8 @@ export function slashDisplayText(display, commands = []) {
       return slashSkillsText(display);
     case "theme":
       return slashThemeText(display);
+    case "spinner":
+      return slashSpinnerText(display);
     case "brief":
       return commandResultText(
         display.enabled ? "Brief output enabled." : "Brief output disabled.",
@@ -690,6 +692,28 @@ export function settingsMenuText(items, selectedIndex = 0, level = "root") {
       const name = active ? bold(label) : dim(label);
       const suffix = item?.current ? dim("current") : "";
       lines.push(`  ${marker} ${name}  ${flavorSwatch(item?.name)}${suffix ? `  ${suffix}` : ""}`);
+    }
+    lines.push(dim("    ↑↓ select · enter apply · esc back"));
+    return `${lines.join("\n")}\n`;
+  }
+  if (level === "spinner") {
+    const visible = menuWindow(items, selectedIndex);
+    if (!visible.items.length) {
+      return "";
+    }
+    const lines = [dim("  Settings · Working spinner")];
+    const labelWidth = Math.max(10, ...items.map((item) => visibleLength(clipSingleLine(item?.label || item?.name, 24))));
+    const previewWidth = Math.max(12, ...items.map((item) => visibleLength(clipSingleLine(item?.preview || (Array.isArray(item?.frames) ? item.frames.join(" ") : ""), 48))));
+    for (const [index, item] of visible.items.entries()) {
+      const active = index === visible.activeIndex;
+      const marker = active ? accent("›") : dim("·");
+      const label = padRight(clipSingleLine(item?.label || item?.name, 24), labelWidth);
+      const name = active ? bold(label) : dim(label);
+      const rawPreview = clipSingleLine(item?.preview || (Array.isArray(item?.frames) ? item.frames.join(" ") : ""), 48);
+      const paddedPreview = padRight(rawPreview, previewWidth);
+      const preview = active || item?.current ? accent(paddedPreview) : dim(paddedPreview);
+      const suffix = item?.current ? dim("current") : "";
+      lines.push(`  ${marker} ${name}  ${preview}${suffix ? `  ${suffix}` : ""}`.trimEnd());
     }
     lines.push(dim("    ↑↓ select · enter apply · esc back"));
     return `${lines.join("\n")}\n`;
@@ -1533,6 +1557,37 @@ function slashThemeText(display) {
   return lines.join("\n");
 }
 
+function slashSpinnerText(display) {
+  const spinners = Array.isArray(display.spinners) ? display.spinners : [];
+  const current = singleLine(display.current) || DEFAULT_SPINNER;
+  const meta = display.changed && display.previous
+    ? `${singleLine(display.previous)} → ${current}`
+    : current;
+  const lines = [sectionRule("Working spinner", meta)];
+  if (!spinners.length) {
+    lines.push(dim(`  active: ${current}`));
+    return lines.join("\n");
+  }
+  const labelWidth = Math.min(
+    24,
+    Math.max(8, ...spinners.map((item) => visibleLength(clipSingleLine(item?.label, 24)))),
+  );
+  for (const item of spinners) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const isCurrent = Boolean(item.current);
+    const marker = isCurrent ? accent("›") : dim("·");
+    const label = padRight(clipSingleLine(item.label || item.name, 24), labelWidth);
+    const preview = clipSingleLine(item.preview || (Array.isArray(item.frames) ? item.frames.join(" ") : ""), 48);
+    const tag = isCurrent ? dim(" · current") : "";
+    lines.push(`  ${marker} ${isCurrent ? bold(label) : dim(label)}  ${isCurrent ? accent(preview) : dim(preview)}${tag}`);
+  }
+  lines.push("");
+  lines.push(dim(`  /settings spinner <${spinnerNames().join(" | ")}>`));
+  return lines.join("\n");
+}
+
 function sectionRule(title, meta = "") {
   const titleText = clipSingleLine(title, 48);
   const metaText = meta ? clipSingleLine(meta, 48) : "";
@@ -1919,12 +1974,6 @@ function pendingInputLines(entries, frameWidth) {
     lines.push(dim(`    ${hints.join(" · ")}`));
   }
   return lines;
-}
-
-function activityFrame(frame) {
-  const frames = ["◐", "◓", "◑", "◒"];
-  const index = Math.floor(Math.abs(Number(frame) || 0)) % frames.length;
-  return frames[index];
 }
 
 function padRight(text, width) {

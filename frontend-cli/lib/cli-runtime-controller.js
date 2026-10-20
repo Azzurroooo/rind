@@ -18,6 +18,7 @@ export function createCliRuntimeController({
   getBriefMode = () => false,
   onBriefChange = null,
   onThemeChange = null,
+  onSpinnerChange = null,
   askEffortMenu = null,
   // A yes/no menu, or null without a terminal UI (a script is never asked).
   askChoice = null,
@@ -611,6 +612,9 @@ export function createCliRuntimeController({
     }
     if (selected.themeChanged && selected.theme) {
       await onThemeChange?.(String(selected.theme));
+    }
+    if (selected.spinnerChanged && selected.spinner) {
+      await onSpinnerChange?.(String(selected.spinner));
     }
     const choices = selected.importChoices;
     if (!choices || !Object.keys(choices).length) return;

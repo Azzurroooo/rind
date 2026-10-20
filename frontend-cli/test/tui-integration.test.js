@@ -886,8 +886,8 @@ test("brief mode E2E in headless terminal keeps ◌ with verb trail until assist
   }
 });
 
-test("/settings two-level menu E2E in headless terminal configures brief output, theme, and skill imports", async (t) => {
-  const { isBriefMode, setBriefMode } = await import("../lib/cli-state-store.js");
+test("/settings two-level menu E2E in headless terminal configures brief output, theme, working spinner, and skill imports", async (t) => {
+  const { currentSpinner, isBriefMode, resetSpinner, setBriefMode } = await import("../lib/cli-state-store.js");
   const { currentTheme, resetTheme } = await import("../lib/theme.js");
   const { createCliInputActions } = await import("../lib/cli-input-actions.js");
   const { createCliRuntimeController } = await import("../lib/cli-runtime-controller.js");
@@ -898,9 +898,11 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
 
   setBriefMode(false);
   resetTheme();
+  resetSpinner();
   t.after(() => {
     setBriefMode(false);
     resetTheme();
+    resetSpinner();
   });
 
   const virtual = createVirtualOutput({ columns: 96, rows: 22 });
@@ -990,6 +992,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     getBriefMode: () => isBriefMode(),
     onBriefChange: (enabled) => commandController.handle(`/settings brief ${enabled ? "on" : "off"}`),
     onThemeChange: (name) => commandController.handle(`/settings theme ${name}`),
+    onSpinnerChange: (name) => commandController.handle(`/settings spinner ${name}`),
     askChoice: (...args) => inputActions.askChoice(...args),
     askSessionMenu: async () => null,
     askForkPointMenu: async () => null,
@@ -1053,6 +1056,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     assert.match(screen, /\/settings/);
     assert.match(screen, /› Brief output .* off/);
     assert.match(screen, /· Theme .* ›/);
+    assert.match(screen, /· Working spinner .* Orbit ›/);
     assert.match(screen, /· Skill imports .* 1 of 2 on ›/);
 
     // 2. Toggle Brief output ON with Space
@@ -1061,7 +1065,8 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     screen = virtual.getViewport().join("\n");
     assert.match(screen, /› Brief output .* on/);
 
-    // 3. Navigate down past Theme to Skill imports and press Enter to open Level 2 submenu
+    // 3. Navigate down past Theme and Working spinner to Skill imports and press Enter to open Level 2 submenu
+    inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\r");
@@ -1111,6 +1116,24 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     await settle(virtual);
     assert.equal(currentTheme().name, "dracula");
     assert.match(virtual.getViewport().join("\n"), /Theme · frappe → dracula/);
+
+    // 8. Open /settings spinner directly, select Sweep (Down wraps from Orbit -> Sweep, then Enter), and verify Working line uses Sweep frames
+    const spinnerDone = commandController.handle("/settings spinner");
+    await settle(virtual);
+    screen = virtual.getViewport().join("\n");
+    assert.match(screen, /\/settings spinner/);
+    assert.match(screen, /Settings · Working spinner/);
+    assert.match(screen, /› Orbit\s+◐ ◓ ◑ ◒\s+current/);
+    inputActions.handleTerminalInput("\x1b[B");
+    await settle(virtual);
+    assert.match(virtual.getViewport().join("\n"), /› Sweep\s+█▒░░░ ▒█▒░░/);
+    inputActions.handleTerminalInput("\r");
+    await spinnerDone;
+    await settle(virtual);
+    assert.equal(currentSpinner().name, "sweep");
+    state.turn.active = true;
+    state.display.activityFrame = 1;
+    assert.match(output.mainPromptText(96), /▒█▒░░ Working/);
   } finally {
     tui.stop();
   }

@@ -1,7 +1,14 @@
 import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
-import { isBriefMode, setBriefMode } from "./cli-state-store.js";
+import {
+  currentSpinner,
+  isBriefMode,
+  setBriefMode,
+  setSpinner,
+  spinnerNames,
+  spinnerOptions,
+} from "./cli-state-store.js";
 
-const SETTINGS_USAGE = "/settings [brief [on | off] | theme [<name>] | import [<source>=on|off ...]]";
+const SETTINGS_USAGE = "/settings [brief [on | off] | theme [<name>] | spinner [<name>] | import [<source>=on|off ...]]";
 
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "compact", description: "Compact current session context", usage: "/compact" },
@@ -17,7 +24,7 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "model", description: "Show or change the active model", usage: "/model | /model set <model>" },
   { name: "rename", description: "Name this conversation (otherwise it is shown by its first message)", usage: "/rename <name> | /rename --reset" },
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
-  { name: "settings", description: "Configure brief output, color theme, and skill imports", usage: SETTINGS_USAGE },
+  { name: "settings", description: "Configure brief output, color theme, working spinner, and skill imports", usage: SETTINGS_USAGE },
   { name: "skill", description: "List skills and where they come from", usage: "/skill" },
   { name: "status", description: "Show session and provider status", usage: "/status" },
   { name: "tour", description: "Interactive feature walkthrough", usage: "/tour [page]" },
@@ -115,6 +122,38 @@ function themeResult(argument, context = {}) {
   };
 }
 
+function spinnerResult(argument, context = {}) {
+  const requested = argument.replace(/^\//, "").trim();
+  if (requested) {
+    const previous = currentSpinner();
+    const applied = setSpinner(requested);
+    if (!applied) {
+      return { text: `Unknown spinner "${requested}". Available: ${spinnerNames().join(", ")}.` };
+    }
+    context.persistSpinner?.(applied.name);
+    return {
+      text: `Working spinner: ${applied.name}`,
+      display: {
+        type: "spinner",
+        changed: previous.name !== applied.name,
+        previous: previous.name,
+        current: applied.name,
+        spinners: spinnerOptions(),
+      },
+    };
+  }
+  const current = currentSpinner();
+  return {
+    text: `Working spinner: ${current.name}`,
+    display: {
+      type: "spinner",
+      changed: false,
+      current: current.name,
+      spinners: spinnerOptions(),
+    },
+  };
+}
+
 function settingsResult(argument, context = {}) {
   const parts = argument.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) {
@@ -129,6 +168,10 @@ function settingsResult(argument, context = {}) {
   if (section === "theme") {
     if (parts.length > 2) return usageResult(SETTINGS_USAGE);
     return themeResult(parts[1] || "", context);
+  }
+  if (section === "spinner") {
+    if (parts.length > 2) return usageResult(SETTINGS_USAGE);
+    return spinnerResult(parts[1] || "", context);
   }
   if (section !== "brief" || parts.length > 2) {
     return usageResult(SETTINGS_USAGE);

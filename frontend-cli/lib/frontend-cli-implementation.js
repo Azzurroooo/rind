@@ -329,6 +329,7 @@ const runtimeController = createCliRuntimeController({
   getBriefMode: () => isBriefMode(),
   onBriefChange: (enabled) => commandController.handle(`/settings brief ${enabled ? "on" : "off"}`),
   onThemeChange: (name) => commandController.handle(`/settings theme ${name}`),
+  onSpinnerChange: (name) => commandController.handle(`/settings spinner ${name}`),
   askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
   askChoice: tui ? (...args) => inputActions.askChoice(...args) : null,
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
@@ -397,6 +398,7 @@ commandController = createCommandController({
         commands: sessionState.commands,
         persistTheme: (name) => saveCliState({ theme: name }),
         persistBrief: (enabled) => saveCliState({ brief: enabled }),
+        persistSpinner: (name) => saveCliState({ spinner: name }),
       });
       if ((result?.display?.type === "theme" || result?.display?.type === "brief") && result.display.changed) {
         outputController.replayAll();

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { executeLocalSlashCommand } from "../lib/local-slash-commands.js";
-import { setBriefMode } from "../lib/cli-state-store.js";
+import { resetSpinner, setBriefMode } from "../lib/cli-state-store.js";
 
 test("local status renders session and provider state", async () => {
   const result = await executeLocalSlashCommand("/status", {
@@ -62,6 +62,37 @@ test("/settings brief reads and updates global brief output mode", async (t) => 
 
   const invalid = await executeLocalSlashCommand("/settings unknown", {});
   assert.match(invalid.text, /^Usage: \/settings/);
+});
+
+test("/settings spinner lists the five animations and updates the active working spinner", async (t) => {
+  t.after(() => resetSpinner());
+  resetSpinner();
+  const listed = await executeLocalSlashCommand("/settings spinner", {});
+  assert.equal(listed.display.type, "spinner");
+  assert.equal(listed.display.changed, false);
+  assert.equal(listed.display.current, "orbit");
+  assert.deepEqual(listed.display.spinners.map((item) => item.name), [
+    "sweep",
+    "sparkle",
+    "pulse",
+    "bars",
+    "orbit",
+  ]);
+
+  let persisted = null;
+  const switched = await executeLocalSlashCommand("/settings spinner sparkle", {
+    persistSpinner: (name) => { persisted = name; },
+  });
+  assert.equal(persisted, "sparkle");
+  assert.equal(switched.display.changed, true);
+  assert.equal(switched.display.previous, "orbit");
+  assert.equal(switched.display.current, "sparkle");
+
+  const byNumber = await executeLocalSlashCommand("/settings spinner 1", {});
+  assert.equal(byNumber.display.current, "sweep");
+
+  const unknown = await executeLocalSlashCommand("/settings spinner missing", {});
+  assert.match(unknown.text, /Unknown spinner/);
 });
 
 test("local status before the first message shows the pending name", async () => {

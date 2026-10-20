@@ -1,8 +1,10 @@
 import { themeOptions } from "./theme.js";
+import { spinnerOptions } from "./cli-state-store.js";
 
 // Two-level /settings menu state:
-// - Root level: "Brief output" (global toggle), "Theme" (submenu), and "Skill imports" (submenu).
+// - Root level: "Brief output" (global toggle), "Theme" (submenu), "Working spinner" (submenu), and "Skill imports" (submenu).
 // - "theme" submenu: CLI color theme selector with live swatches.
+// - "spinner" submenu: Working activity spinner animation selector.
 // - "import" submenu: Claude and Codex skill layers checklist.
 export function createSettingsMenuState({ brief = false, sources = [], initialLevel = "root" } = {}) {
   const initialBrief = Boolean(brief);
@@ -14,6 +16,12 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
   let chosenTheme = initialTheme;
   let themeIndex = initialThemeIndex;
 
+  const spinnerItems = spinnerOptions().map((item) => ({ ...item }));
+  const initialSpinnerIndex = Math.max(0, spinnerItems.findIndex((item) => item.current));
+  const initialSpinner = spinnerItems[initialSpinnerIndex]?.name || "";
+  let chosenSpinner = initialSpinner;
+  let spinnerIndex = initialSpinnerIndex;
+
   const importItems = (Array.isArray(sources) ? sources : []).map((source) => ({
     ...source,
     chosen: Boolean(source.enabled),
@@ -24,9 +32,12 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
   if (initialLevel === "theme" && themeItems.length) {
     level = "theme";
     rootIndex = 1;
+  } else if (initialLevel === "spinner" && spinnerItems.length) {
+    level = "spinner";
+    rootIndex = 2;
   } else if (initialLevel === "import" && importItems.length) {
     level = "import";
-    rootIndex = 2;
+    rootIndex = 3;
   }
   let importIndex = 0;
 
@@ -38,12 +49,16 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
     return Boolean(chosenTheme && chosenTheme !== initialTheme);
   }
 
+  function spinnerChanged() {
+    return Boolean(chosenSpinner && chosenSpinner !== initialSpinner);
+  }
+
   function importChanged() {
     return importItems.some((item) => item.chosen !== Boolean(item.enabled));
   }
 
   function changed() {
-    return briefChanged() || themeChanged() || importChanged();
+    return briefChanged() || themeChanged() || spinnerChanged() || importChanged();
   }
 
   function importChoices() {
@@ -60,7 +75,7 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
       ? `${enabledCount} of ${importItems.length} on ›`
       : "none";
     const themeLabel = themeItems.find((item) => item.name === chosenTheme)?.label || chosenTheme || "default";
-    const themeValue = `${themeLabel} ›`;
+    const spinnerLabel = spinnerItems.find((item) => item.name === chosenSpinner)?.label || chosenSpinner || "default";
     return [
       {
         id: "brief",
@@ -72,9 +87,16 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
       {
         id: "theme",
         label: "Theme",
-        value: themeValue,
+        value: `${themeLabel} ›`,
         submenu: true,
         description: "Switch the CLI color theme",
+      },
+      {
+        id: "spinner",
+        label: "Working spinner",
+        value: `${spinnerLabel} ›`,
+        submenu: true,
+        description: "Choose the working activity animation",
       },
       {
         id: "import",
@@ -87,7 +109,7 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
   }
 
   function handleRootKey(key) {
-    const count = 3;
+    const count = 4;
     if (key?.name === "up") {
       rootIndex = (rootIndex - 1 + count) % count;
       return "redraw";
@@ -116,6 +138,17 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
         if (themeItems.length) {
           level = "theme";
           themeIndex = Math.max(0, themeItems.findIndex((item) => item.name === chosenTheme));
+          return "redraw";
+        }
+        return changed() ? "submit" : "cancel";
+      }
+      return null;
+    }
+    if (rootIndex === 2) {
+      if (key?.name === "enter" || key?.name === "return" || key?.text === " " || key?.name === "right") {
+        if (spinnerItems.length) {
+          level = "spinner";
+          spinnerIndex = Math.max(0, spinnerItems.findIndex((item) => item.name === chosenSpinner));
           return "redraw";
         }
         return changed() ? "submit" : "cancel";
@@ -166,6 +199,39 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
     return null;
   }
 
+  function handleSpinnerKey(key) {
+    if (!spinnerItems.length) {
+      level = "root";
+      return "redraw";
+    }
+    if (key?.name === "up") {
+      spinnerIndex = (spinnerIndex - 1 + spinnerItems.length) % spinnerItems.length;
+      return "redraw";
+    }
+    if (key?.name === "down") {
+      spinnerIndex = (spinnerIndex + 1) % spinnerItems.length;
+      return "redraw";
+    }
+    if (key?.name === "escape" || key?.name === "left" || key?.name === "backspace") {
+      spinnerIndex = Math.max(0, spinnerItems.findIndex((item) => item.name === chosenSpinner));
+      level = "root";
+      rootIndex = 2;
+      return "redraw";
+    }
+    if (key?.name === "enter" || key?.name === "return") {
+      const picked = spinnerItems[spinnerIndex]?.name || initialSpinner;
+      chosenSpinner = picked;
+      for (const item of spinnerItems) {
+        item.current = item.name === chosenSpinner;
+      }
+      if (changed()) return "submit";
+      level = "root";
+      rootIndex = 2;
+      return "redraw";
+    }
+    return null;
+  }
+
   function handleImportKey(key) {
     if (!importItems.length) {
       level = "root";
@@ -188,13 +254,13 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
         item.chosen = Boolean(item.enabled);
       }
       level = "root";
-      rootIndex = 2;
+      rootIndex = 3;
       return "redraw";
     }
     if (key?.name === "enter" || key?.name === "return") {
       if (changed()) return "submit";
       level = "root";
-      rootIndex = 2;
+      rootIndex = 3;
       return "redraw";
     }
     return null;
@@ -202,11 +268,23 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
 
   return {
     level: () => level,
-    items: () => (level === "theme" ? themeItems : level === "import" ? importItems : rootItems()),
-    selectedIndex: () => (level === "theme" ? themeIndex : level === "import" ? importIndex : rootIndex),
+    items: () => {
+      if (level === "theme") return themeItems;
+      if (level === "spinner") return spinnerItems;
+      if (level === "import") return importItems;
+      return rootItems();
+    },
+    selectedIndex: () => {
+      if (level === "theme") return themeIndex;
+      if (level === "spinner") return spinnerIndex;
+      if (level === "import") return importIndex;
+      return rootIndex;
+    },
     selectedTheme: () => themeItems[themeIndex] || null,
+    selectedSpinner: () => spinnerItems[spinnerIndex] || null,
     briefChanged,
     themeChanged,
+    spinnerChanged,
     importChanged,
     changed,
     importChoices,
@@ -215,10 +293,13 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
       briefChanged: briefChanged(),
       theme: chosenTheme,
       themeChanged: themeChanged(),
+      spinner: chosenSpinner,
+      spinnerChanged: spinnerChanged(),
       importChoices: importChoices(),
     }),
     handleKey(key) {
       if (level === "theme") return handleThemeKey(key);
+      if (level === "spinner") return handleSpinnerKey(key);
       if (level === "import") return handleImportKey(key);
       return handleRootKey(key);
     },

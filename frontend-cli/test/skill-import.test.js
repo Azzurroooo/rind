@@ -10,6 +10,7 @@ import { createCliState } from "../lib/cli-state.js";
 import { settingsMenuText } from "../lib/rendering.js";
 import { runtimeMethods as methods } from "../lib/runtime-protocol.js";
 import { createSettingsMenuState } from "../lib/settings-menu-state.js";
+import { resetSpinner, setSpinner } from "../lib/cli-state-store.js";
 import { resetTheme, setTheme } from "../lib/theme.js";
 
 const SOURCES = [
@@ -21,7 +22,15 @@ const SOURCES = [
 
 function harness({
   sessionId = "s1",
-  selected = { brief: false, briefChanged: false, theme: "frappe", themeChanged: false, importChoices: { claude_user: false } },
+  selected = {
+    brief: false,
+    briefChanged: false,
+    theme: "frappe",
+    themeChanged: false,
+    spinner: "orbit",
+    spinnerChanged: false,
+    importChoices: { claude_user: false },
+  },
   answer = "Apply · change the skills and break the cache",
 } = {}) {
   const state = createCliState();
@@ -31,6 +40,7 @@ function harness({
   const logs = [];
   const briefUpdates = [];
   const themeUpdates = [];
+  const spinnerUpdates = [];
   const client = {
     child: {},
     start() {},
@@ -52,16 +62,18 @@ function harness({
     getBriefMode: () => false,
     onBriefChange: async (enabled) => { briefUpdates.push(enabled); },
     onThemeChange: async (name) => { themeUpdates.push(name); },
+    onSpinnerChange: async (name) => { spinnerUpdates.push(name); },
     askChoice: async (question) => { questions.push(question); return answer; },
     askSessionMenu: async () => null, askForkPointMenu: async () => null, restoreLiveTurn() {}, clearPendingInputs() {},
     closeAssistant() {}, refreshInputState() {}, updateGoalState() {}, log: value => logs.push(typeof value === "function" ? value() : value),
     writeError() {}, redraw() {},
   });
-  return { state, controller, commands, questions, logs, briefUpdates, themeUpdates };
+  return { state, controller, commands, questions, logs, briefUpdates, themeUpdates, spinnerUpdates };
 }
 
-test("two-level /settings menu navigates between root settings, theme submenu, and skill imports submenu", () => {
+test("two-level /settings menu navigates between root settings, theme submenu, spinner submenu, and skill imports submenu", () => {
   resetTheme();
+  resetSpinner();
   const menu = createSettingsMenuState({ brief: false, sources: SOURCES });
   assert.equal(menu.level(), "root");
   assert.equal(menu.changed(), false);
@@ -86,9 +98,23 @@ test("two-level /settings menu navigates between root settings, theme submenu, a
   assert.equal(menu.selectedIndex(), 1);
   assert.equal(menu.themeChanged(), false);
 
-  // Move to Skill imports and enter Level 2 submenu
+  // Move to Working spinner and enter Level 2 spinner submenu
   assert.equal(menu.handleKey({ name: "down" }), "redraw");
   assert.equal(menu.selectedIndex(), 2);
+  assert.equal(menu.handleKey({ name: "enter" }), "redraw");
+  assert.equal(menu.level(), "spinner");
+  assert.equal(menu.selectedIndex(), 4, "defaults to active orbit spinner (5th option)");
+  assert.equal(menu.selectedSpinner().name, "orbit");
+  assert.equal(menu.handleKey({ name: "down" }), "redraw");
+  assert.equal(menu.selectedSpinner().name, "sweep", "wraps from 5th to 1st option");
+  assert.equal(menu.handleKey({ name: "escape" }), "redraw");
+  assert.equal(menu.level(), "root");
+  assert.equal(menu.selectedIndex(), 2);
+  assert.equal(menu.spinnerChanged(), false);
+
+  // Move to Skill imports and enter Level 2 submenu
+  assert.equal(menu.handleKey({ name: "down" }), "redraw");
+  assert.equal(menu.selectedIndex(), 3);
   assert.equal(menu.handleKey({ name: "enter" }), "redraw");
   assert.equal(menu.level(), "import");
   assert.equal(menu.selectedIndex(), 0);
@@ -104,7 +130,7 @@ test("two-level /settings menu navigates between root settings, theme submenu, a
   // Esc in Level 2 reverts uncommitted submenu edits and returns to Level 1
   assert.equal(menu.handleKey({ name: "escape" }), "redraw");
   assert.equal(menu.level(), "root");
-  assert.equal(menu.selectedIndex(), 2);
+  assert.equal(menu.selectedIndex(), 3);
   assert.deepEqual(menu.importChoices(), {});
   assert.equal(menu.briefChanged(), true, "root brief toggle remains pending until submitted or cancelled");
 
@@ -118,12 +144,15 @@ test("two-level /settings menu navigates between root settings, theme submenu, a
     briefChanged: true,
     theme: "frappe",
     themeChanged: false,
+    spinner: "orbit",
+    spinnerChanged: false,
     importChoices: { claude_user: false },
   });
 });
 
-test("theme submenu in /settings follows active theme and wraps at edges", () => {
+test("theme and spinner submenus in /settings follow active state and wrap at edges", () => {
   resetTheme();
+  resetSpinner();
   setTheme("everforest-dark-medium");
   const menu = createSettingsMenuState({ initialLevel: "theme" });
   assert.equal(menu.level(), "theme");
@@ -138,17 +167,30 @@ test("theme submenu in /settings follows active theme and wraps at edges", () =>
   assert.equal(menu.value().theme, "pistachio");
   assert.equal(menu.value().themeChanged, true);
   resetTheme();
+
+  setSpinner("pulse");
+  const spinnerMenu = createSettingsMenuState({ initialLevel: "spinner" });
+  assert.equal(spinnerMenu.level(), "spinner");
+  assert.equal(spinnerMenu.selectedSpinner().name, "pulse");
+  assert.equal(spinnerMenu.handleKey({ name: "up" }), "redraw");
+  assert.equal(spinnerMenu.selectedSpinner().name, "sparkle");
+  assert.equal(spinnerMenu.handleKey({ name: "enter" }), "submit");
+  assert.equal(spinnerMenu.value().spinner, "sparkle");
+  assert.equal(spinnerMenu.value().spinnerChanged, true);
+  resetSpinner();
 });
 
-test("settingsMenuText renders root deck, theme submenu, and skill imports submenu", () => {
+test("settingsMenuText renders root deck, theme submenu, spinner submenu, and skill imports submenu", () => {
   resetTheme();
+  resetSpinner();
   const menu = createSettingsMenuState({ brief: false, sources: SOURCES });
   const rootLines = settingsMenuText(menu.items(), menu.selectedIndex(), menu.level()).split("\n");
   assert.match(rootLines[0], /Settings$/);
   assert.match(rootLines[1], /› Brief output .* off .* Collapse consecutive tool calls into one live line/);
   assert.match(rootLines[2], /· Theme .* Frappé › .* Switch the CLI color theme/);
-  assert.match(rootLines[3], /· Skill imports .* 3 of 4 on › .* Choose the Claude and Codex skills this conversation reads/);
-  assert.match(rootLines[4], /space toggle · enter open\/apply · esc cancel/);
+  assert.match(rootLines[3], /· Working spinner .* Orbit › .* Choose the working activity animation/);
+  assert.match(rootLines[4], /· Skill imports .* 3 of 4 on › .* Choose the Claude and Codex skills this conversation reads/);
+  assert.match(rootLines[5], /space toggle · enter open\/apply · esc cancel/);
 
   menu.handleKey({ name: "down" });
   menu.handleKey({ name: "enter" });
@@ -156,6 +198,17 @@ test("settingsMenuText renders root deck, theme submenu, and skill imports subme
   assert.match(themeLines[0], /Settings · Theme/);
   assert.match(themeLines[2], /› Frappé\s+████████\s+current/);
   assert.match(themeLines.at(-2), /↑↓ select · enter apply · esc back/);
+
+  menu.handleKey({ name: "escape" });
+  menu.handleKey({ name: "down" });
+  menu.handleKey({ name: "enter" });
+  const spinnerLines = settingsMenuText(menu.items(), menu.selectedIndex(), menu.level()).replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+  assert.match(spinnerLines[0], /Settings · Working spinner/);
+  assert.match(spinnerLines[1], /· Sweep\s+█▒░░░ ▒█▒░░ ░▒█▒░ ░░▒█▒ ░░░▒█ ░░▒█▒ ░▒█▒░ ▒█▒░░/);
+  assert.match(spinnerLines[2], /· Sparkle\s+· ✧ ✦ ✧ · ∗ ✴ ∗/);
+  assert.match(spinnerLines[3], /· Pulse\s+░ ▒ ▓ █ ▓ ▒/);
+  assert.match(spinnerLines[4], /· Bars\s+▁ ▂ ▃ ▄ ▅ ▆ ▇ █ ▇ ▆ ▅ ▄ ▃ ▂/);
+  assert.match(spinnerLines[5], /› Orbit\s+◐ ◓ ◑ ◒\s+current/);
 
   menu.handleKey({ name: "escape" });
   menu.handleKey({ name: "down" });
@@ -170,11 +223,20 @@ test("settingsMenuText renders root deck, theme submenu, and skill imports subme
 
 test("in a conversation the change is applied after the cache cost is accepted", async () => {
   const h = harness({
-    selected: { brief: true, briefChanged: true, theme: "latte", themeChanged: true, importChoices: { claude_user: false } },
+    selected: {
+      brief: true,
+      briefChanged: true,
+      theme: "latte",
+      themeChanged: true,
+      spinner: "bars",
+      spinnerChanged: true,
+      importChoices: { claude_user: false },
+    },
   });
   await h.controller.runSettingsSelector();
   assert.deepEqual(h.briefUpdates, [true]);
   assert.deepEqual(h.themeUpdates, ["latte"]);
+  assert.deepEqual(h.spinnerUpdates, ["bars"]);
   assert.equal(h.questions.length, 1);
   assert.equal(h.questions[0].title, "Import skills");
   assert.match(h.questions[0].message, /^Applying breaks the prompt cache\./);

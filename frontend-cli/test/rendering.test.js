@@ -779,7 +779,7 @@ test("prompt shows background task count after cwd with monitor hint", () => {
   assert.match(text, /m1 · E:\\project · \[bg:2\] \(ctrl\+b monitor\)/);
 });
 
-test("settingsMenuText theme submenu renders flavor swatches with current marker", () => {
+test("settingsMenuText theme and spinner submenus render options with current marker", () => {
   const text = settingsMenuText([
     { name: "latte", label: "Latte", current: false },
     { name: "catppuccin-mocha", label: "Catppuccin Mocha", current: true },
@@ -791,6 +791,14 @@ test("settingsMenuText theme submenu renders flavor swatches with current marker
   assert.match(plain, /› Catppuccin Mocha\s+████████\s+current/);
   assert.match(plain, /· Everforest Dark Medium\s+████████/);
   assert.match(plain, /enter apply · esc back/);
+
+  const spinnerText = settingsMenuText([
+    { name: "sweep", label: "Sweep", preview: "█▒░░░ ▒█▒░░", current: false },
+    { name: "orbit", label: "Orbit", preview: "◐ ◓ ◑ ◒", current: true },
+  ], 1, "spinner").replace(/\x1b\[[0-9;]*m/g, "");
+  assert.match(spinnerText, /Settings · Working spinner/);
+  assert.match(spinnerText, /· Sweep\s+█▒░░░ ▒█▒░░/);
+  assert.match(spinnerText, /› Orbit\s+◐ ◓ ◑ ◒\s+current/);
 });
 
 test("task monitor header directs background work without obsolete delegate tabs", () => {

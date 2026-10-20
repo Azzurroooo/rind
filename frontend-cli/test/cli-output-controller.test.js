@@ -191,6 +191,8 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
     briefChanged: true,
     theme: "frappe",
     themeChanged: false,
+    spinner: "orbit",
+    spinnerChanged: false,
     importChoices: {},
   });
   assert.deepEqual(transcript.render(90).map(stripAnsi), ["▷ You", "  /settings"]);
