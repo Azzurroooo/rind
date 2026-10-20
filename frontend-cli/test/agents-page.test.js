@@ -71,7 +71,10 @@ test("team page edits members, nests team conversations and drives tasks from th
   const task = await h.client.request("assignTask", { teamId: team.id, assigneeAgentId: lead.id, brief: "Review release", start: false });
   const scoped = await h.client.request("attachSession", { agentId: lead.id, teamId: team.id });
   await h.client.request("bindSession", { sessionId: scoped.id, runtimeSessionId: "20261005_team_history" });
-  const independent = await h.client.request("attachSession", { agentId: lead.id });
+  const soloWorkspace = path.join(h.home, "scratch");
+  await mkdir(soloWorkspace, { recursive: true });
+  const solo = await h.client.request("registerAgent", { workspace: soloWorkspace, name: "Scratch" });
+  const independent = await h.client.request("attachSession", { agentId: solo.id });
   await h.client.request("bindSession", { sessionId: independent.id, runtimeSessionId: "20261005_private_history" });
   const chats = [], abort = new AbortController();
   const main = createTui({ input: h.input, output: h.output.output });
@@ -111,7 +114,7 @@ test("team page edits members, nests team conversations and drives tasks from th
   await visible("No folder at"); assert.match(h.screen(), /missing/, "an invalid folder keeps what was typed and stays on the field");
   key("\x1b"); await settle();
 
-  await h.client.request("createWorkspace", { teamId: team.id, name: "Reviewer" });
+  const reviewer = await h.client.request("createWorkspace", { teamId: team.id, name: "Reviewer" });
   await visible("Reviewer");
 
   key("\r"); await visible("conversations in this team"); await visible("New conversation");
@@ -135,7 +138,7 @@ test("team page edits members, nests team conversations and drives tasks from th
   key("r"); await visible("Rename member");
   key("\x15"); paste("Security Reviewer"); key("\r");
   await visible("Renamed member to Security Reviewer.");
-  assert.equal((await h.client.request("snapshot")).agents.find(a => a.id !== lead.id).name, "Security Reviewer");
+  assert.equal((await h.client.request("snapshot")).agents.find(a => a.id === reviewer.id).name, "Security Reviewer");
   key("g"); key("j"); await visible("Leader · Coordinator");
   key(" "); await visible("Add member below"); key("c");
   await waitFor(() => chats.length === 3, "conversation from the member menu");
@@ -167,17 +170,18 @@ test("team page edits members, nests team conversations and drives tasks from th
   assert.equal(chats[4].runtimeSessionId, "20261005_manager_history");
   assert.equal(chats[4].teamId, undefined);
 
-  // Independent lists conversations outside every team, grouped by folder.
+  // Independent lists conversations outside every team, grouped by folder, and never lists team member folders.
   await visible("Manager ·"); await settle();
   key("\x1b"); await settle(); assert.doesNotMatch(h.screen(), /esc clears/, "the first esc clears the search");
   key("\x1b"); await settle(); key("j"); await visible("conversations outside any team, by folder");
   await visible("20261005_private_history");
   assert.doesNotMatch(h.screen(), /20261005_team_history/, "team conversations stay on their team");
+  assert.doesNotMatch(h.screen(), /Lead\s+/, "team member folders never appear in Independent");
   key("\r"); key("j"); await visible("enter join"); key("\r");
   await waitFor(() => chats.length === 6, "independent conversation");
   assert.equal(chats[5].runtimeSessionId, "20261005_private_history");
   assert.equal(chats[5].teamId, undefined);
-  assert.equal(chats[5].agent.canonicalWorkspace, lead.canonicalWorkspace);
+  assert.equal(chats[5].agent.canonicalWorkspace, solo.canonicalWorkspace);
 
   abort.abort(); await running;
   assert.equal(h.input.listenerCount("data"), 0);

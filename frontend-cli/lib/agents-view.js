@@ -118,7 +118,7 @@ function treeLine(row, width, nameColumn) {
     right = row.working ? paint.accent("● " + row.working + " Working") : row.status && !["Idle", "Open"].includes(row.status) ? toned(row.status, statusMeta(row.status).glyph + " " + row.status) : paint.dim(row.sessionCount + (row.sessionCount === 1 ? " conversation" : " conversations"));
     const gap = Math.max(1, nameColumn - textWidth(name));
     const room = width - textWidth(name) - gap - Math.max(RIGHT, textWidth(right)) - 2;
-    const where = !compact && room > 6 ? " ".repeat(gap) + paint.dim((row.teams?.length ? "in " + single(row.teams.join(", ")) + " · " : "") + shortPath(row.workspace, room - (row.teams?.length ? textWidth("in " + row.teams.join(", ") + " · ") : 0))) : "";
+    const where = !compact && room > 6 ? " ".repeat(gap) + paint.dim(shortPath(row.workspace, room)) : "";
     left = name + where;
   } else if (row.kind === "member") {
     const fold = row.expanded === false ? paint.accent("▸ ") : "";

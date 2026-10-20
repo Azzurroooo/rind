@@ -33,17 +33,22 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
     const registered = Object.values(state.sessions).filter(s => s.agentId === agentId && s.runtimeSessionId);
     const registeredByRuntimeId = new Map(registered.map(s => [s.runtimeSessionId, s]));
     const scoped = scope.teamId ? registered.filter(s => s.teamId === scope.teamId) : registered;
+    const activeTeams = Object.values(state.memberships)
+      .filter(m => m.agentId === agentId && state.teams[m.teamId] && !state.teams[m.teamId].archive)
+      .map(m => m.teamId);
+    const defaultTeamId = activeTeams.length === 1 ? activeTeams[0] : undefined;
     const seen = new Set<string>();
     const entries: HistoryEntry[] = [];
     for (const raw of await list(state.agents[agentId].canonicalWorkspace)) {
       const runtimeSessionId = string(raw.id) || string(raw.session_id);
       if (!runtimeSessionId || seen.has(runtimeSessionId)) continue;
       const owner = registeredByRuntimeId.get(runtimeSessionId);
-      if (scope.teamId && owner?.teamId !== scope.teamId) continue;
+      const teamId = owner?.teamId || defaultTeamId;
+      if (scope.teamId && teamId !== scope.teamId) continue;
       seen.add(runtimeSessionId);
       // History reports what to show: the name, otherwise the first message.
       const title = shownTitle(raw) || runtimeSessionId;
-      entries.push({ runtimeSessionId, agentId, ...(owner?.teamId ? { teamId: owner.teamId } : {}), title,
+      entries.push({ runtimeSessionId, agentId, ...(teamId ? { teamId } : {}), title,
         ...(string(raw.updated_at) ? { updatedAt: string(raw.updated_at) } : {}),
         ...(Number.isInteger(raw.message_count) ? { messageCount: raw.message_count as number } : {}), ...selectionOf(raw) });
     }
@@ -58,7 +63,7 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
 }
 
 export interface WorkspaceSession extends Selection { runtimeSessionId: string; title: string; updatedAt?: string; sessionId?: string }
-export interface WorkspaceGroup { workspace: string; agentId?: string; name: string; teams: string[]; sessions: WorkspaceSession[]; total?: number }
+export interface WorkspaceGroup { workspace: string; agentId?: string; name: string; sessions: WorkspaceSession[]; total?: number }
 type ListQuery = { workspace_root?: string; limit?: number; exclude_workspace_roots?: string[]; exclude_session_ids?: string[]; per_workspace_limit?: number };
 type ListPage = { sessions?: Array<Record<string, unknown>>; totals?: Array<{ workspace_root?: unknown; count?: unknown }> };
 type ListAll = (query: ListQuery) => Promise<ListPage>;
@@ -83,18 +88,18 @@ const sessionOf = (raw: Record<string, unknown>, owner: Session | undefined): Wo
 
 // Conversations outside every team, grouped by folder. One query returns the
 // newest few per folder plus each folder's count, so a busy folder cannot crowd
-// others out and nothing is fetched per folder; team conversations are excluded
-// by id (they are known here) and the Manager's folder by path. The folder is
-// named after its agent when it is registered, otherwise after its basename.
+// others out and nothing is fetched per folder; team member folders and the
+// Manager's folder are excluded by path, and team conversations by id.
 export async function independentHistory(state: State, managerWorkspace: string, list: ListAll): Promise<WorkspaceGroup[]> {
   const registered = new Map(Object.values(state.sessions).filter(s => s.runtimeSessionId).map(s => [s.runtimeSessionId, s]));
   const agents = new Map(Object.values(state.agents).map(a => [workspaceKey(a.canonicalWorkspace), a]));
-  const manager = workspaceKey(managerWorkspace);
+  const excludedRoots = [managerWorkspace, ...teamWorkspaces(state)];
+  const excluded = new Set(excludedRoots.map(workspaceKey));
   const groups = new Map<string, WorkspaceGroup>();
   const page = await list({
     per_workspace_limit: 3,
     limit: 500,
-    exclude_workspace_roots: [managerWorkspace],
+    exclude_workspace_roots: excludedRoots,
     exclude_session_ids: teamSessionIds(state),
   });
   const totals = new Map((page.totals || []).map(item => [String(item.workspace_root || ""), Number(item.count) || 0]));
@@ -102,12 +107,11 @@ export async function independentHistory(state: State, managerWorkspace: string,
   // total still makes that folder discoverable and opens its own bounded page.
   const ensureGroup = (workspace: string) => {
     const key = workspaceKey(workspace);
-    if (!workspace || key === manager) return undefined;
+    if (!workspace || excluded.has(key)) return undefined;
     let group = groups.get(key);
     if (!group) {
       const agent = agents.get(key);
-      const teams = agent ? Object.values(state.memberships).filter(m => m.agentId === agent.id).map(m => state.teams[m.teamId]?.name).filter((name): name is string => Boolean(name)) : [];
-      group = { workspace: agent?.canonicalWorkspace || workspace, ...(agent ? { agentId: agent.id } : {}), name: agent?.name || workspace.split(/[\\/]/).filter(Boolean).at(-1) || workspace, teams, sessions: [], total: totals.get(workspace) };
+      group = { workspace: agent?.canonicalWorkspace || workspace, ...(agent ? { agentId: agent.id } : {}), name: agent?.name || workspace.split(/[\\/]/).filter(Boolean).at(-1) || workspace, sessions: [], total: totals.get(workspace) };
       groups.set(key, group);
     }
     return group;
@@ -116,7 +120,7 @@ export async function independentHistory(state: State, managerWorkspace: string,
   for (const raw of page.sessions || []) {
     const workspace = workspaceOf(raw);
     const key = workspaceKey(workspace);
-    if (!workspace || key === manager) continue;
+    if (!workspace || excluded.has(key)) continue;
     const owner = registered.get(string(raw.id) || string(raw.session_id) || "");
     if (owner?.teamId) continue;
     const session = sessionOf(raw, owner);
@@ -138,7 +142,8 @@ export async function independentHistory(state: State, managerWorkspace: string,
 // One folder's conversations, on demand for its page; the same exclusions as
 // the overview, so both always agree.
 export async function independentFolder(state: State, managerWorkspace: string, workspace: string, list: ListAll, excludeSessionIds: string[] = []): Promise<WorkspaceSession[]> {
-  if (!workspace || workspaceKey(workspace) === workspaceKey(managerWorkspace)) return [];
+  const excluded = new Set([managerWorkspace, ...teamWorkspaces(state)].map(workspaceKey));
+  if (!workspace || excluded.has(workspaceKey(workspace))) return [];
   const registered = new Map(Object.values(state.sessions).filter(s => s.runtimeSessionId).map(s => [s.runtimeSessionId, s]));
   const page = await list({ workspace_root: workspace, limit: 100, exclude_session_ids: [...teamSessionIds(state), ...excludeSessionIds] });
   const sessions: WorkspaceSession[] = [];
@@ -154,4 +159,12 @@ export async function independentFolder(state: State, managerWorkspace: string, 
   return sessions;
 }
 
+const teamWorkspaces = (state: State) => [
+  ...new Set(
+    Object.values(state.memberships)
+      .filter(m => state.teams[m.teamId] && !state.teams[m.teamId].archive)
+      .map(m => state.agents[m.agentId]?.canonicalWorkspace)
+      .filter((w): w is string => Boolean(w)),
+  ),
+];
 const teamSessionIds = (state: State) => Object.values(state.sessions).filter(s => s.teamId && s.runtimeSessionId).map(s => s.runtimeSessionId);

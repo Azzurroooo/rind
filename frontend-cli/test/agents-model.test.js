@@ -127,27 +127,31 @@ test("member pages list every team conversation with new conversation first", ()
   assert.deepEqual(memberSessionRows(sessions, "lead", { query: "kick" }).map(r => r.title), ["New conversation", "Kickoff"]);
 });
 
-test("independent folders take live state from the Runtime, include plain sessions, and fold extra conversations", () => {
+test("independent folders take live state from the Runtime, include plain sessions, strictly exclude team member folders, and fold extra conversations", () => {
   const { snapshot } = fixture();
+  snapshot.agents.push({ id: "solo", name: "Solo", canonicalWorkspace: "/w/solo" });
   const groups = [
-    { workspace: "/home/me/scratch", name: "scratch", teams: [], sessions: ["a", "b", "c", "d", "e"].map((id, i) => ({ runtimeSessionId: "r-" + id, title: "Idea " + id, updatedAt: "2026-10-0" + (6 - i) + "T09:00:00Z" })) },
-    { workspace: "/w/lead/", agentId: "lead", name: "Lead", teams: ["Product"], sessions: [{ runtimeSessionId: "r-independent", title: "Quick fix", updatedAt: "2026-10-06T09:00:00Z" }] },
+    { workspace: "/home/me/scratch", name: "scratch", sessions: ["a", "b", "c", "d", "e"].map((id, i) => ({ runtimeSessionId: "r-" + id, title: "Idea " + id, updatedAt: "2026-10-0" + (6 - i) + "T09:00:00Z" })) },
+    { workspace: "/w/solo/", agentId: "solo", name: "Solo", sessions: [{ runtimeSessionId: "r-solo", title: "Quick fix", updatedAt: "2026-10-06T09:00:00Z" }] },
+    { workspace: "/w/lead/", agentId: "lead", name: "Lead", sessions: [{ runtimeSessionId: "r-independent", title: "Leaked", updatedAt: "2026-10-06T09:00:00Z" }] },
   ];
   snapshot.live = [
-    { id: "r-independent", workspace: "/w/lead", turn: "idle", watchers: 1, updatedAt: "2026-10-06T11:00:00Z" },
+    { id: "r-solo", workspace: "/w/solo", turn: "idle", watchers: 1, updatedAt: "2026-10-06T11:00:00Z" },
     { id: "r-e", workspace: "/home/me/scratch", turn: "running", watchers: 0, updatedAt: "2026-10-06T11:59:00Z" },
     { id: "r-plain", workspace: "/home/me/notes", turn: "question", watchers: 1, updatedAt: "2026-10-06T11:58:00Z" },
     { id: "r-lead", workspace: "/w/lead", turn: "running", watchers: 1, updatedAt: "2026-10-06T11:58:00Z" },
+    { id: "r-unregistered-in-member", workspace: "/w/lead", turn: "idle", watchers: 1, updatedAt: "2026-10-06T11:58:00Z" },
     { id: "r-mgr", workspace: "/rind/manager", turn: "running", watchers: 1, updatedAt: "2026-10-06T11:58:00Z" },
   ];
   const merged = independentSessions(snapshot, groups, "/rind/manager");
-  const lead = merged.find(g => g.agentId === "lead");
-  assert.deepEqual(lead.sessions.map(s => [s.runtimeSessionId, s.status]), [["r-independent", "Open"]], "team conversations stay on their team");
+  const solo = merged.find(g => g.agentId === "solo");
+  assert.deepEqual(solo.sessions.map(s => [s.runtimeSessionId, s.status]), [["r-solo", "Open"]]);
+  assert.ok(!merged.some(g => g.agentId === "lead" || g.workspace === "/w/lead"), "team member folders never appear in Independent");
   assert.equal(merged.find(g => g.name === "scratch").sessions.find(s => s.runtimeSessionId === "r-e").status, "Working");
   assert.deepEqual(merged.find(g => g.name === "notes").sessions.map(s => s.status), ["Needs input"], "a plain session in an unregistered folder appears live");
   assert.ok(!merged.some(g => g.workspace === "/rind/manager"), "Manager conversations are not independent");
   const rows = independentRows(merged, { now: NOW });
-  assert.deepEqual(rows.filter(r => r.kind === "workspace").map(r => r.title), ["notes", "scratch", "Lead"]);
+  assert.deepEqual(rows.filter(r => r.kind === "workspace").map(r => r.title), ["notes", "scratch", "Solo"]);
   const scratch = rows.filter(r => r.workspace === "/home/me/scratch" && r.kind !== "workspace");
   assert.deepEqual(scratch.map(r => r.title), ["Idea e", "Idea a", "Idea b", "+2 more conversations"], "running first, then the newest, the rest behind one row");
   assert.equal(independentRows(merged, { collapsed: new Set(["/home/me/scratch"]) }).filter(r => r.workspace === "/home/me/scratch").length, 1);
@@ -159,7 +163,7 @@ test("independent folders take live state from the Runtime, include plain sessio
 test("a bounded folder window shows the folder's full count while its page opens the fuller list", () => {
   const { snapshot } = fixture();
   // The overview fetched the newest conversation only; the folder has 52.
-  const groups = [{ workspace: "/home/me/scratch", name: "scratch", teams: [], total: 52, sessions: [{ runtimeSessionId: "r-a", title: "Newest", updatedAt: "2026-10-06T09:00:00Z" }] }];
+  const groups = [{ workspace: "/home/me/scratch", name: "scratch", total: 52, sessions: [{ runtimeSessionId: "r-a", title: "Newest", updatedAt: "2026-10-06T09:00:00Z" }] }];
   const rows = independentRows(groups, { now: NOW });
   assert.equal(rows.find(r => r.kind === "workspace").sessionCount, 52, "the row reports the folder's own count");
   assert.deepEqual(rows.filter(r => r.kind !== "workspace").map(r => r.title), ["Newest", "+51 more conversations"]);
@@ -269,8 +273,8 @@ test("lists show a conversation's new name before history is read again", () => 
 
 test("folders whose conversations have no recorded activity still sort", () => {
   const workspaces = [
-    { workspace: "/home/me/a", name: "a", teams: [], sessions: [{ runtimeSessionId: "r1", title: "r1", updatedAt: undefined, status: "Idle" }] },
-    { workspace: "/home/me/b", name: "b", teams: [], sessions: [{ runtimeSessionId: "r2", title: "r2", updatedAt: "2026-10-09T10:00:00Z", status: "Idle" }] },
+    { workspace: "/home/me/a", name: "a", sessions: [{ runtimeSessionId: "r1", title: "r1", updatedAt: undefined, status: "Idle" }] },
+    { workspace: "/home/me/b", name: "b", sessions: [{ runtimeSessionId: "r2", title: "r2", updatedAt: "2026-10-09T10:00:00Z", status: "Idle" }] },
   ];
   assert.deepEqual(independentRows(workspaces).filter(r => r.kind === "workspace").map(r => r.title), ["b", "a"]);
 });
@@ -404,11 +408,12 @@ test("live active status is not overridden by stale Unconfirmed session status i
   assert.equal(rows.find(r => r.sessionId === "r-mgr").status, "Working");
 
   const { snapshot } = fixture();
-  snapshot.sessions.push({ id: "s-ind", agentId: "lead", runtimeSessionId: "r-ind", status: "Unconfirmed", lastActivity: "2026-10-06T11:58:00Z" });
-  snapshot.live = [{ id: "r-ind", workspace: "/w/lead", turn: "running", watchers: 0, updatedAt: "2026-10-06T11:59:00Z" }];
-  const groups = [{ workspace: "/w/lead", agentId: "lead", name: "Lead", teams: ["Product"], sessions: [{ runtimeSessionId: "r-ind", title: "Quick fix", updatedAt: "2026-10-06T11:50:00Z" }] }];
+  snapshot.agents.push({ id: "solo", name: "Solo", canonicalWorkspace: "/w/solo" });
+  snapshot.sessions.push({ id: "s-ind", agentId: "solo", runtimeSessionId: "r-ind", status: "Unconfirmed", lastActivity: "2026-10-06T11:58:00Z" });
+  snapshot.live = [{ id: "r-ind", workspace: "/w/solo", turn: "running", watchers: 0, updatedAt: "2026-10-06T11:59:00Z" }];
+  const groups = [{ workspace: "/w/solo", agentId: "solo", name: "Solo", sessions: [{ runtimeSessionId: "r-ind", title: "Quick fix", updatedAt: "2026-10-06T11:50:00Z" }] }];
   const merged = independentSessions(snapshot, groups, "/rind/manager");
-  assert.equal(merged.find(g => g.agentId === "lead").sessions.find(s => s.runtimeSessionId === "r-ind").status, "Working");
+  assert.equal(merged.find(g => g.agentId === "solo").sessions.find(s => s.runtimeSessionId === "r-ind").status, "Working");
 });
 
 

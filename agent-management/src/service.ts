@@ -821,6 +821,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         if (p.runtimeSessionId) {
           const existing = Object.values(state.sessions).find(s => s.runtimeSessionId === p.runtimeSessionId);
           if (existing) {
+            if (!existing.teamId && p.teamId && existing.agentId === agent.id) existing.teamId = p.teamId;
             requireValue(existing.agentId === agent.id && existing.teamId === p.teamId, "SESSION_SCOPE_CONFLICT", "This conversation belongs to a different team or member.");
             if (p.shared && !existing.shared) {
               requireValue(!Object.values(state.runs).some(r => r.sessionId === existing.id && ["starting", "running"].includes(r.status)), "SESSION_PRIVATE_HOST", "This session is running in a private Worker. Finish it before moving to the shared Runtime.");
@@ -837,6 +838,9 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       case "bindSession": {
         const session = ownSession(state, actor, p.sessionId);
         requireValue(!session.runtimeSessionId || session.runtimeSessionId === p.runtimeSessionId, "SESSION_MISMATCH", "Cannot change the runtime identity of an attached session.");
+        for (const s of Object.values(state.sessions)) {
+          if (s.id !== session.id && s.runtimeSessionId === p.runtimeSessionId && s.agentId === session.agentId && !s.teamId && session.teamId) s.teamId = session.teamId;
+        }
         requireValue(!Object.values(state.sessions).some(s => s.id !== session.id && s.runtimeSessionId === p.runtimeSessionId && (s.teamId !== session.teamId || s.agentId !== session.agentId)), "SESSION_SCOPE_CONFLICT", "This conversation belongs to a different team or agent. Start a new session.");
         session.runtimeSessionId = text(p.runtimeSessionId, "Runtime session"); return session;
       }

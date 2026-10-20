@@ -12,7 +12,7 @@ export const TASK_RUN_LIMIT = 10;
 export const NOTICE_LIMIT = 50;
 export const DELEGATION_LIMIT = 200;
 export const COMPLETED_TASK_LIMIT = 100;
-export const SESSION_LIMIT = 200;
+export const UNBOUND_SESSION_LIMIT = 20;
 
 export function retain(state: State, now = Date.now()) {
   // Receipts only make retries idempotent. Beyond the newest few hundred, old
@@ -79,15 +79,14 @@ export function retain(state: State, now = Date.now()) {
     }
   }
 
-  const sessionIds = Object.keys(state.sessions);
-  for (let drop = Math.max(0, sessionIds.length - SESSION_LIMIT), i = 0; drop > 0 && i < sessionIds.length; i++) {
-    const id = sessionIds[i];
+  // Unbound direct attachments (created before a window sends its first message)
+  // are dropped by detachSession on normal exit; cap any left behind by crashed
+  // windows while preserving all bound conversation registrations.
+  const unbound = Object.keys(state.sessions).filter(id => {
     const s = state.sessions[id];
-    if (!s || state.deliveries[id] || activeRuns.some(r => r.sessionId === id)) continue;
-    if (s.delegationId && state.delegations[s.delegationId]) continue;
-    if (Object.values(state.delegations).some(d => d.originSessionId === id && !d.returned && d.status !== "cancelled")) continue;
+    return s && !s.runtimeSessionId && !sessionsWithRuns.has(id) && !state.deliveries[id];
+  });
+  for (const id of unbound.slice(0, Math.max(0, unbound.length - UNBOUND_SESSION_LIMIT))) {
     delete state.sessions[id];
-    for (const [runId, run] of Object.entries(state.runs)) if (run.sessionId === id && !activeRun(run)) delete state.runs[runId];
-    drop--;
   }
 }

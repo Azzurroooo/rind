@@ -86,7 +86,7 @@ export function detailFor(view, row) {
     case "workspace": {
       const model = folderRunsOn(view.folderDefaults?.[row.workspace], "Defaults");
       return {
-        title: row.title, context: row.agentId ? "Registered folder" + (row.teams.length ? " · member of " + row.teams.join(", ") : "") : "Folder not in any team",
+        title: row.title, context: row.agentId ? "Registered folder" : "Folder not in any team",
         callout: model.callout,
         facts: [model.fact, { label: "Chats", value: row.sessionCount + (row.working ? " · " + row.working + " Working" : "") }, { label: "Path", value: paint.path(row.workspace) }],
       };

@@ -7,6 +7,7 @@ function fixture() {
   const state = emptyState();
   state.agents.lead = { id: "lead", name: "Lead", canonicalWorkspace: "/w/lead", adapter: "rind" };
   state.agents.dev = { id: "dev", name: "Dev", canonicalWorkspace: "/w/dev", adapter: "rind" };
+  state.agents.solo = { id: "solo", name: "Solo", canonicalWorkspace: "/w/solo", adapter: "rind" };
   state.teams.a = { id: "a", name: "A", leaderAgentId: "lead", createRoot: "/w" };
   state.teams.b = { id: "b", name: "B", createRoot: "/w" };
   state.memberships["a/lead"] = { teamId: "a", agentId: "lead" };
@@ -17,27 +18,28 @@ function fixture() {
   state.sessions.s3 = { id: "s3", agentId: "dev", teamId: "a", runtimeSessionId: "r-unsaved", origin: "managed" };
   state.sessions.s4 = { id: "s4", agentId: "dev", teamId: "a", runtimeSessionId: "", origin: "direct" };
   const histories = {
-    "/w/lead": [{ id: "r-team", title: "Plan release", updated_at: "2026-10-06T02:00:00Z" }, { id: "r-private", title: "Private notes", updated_at: "2026-10-06T03:00:00Z" }],
-    "/w/dev": [{ session_id: "r-other-team", title: "Other team", updated_at: "2026-10-06T04:00:00Z" }],
+    "/w/lead": [{ id: "r-team", title: "Plan release", updated_at: "2026-10-06T02:00:00Z" }, { id: "r-local", title: "Local work", updated_at: "2026-10-06T03:00:00Z" }],
+    "/w/dev": [{ session_id: "r-other-team", title: "Other team", updated_at: "2026-10-06T04:00:00Z" }, { session_id: "r-ambiguous", title: "Ambiguous", updated_at: "2026-10-06T05:00:00Z" }],
+    "/w/solo": [{ id: "r-solo", title: "Solo notes", updated_at: "2026-10-06T03:00:00Z" }],
   };
   return { state, list: async workspace => histories[workspace] };
 }
 
-test("team history only contains conversations registered to that team", async () => {
+test("team history includes single-team member conversations and excludes conversations from other teams", async () => {
   const { state, list } = fixture();
   const rows = await sessionHistory(state, { teamId: "a" }, list);
-  assert.deepEqual(rows.map(r => r.runtimeSessionId).sort(), ["r-team", "r-unsaved"]);
+  assert.deepEqual(rows.map(r => r.runtimeSessionId).sort(), ["r-local", "r-team", "r-unsaved"]);
   assert.equal(rows.find(r => r.runtimeSessionId === "r-team").title, "Plan release");
   assert.ok(rows.every(r => r.teamId === "a"));
-  assert.deepEqual((await sessionHistory(state, { teamId: "a", agentId: "lead" }, list)).map(r => r.runtimeSessionId), ["r-team"]);
+  assert.deepEqual((await sessionHistory(state, { teamId: "a", agentId: "lead" }, list)).map(r => r.runtimeSessionId), ["r-local", "r-team"]);
 });
 
-test("agent history keeps every conversation but labels its team scope", async () => {
+test("agent history keeps every conversation and resolves single-team vs standalone scopes", async () => {
   const { state, list } = fixture();
-  const rows = await sessionHistory(state, { agentId: "lead" }, list);
-  assert.deepEqual(rows.map(r => r.runtimeSessionId), ["r-private", "r-team"]);
-  assert.equal(rows[0].teamId, undefined);
-  assert.equal(rows[1].teamId, "a");
+  const leadRows = await sessionHistory(state, { agentId: "lead" }, list);
+  assert.deepEqual(leadRows.map(r => [r.runtimeSessionId, r.teamId]), [["r-local", "a"], ["r-team", "a"]]);
+  const soloRows = await sessionHistory(state, { agentId: "solo" }, list);
+  assert.deepEqual(soloRows.map(r => [r.runtimeSessionId, r.teamId]), [["r-solo", undefined]]);
 });
 
 test("history scopes are validated before reading any workspace", async () => {
@@ -48,12 +50,13 @@ test("history scopes are validated before reading any workspace", async () => {
   await assert.rejects(sessionHistory(state, {}, list), /Agent not found/);
 });
 
-test("independent history reads one grouped page and skips team and Manager history", async () => {
+test("independent history reads one grouped page and strictly excludes all team member and Manager folders", async () => {
   const { state } = fixture();
-  state.sessions.s5 = { id: "s5", agentId: "lead", runtimeSessionId: "r-standalone", origin: "direct" };
+  state.sessions.s5 = { id: "s5", agentId: "solo", runtimeSessionId: "r-standalone", origin: "direct" };
   const all = [
     { id: "r-team", workspace_root: "/w/lead", title: "Team work", updated_at: "2026-10-06T05:00:00Z" },
-    { id: "r-standalone", workspace_root: "/w/lead/", title: "Quick fix", updated_at: "2026-10-06T04:00:00Z" },
+    { id: "r-leaked", workspace_root: "/w/lead/", title: "Member folder", updated_at: "2026-10-06T04:00:00Z" },
+    { id: "r-standalone", workspace_root: "/w/solo/", title: "Quick fix", updated_at: "2026-10-06T04:00:00Z" },
     { id: "r-loose", workspace_root: "/home/me/scratch", title: "Try an idea", updated_at: "2026-10-06T06:00:00Z" },
     { id: "r-manager", workspace_root: "/rind/manager", title: "Coordinate" },
   ];
@@ -80,30 +83,32 @@ test("independent history reads one grouped page and skips team and Manager hist
   const groups = await independentHistory(state, "/rind/manager", list);
   assert.equal(queries.length, 1, "one grouped query, not one per folder");
   assert.equal(queries[0].per_workspace_limit, 3);
-  assert.deepEqual(queries[0].exclude_workspace_roots, ["/rind/manager"]);
+  assert.deepEqual(queries[0].exclude_workspace_roots, ["/rind/manager", "/w/lead", "/w/dev"]);
   assert.deepEqual(queries[0].exclude_session_ids.sort(), ["r-other-team", "r-team", "r-unsaved"], "team conversations are excluded by id");
-  assert.deepEqual(groups.map(g => g.name).sort(), ["Lead", "scratch"]);
-  const lead = groups.find(g => g.agentId === "lead");
-  assert.deepEqual(lead.sessions.map(s => s.runtimeSessionId), ["r-standalone"]);
-  assert.equal(lead.total, 1);
+  assert.deepEqual(groups.map(g => g.name).sort(), ["Solo", "scratch"]);
+  const solo = groups.find(g => g.agentId === "solo");
+  assert.equal("teams" in solo, false);
+  assert.deepEqual(solo.sessions.map(s => s.runtimeSessionId), ["r-standalone"]);
+  assert.equal(solo.total, 1);
   assert.deepEqual(groups.find(g => g.name === "scratch").sessions.map(s => s.runtimeSessionId), ["r-loose"]);
   assert.equal(groups.find(g => g.name === "scratch").total, 1);
 });
 
-test("a folder's page reads that folder's conversations with the same exclusions", async () => {
+test("a folder's page reads that folder's conversations with the same exclusions and refuses team member folders", async () => {
   const { state } = fixture();
   const queries = [];
   const list = async query => {
     queries.push(query);
     return { sessions: [
-      { id: "r-team", workspace_root: "/w/lead", title: "Team work" },
-      { id: "r-standalone", workspace_root: "/w/lead", title: "Quick fix", updated_at: "2026-10-06T04:00:00Z" },
+      { id: "r-team", workspace_root: "/w/solo", title: "Team work" },
+      { id: "r-standalone", workspace_root: "/w/solo", title: "Quick fix", updated_at: "2026-10-06T04:00:00Z" },
     ] };
   };
-  const sessions = await independentFolder(state, "/rind/manager", "/w/lead", list);
-  assert.deepEqual(queries, [{ workspace_root: "/w/lead", limit: 100, exclude_session_ids: ["r-team", "r-other-team", "r-unsaved"] }]);
+  const sessions = await independentFolder(state, "/rind/manager", "/w/solo", list);
+  assert.deepEqual(queries, [{ workspace_root: "/w/solo", limit: 100, exclude_session_ids: ["r-team", "r-other-team", "r-unsaved"] }]);
   assert.deepEqual(sessions.map(s => s.runtimeSessionId), ["r-standalone"]);
   assert.deepEqual(await independentFolder(state, "/rind/manager", "/rind/manager", list), []);
+  assert.deepEqual(await independentFolder(state, "/rind/manager", "/w/lead", list), []);
 });
 
 test("overview keeps folders omitted by the preview cap", async () => {

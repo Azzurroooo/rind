@@ -379,8 +379,18 @@ export const workspaceKey = (value, platform = process.platform) => {
 // whose page has been opened passes its full list, which replaces the bounded
 // overview window before live state is merged in.
 export function independentSessions(snapshot, groups = [], managerWorkspace = "", folderSessions = {}) {
+  const agentByWorkspace = new Map((snapshot.agents || []).map(a => [workspaceKey(a.canonicalWorkspace), a]));
+  const agentById = new Map((snapshot.agents || []).map(a => [a.id, a]));
+  const activeTeamIds = new Set((snapshot.teams || []).map(t => t.id));
+  const excluded = new Set([
+    workspaceKey(managerWorkspace),
+    ...(snapshot.memberships || [])
+      .filter(m => activeTeamIds.has(m.teamId))
+      .map(m => workspaceKey(agentById.get(m.agentId)?.canonicalWorkspace))
+      .filter(Boolean),
+  ]);
   const byRuntimeSessionId = new Map();
-  const byWorkspace = new Map(groups.map(group => {
+  const byWorkspace = new Map(groups.filter(group => group.workspace && !excluded.has(workspaceKey(group.workspace))).map(group => {
     const page = folderSessions[workspaceKey(group.workspace)];
     const sessions = (page?.sessions || group.sessions).map(s => {
       const entry = { ...s, status: "Idle" };
@@ -390,18 +400,15 @@ export function independentSessions(snapshot, groups = [], managerWorkspace = ""
     return [workspaceKey(group.workspace), { ...group, hasMore: page?.hasMore, sessions }];
   }));
   const scoped = new Set(snapshot.sessions.filter(s => s.teamId && s.runtimeSessionId).map(s => s.runtimeSessionId));
-  const manager = workspaceKey(managerWorkspace);
-  const agentByWorkspace = new Map((snapshot.agents || []).map(a => [workspaceKey(a.canonicalWorkspace), a]));
-  const agentById = new Map((snapshot.agents || []).map(a => [a.id, a]));
   for (const item of snapshot.live || []) {
     if (scoped.has(item.id)) continue;
     const key = workspaceKey(item.workspace);
     const found = byRuntimeSessionId.get(item.id);
     if (found) { found.status = liveStatus(item); found.updatedAt = later(found.updatedAt, item.updatedAt); if (single(item.title)) found.title = single(item.title); continue; }
     // A conversation that started after the last history refresh.
-    if (!item.workspace || key === manager) continue;
+    if (!item.workspace || excluded.has(key)) continue;
     const agent = agentByWorkspace.get(key);
-    const group = byWorkspace.get(key) || { workspace: agent?.canonicalWorkspace || item.workspace, ...(agent ? { agentId: agent.id } : {}), name: single(agent?.name) || item.workspace.split(/[\\/]/).filter(Boolean).at(-1) || item.workspace, teams: [], sessions: [] };
+    const group = byWorkspace.get(key) || { workspace: agent?.canonicalWorkspace || item.workspace, ...(agent ? { agentId: agent.id } : {}), name: single(agent?.name) || item.workspace.split(/[\\/]/).filter(Boolean).at(-1) || item.workspace, sessions: [] };
     const entry = { runtimeSessionId: item.id, title: single(item.title) || "New conversation", updatedAt: item.updatedAt, status: liveStatus(item) };
     group.sessions.push(entry);
     byRuntimeSessionId.set(item.id, entry);
@@ -418,9 +425,9 @@ export function independentSessions(snapshot, groups = [], managerWorkspace = ""
       continue;
     }
     const agent = agentById.get(session.agentId);
-    if (!agent || workspaceKey(agent.canonicalWorkspace) === manager) continue;
+    if (!agent || excluded.has(workspaceKey(agent.canonicalWorkspace))) continue;
     const key = workspaceKey(agent.canonicalWorkspace);
-    const group = byWorkspace.get(key) || { workspace: agent.canonicalWorkspace, agentId: agent.id, name: single(agent.name), teams: [], sessions: [] };
+    const group = byWorkspace.get(key) || { workspace: agent.canonicalWorkspace, agentId: agent.id, name: single(agent.name), sessions: [] };
     const entry = { runtimeSessionId: session.runtimeSessionId, title: session.runtimeSessionId, updatedAt: session.lastActivity, status: session.status || "Idle" };
     group.sessions.push(entry);
     byRuntimeSessionId.set(session.runtimeSessionId, entry);
@@ -444,7 +451,7 @@ export function independentRows(workspaces, { query = "", filter = "All", now = 
     // The folder's own count, not just the loaded window: the row and its
     // "+N more" stay truthful while only a few conversations are fetched.
     const total = Math.max(group.total ?? group.sessions.length, sessions.length);
-    rows.push({ id: "w:" + group.workspace, kind: "workspace", depth: 0, title: single(group.name), workspace: group.workspace, agentId: group.agentId, teams: group.teams,
+    rows.push({ id: "w:" + group.workspace, kind: "workspace", depth: 0, title: single(group.name), workspace: group.workspace, agentId: group.agentId,
       status: group.sessions.map(s => s.status).sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Idle", sessionCount: total, working, expanded: open });
     if (!open) continue;
     const limit = narrowed ? Infinity : sessionLimit;

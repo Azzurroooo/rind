@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { createService } from "../dist/service.js";
 import { openStore } from "../dist/store.js";
 import { managementPaths } from "../dist/paths.js";
-import { retain, DELEGATION_LIMIT, COMPLETED_TASK_LIMIT, SESSION_LIMIT } from "../dist/retention.js";
+import { retain, DELEGATION_LIMIT, COMPLETED_TASK_LIMIT, UNBOUND_SESSION_LIMIT } from "../dist/retention.js";
 import { emptyState } from "../dist/model.js";
 import { fixture, eventually, user } from "./fixture.js";
 
@@ -622,7 +622,7 @@ test("delegation depth is capped at MAX_DELEGATION_DEPTH and leaf members do not
   for (const s of f.starts) s.finish({ content: "done" });
 });
 
-test("retain bounds settled delegations, completed tasks with cascading notes/artifacts/runs, and idle sessions", () => {
+test("retain bounds settled delegations and completed tasks with cascading notes/artifacts/runs without evicting bound direct sessions", async t => {
   const state = emptyState();
   state.teams.t1 = { id: "t1", name: "T1", createRoot: "/tmp", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
   for (let i = 0; i < DELEGATION_LIMIT + 15; i++) {
@@ -641,14 +641,19 @@ test("retain bounds settled delegations, completed tasks with cascading notes/ar
     state.notes[`note-${i}`] = { id: `note-${i}`, taskId: id, author: "user", text: "n", createdAt: "2026-01-01T00:00:00Z" };
     state.artifacts[`art-${i}`] = { id: `art-${i}`, taskId: id, name: "a", path: "/tmp/a", sha256: "0", size: 1, createdAt: "2026-01-01T00:00:00Z" };
   }
-  for (let i = 0; i < SESSION_LIMIT + 20; i++) {
+  for (let i = 0; i < 220; i++) {
     const id = `sess-${i}`;
-    state.sessions[id] = { id, agentId: "a1", origin: "user", shared: false, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+    state.sessions[id] = { id, agentId: "a1", teamId: "t1", runtimeSessionId: `r-${i}`, origin: "direct", shared: true };
+  }
+  for (let i = 0; i < UNBOUND_SESSION_LIMIT + 15; i++) {
+    const id = `unbound-${i}`;
+    state.sessions[id] = { id, agentId: "a1", teamId: "t1", runtimeSessionId: "", origin: "direct", shared: true };
   }
   retain(state);
   assert.equal(Object.keys(state.delegations).length, DELEGATION_LIMIT);
   assert.equal(Object.keys(state.tasks).length, COMPLETED_TASK_LIMIT);
   assert.equal(Object.keys(state.notes).length, COMPLETED_TASK_LIMIT);
   assert.equal(Object.keys(state.artifacts).length, COMPLETED_TASK_LIMIT);
-  assert.equal(Object.keys(state.sessions).length, SESSION_LIMIT);
+  assert.equal(Object.values(state.sessions).filter(s => s.runtimeSessionId).length, 220, "bound direct team sessions are never evicted");
+  assert.equal(Object.values(state.sessions).filter(s => !s.runtimeSessionId).length, UNBOUND_SESSION_LIMIT, "leaked unbound sessions are bounded");
 });

@@ -160,7 +160,7 @@ test("rows with the return arrow and pictographic titles keep the pane divider i
   const { independentRows } = await import("../lib/agents-model.js");
   const now = Date.parse("2026-10-07T12:00:00Z");
   const sessions = ["请严格按顺序执行以下操作，用于测试：", "你好", "▶ 发布 ✔ ©", "你好"].map((title, i) => ({ runtimeSessionId: "r" + i, title, status: "Idle", updatedAt: "2026-10-07T11:5" + i + ":00Z" }));
-  const rows = independentRows([{ workspace: "/work/test/2", name: "2", teams: [], sessions }], { now, sessionLimit: 4 })
+  const rows = independentRows([{ workspace: "/work/test/2", name: "2", sessions }], { now, sessionLimit: 4 })
     .map(row => row.sessionId === "r1" ? { ...row, back: true } : row);
   const view = { ...fixture(), navId: "independent", page: { kind: "independent" }, pageKey: "independent", entries: rows, selectedId: rows[0].id, returnTo: { runtimeSessionId: "r1" } };
   // Measured as a terminal draws it, not with the code under test.

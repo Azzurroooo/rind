@@ -65,7 +65,7 @@ test("every kind of row draws inside the panel at 28 and 46 columns", () => {
     { kind: "member", teamId: "team", agentId: "lead", title: "Lead", status: "Working", leader: true, sessionCount: 2 },
     { kind: "session", teamId: "team", agentId: "lead", sessionId: "r1", title: "Plan the release", status: "Needs input", time: "2m", taskId: "t" },
     { kind: "task", taskId: "t", owner: "Lead", status: "Needs input" },
-    { kind: "workspace", title: "lead", workspace: "/w/lead", agentId: "lead", teams: ["Product"], sessionCount: 2, working: 1 },
+    { kind: "workspace", title: "solo", workspace: "/w/solo", agentId: "solo", sessionCount: 2, working: 1 },
     { kind: "live", title: "Lead", context: "Product", note: "Task: Ship it", taskId: "t", sessionId: "r1", status: "Working", time: "5m" },
     { kind: "team", teamId: "team", title: "Product", summary: { members: 1, working: 1, needs: 1, queued: 0, delivered: 2 } },
     { kind: "service", id: "svc:runtime", title: "Shared Runtime", note: "pid 8 · up 3h", stale: true },
