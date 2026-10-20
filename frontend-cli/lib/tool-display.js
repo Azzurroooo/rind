@@ -1,5 +1,5 @@
 import { clipCells } from "./text-width.js";
-import { paintRaw } from "./theme.js";
+import { breathingAccent, paintRaw } from "./theme.js";
 
 function accent(text) {
   return paintRaw.accent(text);
@@ -215,7 +215,24 @@ function indentToolLines(lines, width) {
   return lines.map((line) => clipCells(`  ${line}`, limit));
 }
 
-export function renderToolGroupBrief(blocks, width) {
+const BRIEF_TOOL_VERBS = {
+  bash: "bash",
+  bash_output: "bg",
+  task_control: "task",
+  read_file: "read",
+  edit_file: "edit",
+  write_file: "write",
+  grep: "grep",
+  glob: "glob",
+  search_web: "search",
+  fetch_web_page: "fetch",
+  delegate: "delegate",
+  report: "report",
+  agent_management: "manage",
+  agent_create: "create",
+};
+
+export function renderToolGroupBrief(blocks, width, { settled = true, elapsedMs = 0 } = {}) {
   if (!Array.isArray(blocks) || !blocks.length) {
     return [];
   }
@@ -236,8 +253,15 @@ export function renderToolGroupBrief(blocks, width) {
     suffixCols += label.length;
   }
   const mainBudget = Math.max(12, limit - 2 - suffixCols);
+  const trailSteps = buildBriefVerbTrail(blocks, focus);
+  const trailRaw = trailSteps.length ? `${trailSteps.join(" → ")} → ` : "";
+  const showTrail = Boolean(trailRaw) && mainBudget - 2 - trailRaw.length >= 18;
+  const trail = showTrail ? dim(trailRaw) : "";
+  const focusBudget = Math.max(12, mainBudget - 2 - (showTrail ? trailRaw.length : 0));
+  const active = !settled || focus.isRunning;
+  const leadGlyph = active ? breathingGlyph(elapsedMs) : glyphForState(blockFinishState(focus));
   const renderer = TOOL_RENDERERS[focus.name] || GENERIC_RENDERER;
-  let mainLine;
+  let focusBody;
   if (focus.isRunning) {
     const context = {
       name: focus.name,
@@ -249,9 +273,9 @@ export function renderToolGroupBrief(blocks, width) {
     const elapsedSeconds = Math.floor((context.elapsedMs || 0) / 1000);
     const elapsed = ELAPSED_TITLE_TOOLS.has(focus.name) ? dim(` · ${elapsedSeconds}s`) : "";
     const progress = context.progressMessage
-      ? dim(` · ${clipText(context.progressMessage, Math.max(12, Math.floor(mainBudget / 3)), 0)}`)
+      ? dim(` · ${clipText(context.progressMessage, Math.max(12, Math.floor(focusBudget / 3)), 0)}`)
       : "";
-    mainLine = `${runningGlyph()} ${renderer.runningMain(context, mainBudget)}${elapsed}${progress}`;
+    focusBody = `${renderer.runningMain(context, focusBudget)}${elapsed}${progress}`;
   } else {
     const context = {
       name: focus.name,
@@ -262,17 +286,59 @@ export function renderToolGroupBrief(blocks, width) {
       fileChange: focus.fileChange,
       payload: parseToolResult(focus.resultEvent?.result),
     };
-    mainLine = renderer.finished(context, mainBudget, finishState(context.event));
+    focusBody = stripLeadingToolGlyph(renderer.finished(context, focusBudget, finishState(context.event)));
   }
+  const mainLine = `${leadGlyph} ${trail}${focusBody}`;
   const clippedMain = clipCells(mainLine, Math.max(1, limit - 2 - suffixCols));
   return [clipCells(`  ${clippedMain}${suffixParts.join("")}`, limit)];
+}
+
+function briefToolVerb(name) {
+  return BRIEF_TOOL_VERBS[name] || humanToolName(name).split(/\s+/)[0] || "tool";
+}
+
+function buildBriefVerbTrail(blocks, focus) {
+  const steps = [];
+  for (const block of blocks) {
+    if (block === focus) {
+      continue;
+    }
+    const verb = briefToolVerb(block?.name);
+    const previous = steps.at(-1);
+    if (previous && previous.verb === verb) {
+      previous.count += 1;
+    } else {
+      steps.push({ verb, count: 1 });
+    }
+  }
+  if (!steps.length) {
+    return [];
+  }
+  const labels = steps.map((step) => (step.count > 1 ? `${step.verb} ×${step.count}` : step.verb));
+  if (labels.length <= 3) {
+    return labels;
+  }
+  return ["…", ...labels.slice(-2)];
+}
+
+function stripLeadingToolGlyph(line) {
+  return String(line || "").replace(/^(?:\x1b\[[0-9;]*m)*[◌◉⊘](?:\x1b\[[0-9;]*m)*\s+/, "");
+}
+
+function blockFinishState(block) {
+  const state = finishState(block?.resultEvent);
+  if (state.kind !== "ok") {
+    return state;
+  }
+  const { data } = resultDataFromRaw(block?.resultEvent?.result);
+  return taskFinishState(state, data);
 }
 
 function isToolBlockError(block) {
   if (!block || block.isRunning) {
     return false;
   }
-  const state = finishState(block.resultEvent);
+  const state = blockFinishState(block);
   if (state.kind === "error") {
     return true;
   }
@@ -280,9 +346,6 @@ function isToolBlockError(block) {
     return false;
   }
   const { data } = resultDataFromRaw(block.resultEvent?.result);
-  if (taskFinishState(state, data).kind === "error") {
-    return true;
-  }
   const exitCode = Number(data.exit_code);
   return block.name === "bash" && Number.isInteger(exitCode) && exitCode !== 0;
 }
@@ -312,6 +375,10 @@ function runningGlyph() {
   return accent("◌");
 }
 
+function breathingGlyph(elapsedMs = 0) {
+  return breathingAccent("◌", elapsedMs, true);
+}
+
 function okGlyph() {
   return green("◉");
 }
@@ -324,15 +391,18 @@ function cancelledGlyph() {
   return dim("◌");
 }
 
+function glyphForState(state) {
+  if (state.kind === "running") return runningGlyph();
+  if (state.kind === "error") return errorGlyph();
+  if (state.kind === "cancelled") return cancelledGlyph();
+  return okGlyph();
+}
+
 function titleFor(state, main) {
-  if (state.kind === "running") return `${runningGlyph()} ${main}`;
-  if (state.kind === "error") {
-    return `${errorGlyph()} ${main}`;
-  }
   if (state.kind === "cancelled") {
     return `${cancelledGlyph()} ${main} ${dim("(cancelled)")}`;
   }
-  return `${okGlyph()} ${main}`;
+  return `${glyphForState(state)} ${main}`;
 }
 
 function durationPart(name, event) {

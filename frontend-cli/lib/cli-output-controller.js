@@ -135,7 +135,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       state.display.activityTimer = schedule(() => {
         state.display.activityTimer = null;
         state.display.activityFrame = (now() - state.display.activityStartedAt) / 300;
-        if (runningTools.size) transcript.changed();
+        if (runningTools.size || (activeToolGroup && !activeToolGroup.settled)) transcript.changed();
         redraw();
         updateActivityTimer();
       }, delay);
@@ -162,7 +162,11 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
 
   function appendToolBlock(block) {
     if (!activeToolGroup) {
-      activeToolGroup = new ToolGroupBlock({ leading: blockCount > 0 });
+      activeToolGroup = new ToolGroupBlock({
+        leading: blockCount > 0,
+        animate: animateTools,
+        now: () => frameTime,
+      });
       activeToolGroup.setExpanded(Boolean(state.display?.toolDetailsExpanded));
       toolGroups.add(activeToolGroup);
       transcript.addChild(activeToolGroup);
@@ -171,6 +175,26 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     activeToolGroup.add(block);
     transcript.changed();
     redraw();
+  }
+
+  function settleToolGroup() {
+    if (!activeToolGroup) {
+      return false;
+    }
+    const group = activeToolGroup;
+    activeToolGroup = null;
+    if (group.settled) {
+      return false;
+    }
+    group.settle();
+    transcript.changed();
+    return true;
+  }
+
+  function settleTools() {
+    if (settleToolGroup()) {
+      redraw();
+    }
   }
 
   function lazyLines(buildText, leading) {
@@ -223,7 +247,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     if (!value.trim()) {
       return;
     }
-    activeToolGroup = null;
+    settleToolGroup();
     if (!terminalUi) {
       const line = userInputText(value, undefined, source);
       if (!line) {
@@ -253,7 +277,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     if (!value.trim()) {
       return;
     }
-    activeToolGroup = null;
+    settleToolGroup();
     if (!terminalUi) {
       process.stdout.write(outputBlockText(deliveryBlockText(value, 1000).join("\n"), state.display.outputStarted));
       state.display.outputStarted = true;
@@ -268,7 +292,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
 
   function writeError(text) {
     const value = String(text ?? "");
-    activeToolGroup = null;
+    settleToolGroup();
     // Before the terminal UI starts, appending would be painted only after a
     // startup that may already be failing; a fatal start must reach the screen.
     if (!terminalUi || !terminalUi.started || state.runtime.status === "closing") {
@@ -279,7 +303,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function ensureAssistantBlocks() {
-    activeToolGroup = null;
+    settleToolGroup();
     if (!assistantMessage) {
       const leading = blockCount > 0;
       transcript.addChild(lazyLines(() => assistantHeaderText(), leading));
@@ -306,7 +330,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function beginQuestion(event) {
-    activeToolGroup = null;
+    settleToolGroup();
     if (!terminalUi) {
       log(() => questionText(event));
       return;
@@ -463,7 +487,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function setTurnContext(turnId = "") {
-    activeToolGroup = null;
+    settleToolGroup();
     turnContext = String(turnId || "");
   }
 
@@ -554,6 +578,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       }
     }
     flushPendingTools();
+    settleToolGroup();
     closeAssistant();
     // A tail page may omit the delegate call. Management owns the full task
     // state and overrides reconstruction when that snapshot is available.
@@ -589,6 +614,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     beginTool,
     updateToolProgress,
     finishTool,
+    settleTools,
     beginQuestion,
     finishQuestion,
     setToolsExpanded,

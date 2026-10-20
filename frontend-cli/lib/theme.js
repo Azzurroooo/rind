@@ -195,11 +195,11 @@ export function paintBackground(text, role = "surface") {
   return background + body.replace(/\x1b\[(?:0)?m/g, reset => reset + background) + "\x1b[0m";
 }
 
-export function breathingAccent(text, elapsedMs) {
+export function breathingAccent(text, elapsedMs, force = false) {
   const intensity = 0.78 + 0.22 * (1 - Math.cos(2 * Math.PI * elapsedMs / 4200)) / 2;
   const color = PALETTES[activeName].accentRgb;
   const channels = [16, 8, 0].map((shift) => Math.round(((color >> shift) & 255) * intensity));
-  return wrap(`38;2;${channels.join(";")}`, text, false);
+  return wrap(`38;2;${channels.join(";")}`, text, force);
 }
 
 export function themeNames() {

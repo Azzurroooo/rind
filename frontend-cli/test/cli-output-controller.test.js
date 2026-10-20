@@ -194,16 +194,20 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
   applySavedTheme(tempHome);
   assert.equal(isBriefMode(), true, "applySavedTheme restores persisted global brief mode");
 
-  // 3. Live turn without assistant content: consecutive tools update in place on a single line with count.
+  // 3. Live turn: while tool group is active/unsettled, leading icon stays ◌ and builds a verb trail;
+  //    when assistant content begins (or turn finishes), the leading icon locks into terminal ◉/⊘.
   output.writeUserInput("Fix the build");
   output.beginTool({ tool_call_id: "t1", tool_name: "read_file", args_preview: '{"path":"package.json"}' });
   let lines = transcript.render(90).map(stripAnsi);
   assert.deepEqual(lines, ["▷ You", "  Fix the build", "", "  ◌ read package.json"]);
 
   output.finishTool({ tool_call_id: "t1", tool_name: "read_file", status: "completed", result: JSON.stringify({ ok: true, data: "{\n  \"name\": \"app\"\n}" }) });
+  lines = transcript.render(90).map(stripAnsi);
+  assert.deepEqual(lines, ["▷ You", "  Fix the build", "", "  ◌ read package.json"], "finished tool in unsettled group keeps ◌ before content prints");
+
   output.beginTool({ tool_call_id: "t2", tool_name: "grep", args_preview: '{"pattern":"build","path":"src"}' });
   lines = transcript.render(90).map(stripAnsi);
-  assert.deepEqual(lines, ["▷ You", "  Fix the build", "", "  ◌ grep /build/ in src · 2 tools"]);
+  assert.deepEqual(lines, ["▷ You", "  Fix the build", "", "  ◌ read → grep /build/ in src · 2 tools"]);
 
   output.finishTool({ tool_call_id: "t2", tool_name: "grep", status: "completed", result: JSON.stringify({ ok: true, data: [{ file: "src/a.js", line: 1, text: "build" }], meta: { count: 1 } }) });
   output.beginTool({ tool_call_id: "t3", tool_name: "edit_file", args_preview: '{"path":"src/a.js"}' });
@@ -213,9 +217,9 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
   );
   assert.equal(planUpdatedLine([{ step: "Step 1", status: "completed" }]), "", "plan step body is suppressed in brief mode");
   lines = transcript.render(90).map(stripAnsi);
-  assert.deepEqual(lines, ["▷ You", "  Fix the build", "", "  ◉ edit src/a.js (+1 -1) · 3 tools"]);
+  assert.deepEqual(lines, ["▷ You", "  Fix the build", "", "  ◌ read → grep → edit src/a.js (+1 -1) · 3 tools"]);
 
-  // Assistant text breaks the streak; subsequent tools form a new single-line streak.
+  // Assistant text settles the preceding tool streak to ◉; subsequent tools form a new single-line streak.
   output.assistantAppend("Updated src/a.js, running tests now.");
   output.closeAssistant();
   output.beginTool({ tool_call_id: "t4", tool_name: "bash", args_preview: '{"command":"npm test"}' });
@@ -225,13 +229,16 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
     "▷ You",
     "  Fix the build",
     "",
-    "  ◉ edit src/a.js (+1 -1) · 3 tools",
+    "  ◉ read → grep → edit src/a.js (+1 -1) · 3 tools",
     "",
     "◁ Assistant",
     "  Updated src/a.js, running tests now.",
     "",
-    "  ◉ $ npm test · 800ms",
+    "  ◌ $ npm test · 800ms",
   ]);
+  output.settleTools();
+  lines = transcript.render(90).map(stripAnsi);
+  assert.deepEqual(lines.at(-1), "  ◉ $ npm test · 800ms", "settling at turn end transitions trailing tool group to ◉");
 
   // ctrl+o expands all grouped tools even in brief mode, and collapses back to 1 line.
   output.setToolsExpanded(true);
@@ -263,7 +270,7 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
     "▷ You",
     "  Inspect repo",
     "",
-    "  ◉ $ npm run lint exit 1 · 350ms · 2 tools · 1 failed",
+    "  ◉ glob → $ npm run lint exit 1 · 350ms · 2 tools · 1 failed",
     "",
     "─ Delivery · Delegated work settled: - worker · task 123 · delivered: done Summary: All checks c...",
   ]);

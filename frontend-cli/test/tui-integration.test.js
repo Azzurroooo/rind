@@ -496,6 +496,7 @@ test("event controller with implementation-style picked output bag still renders
     beginTool: (...args) => harness.output.beginTool(...args),
     updateToolProgress: (...args) => harness.output.updateToolProgress(...args),
     finishTool: (...args) => harness.output.finishTool(...args),
+    settleTools: () => harness.output.settleTools(),
     closeAssistant: () => harness.output.closeAssistant(),
     log: (text) => harness.output.log(text),
     redraw: () => harness.output.redraw(),
@@ -791,4 +792,96 @@ test("image system notices preserve the composer and cursor through repeat event
     assert.equal(editor.input(), "未发送 hello");
     assert.equal(cursor.x, cursorX);
   } finally { h.tui.stop(); }
+});
+
+test("brief mode E2E in headless terminal keeps ◌ with verb trail until assistant content or turn completion settles to ◉", async (t) => {
+  const { setBriefMode } = await import("../lib/cli-state-store.js");
+  setBriefMode(true);
+  t.after(() => setBriefMode(false));
+
+  const harness = createHarness({ columns: 80, rows: 16 });
+  harness.tui.start();
+  const pickedOutput = {
+    assistantAppend: harness.output.assistantAppend,
+    beginTool: (...args) => harness.output.beginTool(...args),
+    updateToolProgress: (...args) => harness.output.updateToolProgress(...args),
+    finishTool: (...args) => harness.output.finishTool(...args),
+    settleTools: () => harness.output.settleTools(),
+    closeAssistant: () => harness.output.closeAssistant(),
+    log: (text) => harness.output.log(text),
+    redraw: () => harness.output.redraw(),
+  };
+  const controller = createEventController({ output: pickedOutput });
+
+  try {
+    // 1. Two consecutive read_file calls + grep + edit_file
+    for (const [id, file] of [["r1", "a.js"], ["r2", "b.js"]]) {
+      await controller.handle({ kind: "event", event: {
+        type: "tool_requested", tool_name: "read_file", tool_call_id: id,
+        args_preview: JSON.stringify({ path: file }),
+      } });
+      await controller.handle({ kind: "event", event: {
+        type: "tool_result", tool_name: "read_file", tool_call_id: id,
+        status: "completed", result: JSON.stringify({ ok: true, data: "content" }),
+      } });
+    }
+    await controller.handle({ kind: "event", event: {
+      type: "tool_requested", tool_name: "grep", tool_call_id: "g1",
+      args_preview: JSON.stringify({ pattern: "build", path: "src" }),
+    } });
+    await controller.handle({ kind: "event", event: {
+      type: "tool_result", tool_name: "grep", tool_call_id: "g1",
+      status: "completed", result: JSON.stringify({ ok: true, data: [], meta: { count: 1 } }),
+    } });
+    await controller.handle({ kind: "event", event: {
+      type: "file_change", tool_call_id: "e1",
+      lines: [{ kind: "removed", text: "old" }, { kind: "added", text: "new" }],
+    } });
+    await controller.handle({ kind: "event", event: {
+      type: "tool_requested", tool_name: "edit_file", tool_call_id: "e1",
+      args_preview: JSON.stringify({ path: "src/a.js" }),
+    } });
+    await controller.handle({ kind: "event", event: {
+      type: "tool_result", tool_name: "edit_file", tool_call_id: "e1",
+      status: "completed", result: JSON.stringify({ ok: true, data: "edited" }),
+    } });
+    await settle(harness.virtual);
+
+    // Before assistant content prints, the terminal line MUST show ◌ (never ◉) with the collapsed verb trail.
+    let viewport = harness.virtual.getViewport().join("\n");
+    assert.match(viewport, /◌ read ×2 → grep → edit src\/a\.js \(\+1 -1\) · 4 tools/);
+    assert.doesNotMatch(viewport, /◉/);
+
+    // 2. Streaming assistant content settles the tool group to ◉ in place on the terminal screen.
+    await controller.handle({ kind: "event", event: {
+      type: "assistant_delta", text: "Applied fix and running verification.\n",
+    } });
+    await settle(harness.virtual);
+    viewport = harness.virtual.getViewport().join("\n");
+    assert.match(viewport, /◉ read ×2 → grep → edit src\/a\.js \(\+1 -1\) · 4 tools/);
+    assert.match(viewport, /Applied fix and running verification\./);
+
+    // 3. A trailing tool call at the end of the turn stays ◌ after tool_result, then settles to ◉ on turn_completed.
+    await controller.handle({ kind: "event", event: {
+      type: "tool_requested", tool_name: "bash", tool_call_id: "b1",
+      args_preview: JSON.stringify({ command: "npm test" }),
+    } });
+    await controller.handle({ kind: "event", event: {
+      type: "tool_result", tool_name: "bash", tool_call_id: "b1",
+      status: "completed", duration_ms: 420,
+      result: JSON.stringify({ ok: true, data: { stdout: "PASS\n", stderr: "", exit_code: 0 } }),
+    } });
+    await settle(harness.virtual);
+    viewport = harness.virtual.getViewport().join("\n");
+    assert.match(viewport, /◌ \$ npm test · 420ms/);
+
+    await controller.handle({ kind: "event", event: {
+      type: "turn_completed", duration_ms: 1500,
+    } });
+    await settle(harness.virtual);
+    viewport = harness.virtual.getViewport().join("\n");
+    assert.match(viewport, /◉ \$ npm test · 420ms/);
+  } finally {
+    harness.tui.stop();
+  }
 });

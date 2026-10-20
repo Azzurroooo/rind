@@ -52,6 +52,7 @@ export function createTurnController({
       await request(runtimeMethods.sessionPrompt, { input: text, ...extra });
       requestSucceeded = true;
     } finally {
+      output.settleTools?.();
       output.closeAssistant();
       output.refreshInputState();
       if (!requestSucceeded) {
@@ -65,6 +66,7 @@ export function createTurnController({
   function interrupt() {
     state.interruptRequested = true;
     output.cancelInput();
+    output.settleTools?.();
     output.closeAssistant();
     output.logInterrupt();
     output.refreshInputState();
