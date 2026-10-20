@@ -198,28 +198,38 @@ function gateway() {
         ? await enrichSessionReplayParams(String(params.session_id || ""), params)
         : params
       try {
-        const result = await requestRuntime(method, nextParams)
-        if (method === "session/list" && result && typeof result === "object") {
+        if (method === "session/list") {
           const overview = await projectStore().overview().catch(() => null)
-          const registeredWorkspaces = (overview?.projects || [])
-            .filter((item) => item.available)
-            .map((item) => item.path)
-          const rawSessions = Array.isArray((result as Record<string, unknown>).sessions)
-            ? ((result as Record<string, unknown>).sessions as Array<Record<string, unknown>>)
-            : []
-          const filteredSessions = params.workspace_root
-            ? rawSessions
-            : rawSessions.filter((s) => {
-                const ws = typeof s?.workspace_root === "string" ? s.workspace_root.trim() : ""
-                return Boolean(ws && registeredWorkspaces.some((reg) => samePath(reg, ws)))
-              })
+          const availableProjects = (overview?.projects || []).filter((item) => item.available)
+          const registeredWorkspaces = availableProjects.map((item) => item.path)
+          const requestedWs = typeof params.workspace_root === "string" ? params.workspace_root.trim() : ""
+          const matchedProject = requestedWs
+            ? availableProjects.find((item) => samePath(item.path, requestedWs))
+            : (overview?.activeProjectPath
+                ? availableProjects.find((item) => samePath(item.path, overview.activeProjectPath))
+                : undefined) || availableProjects[0]
+          if (!matchedProject) {
+            return { sessions: [], workspaces: registeredWorkspaces }
+          }
+          const result = await requestRuntime(method, {
+            ...nextParams,
+            workspace_root: matchedProject.path,
+          })
+          const rawSessions =
+            result && typeof result === "object" && Array.isArray((result as Record<string, unknown>).sessions)
+              ? ((result as Record<string, unknown>).sessions as Array<Record<string, unknown>>)
+              : []
+          const filteredSessions = rawSessions.filter((s) => {
+            const ws = typeof s?.workspace_root === "string" ? s.workspace_root.trim() : ""
+            return Boolean(ws && samePath(ws, matchedProject.path))
+          })
           return {
-            ...(result as Record<string, unknown>),
+            ...(result && typeof result === "object" ? (result as Record<string, unknown>) : {}),
             sessions: filteredSessions,
             workspaces: registeredWorkspaces,
           }
         }
-        return result
+        return await requestRuntime(method, nextParams)
       } catch (error: any) {
         if (error?.name === "TurnNotActive" || error?.name === "QuestionNotFound") {
           const forwarded = await forwardControlToSharedRuntimeIfNeeded(method, nextParams)

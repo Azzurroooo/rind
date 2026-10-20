@@ -1,5 +1,6 @@
 import { methods, sessionIdOf } from "../methods.js";
 import { exportConversation, writePreference } from "../lib/sessionPreferences.js";
+import { normalizePathKey } from "../lib/agentsModel.js";
 import { normalizeModelList } from "../lib/models.js";
 import { SESSION_LIMIT_MAX, SESSION_PAGE, errorText } from "./constants.js";
 import { applyInteractions, rememberInteraction } from "../lib/sessionActivity.js";
@@ -10,13 +11,41 @@ export function createSessionActions(ctx) {
   const { refs, endpoint, coalescer, dispatchConversation } = ctx;
   const call = () => ctx.call.current;
 
-  async function refreshSessions(workspace = ctx.selectedWorkspace || ctx.info.workspace_root, { limit = ctx.sessionLimit } = {}) {
+  function resolveSelectedWorkspace(explicitWorkspace) {
+    const hasHostWorkspaces = Array.isArray(refs.info.current?.workspaces);
+    if (hasHostWorkspaces) {
+      const hostWorkspaces = refs.info.current.workspaces;
+      const candidate = String(
+        explicitWorkspace ?? refs.workspace.current ?? ctx.selectedWorkspace ?? "",
+      ).trim();
+      const matched = candidate
+        ? hostWorkspaces.find((w) => normalizePathKey(w) === normalizePathKey(candidate))
+        : "";
+      return matched || hostWorkspaces[0] || "";
+    }
+    return String(
+      explicitWorkspace ??
+        refs.workspace.current ??
+        ctx.selectedWorkspace ??
+        refs.info.current.workspace_root ??
+        "",
+    ).trim();
+  }
+
+  async function refreshSessions(workspace, { limit = ctx.sessionLimit } = {}) {
     const client = refs.client.current;
     if (!client) return;
+    const hasHostWorkspaces = Array.isArray(refs.info.current?.workspaces);
+    const targetWs = resolveSelectedWorkspace(workspace);
+    if (hasHostWorkspaces && !targetWs) {
+      ctx.setSessions([]);
+      ctx.setHasMoreSessions(false);
+      return;
+    }
     const run = refs.connectionRun.current;
     const requestId = ++refs.listRequest.current;
     try {
-      const params = workspace ? { limit, workspace_root: workspace } : { limit };
+      const params = targetWs ? { limit, workspace_root: targetWs } : { limit };
       const result = await client.request(methods.sessionList, params);
       if (run !== refs.connectionRun.current || requestId !== refs.listRequest.current) return;
       if (Array.isArray(result?.workspaces)) {
@@ -26,9 +55,16 @@ export function createSessionActions(ctx) {
           refs.info.current = { ...refs.info.current, workspaces: nextWorkspaces };
         }
       }
-      const list = Array.isArray(result?.sessions) ? result.sessions : [];
+      const rawList = Array.isArray(result?.sessions) ? result.sessions : [];
+      const targetKey = normalizePathKey(targetWs);
+      const list = targetKey
+        ? rawList.filter((s) => {
+            const ws = String(s?.workspace_root || s?.workspaceRoot || "").trim();
+            return !ws || normalizePathKey(ws) === targetKey;
+          })
+        : rawList;
       ctx.setSessions(applyInteractions(list, client.url || endpoint));
-      ctx.setHasMoreSessions(list.length >= limit && limit < SESSION_LIMIT_MAX);
+      ctx.setHasMoreSessions(rawList.length >= limit && limit < SESSION_LIMIT_MAX);
       void syncSubscriptions(list);
     } catch {
       // Session list refresh is advisory; keep the current list on failure.
@@ -38,7 +74,7 @@ export function createSessionActions(ctx) {
   async function loadMoreSessions() {
     const next = Math.min(SESSION_LIMIT_MAX, ctx.sessionLimit + SESSION_PAGE);
     ctx.setSessionLimit(next);
-    await refreshSessions(refs.workspace.current || refs.info.current.workspace_root, { limit: next });
+    await refreshSessions(undefined, { limit: next });
   }
 
   // Listed sessions plus the current one are subscribed so unread dots and
@@ -172,16 +208,28 @@ export function createSessionActions(ctx) {
       const base = refs.info.current;
       const sessionModel = String(switched?.model || replay?.model || base.model || base.default_model || refs.currentModel.current || "").trim();
       const sessionEffort = String(switched?.reasoning_effort || replay?.reasoning_effort || base.reasoning_effort || "").trim();
+      const sessionName = typeof switched?.name === "string" ? switched.name : (typeof replay?.name === "string" ? replay.name : "");
+      const sessionTitleText = typeof switched?.title === "string" ? switched.title : (typeof replay?.title === "string" ? replay.title : "");
       ctx.setInfo((current) => ({
         ...current,
         ...(switched || {}),
         session_id: target,
+        name: sessionName,
+        title: sessionTitleText,
         workspace_root: workspace || current.workspace_root,
         model: sessionModel || current.model || current.default_model || "",
         reasoning_effort: sessionEffort || current.reasoning_effort || "",
       }));
       ctx.setCurrentModel(sessionModel);
-      refs.info.current = { ...refs.info.current, ...switched, session_id: target, workspace_root: workspace, model: sessionModel };
+      refs.info.current = {
+        ...refs.info.current,
+        ...switched,
+        session_id: target,
+        name: sessionName,
+        title: sessionTitleText,
+        workspace_root: workspace,
+        model: sessionModel,
+      };
       writePreference(`session:${client.url || endpoint}`, target);
       if (previousId !== target) ctx.setInput(refs.drafts.current[target] || "");
       void refreshModels(target);
@@ -191,8 +239,9 @@ export function createSessionActions(ctx) {
       const canSelectWorkspace =
         !options?.preserveSelectedWorkspace &&
         Boolean(workspace) &&
-        (!hasRegisteredList || registeredList.includes(workspace));
+        (!hasRegisteredList || registeredList.some((w) => normalizePathKey(w) === normalizePathKey(workspace)));
       if (canSelectWorkspace) {
+        refs.workspace.current = workspace;
         ctx.setSelectedWorkspace(workspace);
         ctx.setWorkspaceDraft(workspace);
       }
@@ -250,7 +299,15 @@ export function createSessionActions(ctx) {
     try {
       const result = await refs.client.current.request(methods.sessionList, { limit, workspace_root: workspace });
       if (run !== refs.connectionRun.current || requestId !== refs.listRequest.current) return;
-      const nextSessions = Array.isArray(result?.sessions) ? result.sessions : [];
+      const rawSessions = Array.isArray(result?.sessions) ? result.sessions : [];
+      const workspaceKey = normalizePathKey(workspace);
+      const nextSessions = workspaceKey
+        ? rawSessions.filter((s) => {
+            const ws = String(s?.workspace_root || s?.workspaceRoot || "").trim();
+            return !ws || normalizePathKey(ws) === workspaceKey;
+          })
+        : rawSessions;
+      refs.workspace.current = workspace;
       ctx.setSelectedWorkspace(workspace);
       ctx.setWorkspaceDraft(workspace);
       if (Array.isArray(result?.workspaces)) {
@@ -285,10 +342,10 @@ export function createSessionActions(ctx) {
   function clearActiveSession(workspace) {
     ++refs.sessionLoad.current;
     saveDraft(refs.info.current.session_id);
-    refs.info.current = { ...refs.info.current, session_id: "", workspace_root: workspace };
+    refs.info.current = { ...refs.info.current, session_id: "", name: "", title: "", workspace_root: workspace };
     ctx.setInput("");
     ctx.setContextSnapshot(null);
-    ctx.setInfo((current) => ({ ...current, session_id: "", turn_state: null, live_turn: null, workspace_root: workspace }));
+    ctx.setInfo((current) => ({ ...current, session_id: "", name: "", title: "", turn_state: null, live_turn: null, workspace_root: workspace }));
     dispatchConversation({ kind: "reset" });
     void refreshModels("");
   }

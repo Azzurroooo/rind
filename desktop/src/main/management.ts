@@ -168,12 +168,12 @@ async function readSessionIndexEntries(rindHome: string): Promise<Array<Record<s
       .filter(([, value]) => value && typeof value === "object")
       .map(([id, value]: [string, any]) => ({
         session_id: String(value.id || value.session_id || id),
-        title: String(value.title || ""),
+        title: String(value.name || value.title || ""),
         updated_at: String(value.updated_at || value.created_at || ""),
         workspace_root: String(value.workspace_root || ""),
         message_count: Number(value.message_count || 0),
         last_model: String(value.last_model || ""),
-        last_user_message: String(value.last_user_message || ""),
+        last_user_message: String(value.last_user_message || value.preview || ""),
       }))
   } catch {
     return []
@@ -250,13 +250,33 @@ async function listManagedSessionsLocal(params: Record<string, unknown> = {}) {
         (live && Number(live.windows || 0) > 0) ||
           (record && connected.has(String(record.id || ""))),
       )
+      const linkedTask = record?.taskId
+        ? snapshot.tasks.find((t) => t.id === record.taskId)
+        : undefined
+      const resolvedAgentName = isManager
+        ? "Manager"
+        : String(agent?.name || agent?.displayName || "Member")
+      const rawTitle = String(item.title || item.last_user_message || linkedTask?.brief || "").trim()
+      const cleanTitle =
+        rawTitle &&
+        rawTitle !== runtimeSessionId &&
+        rawTitle.toLowerCase() !== "new conversation" &&
+        rawTitle.toLowerCase() !== "untitled"
+          ? rawTitle
+          : ""
       return {
         runtimeSessionId,
-        title: String(item.title || item.last_user_message || runtimeSessionId),
+        title:
+          cleanTitle ||
+          (record?.origin === "delegation"
+            ? "Delegated conversation"
+            : record?.origin === "task"
+              ? "Task conversation"
+              : `${resolvedAgentName} conversation`),
         updatedAt: String(item.updated_at || record?.updatedAt || ""),
         workspaceRoot: String(item.workspace_root || agent?.canonicalWorkspace || managerWorkspace || ""),
         agentId: String(agent?.id || ""),
-        agentName: isManager ? "Manager" : String(agent?.displayName || ""),
+        agentName: resolvedAgentName,
         teamId: String(team?.id || record?.teamId || ""),
         teamName: String(team?.name || ""),
         roleTitle: isManager ? "Manager" : String(membership?.roleTitle || ""),

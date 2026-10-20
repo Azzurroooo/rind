@@ -348,7 +348,12 @@ function uniquePaths(paths: string[]) {
 }
 
 export function samePath(left: string, right: string) {
-  return process.platform === "win32" ? left.toLocaleLowerCase() === right.toLocaleLowerCase() : left === right
+  if (process.platform === "win32") {
+    const cleanLeft = left.trim().replace(/[\\/]+/g, "\\").replace(/\\+$/, "")
+    const cleanRight = right.trim().replace(/[\\/]+/g, "\\").replace(/\\+$/, "")
+    return cleanLeft.toLocaleLowerCase() === cleanRight.toLocaleLowerCase()
+  }
+  return left.trim().replace(/\/+$/, "") === right.trim().replace(/\/+$/, "")
 }
 
 async function isDirectory(path: string) {

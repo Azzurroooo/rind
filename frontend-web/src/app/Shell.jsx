@@ -47,6 +47,17 @@ export function Shell() {
   const drawerOpen = layout.narrow && Boolean(layout.drawer);
   const isChatSurface = agents.surface.kind === "chat";
 
+  const activeMemberSessions = useMemo(() => {
+    if (agents.activeSessionContext?.kind !== "member") return [];
+    const teamSum = agents.teamSummaries?.find(
+      (s) => s.team.id === agents.activeSessionContext.teamId,
+    );
+    const member = teamSum?.members?.find(
+      (m) => m.agentId === agents.activeSessionContext.agentId,
+    );
+    return member?.sessions || [];
+  }, [agents.activeSessionContext, agents.teamSummaries]);
+
   const activeHeaderTitle =
     agents.surface.kind === "inbox"
       ? "Inbox"
@@ -58,18 +69,14 @@ export function Shell() {
             ? "Background & Runtime"
             : agents.surface.kind === "team"
               ? agents.currentTeamSummary?.team?.name || "Team"
-              : sessionTitle(ctx.sessions, sessionId);
-
-  const activeMemberSessions = useMemo(() => {
-    if (agents.activeSessionContext?.kind !== "member") return [];
-    const teamSum = agents.teamSummaries?.find(
-      (s) => s.team.id === agents.activeSessionContext.teamId,
-    );
-    const member = teamSum?.members?.find(
-      (m) => m.agentId === agents.activeSessionContext.agentId,
-    );
-    return member?.sessions || [];
-  }, [agents.activeSessionContext, agents.teamSummaries]);
+              : sessionTitle(ctx.sessions, sessionId, info.name || info.title, {
+                  agentContext: agents.activeSessionContext,
+                  agentSessions:
+                    agents.activeSessionContext?.kind === "manager"
+                      ? agents.managerSummary?.sessions
+                      : activeMemberSessions,
+                  messages: view.messages,
+                });
 
   function guardedFork(beforeMessageId) {
     void actions.forkSession(sessionId, beforeMessageId || "");

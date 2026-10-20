@@ -25,7 +25,11 @@ import { ConfirmDialog } from "../overlays/ConfirmDialog.jsx";
 import { Menu } from "../overlays/Menu.jsx";
 import { ProjectSelector } from "./ProjectSelector.jsx";
 import { SessionRow } from "./SessionRow.jsx";
-import { buildTeamSummary } from "../../lib/agentsModel.js";
+import {
+  buildTeamSummary,
+  isManagedAgentWorkspace,
+  normalizePathKey,
+} from "../../lib/agentsModel.js";
 import { interactionTime } from "../../lib/sessionActivity.js";
 import { sessionIdOf } from "../../methods.js";
 
@@ -94,17 +98,36 @@ export function Sidebar({
     }
   }, [activeMemberId]);
 
+  const activeWorkspace = useMemo(() => {
+    if (!project) return "";
+    const raw = String(project.workspace || "").trim();
+    if (project.allowCustomFolder === false) {
+      const paths = [...new Set((project.workspaces || []).map((w) => String(w || "").trim()).filter(Boolean))];
+      const matched = raw ? paths.find((p) => normalizePathKey(p) === normalizePathKey(raw)) : "";
+      return matched || paths[0] || "";
+    }
+    return raw;
+  }, [project]);
+
   const recent = useMemo(() => {
+    if (!activeWorkspace) return [];
+    const activeKey = normalizePathKey(activeWorkspace);
+    const workspaceScoped = sessions.filter((session) => {
+      const ws = String(session?.workspace_root || session?.workspaceRoot || "").trim();
+      if (!ws) return true;
+      if (isManagedAgentWorkspace(ws, agents?.snapshot)) return false;
+      return normalizePathKey(ws) === activeKey;
+    });
     const needle = search.trim().toLowerCase();
     const list = needle
-      ? sessions.filter((session) =>
+      ? workspaceScoped.filter((session) =>
           String(session.title || session.preview || sessionIdOf(session))
             .toLowerCase()
             .includes(needle),
         )
-      : sessions;
+      : workspaceScoped;
     return [...list].sort((a, b) => interactionTime(b) - interactionTime(a));
-  }, [sessions, search]);
+  }, [sessions, search, activeWorkspace, agents?.snapshot]);
 
   const teamSummaries = useMemo(() => {
     if (Array.isArray(agents?.teamSummaries) && agents.teamSummaries.length > 0) {
@@ -823,9 +846,9 @@ export function Sidebar({
             <button
               type="button"
               className="sidebar-new"
-              title={project?.workspace ? `New session in ${project.workspace}` : undefined}
+              title={activeWorkspace ? `New session in ${activeWorkspace}` : undefined}
               onClick={onNew}
-              disabled={!project?.workspace}
+              disabled={!activeWorkspace}
             >
               <SquarePen size={16} aria-hidden="true" />
               <span>New session</span>

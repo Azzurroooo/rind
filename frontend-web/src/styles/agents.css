@@ -659,7 +659,7 @@
   background: var(--surface);
   color: var(--text);
   font-size: var(--text-meta);
-  line-height: 1;
+  line-height: 1.35;
   white-space: nowrap;
 }
 .header-agent-pill svg {
@@ -677,6 +677,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.35;
+  padding-bottom: 1px;
 }
 button.header-agent-pill:hover {
   background: var(--fill-1);
@@ -2128,14 +2130,19 @@ button.header-agent-pill:hover {
     flex: 1 0 100%;
     width: 100%;
     max-width: 100%;
-    flex-wrap: wrap;
-    gap: 6px;
+    flex-wrap: nowrap;
+    gap: 5px;
     padding-top: 6px;
     border-top: 1px solid var(--line);
   }
   .chat-header.has-agent-context .header-agent-pill.member {
-    flex: 0 1 auto;
-    max-width: min(220px, 100%);
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+  }
+  .chat-header.has-agent-context .header-agent-pill.subtle {
+    flex: 0 0 auto;
+    padding: 0 8px;
   }
 
   .agent-surface-topbar {

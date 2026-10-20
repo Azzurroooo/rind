@@ -127,6 +127,15 @@ function getLiveRuntimeId(item) {
   return String(item?.id || item?.runtimeSessionId || item?.sessionId || "");
 }
 
+function cleanAgentSessionTitle(value, runtimeSessionId = "") {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (runtimeSessionId && text === runtimeSessionId) return "";
+  const lower = text.toLowerCase();
+  if (lower === "new conversation" || lower === "untitled") return "";
+  return text;
+}
+
 /**
  * Merges saved session history (`listSessions({ teamId })`) with live runtime
  * state (`snapshot.sessions` + `snapshot.live`), matching `teamSessions` in CLI.
@@ -165,18 +174,23 @@ export function mergeTeamSessions(rawSnapshot, teamId, historyEntries = []) {
         ? "Working"
         : computeSessionStatus(session, liveItem, connected);
       const updatedAt = String(liveItem?.updatedAt || saved?.updatedAt || session?.createdAt || "");
+      const resolvedAgentName = String(agent?.name || saved?.agentName || agentId || "Member");
       const title = String(
-        saved?.title ||
-          liveItem?.title ||
-          task?.brief ||
-          (session?.origin === "delegation" ? "Delegated conversation" : "New conversation"),
+        cleanAgentSessionTitle(saved?.title, runtimeSessionId) ||
+          cleanAgentSessionTitle(liveItem?.title, runtimeSessionId) ||
+          cleanAgentSessionTitle(task?.brief, runtimeSessionId) ||
+          (session?.origin === "delegation"
+            ? "Delegated conversation"
+            : session?.origin === "task"
+              ? "Task conversation"
+              : `${resolvedAgentName} conversation`),
       );
       return {
         runtimeSessionId,
         sessionId: session?.id ? String(session.id) : "",
         teamId: String(teamId || saved?.teamId || session?.teamId || ""),
         agentId,
-        agentName: String(agent?.name || saved?.agentName || agentId || "Member"),
+        agentName: resolvedAgentName,
         taskId,
         taskBrief: task ? String(task.brief || "") : "",
         origin: String(session?.origin || (taskId ? "task" : "direct")),
@@ -249,7 +263,11 @@ export function mergeManagerSessions(rawSnapshot, historyEntries = []) {
       runtimeSessionId,
       sessionId: session?.id ? String(session.id) : "",
       manager: true,
-      title: String(saved?.title || liveItem?.title || "Manager conversation"),
+      title: String(
+        cleanAgentSessionTitle(saved?.title, runtimeSessionId) ||
+          cleanAgentSessionTitle(liveItem?.title, runtimeSessionId) ||
+          "Manager conversation",
+      ),
       updatedAt,
       ageText: formatRelativeAge(updatedAt),
       model: String(liveItem?.model || saved?.model || ""),
@@ -996,7 +1014,7 @@ export function activeBackgroundCount(rawSnapshot) {
   return runningNow.length + unconfirmedRuns.length;
 }
 
-function normalizePathKey(value) {
+export function normalizePathKey(value) {
   return String(value || "").trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 

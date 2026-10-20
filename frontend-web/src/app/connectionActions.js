@@ -85,7 +85,7 @@ export function createConnectionActions(ctx) {
     }
 
     if (event.type === "folder_defaults_changed") {
-      void call().refreshSessions(refs.workspace.current || refs.info.current.workspace_root);
+      void call().refreshSessions();
       return;
     }
 
@@ -118,7 +118,7 @@ export function createConnectionActions(ctx) {
       // Only when the tab is hidden AND permission was granted explicitly.
       showNotification({ title: "Rind reply ready", body: truncateFirstLine(finalAssistantText(refs.conv.current)) });
       // A brand-new session lands in the index after its first turn.
-      void call().refreshSessions(refs.workspace.current || refs.info.current.workspace_root);
+      void call().refreshSessions();
       void call().refreshContext();
     }
     if (event.type === "context_compacted") void call().refreshContext();
@@ -260,6 +260,7 @@ export function createConnectionActions(ctx) {
       if (hasHostWorkspaces) {
         ctx.setWorkspaces(hostWorkspaces);
       }
+      refs.workspace.current = workspace;
       ctx.setSelectedWorkspace(workspace);
       ctx.setWorkspaceDraft(workspace);
       if (previous && previous !== currentId) {
@@ -267,7 +268,7 @@ export function createConnectionActions(ctx) {
         catch (error) { if (error.type === "SessionNotFound" && currentId) await call().loadSession(currentId, true, true); else throw error; }
       } else if (currentId) await call().loadSession(currentId, true, true);
       if (run !== refs.connectionRun.current) return;
-      await call().refreshSessions(workspace || refs.info.current.workspace_root);
+      await call().refreshSessions(refs.workspace.current || workspace);
       if (run !== refs.connectionRun.current) return;
       if (!hasHostWorkspaces) {
         const allSessions = await client.request(methods.sessionList, { limit: SESSION_LIMIT_MAX });
