@@ -675,26 +675,25 @@ export function modelMenuText(items, selectedIndex = 0) {
   return `${lines.join("\n")}\n`;
 }
 
-export function themeMenuText(items, selectedIndex = 0) {
-  const visible = menuWindow(items, selectedIndex);
-  if (!visible.items.length) {
-    return "";
-  }
-  const lines = [dim("  Theme deck")];
-  const labelWidth = Math.max(12, ...items.map((item) => visibleLength(clipSingleLine(item?.label || item?.name, 24))));
-  for (const [index, item] of visible.items.entries()) {
-    const active = index === visible.activeIndex;
-    const marker = active ? accent("›") : dim("·");
-    const label = padRight(clipSingleLine(item?.label || item?.name, 24), labelWidth);
-    const name = active ? bold(label) : dim(label);
-    const suffix = item?.current ? dim("current") : "";
-    lines.push(`  ${marker} ${name}  ${flavorSwatch(item?.name)}${suffix ? `  ${suffix}` : ""}`);
-  }
-  lines.push(dim("    ↑↓ select · enter use · esc cancel"));
-  return `${lines.join("\n")}\n`;
-}
-
 export function settingsMenuText(items, selectedIndex = 0, level = "root") {
+  if (level === "theme") {
+    const visible = menuWindow(items, selectedIndex);
+    if (!visible.items.length) {
+      return "";
+    }
+    const lines = [dim("  Settings · Theme")];
+    const labelWidth = Math.max(12, ...items.map((item) => visibleLength(clipSingleLine(item?.label || item?.name, 24))));
+    for (const [index, item] of visible.items.entries()) {
+      const active = index === visible.activeIndex;
+      const marker = active ? accent("›") : dim("·");
+      const label = padRight(clipSingleLine(item?.label || item?.name, 24), labelWidth);
+      const name = active ? bold(label) : dim(label);
+      const suffix = item?.current ? dim("current") : "";
+      lines.push(`  ${marker} ${name}  ${flavorSwatch(item?.name)}${suffix ? `  ${suffix}` : ""}`);
+    }
+    lines.push(dim("    ↑↓ select · enter apply · esc back"));
+    return `${lines.join("\n")}\n`;
+  }
   if (level === "import") {
     const labelWidth = Math.max(16, ...items.map((item) => visibleLength(item.label)));
     const lines = [dim("  Settings · Import skills into this conversation")];
@@ -1530,7 +1529,7 @@ function slashThemeText(display) {
     lines.push(`  ${marker} ${isCurrent ? bold(label) : dim(label)}  ${flavorSwatch(flavor.name)}${tag}`);
   }
   lines.push("");
-  lines.push(dim(`  /theme <${themeNames().join(" | ")}>`));
+  lines.push(dim(`  /settings theme <${themeNames().join(" | ")}>`));
   return lines.join("\n");
 }
 

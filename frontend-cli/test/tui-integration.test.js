@@ -886,8 +886,9 @@ test("brief mode E2E in headless terminal keeps ◌ with verb trail until assist
   }
 });
 
-test("/settings two-level menu E2E in headless terminal configures brief output and skill imports", async (t) => {
+test("/settings two-level menu E2E in headless terminal configures brief output, theme, and skill imports", async (t) => {
   const { isBriefMode, setBriefMode } = await import("../lib/cli-state-store.js");
+  const { currentTheme, resetTheme } = await import("../lib/theme.js");
   const { createCliInputActions } = await import("../lib/cli-input-actions.js");
   const { createCliRuntimeController } = await import("../lib/cli-runtime-controller.js");
   const { createCommandController } = await import("../lib/command-controller.js");
@@ -896,7 +897,11 @@ test("/settings two-level menu E2E in headless terminal configures brief output 
   const { runtimeMethods: methods, sessionScopedMethods, turnScopedMethods } = await import("../lib/runtime-protocol.js");
 
   setBriefMode(false);
-  t.after(() => setBriefMode(false));
+  resetTheme();
+  t.after(() => {
+    setBriefMode(false);
+    resetTheme();
+  });
 
   const virtual = createVirtualOutput({ columns: 96, rows: 22 });
   const input = createVirtualInput();
@@ -984,6 +989,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output 
     askSettingsMenu: (...args) => inputActions.askSettingsMenu(...args),
     getBriefMode: () => isBriefMode(),
     onBriefChange: (enabled) => commandController.handle(`/settings brief ${enabled ? "on" : "off"}`),
+    onThemeChange: (name) => commandController.handle(`/settings theme ${name}`),
     askChoice: (...args) => inputActions.askChoice(...args),
     askSessionMenu: async () => null,
     askForkPointMenu: async () => null,
@@ -1004,7 +1010,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output 
       runSettingsSelector: runtimeController.runSettingsSelector,
       runLocalCommand: async (text) => {
         const res = await executeLocalSlashCommand(text, {});
-        if (res?.display?.type === "brief" && res.display.changed) {
+        if ((res?.display?.type === "brief" || res?.display?.type === "theme") && res.display.changed) {
           output.replayAll();
         }
         return res;
@@ -1046,6 +1052,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output 
     let screen = virtual.getViewport().join("\n");
     assert.match(screen, /\/settings/);
     assert.match(screen, /› Brief output .* off/);
+    assert.match(screen, /· Theme .* ›/);
     assert.match(screen, /· Skill imports .* 1 of 2 on ›/);
 
     // 2. Toggle Brief output ON with Space
@@ -1054,7 +1061,8 @@ test("/settings two-level menu E2E in headless terminal configures brief output 
     screen = virtual.getViewport().join("\n");
     assert.match(screen, /› Brief output .* on/);
 
-    // 3. Navigate down to Skill imports and press Enter to open Level 2 submenu
+    // 3. Navigate down past Theme to Skill imports and press Enter to open Level 2 submenu
+    inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\r");
     await settle(virtual);
@@ -1087,6 +1095,22 @@ test("/settings two-level menu E2E in headless terminal configures brief output 
     assert.match(screen, /◉ read → read b\.js · 2 tools/, "existing tool group collapsed via live replay");
     assert.match(screen, /Brief output enabled\./);
     assert.match(screen, /Skill imports updated\./);
+
+    // 7. Open /settings theme directly, select Dracula (Down + Enter), and verify theme update
+    const themeDone = commandController.handle("/settings theme");
+    await settle(virtual);
+    screen = virtual.getViewport().join("\n");
+    assert.match(screen, /\/settings theme/);
+    assert.match(screen, /Settings · Theme/);
+    assert.match(screen, /› Frappé\s+████████\s+current/);
+    inputActions.handleTerminalInput("\x1b[B");
+    await settle(virtual);
+    assert.match(virtual.getViewport().join("\n"), /› Dracula\s+████████/);
+    inputActions.handleTerminalInput("\r");
+    await themeDone;
+    await settle(virtual);
+    assert.equal(currentTheme().name, "dracula");
+    assert.match(virtual.getViewport().join("\n"), /Theme · frappe → dracula/);
   } finally {
     tui.stop();
   }

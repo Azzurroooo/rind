@@ -1,7 +1,6 @@
 import { createLineEditor } from "./line-editor.js";
 import { createChoiceMenuState } from "./choice-menu-state.js";
 import { createModelMenuState } from "./model-menu-state.js";
-import { createThemeMenuState } from "./theme-menu-state.js";
 import { createSettingsMenuState } from "./settings-menu-state.js";
 import { createQuestionMenuState } from "./question-menu-state.js";
 import { createSlashMenuState } from "./slash-menu-state.js";
@@ -346,10 +345,6 @@ export function createCliInputActions({
       handleChoiceDialogInput(session, event);
       return;
     }
-    if (session.mode === "theme") {
-      handleThemeInput(session, event);
-      return;
-    }
     if (session.mode === "settings") {
       handleSettingsInput(session, event);
       return;
@@ -418,7 +413,7 @@ export function createCliInputActions({
       return;
     }
     const session = state.input.session;
-    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "settings" || session.mode === "sessions" || session.mode === "fork" || session.mode === "context-board") {
+    if (!session || session.mode === "model" || session.mode === "settings" || session.mode === "sessions" || session.mode === "fork" || session.mode === "context-board") {
       return;
     }
     if (session.mode === "question" && !session.questionState.isEditing()) {
@@ -446,39 +441,14 @@ export function createCliInputActions({
     if (!modified && session.modelState.handleKey(key)) output.redraw();
   }
 
-  function askThemeMenu() {
-    return new Promise((resolve) => {
-      const themeState = createThemeMenuState();
-      if (!themeState.items().length) {
-        resolve("");
-        return;
-      }
-      const session = { mode: "theme", inputText: "/theme", themeState, resolve };
-      state.input.session = session;
-      state.input.active = true;
-      cancelActiveInput = () => completeTtyInput(session, "", false);
-      output.redraw(true);
-    });
-  }
-
-  function handleThemeInput(session, key) {
-    const modified = key.ctrl || key.alt || key.shift;
-    if (!modified && (key.name === "enter" || key.name === "return")) {
-      const theme = session.themeState.selectedTheme()?.name || "";
-      completeTtyInput(session, theme, Boolean(theme), "", theme ? `/theme ${theme}` : "");
-      return;
-    }
-    if (!modified && key.name === "escape") {
-      completeTtyInput(session, "", false);
-      return;
-    }
-    if (!modified && session.themeState.handleKey(key)) output.redraw();
-  }
-
   function askSettingsMenu({ brief = false, sources = [], initialLevel = "root" } = {}) {
     return new Promise((resolve) => {
       const settingsState = createSettingsMenuState({ brief, sources, initialLevel });
-      const inputText = initialLevel === "import" ? "/settings import" : "/settings";
+      const inputText = initialLevel === "theme"
+        ? "/settings theme"
+        : initialLevel === "import"
+          ? "/settings import"
+          : "/settings";
       const session = { mode: "settings", inputText, settingsState, resolve };
       state.input.session = session;
       state.input.active = true;
@@ -812,7 +782,6 @@ export function createCliInputActions({
     dispatchExternal,
     askModelMenu,
     askEffortMenu,
-    askThemeMenu,
     askSettingsMenu,
     askSessionMenu,
     askForkPointMenu,

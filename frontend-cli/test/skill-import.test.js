@@ -1,6 +1,7 @@
-// /settings: a two-level menu for global brief output and conversation skill
-// imports. Before the first message the window keeps the skill import choice;
-// afterwards it is applied only once the prompt-cache cost is accepted.
+// /settings: a two-level menu for global brief output, color theme, and
+// conversation skill imports. Before the first message the window keeps the
+// skill import choice; afterwards it is applied only once the prompt-cache
+// cost is accepted.
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -9,6 +10,7 @@ import { createCliState } from "../lib/cli-state.js";
 import { settingsMenuText } from "../lib/rendering.js";
 import { runtimeMethods as methods } from "../lib/runtime-protocol.js";
 import { createSettingsMenuState } from "../lib/settings-menu-state.js";
+import { resetTheme, setTheme } from "../lib/theme.js";
 
 const SOURCES = [
   { id: "claude_user", label: "Claude · user", paths: ["/home/u/.claude/skills"], count: 1, enabled: true },
@@ -19,7 +21,7 @@ const SOURCES = [
 
 function harness({
   sessionId = "s1",
-  selected = { brief: false, briefChanged: false, importChoices: { claude_user: false } },
+  selected = { brief: false, briefChanged: false, theme: "frappe", themeChanged: false, importChoices: { claude_user: false } },
   answer = "Apply · change the skills and break the cache",
 } = {}) {
   const state = createCliState();
@@ -28,6 +30,7 @@ function harness({
   const questions = [];
   const logs = [];
   const briefUpdates = [];
+  const themeUpdates = [];
   const client = {
     child: {},
     start() {},
@@ -48,15 +51,17 @@ function harness({
     askSettingsMenu: async () => selected,
     getBriefMode: () => false,
     onBriefChange: async (enabled) => { briefUpdates.push(enabled); },
+    onThemeChange: async (name) => { themeUpdates.push(name); },
     askChoice: async (question) => { questions.push(question); return answer; },
     askSessionMenu: async () => null, askForkPointMenu: async () => null, restoreLiveTurn() {}, clearPendingInputs() {},
     closeAssistant() {}, refreshInputState() {}, updateGoalState() {}, log: value => logs.push(typeof value === "function" ? value() : value),
     writeError() {}, redraw() {},
   });
-  return { state, controller, commands, questions, logs, briefUpdates };
+  return { state, controller, commands, questions, logs, briefUpdates, themeUpdates };
 }
 
-test("two-level /settings menu navigates between root settings and the skill imports submenu", () => {
+test("two-level /settings menu navigates between root settings, theme submenu, and skill imports submenu", () => {
+  resetTheme();
   const menu = createSettingsMenuState({ brief: false, sources: SOURCES });
   assert.equal(menu.level(), "root");
   assert.equal(menu.changed(), false);
@@ -66,9 +71,24 @@ test("two-level /settings menu navigates between root settings and the skill imp
   assert.equal(menu.briefChanged(), true);
   assert.equal(menu.value().brief, true);
 
-  // Move to Skill imports and enter Level 2 submenu
+  // Move to Theme and enter Level 2 theme submenu
   assert.equal(menu.handleKey({ name: "down" }), "redraw");
   assert.equal(menu.selectedIndex(), 1);
+  assert.equal(menu.handleKey({ name: "enter" }), "redraw");
+  assert.equal(menu.level(), "theme");
+  assert.equal(menu.selectedIndex(), 1, "defaults to active frappe theme");
+  assert.equal(menu.selectedTheme().name, "frappe");
+  assert.equal(menu.handleKey({ name: "down" }), "redraw");
+  assert.equal(menu.selectedTheme().name, "dracula");
+  // Esc in theme submenu reverts uncommitted theme selection and returns to root
+  assert.equal(menu.handleKey({ name: "escape" }), "redraw");
+  assert.equal(menu.level(), "root");
+  assert.equal(menu.selectedIndex(), 1);
+  assert.equal(menu.themeChanged(), false);
+
+  // Move to Skill imports and enter Level 2 submenu
+  assert.equal(menu.handleKey({ name: "down" }), "redraw");
+  assert.equal(menu.selectedIndex(), 2);
   assert.equal(menu.handleKey({ name: "enter" }), "redraw");
   assert.equal(menu.level(), "import");
   assert.equal(menu.selectedIndex(), 0);
@@ -84,7 +104,7 @@ test("two-level /settings menu navigates between root settings and the skill imp
   // Esc in Level 2 reverts uncommitted submenu edits and returns to Level 1
   assert.equal(menu.handleKey({ name: "escape" }), "redraw");
   assert.equal(menu.level(), "root");
-  assert.equal(menu.selectedIndex(), 1);
+  assert.equal(menu.selectedIndex(), 2);
   assert.deepEqual(menu.importChoices(), {});
   assert.equal(menu.briefChanged(), true, "root brief toggle remains pending until submitted or cancelled");
 
@@ -96,18 +116,48 @@ test("two-level /settings menu navigates between root settings and the skill imp
   assert.deepEqual(menu.value(), {
     brief: true,
     briefChanged: true,
+    theme: "frappe",
+    themeChanged: false,
     importChoices: { claude_user: false },
   });
 });
 
-test("settingsMenuText renders both the root deck and the skill imports submenu", () => {
+test("theme submenu in /settings follows active theme and wraps at edges", () => {
+  resetTheme();
+  setTheme("everforest-dark-medium");
+  const menu = createSettingsMenuState({ initialLevel: "theme" });
+  assert.equal(menu.level(), "theme");
+  assert.equal(menu.selectedTheme().name, "everforest-dark-medium");
+  assert.equal(menu.handleKey({ name: "down" }), "redraw");
+  assert.equal(menu.selectedTheme().name, "pistachio");
+  assert.equal(menu.handleKey({ name: "down" }), "redraw");
+  assert.equal(menu.selectedTheme().name, "latte");
+  assert.equal(menu.handleKey({ name: "up" }), "redraw");
+  assert.equal(menu.selectedTheme().name, "pistachio");
+  assert.equal(menu.handleKey({ name: "enter" }), "submit");
+  assert.equal(menu.value().theme, "pistachio");
+  assert.equal(menu.value().themeChanged, true);
+  resetTheme();
+});
+
+test("settingsMenuText renders root deck, theme submenu, and skill imports submenu", () => {
+  resetTheme();
   const menu = createSettingsMenuState({ brief: false, sources: SOURCES });
   const rootLines = settingsMenuText(menu.items(), menu.selectedIndex(), menu.level()).split("\n");
   assert.match(rootLines[0], /Settings$/);
   assert.match(rootLines[1], /› Brief output .* off .* Collapse consecutive tool calls into one live line/);
-  assert.match(rootLines[2], /· Skill imports .* 3 of 4 on › .* Choose the Claude and Codex skills this conversation reads/);
-  assert.match(rootLines[3], /space toggle · enter open\/apply · esc cancel/);
+  assert.match(rootLines[2], /· Theme .* Frappé › .* Switch the CLI color theme/);
+  assert.match(rootLines[3], /· Skill imports .* 3 of 4 on › .* Choose the Claude and Codex skills this conversation reads/);
+  assert.match(rootLines[4], /space toggle · enter open\/apply · esc cancel/);
 
+  menu.handleKey({ name: "down" });
+  menu.handleKey({ name: "enter" });
+  const themeLines = settingsMenuText(menu.items(), menu.selectedIndex(), menu.level()).replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+  assert.match(themeLines[0], /Settings · Theme/);
+  assert.match(themeLines[2], /› Frappé\s+████████\s+current/);
+  assert.match(themeLines.at(-2), /↑↓ select · enter apply · esc back/);
+
+  menu.handleKey({ name: "escape" });
   menu.handleKey({ name: "down" });
   menu.handleKey({ name: "enter" });
   const importLines = settingsMenuText(menu.items(), menu.selectedIndex(), menu.level()).split("\n");
@@ -120,10 +170,11 @@ test("settingsMenuText renders both the root deck and the skill imports submenu"
 
 test("in a conversation the change is applied after the cache cost is accepted", async () => {
   const h = harness({
-    selected: { brief: true, briefChanged: true, importChoices: { claude_user: false } },
+    selected: { brief: true, briefChanged: true, theme: "latte", themeChanged: true, importChoices: { claude_user: false } },
   });
   await h.controller.runSettingsSelector();
   assert.deepEqual(h.briefUpdates, [true]);
+  assert.deepEqual(h.themeUpdates, ["latte"]);
   assert.equal(h.questions.length, 1);
   assert.equal(h.questions[0].title, "Import skills");
   assert.match(h.questions[0].message, /^Applying breaks the prompt cache\./);

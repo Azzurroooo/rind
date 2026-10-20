@@ -106,29 +106,29 @@ test("flavor swatches render in the target flavor regardless of active theme", (
   resetTheme();
 });
 
-test("/theme command lists flavors and applies switches", async () => {
+test("/settings theme command lists flavors and applies switches", async () => {
   resetTheme();
   const context = {};
-  const listed = await executeLocalSlashCommand("/theme", context);
+  const listed = await executeLocalSlashCommand("/settings theme", context);
   assert.equal(listed.display.type, "theme");
   assert.equal(listed.display.changed, false);
   assert.equal(listed.display.flavors.length, 9);
 
-  const switched = await executeLocalSlashCommand("/theme dracula", context);
+  const switched = await executeLocalSlashCommand("/settings theme dracula", context);
   assert.equal(switched.display.changed, true);
   assert.equal(switched.display.previous, "frappe");
   assert.equal(currentTheme().name, "dracula");
 
-  const unknown = await executeLocalSlashCommand("/theme missing", context);
+  const unknown = await executeLocalSlashCommand("/settings theme missing", context);
   assert.match(unknown.text, /Unknown theme/);
   assert.equal(currentTheme().name, "dracula");
   resetTheme();
 });
 
-test("/theme persists only through the injected persistTheme hook", async () => {
+test("/settings theme persists only through the injected persistTheme hook", async () => {
   resetTheme();
   let persisted = null;
-  const switched = await executeLocalSlashCommand("/theme pistachio", {
+  const switched = await executeLocalSlashCommand("/settings theme pistachio", {
     persistTheme: (name) => {
       persisted = name;
     },
@@ -137,7 +137,7 @@ test("/theme persists only through the injected persistTheme hook", async () => 
   assert.equal(switched.display.changed, true);
   assert.deepEqual(currentTheme(), { name: "pistachio", label: "Pistachio" });
 
-  const bare = await executeLocalSlashCommand("/theme", {});
+  const bare = await executeLocalSlashCommand("/settings theme", {});
   assert.equal(bare.display.changed, false);
   resetTheme();
 });

@@ -50,7 +50,6 @@ import {
   choiceDialogFrame,
   authSecretFrame,
   modelMenuText,
-  themeMenuText,
   settingsMenuText,
   questionMenuFrame,
   sessionMenuText,
@@ -329,6 +328,7 @@ const runtimeController = createCliRuntimeController({
   askSettingsMenu: (...args) => inputActions.askSettingsMenu(...args),
   getBriefMode: () => isBriefMode(),
   onBriefChange: (enabled) => commandController.handle(`/settings brief ${enabled ? "on" : "off"}`),
+  onThemeChange: (name) => commandController.handle(`/settings theme ${name}`),
   askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
   askChoice: tui ? (...args) => inputActions.askChoice(...args) : null,
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
@@ -379,12 +379,6 @@ commandController = createCommandController({
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
     runLogin: (providerId) => runLogin(providerId),
     runLogout: (providerId) => runLogout(providerId),
-    runThemeSelector: async () => {
-      const selected = await inputActions.askThemeMenu();
-      if (selected) {
-        await commandController.handle(`/theme ${selected}`);
-      }
-    },
     runTour: (pageId) => enterInSessionTour(pageId),
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
@@ -858,7 +852,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   if (!session) {
     return null;
   }
-  const choiceMenu = ["model", "theme", "settings", "sessions", "fork", "choice-dialog"].includes(session.mode);
+  const choiceMenu = ["model", "settings", "sessions", "fork", "choice-dialog"].includes(session.mode);
   if (session.mode === "prompt" && session.menuState) {
     session.menuState.setInput(session.editor.input());
   }
@@ -908,15 +902,6 @@ function composeFrame(width = process.stdout.columns || 80) {
       cursor: { line: 0, column: 0 },
       menuText: frame.text.trimEnd(),
       menuCursor: frame.cursor,
-    };
-  }
-  if (session.mode === "theme") {
-    return {
-      showCaret,
-      prompt: mainPromptText(width),
-      inputText: session.inputText,
-      cursor: { line: 0, column: session.inputText.length },
-      menuText: themeMenuText(session.themeState.items(), session.themeState.selectedIndex()).trimEnd(),
     };
   }
   if (session.mode === "settings") {

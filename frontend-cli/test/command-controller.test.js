@@ -188,7 +188,6 @@ test("local command catalog stays complete before the runtime starts", async () 
     "settings",
     "skill",
     "status",
-    "theme",
     "tour",
   ]);
   for (const name of ["compact", "fork", "init", "sessions", "skill"]) {
@@ -249,7 +248,7 @@ test("/rename goes to the conversation, with the name taken as typed", async () 
   assert.equal(renamed.length, 4, "a different command is not /rename");
 });
 
-test("/settings routes to selector on a terminal, forwards /settings import args to runtime, and rejects legacy /brief and /import", async () => {
+test("/settings routes to selector on a terminal, forwards /settings import args to runtime, and rejects legacy /brief, /import, and /theme", async () => {
   const selectorCalls = [];
   const runtimeCalls = [];
   const logs = [];
@@ -268,15 +267,18 @@ test("/settings routes to selector on a terminal, forwards /settings import args
   });
 
   await controller.handle("/settings");
+  await controller.handle("/settings theme");
   await controller.handle("/settings import");
   await controller.handle("/settings import claude_user=on");
   await controller.handle("/brief");
   await controller.handle("/import");
+  await controller.handle("/theme");
 
-  assert.deepEqual(selectorCalls, ["root", "import"]);
+  assert.deepEqual(selectorCalls, ["root", "theme", "import"]);
   assert.deepEqual(runtimeCalls, [
     { method: "rind/command/execute", params: { input: "/import claude_user=on" } },
   ]);
-  assert.match(logs.at(-2), /Unknown command: \/brief/);
-  assert.match(logs.at(-1), /Unknown command: \/import/);
+  assert.match(logs.at(-3), /Unknown command: \/brief/);
+  assert.match(logs.at(-2), /Unknown command: \/import/);
+  assert.match(logs.at(-1), /Unknown command: \/theme/);
 });

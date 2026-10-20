@@ -1,7 +1,7 @@
 import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
 import { isBriefMode, setBriefMode } from "./cli-state-store.js";
 
-const SETTINGS_USAGE = "/settings [brief [on | off] | import [<source>=on|off ...]]";
+const SETTINGS_USAGE = "/settings [brief [on | off] | theme [<name>] | import [<source>=on|off ...]]";
 
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "compact", description: "Compact current session context", usage: "/compact" },
@@ -17,10 +17,9 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "model", description: "Show or change the active model", usage: "/model | /model set <model>" },
   { name: "rename", description: "Name this conversation (otherwise it is shown by its first message)", usage: "/rename <name> | /rename --reset" },
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
-  { name: "settings", description: "Configure brief output and skill imports", usage: SETTINGS_USAGE },
+  { name: "settings", description: "Configure brief output, color theme, and skill imports", usage: SETTINGS_USAGE },
   { name: "skill", description: "List skills and where they come from", usage: "/skill" },
   { name: "status", description: "Show session and provider status", usage: "/status" },
-  { name: "theme", description: "Switch the CLI color theme", usage: `/theme [${themeNames().join(" | ")}]` },
   { name: "tour", description: "Interactive feature walkthrough", usage: "/tour [page]" },
 ]);
 
@@ -34,7 +33,6 @@ export async function executeLocalSlashCommand(input, context = {}) {
     return statusResult(context, argument);
   }
   if (name === "help") return helpResult(argument, context.commands || []);
-  if (name === "theme") return themeResult(argument, context);
   if (name === "settings") return settingsResult(argument, context);
   if (name === "model" && !argument && !context.interactive) return { text: `Model: ${currentModelLabel(context)}` };
   return null;
@@ -128,6 +126,10 @@ function settingsResult(argument, context = {}) {
   }
   const section = parts[0].toLowerCase();
   if (section === "import") return null;
+  if (section === "theme") {
+    if (parts.length > 2) return usageResult(SETTINGS_USAGE);
+    return themeResult(parts[1] || "", context);
+  }
   if (section !== "brief" || parts.length > 2) {
     return usageResult(SETTINGS_USAGE);
   }

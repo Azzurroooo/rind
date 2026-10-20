@@ -26,16 +26,16 @@ export function createCommandController({
       return false;
     }
     const { name, arg } = parseSlashInput(text);
-    if (name === "theme" && !arg && input.isTerminal && input.runThemeSelector) {
-      await input.runThemeSelector();
-      return true;
-    }
     if (name === "settings") {
       const subMatch = arg.match(/^([^\s]+)(?:\s+([\s\S]*))?$/);
       const sub = subMatch ? subMatch[1].toLowerCase() : "";
       const subArg = subMatch ? String(subMatch[2] || "").trim() : "";
       if (!sub && input.isTerminal && input.runSettingsSelector) {
         await input.runSettingsSelector();
+        return true;
+      }
+      if (sub === "theme" && !subArg && input.isTerminal && input.runSettingsSelector) {
+        await input.runSettingsSelector("theme");
         return true;
       }
       if (sub === "import") {
@@ -91,7 +91,7 @@ export function createCommandController({
   }
 
   async function runSlashCommand(text, name, arg) {
-    if (name === "import" || name === "brief") {
+    if (name === "import" || name === "brief" || name === "theme") {
       output.log?.(`Unknown command: /${name}\nRun /help to see available commands.`);
       return;
     }

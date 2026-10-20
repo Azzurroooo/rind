@@ -43,7 +43,7 @@ import {
   welcomeText,
   resumeLineText,
   taskMonitorTabs,
-  themeMenuText,
+  settingsMenuText,
   toolRequestedLine,
   toolResultLine,
   toolStartedLine,
@@ -779,18 +779,18 @@ test("prompt shows background task count after cwd with monitor hint", () => {
   assert.match(text, /m1 · E:\\project · \[bg:2\] \(ctrl\+b monitor\)/);
 });
 
-test("themeMenuText renders flavor swatches with current marker", () => {
-  const text = themeMenuText([
+test("settingsMenuText theme submenu renders flavor swatches with current marker", () => {
+  const text = settingsMenuText([
     { name: "latte", label: "Latte", current: false },
     { name: "catppuccin-mocha", label: "Catppuccin Mocha", current: true },
     { name: "everforest-dark-medium", label: "Everforest Dark Medium", current: false },
-  ], 1);
+  ], 1, "theme");
   const plain = text.replace(/\x1b\[[0-9;]*m/g, "");
-  assert.match(plain, /Theme deck/);
+  assert.match(plain, /Settings · Theme/);
   assert.match(plain, /· Latte/);
   assert.match(plain, /› Catppuccin Mocha\s+████████\s+current/);
   assert.match(plain, /· Everforest Dark Medium\s+████████/);
-  assert.match(plain, /enter use · esc cancel/);
+  assert.match(plain, /enter apply · esc back/);
 });
 
 test("task monitor header directs background work without obsolete delegate tabs", () => {

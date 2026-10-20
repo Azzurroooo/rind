@@ -42,7 +42,7 @@ export const modelPages = [
   },
   {
     id: "model.theme",
-    feature: "/theme",
+    feature: "/settings theme",
     title: "Themes",
     steps: [
       note([
@@ -51,11 +51,11 @@ export const modelPages = [
       ]),
       shell("rind"),
       startup(demoInfo({ session: "20260917_103001_eff01a23" })),
-      type("/theme"),
+      type("/settings theme"),
       submit(),
       menu({
         kind: "theme",
-        input: "/theme",
+        input: "/settings theme",
         items: themeOptions(),
         selected: 3,
         target: 0,
@@ -78,7 +78,7 @@ export const modelPages = [
       }),
       note([
         "This demo previews Latte without saving it. Your original theme returns when you leave this page.",
-        "Try /theme to choose and save a palette. /theme pistachio brings the website's colors to dark terminals.",
+        "Try /settings to choose and save a palette. Pistachio brings the website's colors to dark terminals.",
       ]),
     ],
   },

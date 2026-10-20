@@ -10,8 +10,8 @@ import {
   promptPlaceholderText,
   promptText,
   sessionMenuText,
+  settingsMenuText,
   slashMenuText,
-  themeMenuText,
   taskMonitorTabs,
   usageBoardText,
 } from "../rendering.js";
@@ -335,7 +335,7 @@ function menuFrame(menu, inner) {
     case "model":
       return { text: modelMenuText(menu.items, selected) };
     case "theme":
-      return { text: themeMenuText(menu.items, selected) };
+      return { text: settingsMenuText(menu.items, selected, "theme") };
     case "sessions":
       return { text: sessionMenuText(menu.items, selected) };
     case "choice":

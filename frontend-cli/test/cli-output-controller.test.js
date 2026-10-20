@@ -186,7 +186,13 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
   assert.match(toggledMenu, /› Brief output .* on/);
   actions.handleTerminalInput("\r");
   const chosen = await menuPromise;
-  assert.deepEqual(chosen, { brief: true, briefChanged: true, importChoices: {} });
+  assert.deepEqual(chosen, {
+    brief: true,
+    briefChanged: true,
+    theme: "frappe",
+    themeChanged: false,
+    importChoices: {},
+  });
   assert.deepEqual(transcript.render(90).map(stripAnsi), ["▷ You", "  /settings"]);
   output.clearTranscript();
 

@@ -1,19 +1,41 @@
+import { themeOptions } from "./theme.js";
+
 // Two-level /settings menu state:
-// - Root level: "Brief output" (global toggle) and "Skill imports" (submenu).
-// - Submenu level ("import"): Claude and Codex skill layers checklist.
+// - Root level: "Brief output" (global toggle), "Theme" (submenu), and "Skill imports" (submenu).
+// - "theme" submenu: CLI color theme selector with live swatches.
+// - "import" submenu: Claude and Codex skill layers checklist.
 export function createSettingsMenuState({ brief = false, sources = [], initialLevel = "root" } = {}) {
   const initialBrief = Boolean(brief);
   let briefEnabled = initialBrief;
+
+  const themeItems = themeOptions().map((item) => ({ ...item }));
+  const initialThemeIndex = Math.max(0, themeItems.findIndex((item) => item.current));
+  const initialTheme = themeItems[initialThemeIndex]?.name || "";
+  let chosenTheme = initialTheme;
+  let themeIndex = initialThemeIndex;
+
   const importItems = (Array.isArray(sources) ? sources : []).map((source) => ({
     ...source,
     chosen: Boolean(source.enabled),
   }));
-  let level = initialLevel === "import" && importItems.length ? "import" : "root";
-  let rootIndex = level === "import" ? 1 : 0;
+
+  let level = "root";
+  let rootIndex = 0;
+  if (initialLevel === "theme" && themeItems.length) {
+    level = "theme";
+    rootIndex = 1;
+  } else if (initialLevel === "import" && importItems.length) {
+    level = "import";
+    rootIndex = 2;
+  }
   let importIndex = 0;
 
   function briefChanged() {
     return briefEnabled !== initialBrief;
+  }
+
+  function themeChanged() {
+    return Boolean(chosenTheme && chosenTheme !== initialTheme);
   }
 
   function importChanged() {
@@ -21,7 +43,7 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
   }
 
   function changed() {
-    return briefChanged() || importChanged();
+    return briefChanged() || themeChanged() || importChanged();
   }
 
   function importChoices() {
@@ -37,6 +59,8 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
     const importValue = importItems.length
       ? `${enabledCount} of ${importItems.length} on ›`
       : "none";
+    const themeLabel = themeItems.find((item) => item.name === chosenTheme)?.label || chosenTheme || "default";
+    const themeValue = `${themeLabel} ›`;
     return [
       {
         id: "brief",
@@ -44,6 +68,13 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
         value: briefEnabled ? "on" : "off",
         enabled: briefEnabled,
         description: "Collapse consecutive tool calls into one live line",
+      },
+      {
+        id: "theme",
+        label: "Theme",
+        value: themeValue,
+        submenu: true,
+        description: "Switch the CLI color theme",
       },
       {
         id: "import",
@@ -56,12 +87,13 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
   }
 
   function handleRootKey(key) {
+    const count = 3;
     if (key?.name === "up") {
-      rootIndex = (rootIndex - 1 + 2) % 2;
+      rootIndex = (rootIndex - 1 + count) % count;
       return "redraw";
     }
     if (key?.name === "down") {
-      rootIndex = (rootIndex + 1) % 2;
+      rootIndex = (rootIndex + 1) % count;
       return "redraw";
     }
     if (key?.name === "escape") {
@@ -79,6 +111,17 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
       }
       return null;
     }
+    if (rootIndex === 1) {
+      if (key?.name === "enter" || key?.name === "return" || key?.text === " " || key?.name === "right") {
+        if (themeItems.length) {
+          level = "theme";
+          themeIndex = Math.max(0, themeItems.findIndex((item) => item.name === chosenTheme));
+          return "redraw";
+        }
+        return changed() ? "submit" : "cancel";
+      }
+      return null;
+    }
     if (key?.name === "enter" || key?.name === "return" || key?.text === " " || key?.name === "right") {
       if (importItems.length) {
         level = "import";
@@ -86,6 +129,39 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
         return "redraw";
       }
       return changed() ? "submit" : "cancel";
+    }
+    return null;
+  }
+
+  function handleThemeKey(key) {
+    if (!themeItems.length) {
+      level = "root";
+      return "redraw";
+    }
+    if (key?.name === "up") {
+      themeIndex = (themeIndex - 1 + themeItems.length) % themeItems.length;
+      return "redraw";
+    }
+    if (key?.name === "down") {
+      themeIndex = (themeIndex + 1) % themeItems.length;
+      return "redraw";
+    }
+    if (key?.name === "escape" || key?.name === "left" || key?.name === "backspace") {
+      themeIndex = Math.max(0, themeItems.findIndex((item) => item.name === chosenTheme));
+      level = "root";
+      rootIndex = 1;
+      return "redraw";
+    }
+    if (key?.name === "enter" || key?.name === "return") {
+      const picked = themeItems[themeIndex]?.name || initialTheme;
+      chosenTheme = picked;
+      for (const item of themeItems) {
+        item.current = item.name === chosenTheme;
+      }
+      if (changed()) return "submit";
+      level = "root";
+      rootIndex = 1;
+      return "redraw";
     }
     return null;
   }
@@ -112,13 +188,13 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
         item.chosen = Boolean(item.enabled);
       }
       level = "root";
-      rootIndex = 1;
+      rootIndex = 2;
       return "redraw";
     }
     if (key?.name === "enter" || key?.name === "return") {
       if (changed()) return "submit";
       level = "root";
-      rootIndex = 1;
+      rootIndex = 2;
       return "redraw";
     }
     return null;
@@ -126,19 +202,25 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
 
   return {
     level: () => level,
-    items: () => (level === "import" ? importItems : rootItems()),
-    selectedIndex: () => (level === "import" ? importIndex : rootIndex),
+    items: () => (level === "theme" ? themeItems : level === "import" ? importItems : rootItems()),
+    selectedIndex: () => (level === "theme" ? themeIndex : level === "import" ? importIndex : rootIndex),
+    selectedTheme: () => themeItems[themeIndex] || null,
     briefChanged,
+    themeChanged,
     importChanged,
     changed,
     importChoices,
     value: () => ({
       brief: briefEnabled,
       briefChanged: briefChanged(),
+      theme: chosenTheme,
+      themeChanged: themeChanged(),
       importChoices: importChoices(),
     }),
     handleKey(key) {
-      return level === "import" ? handleImportKey(key) : handleRootKey(key);
+      if (level === "theme") return handleThemeKey(key);
+      if (level === "import") return handleImportKey(key);
+      return handleRootKey(key);
     },
   };
 }

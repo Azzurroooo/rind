@@ -34,10 +34,11 @@ test("local status renders session and provider state", async () => {
   });
 });
 
-test("config, brief, and import are no longer standalone local slash commands", async () => {
+test("config, brief, import, and theme are no longer standalone local slash commands", async () => {
   assert.equal(await executeLocalSlashCommand("/config", {}), null);
   assert.equal(await executeLocalSlashCommand("/brief", {}), null);
   assert.equal(await executeLocalSlashCommand("/import", {}), null);
+  assert.equal(await executeLocalSlashCommand("/theme", {}), null);
 });
 
 test("/settings brief reads and updates global brief output mode", async (t) => {

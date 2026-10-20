@@ -40,10 +40,9 @@ English | [简体中文](cheatsheet.zh-CN.md)
 | `/context` | 上下文组成与用量面板 |
 | `/goal [pause \| resume \| clear \| <目标>]` | 持久目标 |
 | `/skill` | Skill 列表、来源与加载问题 |
-| `/settings` | 配置全局精简输出与对话读取哪些 Claude 和 Codex Skill |
+| `/settings` | 配置全局精简输出、配色主题，以及对话读取哪些 Claude 和 Codex Skill |
 | `/init [project\|user]` | 起草 RIND.md |
 | `/status` | 会话与连接状态 |
-| `/theme [name]` | 切换配色 |
 | `/tour [page]` | 交互式功能导览 |
 | `/exit`（`/quit`） | 退出 |
 

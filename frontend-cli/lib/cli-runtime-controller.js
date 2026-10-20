@@ -17,6 +17,7 @@ export function createCliRuntimeController({
   askSettingsMenu,
   getBriefMode = () => false,
   onBriefChange = null,
+  onThemeChange = null,
   askEffortMenu = null,
   // A yes/no menu, or null without a terminal UI (a script is never asked).
   askChoice = null,
@@ -583,7 +584,7 @@ export function createCliRuntimeController({
     log(() => modelSetResultText({ provider_id: state.session.info.provider, model_id: model }, model));
   }
 
-  // /settings: configures global brief output and conversation skill imports.
+  // /settings: configures global brief output, color theme, and conversation skill imports.
   // Before the first message the window keeps the skill import choice; afterwards
   // the conversation changes only once breaking its prompt cache is accepted.
   async function runSettingsSelector(initialLevel = "root") {
@@ -607,6 +608,9 @@ export function createCliRuntimeController({
     if (!selected || state.runtime.status === "closing") return;
     if (selected.briefChanged) {
       await onBriefChange?.(Boolean(selected.brief));
+    }
+    if (selected.themeChanged && selected.theme) {
+      await onThemeChange?.(String(selected.theme));
     }
     const choices = selected.importChoices;
     if (!choices || !Object.keys(choices).length) return;
