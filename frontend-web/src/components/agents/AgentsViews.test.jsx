@@ -83,7 +83,7 @@ describe("Native Multi-Agent Views", () => {
       content: "# Org Spec\nClean hierarchy.",
     }));
 
-    const { rerender } = render(
+    const { container, rerender } = render(
       <TeamView
         teamSummary={summary}
         teamTasks={tasks}
@@ -95,15 +95,23 @@ describe("Native Multi-Agent Views", () => {
       />,
     );
 
-    // Organization tree defaults to minimalist flow mode (leader and direct report compact until clicked)
+    // Organization tree defaults to minimalist flow mode (leader and direct report compact until clicked, no chevron icon)
     expect(getOrgViewMode()).toBe("minimal");
     expect(screen.getByRole("button", { name: /^Flow$/i }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("alpha-lead")).not.toBeNull();
     expect(screen.getByText("ui-specialist")).not.toBeNull();
-    expect(screen.queryByText("Reports to alpha-lead")).toBeNull();
+    expect(container.querySelector(".org-flow-node-chevron")).toBeNull();
+    const uiNode = container.querySelector('[data-flow-node="a-2"]');
+    const uiCollapse = uiNode?.querySelector(".org-flow-node-collapse");
+    expect(uiNode?.classList.contains("is-expanded")).toBe(false);
+    expect(uiCollapse?.classList.contains("is-open")).toBe(false);
+    expect(uiCollapse?.getAttribute("aria-hidden")).toBe("true");
 
-    // Clicking a minimalist member node inflates it to show reporting line & actions
+    // Clicking a minimalist member node smoothly inflates it to show reporting line & actions
     fireEvent.click(screen.getByText("ui-specialist"));
+    expect(uiNode?.classList.contains("is-expanded")).toBe(true);
+    expect(uiCollapse?.classList.contains("is-open")).toBe(true);
+    expect(uiCollapse?.getAttribute("aria-hidden")).toBe("false");
     expect(screen.getByText("Reports to alpha-lead")).not.toBeNull();
 
     // One-click switch to detailed Cards view updates global orgViewMode

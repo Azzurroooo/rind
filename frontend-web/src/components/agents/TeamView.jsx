@@ -495,9 +495,6 @@ function OrgMemberNode({
                     <span>Leader</span>
                   </span>
                 )}
-                <span className="org-flow-node-chevron" aria-hidden="true">
-                  {isNodeExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                </span>
               </div>
               <div className="org-flow-node-subrow">
                 <span className="org-role-pill">{node.position}</span>
@@ -510,90 +507,109 @@ function OrgMemberNode({
                 {node.status && node.status !== "Idle" && (
                   <span className={`agent-status-pill tone-${node.tone}`}>{node.status}</span>
                 )}
-                {!isNodeExpanded && memberSessions.length > 0 && (
-                  <span className="org-flow-mini-stat" title={`${memberSessions.length} conversation(s)`}>
+                {memberSessions.length > 0 && (
+                  <span
+                    className="org-flow-mini-stat"
+                    title={`${memberSessions.length} conversation(s)`}
+                    aria-hidden={isNodeExpanded}
+                  >
                     <MessageSquare size={10} aria-hidden="true" />
                     <span>{memberSessions.length}</span>
                   </span>
                 )}
-                {!isNodeExpanded && node.taskCounts.attention > 0 && (
-                  <span className="org-flow-mini-stat attention">!{node.taskCounts.attention}</span>
+                {node.taskCounts.attention > 0 && (
+                  <span className="org-flow-mini-stat attention" aria-hidden={isNodeExpanded}>
+                    !{node.taskCounts.attention}
+                  </span>
                 )}
               </div>
-              {!isNodeExpanded && node.activeTask && (
-                <div className="org-flow-mini-task" title={node.activeTask.brief}>
-                  <span className="org-flow-mini-task-dot" />
-                  <span className="org-flow-mini-task-text">{node.activeTask.brief}</span>
+              {node.activeTask && (
+                <div
+                  className={`org-flow-mini-task-collapse${isNodeExpanded ? " is-hidden" : ""}`}
+                  aria-hidden={isNodeExpanded}
+                >
+                  <div className="org-flow-mini-task-collapse-inner">
+                    <div className="org-flow-mini-task" title={node.activeTask.brief}>
+                      <span className="org-flow-mini-task-dot" />
+                      <span className="org-flow-mini-task-text">{node.activeTask.brief}</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </button>
 
-            {isNodeExpanded && (
-              <div className="org-flow-node-body">
-                {(node.reportsToName || node.responsibility) && (
-                  <div className="org-member-sub">
-                    {node.reportsToName && <span>Reports to {node.reportsToName}</span>}
-                    {node.reportsToName && node.responsibility && <span>·</span>}
-                    {node.responsibility && <span>{node.responsibility}</span>}
+            <div
+              className={`org-flow-node-collapse${isNodeExpanded ? " is-open" : ""}`}
+              aria-hidden={!isNodeExpanded}
+              inert={!isNodeExpanded ? "" : undefined}
+            >
+              <div className="org-flow-node-collapse-inner">
+                <div className="org-flow-node-body">
+                  {(node.reportsToName || node.responsibility) && (
+                    <div className="org-member-sub">
+                      {node.reportsToName && <span>Reports to {node.reportsToName}</span>}
+                      {node.reportsToName && node.responsibility && <span>·</span>}
+                      {node.responsibility && <span>{node.responsibility}</span>}
+                    </div>
+                  )}
+
+                  <div className="org-flow-node-actions">
+                    <button
+                      type="button"
+                      className="agent-btn primary sm"
+                      disabled={busy}
+                      onClick={() =>
+                        onOpenChat?.({
+                          teamId: node.teamId,
+                          agentId: node.agentId,
+                          runtimeSessionId: node.latestRuntimeSessionId,
+                          resumeLatest: true,
+                        })
+                      }
+                    >
+                      <MessageSquare size={13} aria-hidden="true" />
+                      <span>Chat</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="agent-btn secondary sm"
+                      disabled={busy}
+                      onClick={() => onQuickAssign?.(node.agentId)}
+                    >
+                      <Plus size={12} aria-hidden="true" />
+                      <span>Assign</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="agent-btn ghost sm"
+                      disabled={busy}
+                      onClick={() => onQuickAddReport?.(node.agentId)}
+                      title="Add direct report"
+                    >
+                      <UserPlus size={12} aria-hidden="true" />
+                      <span>Report</span>
+                    </button>
+                    <Menu
+                      label={`Actions for ${node.name}`}
+                      items={memberMenuItems}
+                      trigger={(props) => (
+                        <button
+                          type="button"
+                          className="icon-button small"
+                          aria-label={`Actions for ${node.name}`}
+                          title="Member actions"
+                          {...props}
+                        >
+                          <MoreHorizontal size={14} aria-hidden="true" />
+                        </button>
+                      )}
+                    />
                   </div>
-                )}
 
-                <div className="org-flow-node-actions">
-                  <button
-                    type="button"
-                    className="agent-btn primary sm"
-                    disabled={busy}
-                    onClick={() =>
-                      onOpenChat?.({
-                        teamId: node.teamId,
-                        agentId: node.agentId,
-                        runtimeSessionId: node.latestRuntimeSessionId,
-                        resumeLatest: true,
-                      })
-                    }
-                  >
-                    <MessageSquare size={13} aria-hidden="true" />
-                    <span>Chat</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="agent-btn secondary sm"
-                    disabled={busy}
-                    onClick={() => onQuickAssign?.(node.agentId)}
-                  >
-                    <Plus size={12} aria-hidden="true" />
-                    <span>Assign</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="agent-btn ghost sm"
-                    disabled={busy}
-                    onClick={() => onQuickAddReport?.(node.agentId)}
-                    title="Add direct report"
-                  >
-                    <UserPlus size={12} aria-hidden="true" />
-                    <span>Report</span>
-                  </button>
-                  <Menu
-                    label={`Actions for ${node.name}`}
-                    items={memberMenuItems}
-                    trigger={(props) => (
-                      <button
-                        type="button"
-                        className="icon-button small"
-                        aria-label={`Actions for ${node.name}`}
-                        title="Member actions"
-                        {...props}
-                      >
-                        <MoreHorizontal size={14} aria-hidden="true" />
-                      </button>
-                    )}
-                  />
+                  {detailsBody}
                 </div>
-
-                {detailsBody}
               </div>
-            )}
+            </div>
           </div>
           {hasChildren && <span className="org-flow-port out" aria-hidden="true" />}
         </div>

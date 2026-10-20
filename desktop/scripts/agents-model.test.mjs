@@ -436,6 +436,8 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
   })
   assert.match(memberMenuOpenOrgHtml, /org-flow-canvas/)
   assert.match(memberMenuOpenOrgHtml, /org-flow-node org-member-card menu-open/)
+  assert.match(memberMenuOpenOrgHtml, /org-flow-node-collapse is-open/)
+  assert.doesNotMatch(memberMenuOpenOrgHtml, /org-flow-node-chevron/)
   assert.match(memberMenuOpenOrgHtml, /project-menu-wrap menu-open/)
   assert.doesNotMatch(memberMenuOpenOrgHtml, /Make leader/)
   assert.doesNotMatch(memberMenuOpenOrgHtml, /data-agent-make-leader/)

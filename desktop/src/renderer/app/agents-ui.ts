@@ -856,12 +856,74 @@ export function bindAgentsEvents(): () => void {
     const toggleFlowNodeBtn = target.closest<HTMLElement>("[data-org-toggle-flow-node]")
     if (toggleFlowNodeBtn?.dataset.orgToggleFlowNode) {
       const agentId = toggleFlowNodeBtn.dataset.orgToggleFlowNode
+      const hadMenuOpen = Boolean(state.agentItemMenuKey)
       state.agentItemMenuKey = ""
-      if (state.expandedFlowNodes.has(agentId) || state.expandedOrgMembers.has(agentId)) {
+      const wasExpanded = state.expandedFlowNodes.has(agentId) || state.expandedOrgMembers.has(agentId)
+      const nextExpanded = !wasExpanded
+      if (wasExpanded) {
         state.expandedFlowNodes.delete(agentId)
         state.expandedOrgMembers.delete(agentId)
       } else {
         state.expandedFlowNodes.add(agentId)
+      }
+
+      const branchEl = toggleFlowNodeBtn.closest<HTMLElement>(".org-flow-branch")
+      const nodeEl = toggleFlowNodeBtn.closest<HTMLElement>(".org-flow-node")
+      const collapseEl = nodeEl?.querySelector<HTMLElement>(":scope > .org-flow-node-collapse")
+      const miniTaskCollapseEl = toggleFlowNodeBtn.querySelector<HTMLElement>(".org-flow-mini-task-collapse")
+      const miniStats = toggleFlowNodeBtn.querySelectorAll<HTMLElement>(".org-flow-mini-stat")
+      if (branchEl && nodeEl && collapseEl && !hadMenuOpen && state.agentSurface.kind === "team") {
+        branchEl.classList.toggle("is-node-expanded", nextExpanded)
+        nodeEl.classList.toggle("is-expanded", nextExpanded)
+        toggleFlowNodeBtn.setAttribute("aria-expanded", String(nextExpanded))
+        collapseEl.classList.toggle("is-open", nextExpanded)
+        collapseEl.setAttribute("aria-hidden", String(!nextExpanded))
+        if (nextExpanded) {
+          collapseEl.removeAttribute("inert")
+        } else {
+          collapseEl.setAttribute("inert", "")
+        }
+        if (miniTaskCollapseEl) {
+          miniTaskCollapseEl.classList.toggle("is-hidden", nextExpanded)
+          miniTaskCollapseEl.setAttribute("aria-hidden", String(nextExpanded))
+        }
+        for (const stat of miniStats) {
+          stat.setAttribute("aria-hidden", String(nextExpanded))
+        }
+        if (!nextExpanded) {
+          const sessToggle = collapseEl.querySelector<HTMLElement>("[data-org-toggle-member-sessions]")
+          const sessCollapse = collapseEl.querySelector<HTMLElement>(".org-member-sessions-collapse")
+          const newSessBtn = collapseEl.querySelector<HTMLElement>(".org-flow-sessions-new-btn")
+          if (sessToggle) {
+            sessToggle.setAttribute("aria-expanded", "false")
+            const arrow = sessToggle.querySelector("span:first-child")
+            if (arrow) arrow.textContent = "▸"
+          }
+          if (newSessBtn) {
+            newSessBtn.hidden = true
+          }
+          if (sessCollapse) {
+            sessCollapse.classList.remove("is-open")
+            sessCollapse.setAttribute("aria-hidden", "true")
+            sessCollapse.setAttribute("inert", "")
+          }
+        }
+        lastSurfaceHtml = renderTeamSurfaceHtml({
+          snapshot: state.agentsSnapshot,
+          surface: state.agentSurface,
+          teamSessions: state.teamSessionsByTeam[state.agentSurface.teamId] || [],
+          orgViewMode: state.orgViewMode,
+          expandedFlowNodes: state.expandedFlowNodes,
+          expandedOrgMembers: state.expandedOrgMembers,
+          viewedSessionId: state.viewedSessionId,
+          sessionLimits: state.agentSessionLimits,
+          itemMenuKey: state.agentItemMenuKey,
+          busy: state.agentsBusy,
+          artifactPreview: state.artifactPreview,
+          drawerWidth: taskDrawerWidth,
+          drawerExpanded: taskDrawerExpanded,
+        })
+        return
       }
       render()
       return
@@ -871,6 +933,48 @@ export function bindAgentsEvents(): () => void {
     if (toggleOrgMemberSessionsBtn?.dataset.orgToggleMemberSessions) {
       const agentId = toggleOrgMemberSessionsBtn.dataset.orgToggleMemberSessions
       const wasExpanded = state.expandedOrgMembers.has(agentId)
+      const flowNodeEl = toggleOrgMemberSessionsBtn.closest<HTMLElement>(".org-flow-node")
+      if (flowNodeEl && state.agentSurface.kind === "team") {
+        const nextOpen = !wasExpanded
+        if (nextOpen) {
+          state.expandedOrgMembers.add(agentId)
+        } else {
+          state.expandedOrgMembers.delete(agentId)
+        }
+        toggleOrgMemberSessionsBtn.setAttribute("aria-expanded", String(nextOpen))
+        const arrow = toggleOrgMemberSessionsBtn.querySelector("span:first-child")
+        if (arrow) arrow.textContent = nextOpen ? "▾" : "▸"
+        const sessCollapse = flowNodeEl.querySelector<HTMLElement>(".org-member-sessions-collapse")
+        const newSessBtn = flowNodeEl.querySelector<HTMLElement>(".org-flow-sessions-new-btn")
+        if (newSessBtn) {
+          newSessBtn.hidden = !nextOpen
+        }
+        if (sessCollapse) {
+          sessCollapse.classList.toggle("is-open", nextOpen)
+          sessCollapse.setAttribute("aria-hidden", String(!nextOpen))
+          if (nextOpen) {
+            sessCollapse.removeAttribute("inert")
+          } else {
+            sessCollapse.setAttribute("inert", "")
+          }
+        }
+        lastSurfaceHtml = renderTeamSurfaceHtml({
+          snapshot: state.agentsSnapshot,
+          surface: state.agentSurface,
+          teamSessions: state.teamSessionsByTeam[state.agentSurface.teamId] || [],
+          orgViewMode: state.orgViewMode,
+          expandedFlowNodes: state.expandedFlowNodes,
+          expandedOrgMembers: state.expandedOrgMembers,
+          viewedSessionId: state.viewedSessionId,
+          sessionLimits: state.agentSessionLimits,
+          itemMenuKey: state.agentItemMenuKey,
+          busy: state.agentsBusy,
+          artifactPreview: state.artifactPreview,
+          drawerWidth: taskDrawerWidth,
+          drawerExpanded: taskDrawerExpanded,
+        })
+        return
+      }
       if (wasExpanded) {
         void (async () => {
           await animateCollapse(findOrgMemberSessionsElement(agentId))

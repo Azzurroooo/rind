@@ -1140,44 +1140,45 @@ export function renderOrgFlowNodeHtml(
   if (node.reportsToName) metaItems.push(`Reports to ${escapeHtml(node.reportsToName)}`)
   if (node.responsibility) metaItems.push(escapeHtml(node.responsibility))
 
-  const expandedBodyHtml = isNodeExpanded
-    ? `<div class="org-flow-node-body">
-        ${metaItems.length > 0 ? `<div class="org-member-sub">${metaItems.join(" · ")}</div>` : ""}
-        <div class="org-flow-node-actions org-member-actions">
-          <button type="button" class="agent-btn primary sm" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(node.latestRuntimeSessionId)}">Chat</button>
-          <button type="button" class="agent-btn secondary sm" data-agent-quick-assign="${escapeAttribute(node.agentId)}">Assign</button>
-          <div class="project-menu-wrap${memberMenuOpen ? " menu-open" : ""}">
-            <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(memberMenuKey)}" title="Member actions" aria-label="Actions for ${escapeAttribute(node.name)}" aria-haspopup="menu" aria-expanded="${String(memberMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
-            ${
-              memberMenuOpen
-                ? `<div class="project-menu" role="menu">
-                    <button type="button" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">New chat</button>
-                    <button type="button" data-agent-quick-assign="${escapeAttribute(node.agentId)}" role="menuitem">Assign task</button>
-                    <button type="button" data-agent-remove="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">Remove</button>
-                  </div>`
-                : ""
-            }
+  const expandedBodyHtml = `<div class="org-flow-node-collapse${isNodeExpanded ? " is-open" : ""}" aria-hidden="${String(!isNodeExpanded)}"${!isNodeExpanded ? " inert" : ""}>
+      <div class="org-flow-node-collapse-inner">
+        <div class="org-flow-node-body">
+          ${metaItems.length > 0 ? `<div class="org-member-sub">${metaItems.join(" · ")}</div>` : ""}
+          <div class="org-flow-node-actions org-member-actions">
+            <button type="button" class="agent-btn primary sm" data-agent-chat="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" data-agent-session="${escapeAttribute(node.latestRuntimeSessionId)}">Chat</button>
+            <button type="button" class="agent-btn secondary sm" data-agent-quick-assign="${escapeAttribute(node.agentId)}">Assign</button>
+            <div class="project-menu-wrap${memberMenuOpen ? " menu-open" : ""}">
+              <button type="button" class="project-menu-trigger ghost-button" data-agent-item-menu="${escapeAttribute(memberMenuKey)}" title="Member actions" aria-label="Actions for ${escapeAttribute(node.name)}" aria-haspopup="menu" aria-expanded="${String(memberMenuOpen)}">${PROJECT_MENU_ICON_SVG}</button>
+              ${
+                memberMenuOpen
+                  ? `<div class="project-menu" role="menu">
+                      <button type="button" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">New chat</button>
+                      <button type="button" data-agent-quick-assign="${escapeAttribute(node.agentId)}" role="menuitem">Assign task</button>
+                      <button type="button" data-agent-remove="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}" role="menuitem">Remove</button>
+                    </div>`
+                  : ""
+              }
+            </div>
           </div>
-        </div>
-        ${
-          node.activeTask
-            ? `<button type="button" class="org-active-task" data-agent-select-task="${escapeAttribute(node.activeTask.id)}" data-agent-team="${escapeAttribute(node.teamId)}"><span class="org-active-task-kicker">Working on</span><span class="org-active-task-brief">${escapeHtml(String(node.activeTask.brief || ""))}</span></button>`
-            : ""
-        }
-        <div class="org-member-meta-bar">
-          <button type="button" class="org-sessions-toggle" data-org-toggle-member-sessions="${escapeAttribute(node.agentId)}" aria-expanded="${String(isSessionsOpen)}">
-            <span>${isSessionsOpen ? "▾" : "▸"}</span>
-            <span>Conversations (${sessions.length})</span>
-          </button>
-          <div class="org-member-stats">
-            ${node.taskCounts.active > 0 ? `<span>${node.taskCounts.active} active</span>` : ""}
-            ${node.taskCounts.attention > 0 ? `<span class="org-stat-attention">${node.taskCounts.attention} need review</span>` : ""}
-            ${isSessionsOpen ? `<button type="button" class="agent-btn ghost sm" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}">+ New</button>` : ""}
+          ${
+            node.activeTask
+              ? `<button type="button" class="org-active-task" data-agent-select-task="${escapeAttribute(node.activeTask.id)}" data-agent-team="${escapeAttribute(node.teamId)}"><span class="org-active-task-kicker">Working on</span><span class="org-active-task-brief">${escapeHtml(String(node.activeTask.brief || ""))}</span></button>`
+              : ""
+          }
+          <div class="org-member-meta-bar">
+            <button type="button" class="org-sessions-toggle" data-org-toggle-member-sessions="${escapeAttribute(node.agentId)}" aria-expanded="${String(isSessionsOpen)}">
+              <span>${isSessionsOpen ? "▾" : "▸"}</span>
+              <span>Conversations (${sessions.length})</span>
+            </button>
+            <div class="org-member-stats">
+              ${node.taskCounts.active > 0 ? `<span>${node.taskCounts.active} active</span>` : ""}
+              ${node.taskCounts.attention > 0 ? `<span class="org-stat-attention">${node.taskCounts.attention} need review</span>` : ""}
+              <button type="button" class="agent-btn ghost sm org-flow-sessions-new-btn" data-agent-new-session="${escapeAttribute(node.agentId)}" data-agent-team="${escapeAttribute(node.teamId)}"${!isSessionsOpen ? " hidden" : ""}>+ New</button>
+            </div>
           </div>
-        </div>
-        ${
-          isSessionsOpen
-            ? `<div class="org-member-sessions-list">
+          <div class="org-member-sessions-collapse${isSessionsOpen ? " is-open" : ""}" aria-hidden="${String(!isSessionsOpen)}"${!isSessionsOpen ? " inert" : ""}>
+            <div class="org-member-sessions-collapse-inner">
+              <div class="org-member-sessions-list">
                 ${
                   sessions.length === 0
                     ? `<div class="org-sessions-empty">No conversations yet.</div>`
@@ -1200,11 +1201,12 @@ export function renderOrgFlowNodeHtml(
                         ? `<button type="button" class="sidebar-load-more" data-agent-more-sessions="${escapeAttribute(limitKey)}">Show ${sessions.length - limit} more</button>`
                         : "")
                 }
-              </div>`
-            : ""
-        }
-      </div>`
-    : ""
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`
 
   return `
     <div class="org-flow-branch depth-${Math.min(depth, 6)}${isNodeExpanded ? " is-node-expanded" : ""}${branchMenuOpen ? " menu-open" : ""}" data-agent-id="${escapeAttribute(node.agentId)}">
@@ -1216,18 +1218,17 @@ export function renderOrgFlowNodeHtml(
               <span class="agent-status-dot tone-${node.tone}"></span>
               <strong class="org-flow-node-name org-member-name">${escapeHtml(node.name)}</strong>
               ${node.isLeader ? `<span class="org-leader-badge">Leader</span>` : ""}
-              <span class="org-flow-node-chevron" aria-hidden="true">${isNodeExpanded ? "▾" : "▸"}</span>
             </div>
             <div class="org-flow-node-subrow">
               <span class="org-role-pill">${escapeHtml(node.position)}</span>
               ${node.worktreeOf ? `<span class="org-worktree-pill" title="${escapeAttribute(node.worktreeOf)}">Worktree</span>` : ""}
               ${node.status && node.status !== "Idle" ? `<span class="agent-status-pill tone-${node.tone}">${escapeHtml(node.status)}</span>` : ""}
-              ${!isNodeExpanded && sessions.length > 0 ? `<span class="org-flow-mini-stat" title="${sessions.length} conversation(s)">${sessions.length}</span>` : ""}
-              ${!isNodeExpanded && node.taskCounts.attention > 0 ? `<span class="org-flow-mini-stat attention">!${node.taskCounts.attention}</span>` : ""}
+              ${sessions.length > 0 ? `<span class="org-flow-mini-stat" title="${sessions.length} conversation(s)" aria-hidden="${String(isNodeExpanded)}">${sessions.length}</span>` : ""}
+              ${node.taskCounts.attention > 0 ? `<span class="org-flow-mini-stat attention" aria-hidden="${String(isNodeExpanded)}">!${node.taskCounts.attention}</span>` : ""}
             </div>
             ${
-              !isNodeExpanded && node.activeTask
-                ? `<div class="org-flow-mini-task" title="${escapeAttribute(String(node.activeTask.brief || ""))}"><span class="org-flow-mini-task-dot"></span><span class="org-flow-mini-task-text">${escapeHtml(String(node.activeTask.brief || ""))}</span></div>`
+              node.activeTask
+                ? `<div class="org-flow-mini-task-collapse${isNodeExpanded ? " is-hidden" : ""}" aria-hidden="${String(isNodeExpanded)}"><div class="org-flow-mini-task-collapse-inner"><div class="org-flow-mini-task" title="${escapeAttribute(String(node.activeTask.brief || ""))}"><span class="org-flow-mini-task-dot"></span><span class="org-flow-mini-task-text">${escapeHtml(String(node.activeTask.brief || ""))}</span></div></div></div>`
                 : ""
             }
           </button>
