@@ -51,8 +51,7 @@ import {
   authSecretFrame,
   modelMenuText,
   themeMenuText,
-  skillImportMenuText,
-  briefMenuText,
+  settingsMenuText,
   questionMenuFrame,
   sessionMenuText,
   promptPlaceholderText,
@@ -327,7 +326,9 @@ const runtimeController = createCliRuntimeController({
   getTaskMonitor: () => taskMonitorController,
   getCompactContextState: () => compactContextState,
   askModelMenu: (...args) => inputActions.askModelMenu(...args),
-  askSkillImportMenu: (...args) => inputActions.askSkillImportMenu(...args),
+  askSettingsMenu: (...args) => inputActions.askSettingsMenu(...args),
+  getBriefMode: () => isBriefMode(),
+  onBriefChange: (enabled) => commandController.handle(`/settings brief ${enabled ? "on" : "off"}`),
   askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
   askChoice: tui ? (...args) => inputActions.askChoice(...args) : null,
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
@@ -374,7 +375,7 @@ commandController = createCommandController({
     runRename: (argument) => runtimeController.runRename(argument),
     runModelSelector: runtimeController.runModelSelector,
     runModelCommand: (argument) => runtimeController.runModelCommand(argument),
-    runImportSelector: runtimeController.runImportSelector,
+    runSettingsSelector: runtimeController.runSettingsSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
     runLogin: (providerId) => runLogin(providerId),
     runLogout: (providerId) => runLogout(providerId),
@@ -382,12 +383,6 @@ commandController = createCommandController({
       const selected = await inputActions.askThemeMenu();
       if (selected) {
         await commandController.handle(`/theme ${selected}`);
-      }
-    },
-    runBriefSelector: async () => {
-      const next = await inputActions.askBriefMenu(isBriefMode());
-      if (typeof next === "boolean") {
-        await commandController.handle(`/brief ${next ? "on" : "off"}`);
       }
     },
     runTour: (pageId) => enterInSessionTour(pageId),
@@ -863,7 +858,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   if (!session) {
     return null;
   }
-  const choiceMenu = ["model", "theme", "sessions", "fork", "choice-dialog"].includes(session.mode);
+  const choiceMenu = ["model", "theme", "settings", "sessions", "fork", "choice-dialog"].includes(session.mode);
   if (session.mode === "prompt" && session.menuState) {
     session.menuState.setInput(session.editor.input());
   }
@@ -924,22 +919,17 @@ function composeFrame(width = process.stdout.columns || 80) {
       menuText: themeMenuText(session.themeState.items(), session.themeState.selectedIndex()).trimEnd(),
     };
   }
-  if (session.mode === "import") {
+  if (session.mode === "settings") {
     return {
       showCaret,
       prompt: mainPromptText(width),
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
-      menuText: skillImportMenuText(session.importState.items(), session.importState.selectedIndex()).trimEnd(),
-    };
-  }
-  if (session.mode === "brief") {
-    return {
-      showCaret,
-      prompt: mainPromptText(width),
-      inputText: session.inputText,
-      cursor: { line: 0, column: session.inputText.length },
-      menuText: briefMenuText(session.briefState.items(), session.briefState.selectedIndex()).trimEnd(),
+      menuText: settingsMenuText(
+        session.settingsState.items(),
+        session.settingsState.selectedIndex(),
+        session.settingsState.level(),
+      ).trimEnd(),
     };
   }
   if (session.mode === "question") {

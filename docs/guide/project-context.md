@@ -24,7 +24,7 @@ A Skill is a folder with a `SKILL.md` whose frontmatter has a `description` (and
 | This folder | `.rind/skills/<skill-name>/SKILL.md` under the working directory |
 | You, everywhere | `~/.rind/skills/<skill-name>/SKILL.md` |
 
-Rind also reads the folder's Claude skills (`./.claude/skills`) and Codex skills (`./.codex/skills`, `./.agents/skills`). Your own Claude and Codex skills (`~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`) are off until you turn them on with `/import`. Ask Rind to make a skill and it follows the built-in `skill-creator` skill. Built-in skills live in `~/.rind/skills/.system`, which Rind replaces on update; to change one, put a skill with the same name in `~/.rind/skills`.
+Rind also reads the folder's Claude skills (`./.claude/skills`) and Codex skills (`./.codex/skills`, `./.agents/skills`). Your own Claude and Codex skills (`~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`) are off until you turn them on with `/settings`. Ask Rind to make a skill and it follows the built-in `skill-creator` skill. Built-in skills live in `~/.rind/skills/.system`, which Rind replaces on update; to change one, put a skill with the same name in `~/.rind/skills`.
 
 Each request carries only the **catalog**: name, description and file location. When a task matches a skill, the model reads its `SKILL.md`. To use one now:
 
@@ -32,12 +32,12 @@ Each request carries only the **catalog**: name, description and file location. 
 $skill-name          @ it in a prompt
 /skill:skill-name    the whole message is a single Skill invocation
 /skill               every skill, where it comes from, and any file that failed to load
-/import              choose which Claude and Codex skills this conversation reads
+/settings            configure brief output and which Claude and Codex skills this conversation reads
 ```
 
 An unknown `/skill:name` reports an error directly; an ordinary `$name` that is not an existing Skill is treated as ordinary text. The body of an invoked Skill enters the session as a snapshot, so deleting the file afterwards does not affect that session.
 
-When names collide, the more specific layer wins: project over user, and Rind over Codex over Claude at the same level. `/import` choices belong to the conversation; changing them mid-conversation breaks the prompt cache, so the next request will not hit it, and Rind asks first.
+When names collide, the more specific layer wins: project over user, and Rind over Codex over Claude at the same level. Skill import choices in `/settings` belong to the conversation; changing them mid-conversation breaks the prompt cache, so the next request will not hit it, and Rind asks first.
 
 ## Per-project default model / effort
 

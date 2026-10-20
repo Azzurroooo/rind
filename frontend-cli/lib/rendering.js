@@ -694,37 +694,39 @@ export function themeMenuText(items, selectedIndex = 0) {
   return `${lines.join("\n")}\n`;
 }
 
-export function skillImportMenuText(items, selectedIndex = 0) {
-  const labelWidth = Math.max(16, ...items.map((item) => visibleLength(item.label)));
-  const lines = [dim("  Import skills into this conversation")];
-  const pathWidth = Math.max(18, slashContentWidth() - labelWidth - 22);
-  for (const [index, item] of items.entries()) {
-    const active = index === selectedIndex;
-    const marker = active ? accent("›") : dim("·");
-    const box = item.chosen ? accent("[x]") : dim("[ ]");
-    const label = padRight(item.label, labelWidth);
-    const paths = (Array.isArray(item.paths) ? item.paths : []).map(prettySkillLocation).join(" · ");
-    const count = Number(item.count) || 0;
-    const found = count ? `${count} ${count === 1 ? "skill" : "skills"}` : "—";
-    lines.push(`  ${marker} ${box} ${active ? bold(label) : label}  ${dim(padRight(clipSingleLine(paths, pathWidth), pathWidth))}  ${dim(found)}`);
+export function settingsMenuText(items, selectedIndex = 0, level = "root") {
+  if (level === "import") {
+    const labelWidth = Math.max(16, ...items.map((item) => visibleLength(item.label)));
+    const lines = [dim("  Settings · Import skills into this conversation")];
+    const pathWidth = Math.max(18, slashContentWidth() - labelWidth - 22);
+    for (const [index, item] of items.entries()) {
+      const active = index === selectedIndex;
+      const marker = active ? accent("›") : dim("·");
+      const box = item.chosen ? accent("[x]") : dim("[ ]");
+      const label = padRight(item.label, labelWidth);
+      const paths = (Array.isArray(item.paths) ? item.paths : []).map(prettySkillLocation).join(" · ");
+      const count = Number(item.count) || 0;
+      const found = count ? `${count} ${count === 1 ? "skill" : "skills"}` : "—";
+      lines.push(`  ${marker} ${box} ${active ? bold(label) : label}  ${dim(padRight(clipSingleLine(paths, pathWidth), pathWidth))}  ${dim(found)}`);
+    }
+    lines.push(dim("    ↑↓ select · space toggle · enter apply · esc back"));
+    return `${lines.join("\n")}\n`;
   }
-  lines.push(dim("    ↑↓ select · space toggle · enter apply · esc cancel"));
-  return `${lines.join("\n")}\n`;
-}
-
-export function briefMenuText(items, selectedIndex = 0) {
   const labelWidth = Math.max(16, ...items.map((item) => visibleLength(item.label)));
-  const lines = [dim("  Global output display mode")];
-  const descWidth = Math.max(18, slashContentWidth() - labelWidth - 12);
+  const valueWidth = Math.max(11, ...items.map((item) => visibleLength(item.value || "")));
+  const lines = [dim("  Settings")];
+  const descWidth = Math.max(18, slashContentWidth() - labelWidth - valueWidth - 10);
   for (const [index, item] of items.entries()) {
     const active = index === selectedIndex;
     const marker = active ? accent("›") : dim("·");
-    const box = item.chosen ? accent("[x]") : dim("[ ]");
     const label = padRight(item.label, labelWidth);
+    const rawValue = String(item.value || "");
+    const paddedValue = padRight(rawValue, valueWidth);
+    const value = item.enabled || (item.submenu && active) ? accent(paddedValue) : dim(paddedValue);
     const description = item.description ? `  ${dim(clipSingleLine(item.description, descWidth))}` : "";
-    lines.push(`  ${marker} ${box} ${active ? bold(label) : label}${description}`);
+    lines.push(`  ${marker} ${active ? bold(label) : label}  ${value}${description}`);
   }
-  lines.push(dim("    ↑↓ select · space toggle · enter apply · esc cancel"));
+  lines.push(dim("    ↑↓ select · space toggle · enter open/apply · esc cancel"));
   return `${lines.join("\n")}\n`;
 }
 
@@ -1422,7 +1424,7 @@ function slashSkillsText(display) {
     addSection(...disabled.map((source, index) => {
       const label = padRight(source.label, labelWidth);
       const status = padRight(counts[index], countWidth);
-      return `  ${dim(`${label}  ${status} · `)}${accent("/import")}${dim(" to enable")}`;
+      return `  ${dim(`${label}  ${status} · `)}${accent("/settings")}${dim(" to enable")}`;
     }));
   }
   if (problems.length) {

@@ -14,7 +14,9 @@ export function createCliRuntimeController({
   getTaskMonitor,
   getCompactContextState,
   askModelMenu,
-  askSkillImportMenu,
+  askSettingsMenu,
+  getBriefMode = () => false,
+  onBriefChange = null,
   askEffortMenu = null,
   // A yes/no menu, or null without a terminal UI (a script is never asked).
   askChoice = null,
@@ -581,9 +583,10 @@ export function createCliRuntimeController({
     log(() => modelSetResultText({ provider_id: state.session.info.provider, model_id: model }, model));
   }
 
-  // /import: before the first message the window keeps the choice; afterwards
+  // /settings: configures global brief output and conversation skill imports.
+  // Before the first message the window keeps the skill import choice; afterwards
   // the conversation changes only once breaking its prompt cache is accepted.
-  async function runImportSelector() {
+  async function runSettingsSelector(initialLevel = "root") {
     let listed;
     try {
       listed = await request(methods.commandExecute, { input: "/import" });
@@ -592,14 +595,23 @@ export function createCliRuntimeController({
       return;
     }
     const sources = Array.isArray(listed?.display?.sources) ? listed.display.sources : [];
-    if (!sources.length) {
+    if (initialLevel === "import" && !sources.length) {
       log(String(listed?.text || "No skill sources to import."));
       return;
     }
-    const choices = await askSkillImportMenu(sources);
-    if (!choices || state.runtime.status === "closing") return;
+    const selected = await askSettingsMenu?.({
+      brief: Boolean(getBriefMode()),
+      sources,
+      initialLevel,
+    });
+    if (!selected || state.runtime.status === "closing") return;
+    if (selected.briefChanged) {
+      await onBriefChange?.(Boolean(selected.brief));
+    }
+    const choices = selected.importChoices;
+    if (!choices || !Object.keys(choices).length) return;
     if (!hasConversation()) {
-      state.session.pendingSkillSources = choices;
+      state.session.pendingSkillSources = { ...(state.session.pendingSkillSources || {}), ...choices };
       log(() => commandResultText("Skill imports chosen.", "they apply when the conversation starts"));
       return;
     }
@@ -722,7 +734,7 @@ export function createCliRuntimeController({
     startCompactCommand,
     runModelSelector,
     runModelCommand,
-    runImportSelector,
+    runSettingsSelector,
     runEffortCommand,
     currentModelEfforts,
   };

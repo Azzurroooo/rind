@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
 
 import { executeLocalSlashCommand } from "../lib/local-slash-commands.js";
+import { setBriefMode } from "../lib/cli-state-store.js";
 
 test("local status renders session and provider state", async () => {
   const result = await executeLocalSlashCommand("/status", {
@@ -34,8 +34,33 @@ test("local status renders session and provider state", async () => {
   });
 });
 
-test("config is no longer a local slash command", async () => {
+test("config, brief, and import are no longer standalone local slash commands", async () => {
   assert.equal(await executeLocalSlashCommand("/config", {}), null);
+  assert.equal(await executeLocalSlashCommand("/brief", {}), null);
+  assert.equal(await executeLocalSlashCommand("/import", {}), null);
+});
+
+test("/settings brief reads and updates global brief output mode", async (t) => {
+  t.after(() => setBriefMode(false));
+  setBriefMode(false);
+  const initial = await executeLocalSlashCommand("/settings brief", {});
+  assert.deepEqual(initial, {
+    text: "Brief output: off",
+    display: { type: "brief", changed: false, enabled: false },
+  });
+
+  let persisted = null;
+  const enabled = await executeLocalSlashCommand("/settings brief on", {
+    persistBrief: (val) => { persisted = val; },
+  });
+  assert.equal(persisted, true);
+  assert.deepEqual(enabled, {
+    text: "Brief output: on",
+    display: { type: "brief", changed: true, enabled: true },
+  });
+
+  const invalid = await executeLocalSlashCommand("/settings unknown", {});
+  assert.match(invalid.text, /^Usage: \/settings/);
 });
 
 test("local status before the first message shows the pending name", async () => {

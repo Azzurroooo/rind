@@ -30,9 +30,25 @@ export function createCommandController({
       await input.runThemeSelector();
       return true;
     }
-    if (name === "brief" && !arg && input.isTerminal && input.runBriefSelector) {
-      await input.runBriefSelector();
-      return true;
+    if (name === "settings") {
+      const subMatch = arg.match(/^([^\s]+)(?:\s+([\s\S]*))?$/);
+      const sub = subMatch ? subMatch[1].toLowerCase() : "";
+      const subArg = subMatch ? String(subMatch[2] || "").trim() : "";
+      if (!sub && input.isTerminal && input.runSettingsSelector) {
+        await input.runSettingsSelector();
+        return true;
+      }
+      if (sub === "import") {
+        if (!subArg && input.isTerminal && input.runSettingsSelector) {
+          await input.runSettingsSelector("import");
+          return true;
+        }
+        const result = await request(runtimeMethods.commandExecute, {
+          input: subArg ? `/import ${subArg}` : "/import",
+        });
+        await applyResult(result);
+        return true;
+      }
     }
     if (name === "tour") {
       if (input.isTerminal && input.runTour) {
@@ -75,6 +91,10 @@ export function createCommandController({
   }
 
   async function runSlashCommand(text, name, arg) {
+    if (name === "import" || name === "brief") {
+      output.log?.(`Unknown command: /${name}\nRun /help to see available commands.`);
+      return;
+    }
     if (name === "rename" && input.runRename) {
       await applyResult(await input.runRename(arg));
       return;
@@ -88,10 +108,6 @@ export function createCommandController({
         await input.runModelCommand(arg);
         return;
       }
-    }
-    if (name === "import" && !arg && input.isTerminal && input.runImportSelector) {
-      await input.runImportSelector();
-      return;
     }
     if (name === "effort") {
       await input.runEffortCommand?.(arg);
@@ -163,14 +179,14 @@ export function createCommandController({
     const items = [];
     for (const command of commands) {
       const name = singleWord(command?.name);
-      if (!name) {
+      if (!name || name === "import") {
         continue;
       }
       const description = String(command.description || "").trim();
       items.push({ name, description });
       for (const alias of command.aliases || []) {
         const aliasName = singleWord(alias);
-        if (aliasName) {
+        if (aliasName && aliasName !== "import") {
           items.push({ name: aliasName, description: `alias for /${name}` });
         }
       }
@@ -198,6 +214,6 @@ function parseSlashInput(value) {
 }
 
 function singleWord(value) {
-  const text = String(value || "").trim().toLowerCase();
-  return text && !/\s/.test(text) ? text : "";
+  const normalized = String(value || "").trim().toLowerCase();
+  return /^[^\s/]+$/.test(normalized) ? normalized : "";
 }

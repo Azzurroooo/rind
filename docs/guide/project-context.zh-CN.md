@@ -24,7 +24,7 @@ Skill 是一个包含 `SKILL.md` 的目录，frontmatter 里要有 `description`
 | 当前目录 | 工作目录下的 `.rind/skills/<skill-name>/SKILL.md` |
 | 你的所有目录 | `~/.rind/skills/<skill-name>/SKILL.md` |
 
-Rind 也会读取当前目录的 Claude Skill（`./.claude/skills`）和 Codex Skill（`./.codex/skills`、`./.agents/skills`）。你自己的 Claude 和 Codex Skill（`~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills`）默认不读取，需要时用 `/import` 打开。让 Rind 帮你写一个 Skill 时，它会按内置的 `skill-creator` 来做。内置 Skill 位于 `~/.rind/skills/.system`，升级时会被 Rind 替换；想修改其中一个，就在 `~/.rind/skills` 放一个同名 Skill。
+Rind 也会读取当前目录的 Claude Skill（`./.claude/skills`）和 Codex Skill（`./.codex/skills`、`./.agents/skills`）。你自己的 Claude 和 Codex Skill（`~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills`）默认不读取，需要时用 `/settings` 打开。让 Rind 帮你写一个 Skill 时，它会按内置的 `skill-creator` 来做。内置 Skill 位于 `~/.rind/skills/.system`，升级时会被 Rind 替换；想修改其中一个，就在 `~/.rind/skills` 放一个同名 Skill。
 
 每次请求只带**目录**：名称、描述和文件位置。任务匹配某个 Skill 时，模型会读取它的 `SKILL.md`。想马上用一个：
 
@@ -32,12 +32,12 @@ Rind 也会读取当前目录的 Claude Skill（`./.claude/skills`）和 Codex S
 $skill-name           在 prompt 里 @ 它
 /skill:skill-name     整条消息就是一个 Skill 调用
 /skill                列出全部 Skill、各自来源，以及加载失败的文件
-/import               选择这个对话读取哪些 Claude 和 Codex Skill
+/settings             配置精简输出与这个对话读取哪些 Claude 和 Codex Skill
 ```
 
 `/skill:name` 找不到会直接报错；普通的 `$name` 若不是已存在 Skill，就按普通文本处理。被调用的 Skill 正文会以快照进入会话，之后即使文件被删也不影响这次会话。
 
-同名时，更具体的层级优先：项目级高于用户级；同一级里 Rind 高于 Codex，Codex 高于 Claude。`/import` 的选择属于当前对话；对话中途修改会破坏提示词缓存，下一次请求不会命中缓存，所以 Rind 会先确认。
+同名时，更具体的层级优先：项目级高于用户级；同一级里 Rind 高于 Codex，Codex 高于 Claude。`/settings` 中导入 Skill 的选择属于当前对话；对话中途修改会破坏提示词缓存，下一次请求不会命中缓存，所以 Rind 会先确认。
 
 ## 每项目的默认模型/强度
 

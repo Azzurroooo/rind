@@ -1,8 +1,9 @@
 import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
 import { isBriefMode, setBriefMode } from "./cli-state-store.js";
 
+const SETTINGS_USAGE = "/settings [brief [on | off] | import [<source>=on|off ...]]";
+
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
-  { name: "brief", description: "Toggle ultra-concise output mode globally", usage: "/brief [on | off]" },
   { name: "compact", description: "Compact current session context", usage: "/compact" },
   { name: "context", description: "Show context composition and token usage", usage: "/context" },
   { name: "effort", description: "Show or change reasoning effort", usage: "/effort [low | medium | high | xhigh | max]" },
@@ -10,13 +11,13 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "goal", description: "View or control the active goal", usage: "/goal [pause | resume | clear | objective]" },
   { name: "help", description: "Show commands", usage: "/help [command]" },
   { name: "history", description: "Load earlier messages of this conversation", usage: "/history" },
-  { name: "import", description: "Choose the Claude and Codex skills this conversation reads", usage: "/import" },
   { name: "init", description: "Draft RIND.md", usage: "/init [project|user]" },
   { name: "login", description: "Configure a provider", usage: "/login [provider]" },
   { name: "logout", description: "Remove a stored provider credential", usage: "/logout [provider]" },
   { name: "model", description: "Show or change the active model", usage: "/model | /model set <model>" },
   { name: "rename", description: "Name this conversation (otherwise it is shown by its first message)", usage: "/rename <name> | /rename --reset" },
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
+  { name: "settings", description: "Configure brief output and skill imports", usage: SETTINGS_USAGE },
   { name: "skill", description: "List skills and where they come from", usage: "/skill" },
   { name: "status", description: "Show session and provider status", usage: "/status" },
   { name: "theme", description: "Switch the CLI color theme", usage: `/theme [${themeNames().join(" | ")}]` },
@@ -34,7 +35,7 @@ export async function executeLocalSlashCommand(input, context = {}) {
   }
   if (name === "help") return helpResult(argument, context.commands || []);
   if (name === "theme") return themeResult(argument, context);
-  if (name === "brief") return briefResult(argument, context);
+  if (name === "settings") return settingsResult(argument, context);
   if (name === "model" && !argument && !context.interactive) return { text: `Model: ${currentModelLabel(context)}` };
   return null;
 }
@@ -116,8 +117,21 @@ function themeResult(argument, context = {}) {
   };
 }
 
-function briefResult(argument, context = {}) {
-  const requested = argument.replace(/^\//, "").trim().toLowerCase();
+function settingsResult(argument, context = {}) {
+  const parts = argument.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) {
+    const enabled = isBriefMode();
+    return {
+      text: `Brief output: ${enabled ? "on" : "off"}`,
+      display: { type: "brief", changed: false, enabled },
+    };
+  }
+  const section = parts[0].toLowerCase();
+  if (section === "import") return null;
+  if (section !== "brief" || parts.length > 2) {
+    return usageResult(SETTINGS_USAGE);
+  }
+  const requested = (parts[1] || "").toLowerCase();
   if (!requested) {
     const enabled = isBriefMode();
     return {
@@ -126,7 +140,7 @@ function briefResult(argument, context = {}) {
     };
   }
   if (requested !== "on" && requested !== "off") {
-    return usageResult("/brief [on | off]");
+    return usageResult(SETTINGS_USAGE);
   }
   const previous = isBriefMode();
   const enabled = setBriefMode(requested === "on");

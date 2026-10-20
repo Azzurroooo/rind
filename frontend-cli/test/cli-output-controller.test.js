@@ -133,14 +133,14 @@ test("replayed history preserves tool failure status, duration, and terminal dif
   assert.match(rendered, /◉ \$ npm test · 1\.20s/);
 });
 
-test("brief mode collapses consecutive tool calls into one live line, applies to history replay, and toggles via /brief checkbox menu", async (t) => {
+test("brief mode collapses consecutive tool calls into one live line, applies to history replay, and toggles via /settings menu", async (t) => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const os = await import("node:os");
   const path = await import("node:path");
   const { applySavedTheme, isBriefMode, loadCliState, saveCliState, setBriefMode } = await import("../lib/cli-state-store.js");
   const { executeLocalSlashCommand } = await import("../lib/local-slash-commands.js");
   const { createCliInputActions } = await import("../lib/cli-input-actions.js");
-  const { briefMenuText, planUpdatedLine } = await import("../lib/rendering.js");
+  const { settingsMenuText, planUpdatedLine } = await import("../lib/rendering.js");
 
   const tempHome = mkdtempSync(path.join(os.tmpdir(), "rind-brief-mode-"));
   t.after(() => {
@@ -148,7 +148,7 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
     rmSync(tempHome, { recursive: true, force: true });
   });
 
-  // 1. Checkbox menu (/brief) toggles state with space and applies with enter.
+  // 1. /settings menu toggles brief output with space and applies with enter.
   const state = createCliState();
   const transcript = createTranscript();
   const output = createCliOutputController({ state, transcript, terminalUi: { requestRender() {} }, animateTools: false });
@@ -168,22 +168,30 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
     handleSigint: () => {},
   });
 
-  const menuPromise = actions.askBriefMenu(false);
-  assert.equal(state.input.session.mode, "brief");
-  const initialMenu = stripAnsi(briefMenuText(state.input.session.briefState.items(), state.input.session.briefState.selectedIndex()));
-  assert.match(initialMenu, /\[ \] Brief output/);
-  assert.match(initialMenu, /space toggle · enter apply · esc cancel/);
+  const menuPromise = actions.askSettingsMenu({ brief: false, sources: [] });
+  assert.equal(state.input.session.mode, "settings");
+  const initialMenu = stripAnsi(settingsMenuText(
+    state.input.session.settingsState.items(),
+    state.input.session.settingsState.selectedIndex(),
+    state.input.session.settingsState.level(),
+  ));
+  assert.match(initialMenu, /› Brief output .* off/);
+  assert.match(initialMenu, /space toggle · enter open\/apply · esc cancel/);
   actions.handleTerminalInput(" ");
-  const toggledMenu = stripAnsi(briefMenuText(state.input.session.briefState.items(), state.input.session.briefState.selectedIndex()));
-  assert.match(toggledMenu, /\[x\] Brief output/);
+  const toggledMenu = stripAnsi(settingsMenuText(
+    state.input.session.settingsState.items(),
+    state.input.session.settingsState.selectedIndex(),
+    state.input.session.settingsState.level(),
+  ));
+  assert.match(toggledMenu, /› Brief output .* on/);
   actions.handleTerminalInput("\r");
   const chosen = await menuPromise;
-  assert.equal(chosen, true);
-  assert.deepEqual(transcript.render(90).map(stripAnsi), ["▷ You", "  /brief"]);
+  assert.deepEqual(chosen, { brief: true, briefChanged: true, importChoices: {} });
+  assert.deepEqual(transcript.render(90).map(stripAnsi), ["▷ You", "  /settings"]);
   output.clearTranscript();
 
-  // 2. /brief command persists globally and updates active brief mode.
-  const cmdRes = await executeLocalSlashCommand("/brief on", {
+  // 2. /settings brief command persists globally and updates active brief mode.
+  const cmdRes = await executeLocalSlashCommand("/settings brief on", {
     persistBrief: (enabled) => saveCliState({ brief: enabled }, tempHome),
   });
   assert.equal(cmdRes.display.type, "brief");
@@ -276,7 +284,7 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
   ]);
 
   // Switching brief mode off and invalidating transcript restores full multi-block rendering in place.
-  await executeLocalSlashCommand("/brief off", {
+  await executeLocalSlashCommand("/settings brief off", {
     persistBrief: (enabled) => saveCliState({ brief: enabled }, tempHome),
   });
   transcript.invalidate();

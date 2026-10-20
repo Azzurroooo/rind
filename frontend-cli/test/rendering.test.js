@@ -652,7 +652,7 @@ test("slashDisplayText groups skills by layer with overrides, imports and proble
     "    manual         only via /skill:name · Release",
     "    skill-creator  overridden by E:\\work\\.rind\\skills\\x",
     "",
-    "  Claude · user    off · 1 skill · /import to enable",
+    "  Claude · user    off · 1 skill · /settings to enable",
     "",
     "  Problems",
     "    E:\\work\\.rind\\skills\\bad  missing description.",
@@ -675,7 +675,7 @@ test("skill paths collapse the home directory, clip long descriptions, and apply
   const text = slashDisplayText(display);
   assert.match(text, /Rind · user  ~[\\/]\.rind[\\/]skills$/m);
   assert.match(text, /x+\.\.\.$/m);
-  assert.match(text, /  Claude · user   off · 1 skill  · \/import to enable\n  Codex · user    off · 2 skills · \/import to enable$/);
+  assert.match(text, /  Claude · user   off · 1 skill  · \/settings to enable\n  Codex · user    off · 2 skills · \/settings to enable$/);
 
   const tty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
   const priorNoColor = process.env.NO_COLOR;
@@ -684,7 +684,7 @@ test("skill paths collapse the home directory, clip long descriptions, and apply
   try {
     const colored = slashDisplayText(display);
     assert.ok(colored.includes(paintRaw.accent("calc        ")));
-    assert.ok(colored.includes(paintRaw.accent("/import")));
+    assert.ok(colored.includes(paintRaw.accent("/settings")));
     assert.equal(stripAnsi(colored), text);
   } finally {
     if (tty) Object.defineProperty(process.stdout, "isTTY", tty);

@@ -172,7 +172,6 @@ test("local command catalog stays complete before the runtime starts", async () 
   assert.deepEqual(names, [
     "exit",
     "quit",
-    "brief",
     "compact",
     "context",
     "effort",
@@ -180,13 +179,13 @@ test("local command catalog stays complete before the runtime starts", async () 
     "goal",
     "help",
     "history",
-    "import",
     "init",
     "login",
     "logout",
     "model",
     "rename",
     "sessions",
+    "settings",
     "skill",
     "status",
     "theme",
@@ -248,4 +247,36 @@ test("/rename goes to the conversation, with the name taken as typed", async () 
   assert.deepEqual(renamed, ["Bob's notes", "", "--reset", "spaced"]);
   assert.equal(await controller.handle("/renamed"), true);
   assert.equal(renamed.length, 4, "a different command is not /rename");
+});
+
+test("/settings routes to selector on a terminal, forwards /settings import args to runtime, and rejects legacy /brief and /import", async () => {
+  const selectorCalls = [];
+  const runtimeCalls = [];
+  const logs = [];
+  const controller = createCommandController({
+    request: async (method, params) => {
+      runtimeCalls.push({ method, params });
+      return { text: "imported" };
+    },
+    turn: { submit() {} },
+    input: {
+      isTerminal: true,
+      runSettingsSelector: async (level = "root") => selectorCalls.push(level),
+      runLocalCommand: (text) => executeLocalSlashCommand(text, {}),
+    },
+    output: { log: (text) => logs.push(typeof text === "function" ? text() : text) },
+  });
+
+  await controller.handle("/settings");
+  await controller.handle("/settings import");
+  await controller.handle("/settings import claude_user=on");
+  await controller.handle("/brief");
+  await controller.handle("/import");
+
+  assert.deepEqual(selectorCalls, ["root", "import"]);
+  assert.deepEqual(runtimeCalls, [
+    { method: "rind/command/execute", params: { input: "/import claude_user=on" } },
+  ]);
+  assert.match(logs.at(-2), /Unknown command: \/brief/);
+  assert.match(logs.at(-1), /Unknown command: \/import/);
 });

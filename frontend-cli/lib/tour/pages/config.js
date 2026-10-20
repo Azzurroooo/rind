@@ -32,7 +32,7 @@ export const configPages = [
         },
       }),
       note([
-        "Skills come from .rind/skills, ~/.rind/skills and your Claude and Codex skills (/import).",
+        "Skills come from .rind/skills, ~/.rind/skills and your Claude and Codex skills (/settings).",
         "A matching task reads its SKILL.md; $name uses one now. Review the RIND.md from /init.",
       ]),
     ],

@@ -40,7 +40,7 @@ The CLI's keys and commands on a single screen. Come back to this page when you 
 | `/context` | Context composition and usage panel |
 | `/goal [pause \| resume \| clear \| <goal>]` | Persistent Goal |
 | `/skill` | Skills, where they come from, and load problems |
-| `/import` | Choose which Claude and Codex skills the conversation reads |
+| `/settings` | Configure global brief output and which Claude and Codex skills the conversation reads |
 | `/init [project\|user]` | Draft RIND.md |
 | `/status` | Session and connection status |
 | `/theme [name]` | Switch color scheme |

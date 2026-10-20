@@ -885,3 +885,209 @@ test("brief mode E2E in headless terminal keeps ◌ with verb trail until assist
     harness.tui.stop();
   }
 });
+
+test("/settings two-level menu E2E in headless terminal configures brief output and skill imports", async (t) => {
+  const { isBriefMode, setBriefMode } = await import("../lib/cli-state-store.js");
+  const { createCliInputActions } = await import("../lib/cli-input-actions.js");
+  const { createCliRuntimeController } = await import("../lib/cli-runtime-controller.js");
+  const { createCommandController } = await import("../lib/command-controller.js");
+  const { executeLocalSlashCommand } = await import("../lib/local-slash-commands.js");
+  const { choiceDialogFrame, settingsMenuText } = await import("../lib/rendering.js");
+  const { runtimeMethods: methods, sessionScopedMethods, turnScopedMethods } = await import("../lib/runtime-protocol.js");
+
+  setBriefMode(false);
+  t.after(() => setBriefMode(false));
+
+  const virtual = createVirtualOutput({ columns: 96, rows: 22 });
+  const input = createVirtualInput();
+  const tui = createTui({
+    input,
+    output: virtual.output,
+    renderIntervalMs: 0,
+    setTimeout: (fn) => setTimeout(fn, 0),
+    clearTimeout,
+  });
+  const state = createCliState();
+  state.runtime.status = "ready";
+  state.session.info = { session_id: "sess_e2e", workspace_root: "/work" };
+  const transcriptContainer = createTranscript();
+  const output = createCliOutputController({
+    state,
+    terminalUi: tui,
+    transcript: transcriptContainer,
+    animateTools: false,
+  });
+  const composerArea = new ComposerArea((width) => {
+    const session = state.input.session;
+    if (!session) return null;
+    if (session.mode === "settings") {
+      return {
+        showCaret: false,
+        prompt: output.mainPromptText(width),
+        inputText: session.inputText,
+        cursor: { line: 0, column: session.inputText.length },
+        menuText: settingsMenuText(
+          session.settingsState.items(),
+          session.settingsState.selectedIndex(),
+          session.settingsState.level(),
+        ).trimEnd(),
+      };
+    }
+    if (session.mode === "choice-dialog") {
+      return {
+        showCaret: false,
+        prompt: "",
+        inputText: "",
+        cursor: { line: 0, column: 0 },
+        menuText: choiceDialogFrame({
+          title: session.title,
+          message: session.message,
+          options: session.choiceState.options(),
+          selectedIndex: session.choiceState.selectedIndex(),
+          width,
+        }).trimEnd(),
+      };
+    }
+    return null;
+  });
+  tui.addChild(transcriptContainer);
+  tui.addChild(composerArea);
+
+  const executedCommands = [];
+  const sources = [
+    { id: "claude_user", label: "Claude · user", paths: ["/home/u/.claude/skills"], count: 1, enabled: true },
+    { id: "codex_user", label: "Codex · user", paths: ["/home/u/.codex/skills"], count: 3, enabled: false },
+  ];
+  let commandController;
+  let inputActions;
+  const runtimeController = createCliRuntimeController({
+    client: {
+      child: {},
+      start() {},
+      async request(method, params) {
+        if (method === methods.commandExecute) {
+          executedCommands.push(params.input);
+          return { text: "", display: { type: "skill_imports", sources } };
+        }
+        return {};
+      },
+    },
+    methods,
+    sessionScopedMethods,
+    turnScopedMethods,
+    requireInitialization: (v) => v,
+    state,
+    getCommands: () => commandController,
+    getTaskMonitor: () => null,
+    getCompactContextState: () => ({ clear() {} }),
+    askModelMenu: async () => null,
+    askSettingsMenu: (...args) => inputActions.askSettingsMenu(...args),
+    getBriefMode: () => isBriefMode(),
+    onBriefChange: (enabled) => commandController.handle(`/settings brief ${enabled ? "on" : "off"}`),
+    askChoice: (...args) => inputActions.askChoice(...args),
+    askSessionMenu: async () => null,
+    askForkPointMenu: async () => null,
+    restoreLiveTurn() {},
+    clearPendingInputs() {},
+    closeAssistant: output.closeAssistant,
+    refreshInputState: output.refreshInputState,
+    updateGoalState() {},
+    log: output.log,
+    writeError() {},
+    redraw: output.redraw,
+  });
+  commandController = createCommandController({
+    request: runtimeController.request,
+    turn: { submit() {} },
+    input: {
+      isTerminal: true,
+      runSettingsSelector: runtimeController.runSettingsSelector,
+      runLocalCommand: async (text) => {
+        const res = await executeLocalSlashCommand(text, {});
+        if (res?.display?.type === "brief" && res.display.changed) {
+          output.replayAll();
+        }
+        return res;
+      },
+    },
+    state: { slashCommands: [] },
+    output: { log: output.log },
+  });
+  inputActions = createCliInputActions({
+    state,
+    request: runtimeController.request,
+    output,
+    getTurnController: () => ({}),
+    getCommandController: () => commandController,
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    getEffortLevels: async () => [],
+    pausePrompt: () => {},
+    resumePrompt: () => {},
+    handleSigint: () => {},
+  });
+
+  tui.start();
+  try {
+    // Seed transcript with two consecutive tool calls in full mode
+    output.writeUserInput("Inspect files");
+    output.beginTool({ tool_call_id: "t1", tool_name: "read_file", args_preview: '{"path":"a.js"}' });
+    output.finishTool({ tool_call_id: "t1", tool_name: "read_file", status: "completed", result: JSON.stringify({ ok: true, data: "const a = 1;\n" }) });
+    output.beginTool({ tool_call_id: "t2", tool_name: "read_file", args_preview: '{"path":"b.js"}' });
+    output.finishTool({ tool_call_id: "t2", tool_name: "read_file", status: "completed", result: JSON.stringify({ ok: true, data: "const b = 2;\n" }) });
+    output.settleTools();
+    await settle(virtual);
+    assert.match(virtual.getViewport().join("\n"), /◉ read a\.js/);
+    assert.match(virtual.getViewport().join("\n"), /◉ read b\.js/);
+
+    // 1. Open /settings
+    const settingsDone = commandController.handle("/settings");
+    await settle(virtual);
+    let screen = virtual.getViewport().join("\n");
+    assert.match(screen, /\/settings/);
+    assert.match(screen, /› Brief output .* off/);
+    assert.match(screen, /· Skill imports .* 1 of 2 on ›/);
+
+    // 2. Toggle Brief output ON with Space
+    inputActions.handleTerminalInput(" ");
+    await settle(virtual);
+    screen = virtual.getViewport().join("\n");
+    assert.match(screen, /› Brief output .* on/);
+
+    // 3. Navigate down to Skill imports and press Enter to open Level 2 submenu
+    inputActions.handleTerminalInput("\x1b[B");
+    inputActions.handleTerminalInput("\r");
+    await settle(virtual);
+    screen = virtual.getViewport().join("\n");
+    assert.match(screen, /Settings · Import skills into this conversation/);
+    assert.match(screen, /› \[x\] Claude · user/);
+    assert.match(screen, /· \[ \] Codex · user/);
+
+    // 4. Move down to Codex · user, toggle ON with Space, and press Enter to apply
+    inputActions.handleTerminalInput("\x1b[B");
+    inputActions.handleTerminalInput(" ");
+    await settle(virtual);
+    screen = virtual.getViewport().join("\n");
+    assert.match(screen, /› \[x\] Codex · user/);
+    inputActions.handleTerminalInput("\r");
+    await settle(virtual);
+
+    // 5. Prompt-cache confirmation dialog opens; select Apply (Down + Enter)
+    screen = virtual.getViewport().join("\n");
+    assert.match(screen, /Applying breaks the prompt cache\./);
+    inputActions.handleTerminalInput("\x1b[B");
+    inputActions.handleTerminalInput("\r");
+    await settingsDone;
+    await settle(virtual);
+
+    // 6. Verify both Brief output and Skill imports applied, and existing transcript replayed into brief mode!
+    assert.equal(isBriefMode(), true);
+    assert.deepEqual(executedCommands, ["/import", "/import codex_user=on"]);
+    screen = virtual.getViewport().join("\n");
+    assert.match(screen, /◉ read → read b\.js · 2 tools/, "existing tool group collapsed via live replay");
+    assert.match(screen, /Brief output enabled\./);
+    assert.match(screen, /Skill imports updated\./);
+  } finally {
+    tui.stop();
+  }
+});
