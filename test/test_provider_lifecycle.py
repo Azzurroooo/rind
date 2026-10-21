@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import aclosing
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -7,6 +8,7 @@ import httpx
 import openai
 
 from agent.domain.cancellation import CancellationTokenSource
+from agent.infrastructure.llm import cancellation
 from agent.infrastructure.llm.cancellation import await_with_cancellation
 from agent.infrastructure.llm.cancellation import iterate_with_cancellation
 from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
@@ -132,6 +134,42 @@ async def test_simultaneous_completion_prefers_cancellation():
 
     with pytest.raises(asyncio.CancelledError, match="stop"):
         await await_with_cancellation(request(), source.token)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_token", [False, True])
+async def test_silent_request_times_out(monkeypatch, with_token):
+    monkeypatch.setattr(cancellation, "MODEL_IDLE_TIMEOUT_SECONDS", 0.05)
+    before = asyncio.all_tasks()
+    token = CancellationTokenSource().token if with_token else None
+    with pytest.raises(TimeoutError, match="sent nothing"):
+        await await_with_cancellation(asyncio.Event().wait(), token)
+    assert asyncio.all_tasks() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_token", [False, True])
+async def test_stream_times_out_only_after_a_silent_gap(monkeypatch, with_token):
+    monkeypatch.setattr(cancellation, "MODEL_IDLE_TIMEOUT_SECONDS", 0.2)
+    token = CancellationTokenSource().token if with_token else None
+    closed = asyncio.Event()
+
+    async def stream():
+        try:
+            for index in range(5):
+                await asyncio.sleep(0.1)
+                yield index
+            await asyncio.Event().wait()
+        finally:
+            closed.set()
+
+    received = []
+    with pytest.raises(TimeoutError, match="sent nothing"):
+        async with aclosing(iterate_with_cancellation(stream(), token)) as chunks:
+            async for chunk in chunks:
+                received.append(chunk)
+    assert received == [0, 1, 2, 3, 4]
+    assert closed.is_set()
 
 
 @pytest.mark.asyncio
