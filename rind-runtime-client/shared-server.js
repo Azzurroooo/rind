@@ -1,6 +1,6 @@
 import net from "node:net";
 import { existsSync } from "node:fs";
-import { privateDirectory, resolveRindHome } from "./local-files.js";
+import { privateDirectory, recordedNonce, resolveRindHome } from "./local-files.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { appendFile, readFile, writeFile, unlink } from "node:fs/promises";
 import { createRuntimeClient } from "./runtime-client.js";
@@ -12,6 +12,11 @@ import { createLiveSessions } from "./live-sessions.js";
 // Only the detached entry point exits on its own; a test imports this module.
 const hostEntry = Boolean(process.argv[1]?.endsWith("shared-server.js"));
 const DEFAULT_IDLE_TTL_MS = 15 * 60 * 1000;
+// The detached host's stderr is the Runtime log: every line it carries gets a time.
+const writeStderr = text => {
+  const at = `[${new Date().toISOString()}] `;
+  process.stderr.write(text.replace(/^(?=.)/gm, at));
+};
 const OBSERVE_EVENTS = new Set([
   "turn_started", "turn_completed", "turn_failed", "turn_cancelled",
   "user_question_requested", "user_question_answered", "background_wait_changed",
@@ -44,9 +49,17 @@ export async function startSharedServer(options) {
     ...live.list().filter(item => item.turn !== "idle" || item.background).map(item => item.id),
   ]).size;
   const idleTtlMs = resolveIdleTtlMs(options);
-  let idleSince = Date.now(), idleTimer = null;
-  const isIdle = () => peers.size === 0 && busyCount() === 0 && opening.size === 0 && deleting.size === 0 && !authOwner;
-  const touchActivity = () => { idleSince = Date.now(); };
+  let idleSince = Date.now(), idleTimer = null, stopTimer = null, stopWhenIdle = Boolean(options.stopWhenIdle), hasConnectedPeer = false;
+  const clearStopTimer = () => { if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; } };
+  const isIdle = () => ![...peers].some(peer => !peer.observe) && busyCount() === 0 && opening.size === 0 && deleting.size === 0 && !authOwner;
+  const touchActivity = () => {
+    idleSince = Date.now();
+    if (!stopWhenIdle || stopping || !isIdle()) { clearStopTimer(); return; }
+    if (!stopTimer) {
+      stopTimer = setTimeout(() => { stopTimer = null; if (!stopping && stopWhenIdle && isIdle()) void close("shutdown"); }, hasConnectedPeer ? 200 : 5000);
+      stopTimer.unref?.();
+    }
+  };
   const client = createRuntimeClient({ ...options, rindHome, cwd: paths.directory, cliArgs: [], env: { RIND_SHARED_HOST_PID: String(process.pid) },
     onMessage(event) {
       // Sign-in progress (the URL to open) is for the window signing in.
@@ -62,7 +75,7 @@ export async function startSharedServer(options) {
       if (isIdle()) touchActivity();
     },
     onRequest(prompt) { return new Promise(resolve => { if (!authOwner || authOwner.socket.destroyed) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
-    onStderr: text => process.stderr.write(text),
+    onStderr: writeStderr,
     // A crashed worker ends every turn it was running; nothing will report their end.
     // The host stops with it: a later client starts a fresh host instead of
     // reaching one that can no longer spawn a worker.
@@ -96,9 +109,16 @@ export async function startSharedServer(options) {
   ready.catch(() => {});
   const server = net.createServer(socket => {
     socket.setEncoding("utf8"); let buffer = "";
-    const peer = { socket, sessions: new Set(), observe: false, send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
+    const peer = { socket, sessions: new Set(), prompts: new Set(), observe: false, oneShot: false, send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
     peers.add(peer); touchActivity(); socket.on("error", () => {});
-    socket.on("close", () => { peers.delete(peer); live.leave(peer); for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); } if (isIdle()) touchActivity(); });
+    socket.on("close", () => {
+      peers.delete(peer); live.leave(peer);
+      if (peer.oneShot && initialized) {
+        for (const sessionId of peer.prompts) void client.request("session/cancel", { session_id: sessionId }).catch(() => {});
+      }
+      for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); }
+      if (isIdle()) touchActivity();
+    });
     socket.on("data", chunk => {
       buffer += chunk;
       if (buffer.length > 32 * 1024 * 1024) { socket.destroy(); return; }
@@ -151,28 +171,38 @@ export async function startSharedServer(options) {
           if (initialized) {
             // A worker that already died mid-shutdown is no reason to stay up.
             try { await client.shutdown(); }
-            catch (error) { process.stderr.write("runtime shutdown: " + (error?.message || String(error)) + "\n"); }
+            catch (error) { writeStderr("runtime shutdown: " + (error?.message || String(error)) + "\n"); }
           }
           peer.send({ id, result: { stopped: true } });
           await close("shutdown");
           return;
         }
         const base = await initialize(); let result;
+        if (method !== "runtime/observe") hasConnectedPeer = true;
         if (method === "initialize") result = base;
         else if (method === "runtime/observe") { peer.observe = true; result = { pid: client.child.pid }; }
         else if (method === "shutdown") { result = { detached: true }; peer.sessions.clear(); live.leave(peer); }
         else {
+          if (["session/open", "session/create", "session/subscribe"].includes(method)) {
+            if (params.one_shot === true) {
+              peer.oneShot = true;
+              if (params.stop_when_idle === true) stopWhenIdle = true;
+            } else if (!peer.oneShot) {
+              stopWhenIdle = false;
+            }
+          }
+          const { one_shot: _oneShot, stop_when_idle: _stopWhenIdle, ...workerParams } = params;
           if (method === "session/prompt" && prompts.has(params.session_id)) throw new Error("This session already has an active request. Use steering or follow-up input.");
-          if (method === "session/prompt") { prompts.add(params.session_id); viewIfOpen(peer, params.session_id); }
+          if (method === "session/prompt") { prompts.add(params.session_id); peer.prompts.add(params.session_id); viewIfOpen(peer, params.session_id); }
           if (method === "rind/auth/login") { if (authOwner) throw new Error("Another connection is signing in."); authOwner = peer; }
           if (method === "session/subscribe" || method === "session/prompt") peer.sessions.add(params.session_id);
           if (method === "session/unsubscribe") { peer.sessions.delete(params.session_id); live.leave(peer, params.session_id); result = { ok: true }; }
           let promptFailed = false;
-          try { if (method !== "session/unsubscribe") result = await client.request(method, params); }
+          try { if (method !== "session/unsubscribe") result = await client.request(method, workerParams); }
           catch (error) { promptFailed = true; throw error; }
           finally {
             if (method === "rind/auth/login") authOwner = null;
-            if (method === "session/prompt") { prompts.delete(params.session_id); live.settle(params.session_id, promptFailed); }
+            if (method === "session/prompt") { prompts.delete(params.session_id); peer.prompts.delete(params.session_id); live.settle(params.session_id, promptFailed); }
           }
           // A window before its first message has no session; session/create makes one.
           if (["session/open", "session/new", "session/switch", "session/create"].includes(method) && result.session_id) { peer.sessions.add(result.session_id); viewIfOpen(peer, result.session_id, { workspace: result.workspace_root }); }
@@ -192,7 +222,7 @@ export async function startSharedServer(options) {
   try {
     await listenOwned(server, paths.endpoint);
   } catch (error) {
-    if (error?.code === "ENDPOINT_OCCUPIED") throw new Error("Shared Runtime is already running.");
+    if (error?.code === "ENDPOINT_OCCUPIED") throw Object.assign(new Error("Shared Runtime is already running."), { code: "ALREADY_RUNNING" });
     throw error;
   }
   try {
@@ -211,15 +241,16 @@ export async function startSharedServer(options) {
       const checkMs = Math.max(50, Math.min(idleTtlMs || 1000, 1000));
       idleTimer = setInterval(async () => {
         if (stopping) return;
+        // A host that published itself here since owns the endpoint; this one is unreachable.
+        const owner = await recordedNonce(paths.record);
+        if (owner && owner !== recordNonce) { void close("superseded"); return; }
         if (!isIdle()) { touchActivity(); return; }
-        const raw = await readFile(paths.record, "utf8").catch(() => null);
-        let recordOwned = false;
-        try { recordOwned = Boolean(raw && JSON.parse(raw).nonce === recordNonce); } catch {}
-        if (!recordOwned) { void close("record_removed"); return; }
+        if (owner !== recordNonce) { void close("record_removed"); return; }
         if (idleTtlMs > 0 && Date.now() - idleSince >= idleTtlMs) void close("idle_timeout");
       }, checkMs);
       idleTimer.unref?.();
     }
+    touchActivity();
     readyResolve();
   } catch (error) {
     readyReject(error);
@@ -227,11 +258,8 @@ export async function startSharedServer(options) {
     await new Promise(resolve => server.close(resolve));
     throw error;
   }
-  function releaseRecord() {
-    return readFile(paths.record, "utf8").then(value => {
-      if (JSON.parse(value).nonce !== recordNonce) return; // a later host owns it now
-      return unlink(paths.record).catch(() => {});
-    }, () => {}).catch(() => {});
+  async function releaseRecord() {
+    if (await recordedNonce(paths.record) === recordNonce) await unlink(paths.record).catch(() => {});
   }
   // Keep ownership until the worker stops, so a replacement cannot run a
   // second worker against the same history during cleanup. Every peer is let
@@ -239,6 +267,7 @@ export async function startSharedServer(options) {
   function close(reason = "shutdown") {
     return closing ||= (async () => {
       stopping = true;
+      clearStopTimer();
       if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
       const forced = setTimeout(() => { for (const peer of peers) peer.socket.destroy(); }, 1000);
       forced.unref?.();
@@ -263,5 +292,9 @@ if (hostEntry) {
     const stop = signal => { void server.close(signal); };
     process.once("SIGTERM", () => stop("SIGTERM"));
     process.once("SIGINT", () => stop("SIGINT"));
-  }).catch(error => { console.error(error); process.exitCode = 1; });
+  }).catch(error => {
+    // Losing a start race to a live host is expected; the client uses that host.
+    if (error?.code !== "ALREADY_RUNNING") writeStderr(String(error?.stack || error) + "\n");
+    process.exitCode = 1;
+  });
 }

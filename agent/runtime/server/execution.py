@@ -357,12 +357,21 @@ class ExecutionCoordinator:
                 if not waiting and not busy and session_id not in self._continuations:
                     return {"request_id": scope.request_id, "answer": scope.answer}
                 await scope.changed.wait()
+        except BaseException:
+            await self.abandon_request(session_id)
+            raise
         finally:
             self._scopes.pop(session_id, None)
 
-    def abandon_request(self, session_id: str) -> None:
-        self.interrupt(session_id, "Request disconnected")
-        self._scopes.pop(session_id, None)
+    async def abandon_request(self, session_id: str) -> None:
+        scope = self._scopes.pop(session_id, None)
+        reason = (scope.error if scope else "") or "Request disconnected"
+        self.interrupt(session_id, reason)
+        continuation = self._continuations.get(session_id)
+        if continuation is not None and continuation is not asyncio.current_task():
+            await asyncio.gather(continuation, return_exceptions=True)
+        if scope is not None:
+            await self._shell_tools.supervisor.close_request(session_id, scope.request_id, reason)
 
     def active_session_ids(self) -> set[str]:
         return set(self._active)

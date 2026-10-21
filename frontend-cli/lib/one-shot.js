@@ -156,17 +156,27 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   let management;
   let activeSessionId = "";
   let promptInFlight = false;
+  let interrupted = false;
+  let abortSignal;
+  const signalAbort = new Promise((_, reject) => { abortSignal = reject; });
+  signalAbort.catch(() => {});
   const onSignal = () => {
-    if (promptInFlight && client && activeSessionId) {
-      turnFailure ||= "Request interrupted.";
+    const repeat = interrupted;
+    interrupted = true;
+    turnFailure ||= "Request interrupted.";
+    if (promptInFlight && client && activeSessionId && !repeat) {
       void client.request(runtimeMethods.sessionCancel, { session_id: activeSessionId }).catch(() => {});
+    } else {
+      abortSignal(new Error("Request interrupted."));
     }
   };
+  const interruptible = (work) => interrupted ? Promise.reject(new Error("Request interrupted.")) : Promise.race([work, signalAbort]);
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
+  if (process.platform !== "win32") process.on("SIGHUP", onSignal);
   try {
     management = clientFactory === createSharedRuntimeClient
-      ? await prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false })
+      ? await interruptible(prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false, stopSpawnedService: true }))
       : { args: runtimeArgs, shared: true };
     progress.begin();
     client = observeRuntime(clientFactory({
@@ -177,6 +187,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       cliArgs: management.args,
       externalTools: management.externalTools,
       stopSpawnedHost: true,
+      hostSpawned: Boolean(management.spawnedRuntime),
       onMessage: (message) => {
         const event = message?.event;
         const type = event?.type;
@@ -202,9 +213,9 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       },
     }), management);
     client.start();
-    sessionInfo = requireRuntimeInitialization(await client.request(runtimeMethods.initialize));
+    sessionInfo = requireRuntimeInitialization(await interruptible(client.request(runtimeMethods.initialize)));
     // Without --session the prompt below is a new conversation's first message.
-    if (!sessionInfo.session_id && !options.session) sessionInfo = { ...sessionInfo, ...await client.request(runtimeMethods.sessionCreate, {}) };
+    if (!sessionInfo.session_id && !options.session) sessionInfo = { ...sessionInfo, ...await interruptible(client.request(runtimeMethods.sessionCreate, {})) };
     const sessionId = String(sessionInfo.session_id || options.session || "").trim();
     if (!sessionId) throw new Error("Runtime initialization did not return a session_id.");
     activeSessionId = sessionId;
@@ -212,11 +223,11 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     const requestCompletion = sessionInfo.capabilities.includes("rind/request-completion");
     if (!requestCompletion) progress.note("This Worker completes one turn only; automatic background continuation is unavailable.");
     promptInFlight = true;
-    const result = await client.request(runtimeMethods.sessionPrompt, {
+    const result = await interruptible(client.request(runtimeMethods.sessionPrompt, {
       session_id: sessionId,
       input: options.prompt,
       ...(requestCompletion ? { completion_scope: "request" } : {}),
-    }).finally(() => { promptInFlight = false; });
+    })).finally(() => { promptInFlight = false; });
     if (turnFailure) throw new Error(turnFailure);
     status = "completed";
     const responseTurnId = String(result?.turn_id || turnId || "");
@@ -266,6 +277,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   } finally {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
+    if (process.platform !== "win32") process.off("SIGHUP", onSignal);
     try {
       if (client) await client.shutdown().catch((error) => {
         stderr(`Runtime shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`);

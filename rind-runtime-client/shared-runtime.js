@@ -147,7 +147,7 @@ export async function connectSharedRuntime(options = {}) {
     const log = await open(paths.log, "a", 0o600);
     // The host must not hold the caller's working directory open: on Windows a
     // process whose current directory is inside a folder blocks removing it.
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ python: options.python, repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome }), "--rind-host-nonce=" + randomUUID()], { cwd: paths.directory, detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd], env: process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env });
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ python: options.python, repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome, ...(options.stopSpawnedHost && !replaced ? { stopWhenIdle: true } : {}) }), "--rind-host-nonce=" + randomUUID()], { cwd: paths.directory, detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd], env: process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env });
     child.on("error", () => {}); child.unref(); await log.close();
     for (let i = 0; i < 100; i++) {
       try { const started = await connect(); started.spawned = !replaced; return started; } catch {}
@@ -288,7 +288,12 @@ export function createSharedRuntimeClient(options) {
   }
   // Where this window works and what its conversation may use; a conversation
   // opened (an existing one) or created (on the first message) gets the same.
-  const scope = () => ({ workspace_root: arg("--cwd") || arg("--dir") || options.cwd || process.cwd(), external_tools: options.externalTools || null, enable_user_question: !args.includes("--no-user-question") });
+  const scope = client => ({
+    workspace_root: arg("--cwd") || arg("--dir") || options.cwd || process.cwd(),
+    external_tools: options.externalTools || null,
+    enable_user_question: !args.includes("--no-user-question"),
+    ...(options.stopSpawnedHost ? { one_shot: true, ...(client?.spawned || options.hostSpawned ? { stop_when_idle: true } : {}) } : {}),
+  });
   async function request(method, params = {}) {
     const client = await start();
     if (method === "initialize") {
@@ -297,18 +302,18 @@ export function createSharedRuntimeClient(options) {
       // keeps its own send endpoint (client.acceptsInput stays false).
       // Without --session nothing is created yet: the first message does that.
       initialization ||= client.request("initialize").then(async base => (options.onDeliver && (client.acceptsInput = await client.request("runtime/accept-input").then(() => true, () => false)), { ...base, ...await client.request("session/open", {
-        ...scope(), session_id: arg("--session"), resume_latest: args.includes("--resume-latest") || args.includes("-c"),
+        ...scope(client), session_id: arg("--session"), resume_latest: args.includes("--resume-latest") || args.includes("-c"),
       }) })).catch(error => { initialization = undefined; throw error; });
       return initialization;
     }
-    if (method === "session/create") return client.request(method, { ...scope(), ...params });
+    if (method === "session/create") return client.request(method, { ...scope(client), ...params });
     return client.request(method, params);
   }
   function close() { closed = true; connection?.close(); starting?.then(c => c.close()).catch(() => {}); }
   async function shutdown() {
     closed = true;
     const active = connection || await starting?.catch(() => null);
-    if (active && options.stopSpawnedHost && active.spawned) {
+    if (active && options.stopSpawnedHost && (active.spawned || options.hostSpawned)) {
       try {
         const result = await within(active.request("runtime/shutdown", { if_idle: true }).catch(() => null), 5000);
         active.close();

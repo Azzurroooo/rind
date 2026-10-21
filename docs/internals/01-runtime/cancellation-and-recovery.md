@@ -19,8 +19,10 @@ flowchart TD
 
 TurnRunner has a bounded step retry for stream_interrupted and persists the retry count; the tool processor reuses saved results by call ID, including failed results. If a call is missing its result during recovery, an explicit placeholder is written noting that it "may have executed or may not have", and it must not pretend to be exactly once. File threads under cancellation wait for already-started writes to finish; background processes need separate task cancellation or handling during Worker shutdown.
 
+Silence ends a model read as well: a request or stream that delivers nothing for 600 seconds fails as `timed_out`, even when a gateway keeps the connection alive with keep-alive comments. A stall in the middle of a stream counts as stream_interrupted and gets the same bounded retry; after that the turn ends with turn_failed, so its execution is released and the session accepts new input.
+
 A user interruption suppresses automatic continuation and sets the active Goal to paused; a failure sets the active Goal to blocked. A normal Worker shutdown tries to terminate the processes it owns and wait for monitor tasks to end; force-killing an unresponsive Worker cannot guarantee that every child process has been cleaned up.
 
-Code entry points: [the cancellation token](../../../agent/domain/cancellation.py), [TurnRunner](../../../agent/runtime/core/turn_runner.py), [the execution coordinator](../../../agent/runtime/server/execution.py). Verification: [cancellation tests](../../../test/test_cancellation_token.py), [task recovery](../../../test/test_task_continuation.py), [failure boundaries](../../../test/test_failure_boundaries.py).
+Code entry points: [the cancellation token](../../../agent/domain/cancellation.py), [TurnRunner](../../../agent/runtime/core/turn_runner.py), [the execution coordinator](../../../agent/runtime/server/execution.py). Verification: [cancellation tests](../../../test/test_cancellation_token.py), [task recovery](../../../test/test_task_continuation.py), [failure boundaries](../../../test/test_failure_boundaries.py), [a silent model](../../../test/test_model_idle_journey.py).
 
 [Back to the series map](../README.md)

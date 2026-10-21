@@ -305,6 +305,14 @@ class ProcessSupervisor:
     def stop_accepting(self) -> None:
         self._closed = True
 
+    async def close_request(self, session_id: str, request_id: str, reason: str = "Request interrupted") -> None:
+        records = [
+            r for r in self._processes.values()
+            if r.session_id == session_id and r.request_id == request_id and r.status not in TERMINAL_STATES
+        ]
+        if records:
+            await self._close_records(records, reason)
+
     async def close_session(self, session_id: str) -> None:
         self._closed_sessions.add(session_id)
         records = [r for r in self._processes.values() if r.session_id == session_id]

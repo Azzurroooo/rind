@@ -178,6 +178,8 @@ export async function runAgentsCommand(args, launch) {
 // Stopping is explicit and separate from leaving Rind. Without --all it only
 // stops services that have nothing running, so no work is lost by accident.
 async function stopBackground(all, launch, json) {
+  // A Rind session's shell descends from the shared Runtime that --all stops.
+  if (all && process.env.RIND_SHARED_HOST_PID) throw new Error("`rind agents stop --all` would stop the Rind session running it. Run it in a terminal outside Rind.");
   let client;
   try { client = await managementClient({ ...launch, start: false }); }
   catch { await stopRuntimeAlone(all, launch, json); return; }

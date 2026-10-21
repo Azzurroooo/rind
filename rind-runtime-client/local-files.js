@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { readlinkSync, realpathSync } from "node:fs";
-import { mkdir, chmod } from "node:fs/promises";
+import { mkdir, chmod, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -37,4 +37,10 @@ export async function privateDirectory(directory) {
     const user = [process.env.USERDOMAIN, os.userInfo().username].filter(Boolean).join("\\");
     await promisify(execFile)("icacls.exe", [directory, "/inheritance:r", "/grant:r", user + ":(OI)(CI)F"], { windowsHide: true });
   }
+}
+
+// The nonce of the process that last published itself in `file`; "" when there is none to read.
+export async function recordedNonce(file) {
+  try { return String(JSON.parse(await readFile(file, "utf8")).nonce || ""); }
+  catch { return ""; }
 }

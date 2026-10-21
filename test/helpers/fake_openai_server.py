@@ -53,6 +53,11 @@ class FakeOpenAIServer:
         with self._lock:
             self._script.append({"kind": "error", "status": status})
 
+    def script_stall(self) -> None:
+        """A stream that opens and then sends only keep-alive comments until the client leaves."""
+        with self._lock:
+            self._script.append({"kind": "stall"})
+
     def set_models(self, model_ids: list[str]) -> None:
         """Serve GET /models with a fixed catalog."""
         with self._lock:
@@ -135,6 +140,15 @@ class FakeOpenAIServer:
                 def emit(payload):
                     self.wfile.write(f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8"))
                     self.wfile.flush()
+
+                if script["kind"] == "stall":
+                    try:
+                        while True:
+                            self.wfile.write(b": keep-alive\n\n")
+                            self.wfile.flush()
+                            time.sleep(0.1)
+                    except OSError:
+                        return
 
                 if script["kind"] == "tool_call":
                     arguments = script["arguments"]

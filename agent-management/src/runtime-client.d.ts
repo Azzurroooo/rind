@@ -6,7 +6,7 @@ declare module "*runtime-client.js" {
 }
 
 declare module "*shared-runtime.js" {
-  export function connectSharedRuntime(options?: any): Promise<{ request(method: string, params?: any): Promise<any>; close(): void; stale?: { reason: string } }>;
+  export function connectSharedRuntime(options?: any): Promise<{ request(method: string, params?: any): Promise<any>; close(): void; spawned?: boolean; stale?: { reason: string } }>;
   export function createSharedRuntimeClient(options: any): { start(): unknown; request(method: string, params?: any): Promise<any>; shutdown(): Promise<void> };
   export function stopSharedRuntime(options?: any): Promise<boolean>;
 }
@@ -14,6 +14,7 @@ declare module "*shared-runtime.js" {
 declare module "*local-files.js" {
   export function privateDirectory(directory: string): Promise<void>;
   export function resolveRindHome(home?: string): string;
+  export function recordedNonce(file: string): Promise<string>;
 }
 
 declare module "*endpoint.js" {

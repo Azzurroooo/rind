@@ -160,3 +160,40 @@ test("system notice colors follow stderr TTY and NO_COLOR", () => {
     else process.env.NO_COLOR = original;
   }
 });
+
+test("one-shot signal during initialization aborts startup and still shuts down the client", async (t) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "rind-signal-init-"));
+  const originalExitCode = process.exitCode;
+  t.after(async () => {
+    process.exitCode = originalExitCode;
+    await rm(workspace, { recursive: true, force: true });
+  });
+  let shutDown = false;
+  let notifyInitStarted;
+  const initStarted = new Promise((resolve) => { notifyInitStarted = resolve; });
+  const errors = [];
+  const running = runOneShot({
+    args: ["run", "--prompt", "hello"],
+    cwd: workspace,
+    stdout: () => {},
+    stderr: (text) => errors.push(text),
+    clientFactory: () => ({
+      start() {},
+      request(method) {
+        if (method === "initialize") {
+          notifyInitStarted();
+          return new Promise(() => {});
+        }
+        return Promise.resolve({});
+      },
+      async shutdown() { shutDown = true; },
+    }),
+  });
+  await initStarted;
+  process.emit("SIGTERM");
+  await running;
+  assert.equal(shutDown, true);
+  assert.equal(process.exitCode, 1);
+  assert.match(errors.join(""), /Request interrupted/);
+});
+

@@ -1,4 +1,4 @@
-"""Await a provider coroutine while staying responsive to cancellation."""
+"""Await a provider coroutine while staying responsive to cancellation and silence."""
 
 from __future__ import annotations
 
@@ -7,11 +7,22 @@ import inspect
 
 from agent.domain.cancellation import CancellationToken
 
+# A request or stream that delivers nothing for this long has stalled: a
+# connection kept open by keep-alives alone would otherwise hold the turn forever.
+MODEL_IDLE_TIMEOUT_SECONDS = 600
+
+
+async def _within_idle_timeout(awaitable):
+    try:
+        return await asyncio.wait_for(awaitable, MODEL_IDLE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        raise TimeoutError(f"The model sent nothing for {MODEL_IDLE_TIMEOUT_SECONDS} seconds.") from None
+
 
 async def await_with_cancellation(awaitable, cancellation_token: CancellationToken | None):
     if cancellation_token is None:
-        return await awaitable
-    task = asyncio.create_task(awaitable)
+        return await _within_idle_timeout(awaitable)
+    task = asyncio.create_task(_within_idle_timeout(awaitable))
     cancel = asyncio.create_task(cancellation_token.wait())
     try:
         done, _ = await asyncio.wait((task, cancel), return_when=asyncio.FIRST_COMPLETED)
@@ -36,9 +47,12 @@ async def close_resource(resource) -> None:
 async def iterate_with_cancellation(stream, cancellation_token: CancellationToken | None):
     iterator = aiter(stream)
     if cancellation_token is None:
-        async for item in iterator:
+        while True:
+            try:
+                item = await _within_idle_timeout(anext(iterator))
+            except StopAsyncIteration:
+                return
             yield item
-        return
 
     read_task = None
 
@@ -51,7 +65,7 @@ async def iterate_with_cancellation(stream, cancellation_token: CancellationToke
         while True:
             if cancellation_token.is_cancelled:
                 raise asyncio.CancelledError(cancellation_token.reason)
-            read_task = asyncio.create_task(anext(iterator))
+            read_task = asyncio.create_task(_within_idle_timeout(anext(iterator)))
             try:
                 item = await read_task
             except StopAsyncIteration:

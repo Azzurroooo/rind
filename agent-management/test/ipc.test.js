@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -216,6 +217,24 @@ test("service stops automatically when idle TTL expires or service.json is remov
   assert.match(logAfterRecord, /reason=record_removed/);
 });
 
+test("a service replaced in service.json stops while a client is still connected and leaves the replacement's record", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-superseded-"));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  t.after(async () => { await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  let stopped;
+  const exited = new Promise(resolve => { stopped = resolve; });
+  const server = await startServer({ home, repoRoot, idleTtlMs: 60_000, onShutdown: stopped });
+  const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
+  await client.request("snapshot");
+  const successor = JSON.stringify({ pid: process.pid, nonce: randomUUID(), startedAt: new Date().toISOString() });
+  await writeFile(server.paths.record, successor);
+  await exited;
+  client.close();
+  await server.close();
+  assert.equal(await readFile(server.paths.record, "utf8"), successor);
+  assert.match(await readFile(path.join(server.paths.state, "service.log"), "utf8"), /reason=superseded/);
+});
+
 test("disconnecting an agent connection while waiting in delegate({ wait: true }) releases the wait without losing child results", async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-wait-disconnect-"));
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -290,7 +309,7 @@ test("openStore rejects while store.lock is held, and a busy server steps down o
   await takeoverStore.close();
 
   const log = await readFile(path.join(server1.paths.state, "service.log"), "utf8");
-  assert.match(log, /reason=record_removed/);
+  assert.match(log, /reason=superseded/);
 
   // Before a new server recovers, the old server must NOT have written status="cancelled" into store:
   const rawEvents = await readFile(path.join(server1.paths.state, "events.jsonl"), "utf8");

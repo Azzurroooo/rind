@@ -6,10 +6,14 @@ import path from "node:path";
 import os from "node:os";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { startSharedServer } from "../../rind-runtime-client/shared-server.js";
 import { connectSharedRuntime, createSharedRuntimeClient, sharedRuntimePaths, stopSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { probeEndpoint } from "../../rind-runtime-client/endpoint.js";
 import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
 import { managementPaths } from "../../agent-management/dist/paths.js";
+import { stopManagementService } from "../../agent-management/dist/client.js";
 import { startServer } from "../../agent-management/dist/ipc.js";
 import { runOneShot } from "../lib/one-shot.js";
 import { removeRindHome } from "./helpers/rind-home.js";
@@ -239,3 +243,193 @@ test("idle TTL and record removal automatically stop an unattached shared host",
   }
   assert.equal(gone, true, "unattached host stops when its record file is removed");
 });
+
+test("a host replaced in host.json stops while a window is still attached and leaves the replacement's record", { timeout: 25000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-superseded-host-"));
+  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  t.after(async () => { await stopSharedRuntime(options); await removeRindHome(home); });
+  const host = await startSharedServer({ ...options, idleTtlMs: 60000 });
+  const window = await connectSharedRuntime({ ...options, start: false });
+  const successor = JSON.stringify({ pid: process.pid, nonce: randomUUID(), startedAt: new Date().toISOString() });
+  await writeFile(host.paths.record, successor);
+  let gone = false;
+  for (let i = 0; i < 40 && !gone; i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    gone = !(await connectSharedRuntime({ ...options, start: false }).then(conn => { conn.close(); return true; }, () => false));
+  }
+  window.close();
+  assert.equal(gone, true, "the replaced host stops serving although a window is attached");
+  assert.equal(await readFile(host.paths.record, "utf8"), successor);
+  assert.match(await readFile(host.paths.log, "utf8"), /reason=superseded/);
+});
+
+test("every line of a detached host's Runtime log carries a time, including the worker's stderr", { timeout: 30000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-log-time-"));
+  // A worker that fails at once writes a multi-line error to stderr.
+  const options = { rindHome: home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)), runtimePath: process.execPath };
+  t.after(async () => { await stopSharedRuntime(options); await removeRindHome(home); });
+  const runtime = await connectSharedRuntime(options);
+  await assert.rejects(runtime.request("initialize"));
+  runtime.close();
+  const { log } = sharedRuntimePaths(home);
+  let text = "";
+  for (let i = 0; i < 100 && !/host stopped/.test(text); i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    text = await readFile(log, "utf8").catch(() => "");
+  }
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  assert.ok(lines.some(line => /Cannot find module/.test(line)), "the worker's own stderr reached the log");
+  for (const line of lines) assert.match(line, /^\[\d{4}-\d\d-\d\dT[\d:.]+Z\] /);
+});
+
+test("one-shot leaves zero orphan processes across plain and registered folders, normal exit, and abrupt SIGKILL", { timeout: 90000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-oneshot-no-orphans-"));
+  const plainDir = path.join(home, "plain");
+  const memberDir = path.join(home, "member");
+  await mkdir(plainDir, { recursive: true });
+  await mkdir(memberDir, { recursive: true });
+  let mode = "immediate", heldResponse = null, notifyHeld = null;
+  const provider = http.createServer((request, response) => {
+    if (request.method === "GET") { response.end(JSON.stringify({ data: [{ id: "fixture" }] })); return; }
+    let raw = "";
+    request.on("data", chunk => { raw += chunk; });
+    request.on("end", () => {
+      if (mode === "hold") {
+        heldResponse = response;
+        notifyHeld?.();
+        return;
+      }
+      const body = JSON.parse(raw || "{}");
+      const hasToolResult = (body.messages || []).some(m => m.role === "tool");
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      if (mode === "bg_task" && !hasToolResult) {
+        const call = { index: 0, id: "bg-1", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: `"${process.execPath}" -e "setTimeout(() => {}, 30000)"`, yield_time_ms: 50, notify: "on_exit" }) } };
+        response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [call] }, finish_reason: null }] })}\n\n`);
+        response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\n`);
+        response.end("data: [DONE]\n\n");
+        return;
+      }
+      if (mode === "bg_task" && hasToolResult) {
+        notifyHeld?.();
+      }
+      response.write('data: {"choices":[{"index":0,"delta":{"content":"OK."},"finish_reason":null}]}\n\n');
+      response.write('data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n');
+      response.end("data: [DONE]\n\n");
+    });
+  });
+  await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
+  await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
+  await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const rindBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));
+  const python = process.env.RIND_PYTHON || "python";
+  const rtPaths = sharedRuntimePaths(home);
+  const mgmtPaths = managementPaths(home);
+  const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+  t.after(async () => {
+    heldResponse?.destroy();
+    await stopManagementService({ home }).catch(() => {});
+    await stopSharedRuntime({ rindHome: home }).catch(() => {});
+    await new Promise(resolve => provider.close(resolve));
+    await removeRindHome(home);
+  });
+
+  // Register a team and member first, then stop the management service so user-token exists on disk while nothing is running.
+  const setupServer = await startServer({ home, repoRoot, python });
+  const { connectClient } = await import("../../agent-management/dist/client.js");
+  const setupClient = await connectClient({ endpoint: setupServer.paths.endpoint, token: (await readFile(setupServer.paths.token, "utf8")).trim() });
+  const agent = await setupClient.request("registerAgent", { workspace: memberDir, name: "Worker" });
+  const team = await setupClient.request("createTeam", { name: "Alpha" });
+  await setupClient.request("addMember", { teamId: team.id, agentId: agent.id });
+  setupClient.close();
+  await setupServer.close();
+  assert.equal(existsSync(mgmtPaths.token), true, "user-token exists on disk");
+  assert.equal(await probeEndpoint(mgmtPaths.endpoint), false);
+  assert.equal(await probeEndpoint(rtPaths.endpoint), false);
+
+  const runCli = (cwd, ...args) => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [rindBin, ...args], {
+      cwd,
+      env: { ...process.env, RIND_HOME: home, RIND_PYTHON: python, NO_COLOR: "1" },
+      windowsHide: true,
+    });
+    let out = "", err = "";
+    child.stdout.on("data", chunk => { out += chunk; });
+    child.stderr.on("data", chunk => { err += chunk; });
+    child.once("error", reject);
+    child.once("close", code => resolve({ code, out, err }));
+  });
+
+  // 1. Plain unregistered folder when user-token exists and no Rind is running: neither server.js nor shared-server.js remains.
+  const plainRes = await runCli(plainDir, "run", "--dir", plainDir, "--prompt", "Plain reply");
+  assert.equal(plainRes.code, 0, plainRes.err);
+  assert.match(plainRes.out, /OK\./);
+  assert.equal(await probeEndpoint(mgmtPaths.endpoint), false, "management service spawned for folder check must stop");
+  assert.equal(await probeEndpoint(rtPaths.endpoint), false, "runtime host spawned for one-shot must stop");
+  assert.equal(existsSync(mgmtPaths.record), false);
+  assert.equal(existsSync(rtPaths.record), false);
+
+  // 2. Registered member folder when no Rind is running: both server.js and shared-server.js stop on completion.
+  const memberRes = await runCli(memberDir, "run", "--dir", memberDir, "--prompt", "Member reply");
+  assert.equal(memberRes.code, 0, memberRes.err);
+  assert.match(memberRes.out, /OK\./);
+  assert.equal(await probeEndpoint(mgmtPaths.endpoint), false, "management service spawned for one-shot must stop");
+  assert.equal(await probeEndpoint(rtPaths.endpoint), false, "runtime host spawned via sessionTools must stop");
+
+  // 3. Abrupt SIGKILL of `rind run` mid-turn when no Rind was running: turn is cancelled and both spawned daemons exit automatically.
+  mode = "hold";
+  const heldArrived = new Promise(resolve => { notifyHeld = resolve; });
+  const killedChild = spawn(process.execPath, [rindBin, "run", "--dir", memberDir, "--prompt", "Hold reply"], {
+    cwd: memberDir,
+    env: { ...process.env, RIND_HOME: home, RIND_PYTHON: python, NO_COLOR: "1" },
+    windowsHide: true,
+  });
+  await heldArrived;
+  const rtRecordBeforeKill = JSON.parse(await readFile(rtPaths.record, "utf8"));
+  const mgmtRecordBeforeKill = JSON.parse(await readFile(mgmtPaths.record, "utf8"));
+  const killedExit = new Promise(resolve => killedChild.once("exit", resolve));
+  killedChild.kill("SIGKILL");
+  await killedExit;
+  heldResponse?.destroy();
+  heldResponse = null;
+  for (let i = 0; i < 100 && (alive(rtRecordBeforeKill.pid) || alive(rtRecordBeforeKill.workerPid) || alive(mgmtRecordBeforeKill.pid)); i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(alive(rtRecordBeforeKill.pid), false, "spawned shared-server exits after one-shot SIGKILL");
+  assert.equal(alive(rtRecordBeforeKill.workerPid), false, "spawned python worker exits after one-shot SIGKILL");
+  assert.equal(alive(mgmtRecordBeforeKill.pid), false, "spawned management server exits after one-shot SIGKILL");
+
+  // 4. Existing Rind running when `rind run` starts a background bash task and is killed with SIGKILL:
+  //    existing host stays alive while the one-shot's background bash task is terminated.
+  const existingHost = await connectSharedRuntime({ rindHome: home, python, repoRoot });
+  t.after(() => existingHost.close());
+  await existingHost.request("initialize");
+  const hostInfoBefore = await existingHost.request("runtime/info");
+  const workerBefore = await existingHost.request("runtime/observe");
+  mode = "bg_task";
+  const bgWaitArrived = new Promise(resolve => { notifyHeld = resolve; });
+  const bgChild = spawn(process.execPath, [rindBin, "run", "--dir", plainDir, "--prompt", "Start bg"], {
+    cwd: plainDir,
+    env: { ...process.env, RIND_HOME: home, RIND_PYTHON: python, NO_COLOR: "1" },
+    windowsHide: true,
+  });
+  await bgWaitArrived;
+  // Wait briefly so run_turn finishes and wait_request is actively waiting on the background bash process.
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const bgChildExit = new Promise(resolve => bgChild.once("exit", resolve));
+  bgChild.kill("SIGKILL");
+  await bgChildExit;
+
+  let sessions = [];
+  for (let i = 0; i < 60; i++) {
+    sessions = (await existingHost.request("runtime/sessions")).sessions || [];
+    if (sessions.every(s => s.turn === "idle" && !s.background)) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.ok(sessions.every(s => s.turn === "idle" && !s.background), "background bash task from killed one-shot is cancelled");
+  assert.equal((await existingHost.request("runtime/info")).pid, hostInfoBefore.pid, "existing shared host stays alive");
+  assert.equal((await existingHost.request("runtime/observe")).pid, workerBefore.pid, "existing python worker stays alive");
+});
+
