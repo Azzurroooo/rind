@@ -6,7 +6,7 @@ import { currentSessionAgentContext, renderAgentsUI } from "./agents-ui.ts"
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
 import { renderSlashCommandMenu } from "./composer.ts"
-import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, prompt, retry, send, steer, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu } from "./dom.ts"
+import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, prompt, retry, send, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu, steer, topbarUpdateButton } from "./dom.ts"
 import { escapeHtml } from "./html.ts"
 import { renderInspector } from "./inspector.ts"
 import { renderPalette } from "./palette-ui.ts"
@@ -64,6 +64,7 @@ export function render() {
   renderAttachments()
   renderSettings()
   renderTheme()
+  renderTopbarUpdate()
   renderShortcuts()
   syncWorkingTimer()
 }
@@ -99,6 +100,46 @@ export function renderComposerState() {
     },
   )
   renderSendMenu()
+}
+
+export function renderTopbarUpdate() {
+  const update = state.update
+  if (!update || update.status === "idle") {
+    topbarUpdateButton.hidden = true
+    topbarUpdateButton.disabled = true
+    topbarUpdateButton.textContent = ""
+    delete topbarUpdateButton.dataset.status
+    delete topbarUpdateButton.dataset.tooltip
+    return
+  }
+  topbarUpdateButton.hidden = false
+  topbarUpdateButton.dataset.status = update.status
+  if (update.status === "available") {
+    topbarUpdateButton.disabled = false
+    topbarUpdateButton.textContent = `Update v${update.latestVersion}`
+    const tip = `Install Rind v${update.latestVersion} and restart`
+    topbarUpdateButton.dataset.tooltip = tip
+    topbarUpdateButton.setAttribute("aria-label", tip)
+  } else if (update.status === "downloading") {
+    topbarUpdateButton.disabled = true
+    const pct = typeof update.progress === "number" ? ` ${update.progress}%` : "…"
+    topbarUpdateButton.textContent = `Downloading${pct}`
+    const tip = `Downloading Rind v${update.latestVersion}`
+    topbarUpdateButton.dataset.tooltip = tip
+    topbarUpdateButton.setAttribute("aria-label", tip)
+  } else if (update.status === "installing") {
+    topbarUpdateButton.disabled = true
+    topbarUpdateButton.textContent = "Restarting…"
+    const tip = `Applying Rind v${update.latestVersion} update`
+    topbarUpdateButton.dataset.tooltip = tip
+    topbarUpdateButton.setAttribute("aria-label", tip)
+  } else if (update.status === "error") {
+    topbarUpdateButton.disabled = false
+    topbarUpdateButton.textContent = "Retry update"
+    const tip = update.error ? `Update failed: ${update.error}. Click to retry.` : "Click to retry update"
+    topbarUpdateButton.dataset.tooltip = tip
+    topbarUpdateButton.setAttribute("aria-label", tip)
+  }
 }
 
 export function renderTheme() {

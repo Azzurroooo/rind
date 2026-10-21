@@ -1,4 +1,4 @@
-import { requiredElement, settingsNotifications, shortcutsDialog, sidebarResizeHandle, sidebarToggle } from "./dom.ts"
+import { requiredElement, settingsNotifications, shortcutsDialog, sidebarResizeHandle, sidebarToggle, topbarUpdateButton } from "./dom.ts"
 import { openPalette } from "./palette-ui.ts"
 import { runAction } from "./runtime.ts"
 import { addProject, startNewChat } from "./sessions.ts"
@@ -20,6 +20,13 @@ export function bindShellEvents(): void {
   // ---------- topbar actions ----------
 
   document.getElementById("open-palette")?.addEventListener("click", () => openPalette())
+
+  topbarUpdateButton.addEventListener("click", () => {
+    runAction(async () => {
+      state.update = await window.api.update.apply()
+      render()
+    })
+  })
 
   document.getElementById("toggle-theme")?.addEventListener("click", () => setTheme(nextTheme()))
 

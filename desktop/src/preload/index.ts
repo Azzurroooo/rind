@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron"
 
 import { unwrapRuntimeIpcResult } from "../shared/ipc-error"
-import { runtimeMethods, type DesktopApi, type DesktopAuthPrompt, type DesktopAuthUpdate, type DesktopNotificationPayload, type DesktopPrefsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeSnapshot } from "./types"
+import { runtimeMethods, type DesktopApi, type DesktopAuthPrompt, type DesktopAuthUpdate, type DesktopNotificationPayload, type DesktopPrefsPatch, type DesktopTheme, type DesktopUpdateState, type RuntimeEvent, type RuntimeSnapshot } from "./types"
 
 // The main process returns worker errors as a wrapped envelope (never as a
 // rejected ipcMain.handle) — unwrap here so renderer call sites keep their
@@ -134,6 +134,19 @@ const api: DesktopApi = {
     },
   },
   quit: () => ipcRenderer.invoke("app-quit"),
+  update: {
+    getState: () => ipcRenderer.invoke("update-get-state"),
+    check: () => ipcRenderer.invoke("update-check"),
+    apply: () => ipcRenderer.invoke("update-apply"),
+    subscribe: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: DesktopUpdateState) => listener(state)
+      ipcRenderer.on("update-state", handler)
+      void ipcRenderer.invoke("update-get-state").then((state: DesktopUpdateState) => {
+        if (state && typeof state === "object") listener(state)
+      }).catch(() => {})
+      return () => ipcRenderer.removeListener("update-state", handler)
+    },
+  },
   platform: process.platform,
 }
 

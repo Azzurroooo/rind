@@ -6,6 +6,7 @@ import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol
 import { createOneShotProgress } from "./one-shot-progress.js";
 import { sendHelp } from "./send.js";
 import { configHelp } from "./config-command.js";
+import { updateHelp } from "./update.js";
 import { prepareManagement, observeRuntime } from "./agents-session.js";
 
 export const oneShotHelp = [
@@ -42,6 +43,8 @@ export const cliHelp = [
   configHelp,
   "",
   tourHelp,
+  "",
+  updateHelp,
 ].join("\n");
 
 export function parseOneShotArgs(args) {

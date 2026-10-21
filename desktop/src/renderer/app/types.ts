@@ -1,4 +1,4 @@
-import { type DesktopFileListing, type DesktopFilePreview, type DesktopGoal, type DesktopProject, type DesktopRecentSession, type DesktopSessionSummary, type DesktopSettings, type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
+import { type DesktopFileListing, type DesktopFilePreview, type DesktopGoal, type DesktopProject, type DesktopRecentSession, type DesktopSessionSummary, type DesktopSettings, type DesktopTheme, type DesktopUpdateState, type RuntimeSnapshot } from "../../preload/types.ts"
 import { type AgentsSnapshotData, type DesktopAgentSurfaceState, type OrgViewMode, type SessionAgentContext } from "../agents-model.ts"
 import { type PendingInput } from "../composer-region.ts"
 import { type ModelOption } from "../composer-select.ts"
@@ -37,6 +37,7 @@ export type InspectorLoad<T> = {
 
 export type AppState = {
   runtime: RuntimeSnapshot
+  update: DesktopUpdateState
   settings: DesktopSettings
   settingsOpen: boolean
   settingsSaving: boolean

@@ -65,6 +65,34 @@ body[data-platform="darwin"] .topbar { padding-left: 80px; }
 
 .topbar-icon { display: block; width: 16px; height: 16px; }
 .app-version { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.topbar-update-button {
+  height: 24px;
+  margin-right: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+.topbar-update-button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--surface);
+}
+.topbar-update-button:disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+.topbar-update-button[data-status="error"] {
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger);
+}
 
 /* ---------- layout ---------- */
 

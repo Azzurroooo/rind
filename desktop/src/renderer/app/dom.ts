@@ -24,6 +24,7 @@ appRoot.innerHTML = `
         <span id="connection" class="connection"><span class="status-pip"></span><span id="connection-text">Stopped</span></span>
       </div>
       <div class="topbar-actions">
+        <button id="topbar-update" type="button" class="topbar-update-button" hidden></button>
         <span class="app-version" aria-label="Rind version">v${escapeHtml(appVersion)}</span>
         <button id="open-palette" type="button" class="icon-button topbar-button" data-tooltip="Command palette (Ctrl+K)" aria-label="Command palette (Ctrl+K)">${renderIcon(Search)}</button>
         <button id="open-remote" type="button" class="icon-button topbar-button" data-tooltip="Remote access" aria-label="Remote access">${renderIcon(MonitorSmartphone)}</button>
@@ -268,6 +269,7 @@ appRoot.innerHTML = `
 `
 
 export const connection = requiredElement("connection")
+export const topbarUpdateButton = requiredElement<HTMLButtonElement>("topbar-update")
 export const connectionText = requiredElement("connection-text")
 export const projectMenuTrigger = requiredElement<HTMLButtonElement>("project-menu-trigger")
 export const projectMenuLabel = requiredElement("project-menu-label")

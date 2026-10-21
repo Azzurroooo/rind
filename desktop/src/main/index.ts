@@ -5,13 +5,14 @@ import { existsSync, rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopTheme, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
+import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopTheme, DesktopUpdateState, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
 import { asObject, readJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
 import { DesktopProjectStore, samePath } from "./projects"
 import { loadRuntimeSettings as loadSharedRuntimeSettings, resolveRindPaths, saveRuntimeSettings as saveSharedRuntimeSettings } from "./runtime-settings"
 import { readRindVersion } from "./version"
+import { DesktopUpdater } from "./updater"
 import { wrapRuntimeIpcError } from "../shared/ipc-error"
 import { DesktopGateway } from "./gateway/server"
 import { allowGatewayOnWindows } from "./gateway/firewall"
@@ -154,6 +155,22 @@ let quitting = false
 let runtimeShutdownComplete = false
 let windowFocused = false
 let remoteGateway: DesktopGateway | undefined
+let desktopUpdater: DesktopUpdater | undefined
+
+function updater() {
+  desktopUpdater ||= new DesktopUpdater({
+    currentVersion: appVersion(),
+    isPackaged: app.isPackaged,
+    onStateChange: notifyUpdateState,
+    quiesceServices: async () => {
+      await remoteGateway?.stop()
+      await closeManagement()
+      await shutdownRuntime()
+      runtimeShutdownComplete = true
+    },
+  })
+  return desktopUpdater
+}
 
 function gateway() {
   remoteGateway ||= new DesktopGateway({
@@ -480,6 +497,9 @@ function registerIpc() {
     return showDesktopNotification(record)
   })
   ipcMain.handle("app-quit", () => app.quit())
+  ipcMain.handle("update-get-state", () => updater().getState())
+  ipcMain.handle("update-check", () => updater().checkForUpdates())
+  ipcMain.handle("update-apply", () => updater().applyUpdate())
 }
 
 function createMainWindow() {
@@ -548,6 +568,7 @@ function createMainWindow() {
     const snapshot = getRuntimeSnapshot()
     if (snapshot) notifyRuntime(snapshot)
     notifyAgentsState(getManagementState())
+    notifyUpdateState(updater().getState())
   })
   win.on("focus", () => { windowFocused = true })
   win.on("blur", () => { windowFocused = false })
@@ -582,6 +603,10 @@ function notifyAuthPrompt(prompt: DesktopAuthPrompt) {
 
 function notifyAuthUpdate(update: DesktopAuthUpdate) {
   mainWindow?.webContents.send("auth-update", update)
+}
+
+function notifyUpdateState(state: DesktopUpdateState) {
+  mainWindow?.webContents.send("update-state", state)
 }
 
 function showDesktopNotification(payload: { title?: unknown; body?: unknown; sessionId?: unknown }) {
@@ -661,6 +686,7 @@ if (!hasLock) {
       notifyThemeChanged(nativeTheme.themeSource as DesktopTheme)
     })
     createMainWindow()
+    void updater().initialize().catch((error) => log.warn("update check failed", error))
   })
 
   app.on("window-all-closed", () => {

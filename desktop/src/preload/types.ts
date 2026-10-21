@@ -313,6 +313,7 @@ export type DesktopAuthLoginResult = {
 
 export type GatewayOptions = { scope: "loopback" | "lan"; port?: number; externalOrigin?: string }
 export type GatewayState = { running: boolean; scope: "loopback" | "lan"; port: number; addresses: string[]; accessCode: string; clients: number }
+export type DesktopUpdateState = { status: "idle" | "available" | "downloading" | "installing" | "error"; currentVersion: string; latestVersion: string; progress?: number; error?: string }
 
 export type DesktopApi = {
   gateway: {
@@ -395,6 +396,7 @@ export type DesktopApi = {
     subscribe: (listener: (state: Record<string, unknown>) => void) => () => void
   }
   quit: () => Promise<void>
+  update: { getState: () => Promise<DesktopUpdateState>; check: () => Promise<DesktopUpdateState>; apply: () => Promise<DesktopUpdateState>; subscribe: (listener: (state: DesktopUpdateState) => void) => () => void }
   platform: string
 }
 
