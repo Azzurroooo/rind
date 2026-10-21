@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, rm, copyFile, readFile } from "node:fs/promises";
 import path from "node:path";
-import { activeRun, awaitingDelegation, entryTask, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Delegation, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
+import { activeRun, awaitingDelegation, entryTask, ManagementError, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Delegation, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
@@ -466,13 +466,17 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     state.approvals[id] = { ...request, id, requestedBy: author(state, actor), createdAt: new Date().toISOString() };
     return { approval: state.approvals[id] };
   }
-  function workspaceBusy(state: State, workspace: string) {
-    return Object.values(state.runs).some(r => activeRun(r) && state.agents[state.sessions[r.sessionId]?.agentId]?.canonicalWorkspace === workspace);
+  function busyRun(state: State, workspace: string) {
+    return Object.values(state.runs).find(r => activeRun(r) && state.agents[state.sessions[r.sessionId]?.agentId]?.canonicalWorkspace === workspace);
   }
   function newRun(state: State, sessionId: string, taskId?: string, delegationId?: string): Run {
     const session = state.sessions[sessionId];
     const agent = state.agents[session.agentId];
-    requireValue(!workspaceBusy(state, agent.canonicalWorkspace), "WORKSPACE_BUSY", "Another run owns this workspace. Wait for it to finish or resolve its unknown status.");
+    const owner = busyRun(state, agent.canonicalWorkspace);
+    if (owner) {
+      const release = owner.status === "unknown" ? "resolve " + owner.id + " --confirm-stopped" : "stop " + owner.id;
+      throw new ManagementError("WORKSPACE_BUSY", "Run " + owner.id + " (" + owner.status + ") owns this workspace. Wait for it, or run `rind agents " + release + "`.");
+    }
     const now = new Date().toISOString();
     const run: Run = { id: randomUUID(), sessionId, ...(taskId ? { taskId } : {}), ...(delegationId ? { delegationId } : {}), status: "starting", startedAt: now, lastObservedAt: now, hostSequence: 0 };
     state.runs[run.id] = run;
@@ -1215,7 +1219,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
             const team = state.teams[task.teamId];
             const agent = state.agents[task.assigneeAgentId];
             if (!team?.leaderAgentId || !state.memberships[memberKey(task.teamId, task.assigneeAgentId)]) { task.status = "needs_attention"; task.error = "Team leadership or membership changed."; delete task.dispatch; continue; }
-            if (activeManagedRuns(state) >= runLimit || workspaceBusy(state, agent.canonicalWorkspace)) continue;
+            if (activeManagedRuns(state) >= runLimit || busyRun(state, agent.canonicalWorkspace)) continue;
             try { await canonicalDirectory(agent.canonicalWorkspace); }
             catch (error) { task.status = "needs_attention"; task.error = String(error); delete task.dispatch; continue; }
             const previous = Object.values(state.runs).filter(r => r.taskId === task.id && !r.delegationId).map(r => state.sessions[r.sessionId]).filter(Boolean).at(-1);
@@ -1234,7 +1238,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
             if (!team?.leaderAgentId || !state.memberships[memberKey(d.teamId, d.assigneeAgentId)] || !state.memberships[memberKey(d.teamId, d.fromAgentId)]) {
               d.status = "failed"; d.error = "Team leadership or membership changed."; delete d.dispatch; wakeDelegator(state, d, waiters); scheduleRequested = true; continue;
             }
-            if (activeManagedRuns(state) >= runLimit || workspaceBusy(state, agent.canonicalWorkspace)) continue;
+            if (activeManagedRuns(state) >= runLimit || busyRun(state, agent.canonicalWorkspace)) continue;
             try { await canonicalDirectory(agent.canonicalWorkspace); }
             catch (error) { d.status = "failed"; d.error = String(error); delete d.dispatch; wakeDelegator(state, d, waiters); scheduleRequested = true; continue; }
             const previous = Object.values(state.runs).filter(r => r.delegationId === d.id).map(r => state.sessions[r.sessionId]).filter(Boolean).at(-1);
