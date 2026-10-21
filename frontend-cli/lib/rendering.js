@@ -2042,8 +2042,10 @@ function teamBadge() {
 function promptDetails(info, width) {
   const model = singleLine(info.model);
   const cwd = singleLine(info.cwd);
+  const remoteSegment = info.remote_running && (model || cwd) && width >= 8 ? `${dim(" · ")}${promptPath("⚯")}` : "";
+  width = Math.max(0, width - visibleLength(remoteSegment));
   if (!model) {
-    return promptPath(middleClip(cwd, width));
+    return !cwd ? (info.remote_running ? promptPath("⚯") : "") : `${promptPath(middleClip(cwd, width))}${remoteSegment}`;
   }
   const effort = singleLine(info.reasoning_effort);
   const effortSegment = effort && visibleLength(effort) + 3 + 8 <= width
@@ -2054,7 +2056,7 @@ function promptDetails(info, width) {
   const pathWidth = remaining - visibleLength(modelText) - 3;
   const pathSegment = cwd && pathWidth >= 4
     ? `${dim(" · ")}${promptPath(middleClip(cwd, pathWidth))}` : "";
-  return `${promptModel(modelText)}${effortSegment}${pathSegment}`;
+  return `${promptModel(modelText)}${effortSegment}${pathSegment}${remoteSegment}`;
 }
 
 function composerWidth(frameWidth) {

@@ -381,7 +381,7 @@ const runtimeController = createCliRuntimeController({
 });
 remoteController = createCliRemoteController({
   runtimeClient: runtimeController,
-  rawClient: runtimeClient, askChoice: tui ? (...args) => inputActions.askChoice(...args) : null,
+  rawClient: runtimeClient, askChoice: (...args) => inputActions.askChoice(...args),
   sessionState,
   log: logOutput,
   redraw: redrawInput,
@@ -422,7 +422,7 @@ commandController = createCommandController({
     runLogin: (providerId) => runLogin(providerId),
     runLogout: (providerId) => runLogout(providerId),
     runTour: (pageId) => enterInSessionTour(pageId),
-    runRemote: (args) => remoteController.handleCommand(args),
+    runRemote: () => remoteController.handleCommand(),
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
     runForkSelector: runtimeController.runForkSelector,
@@ -576,7 +576,7 @@ try {
   const persistedState = loadCliState();
   sessionState.info = { cwd: process.cwd(), management_label: management.label };
   sessionState.commands = commandController.localCommands();
-  await runtimeController.ensureRuntime();
+  await runtimeController.ensureRuntime(); await remoteController.refresh();
   if (startupUpdateVersion) sessionState.info.update_available = startupUpdateVersion;
   windowLog.step("runtime ready");
   const startupInfo = () => ({ ...sessionState.info, resume_preview: "" });

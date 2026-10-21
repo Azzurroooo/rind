@@ -36,70 +36,19 @@ const STOPPED_STATE = {
   clients: 0,
 };
 
-export function parseRemoteArgs(args = []) {
-  const tokens = Array.isArray(args) ? args.map((arg) => String(arg).trim()).filter(Boolean) : [];
-  let action = "auto";
-  let scope;
-  let port;
-  let externalOrigin;
+const TURN_ON_LAN_OPTION = "Turn on (Local network) · Wi-Fi / LAN devices and this computer";
+const TURN_ON_LOCAL_OPTION = "Turn on (This computer) · 127.0.0.1 only";
+const TURN_OFF_OPTION = "Turn off · Stop remote access and disconnect devices";
+const SHOW_QR_OPTION = "Show QR code · Display pairing QR code and connection details";
+const SWITCH_TO_LOCAL_OPTION = "Switch to this computer · Restrict access to 127.0.0.1 only";
+const SWITCH_TO_LAN_OPTION = "Switch to local network · Share on Wi-Fi / LAN";
+const ROTATE_CODE_OPTION = "Rotate access code · Generate new code and disconnect devices";
 
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i];
-    const lower = token.toLowerCase();
-    if (lower === "on" || lower === "start" || lower === "enable") {
-      action = "start";
-    } else if (lower === "off" || lower === "stop" || lower === "disable") {
-      action = "stop";
-    } else if (lower === "status") {
-      action = "status";
-    } else if (lower === "rotate" || lower === "regenerate") {
-      action = "rotate";
-    } else if (lower === "firewall" || lower === "allow-network") {
-      action = "firewall";
-    } else if (lower === "lan" || lower === "--lan") {
-      scope = "lan";
-      if (action === "auto") action = "start";
-    } else if (lower === "loopback" || lower === "local" || lower === "--loopback" || lower === "--local") {
-      scope = "loopback";
-      if (action === "auto") action = "start";
-    } else if (lower === "--port" || lower === "-p") {
-      const value = Number(tokens[++i]);
-      if (!Number.isInteger(value) || value < 0 || value > 65535) {
-        throw new Error("Invalid port. Choose a port between 1024 and 65535.");
-      }
-      port = value;
-      if (action === "auto") action = "start";
-    } else if (lower.startsWith("--port=")) {
-      const value = Number(token.slice("--port=".length));
-      if (!Number.isInteger(value) || value < 0 || value > 65535) {
-        throw new Error("Invalid port. Choose a port between 1024 and 65535.");
-      }
-      port = value;
-      if (action === "auto") action = "start";
-    } else if (lower === "--origin") {
-      externalOrigin = tokens[++i] || "";
-      if (action === "auto") action = "start";
-    } else if (lower.startsWith("--origin=")) {
-      externalOrigin = token.slice("--origin=".length);
-      if (action === "auto") action = "start";
-    } else if (/^\d+$/.test(token) && port === undefined) {
-      const value = Number(token);
-      if (!Number.isInteger(value) || value < 0 || value > 65535) {
-        throw new Error("Invalid port. Choose a port between 1024 and 65535.");
-      }
-      port = value;
-      if (action === "auto") action = "start";
-    } else if (token.startsWith("https://") && !externalOrigin) {
-      externalOrigin = token;
-      if (action === "auto") action = "start";
-    } else {
-      throw new Error(
-        `Unknown /remote option "${token}". Usage: /remote [on|off|status|rotate|lan|loopback] [--port <port>] [--origin <https://...>]`,
-      );
-    }
-  }
-
-  return { action, scope, port, externalOrigin };
+function matchesChoice(choice, option) {
+  const picked = String(choice || "").trim();
+  if (!picked) return false;
+  const label = option.split(" · ")[0].trim();
+  return picked === option || picked === label;
 }
 
 export function buildPairingUrl(state, selectedAddress = "") {
@@ -140,7 +89,6 @@ export function formatRemoteOutput(state, { heading = "", selectedAddress = "" }
     lines.push(`Alternates:  ${alternates.join(", ")}`);
   }
   lines.push(`Access code: ${state.accessCode}`);
-  lines.push("Commands:    /remote status · /remote rotate · /remote off");
   return lines.filter((line) => line !== undefined).join("\n");
 }
 
@@ -175,6 +123,16 @@ export function createCliRemoteController({
     String(sessionState?.info?.workspace_root || sessionState?.info?.cwd || cwd || process.cwd());
 
   void registerSharedWorkspace(rindHome, currentWorkspace(), { setActive: true }).catch(() => {});
+
+  function applyState(state) {
+    cachedState = state && typeof state === "object" ? { ...STOPPED_STATE, ...state } : { ...STOPPED_STATE };
+    const running = Boolean(cachedState.running);
+    if (sessionState?.info && Boolean(sessionState.info.remote_running) !== running) {
+      sessionState.info = { ...sessionState.info, remote_running: running };
+    }
+    redraw?.();
+    return cachedState;
+  }
 
   function bindCliSessionIfEmpty(result, fallbackWorkspace = "") {
     const nextSessionId = String(result?.session_id || "").trim();
@@ -247,8 +205,7 @@ export function createCliRemoteController({
       webRoot: resolveWebRoot(webRoot),
       allowMissingWebRoot: true,
       onStateChange: (state) => {
-        cachedState = state;
-        redraw?.();
+        applyState(state);
       },
     });
     return localHost;
@@ -260,8 +217,7 @@ export function createCliRemoteController({
         const res = await client.request(method, params);
         if (res && typeof res.running === "boolean" && Array.isArray(res.addresses)) {
           sharedSupported = true;
-          cachedState = res;
-          return res;
+          return applyState(res);
         }
         if (sharedSupported === null) {
           sharedSupported = false;
@@ -271,20 +227,29 @@ export function createCliRemoteController({
         sharedSupported = false;
       }
     }
+    if (method === "remote/get" && !localHost) {
+      return applyState(STOPPED_STATE);
+    }
     const host = getLocalHost();
-    if (method === "remote/get") cachedState = host.state();
-    else if (method === "remote/start") cachedState = await host.start(params);
-    else if (method === "remote/stop") cachedState = await host.stop();
-    else if (method === "remote/rotate") cachedState = host.rotate();
-    else if (method === "remote/allow-network") cachedState = await host.allowNetwork(process.execPath);
+    if (method === "remote/get") return applyState(host.state());
+    if (method === "remote/start") return applyState(await host.start(params));
+    if (method === "remote/stop") return applyState(await host.stop());
+    if (method === "remote/rotate") return applyState(host.rotate());
     return cachedState;
+  }
+
+  async function refresh() {
+    try {
+      return await requestRemote("remote/get");
+    } catch {
+      return cachedState;
+    }
   }
 
   function handleRuntimeEvent(message) {
     if (!message || typeof message !== "object") return;
     if (message.kind === "remote" && message.state) {
-      cachedState = message.state;
-      redraw?.();
+      applyState(message.state);
       return;
     }
     const sessionId = String(message.session_id || "");
@@ -307,123 +272,12 @@ export function createCliRemoteController({
     }
   }
 
-  async function handleCommand(args = []) {
-    const parsed = parseRemoteArgs(args);
-    await registerSharedWorkspace(rindHome, currentWorkspace(), { setActive: true }).catch(() => {});
-    const current = await requestRemote("remote/get");
-
-    if (parsed.action === "stop") {
-      if (!current.running) {
-        log("Remote access is already off.");
-        return current;
-      }
-      const stopped = await requestRemote("remote/stop");
-      selectedAddress = "";
-      log("Remote access turned off.");
-      return stopped;
-    }
-
-    if (parsed.action === "rotate") {
-      if (!current.running) {
-        throw new Error("Remote access is off. Run /remote to enable it first.");
-      }
-      const next = await requestRemote("remote/rotate");
-      log(
-        formatRemoteOutput(next, {
-          heading: "Access code rotated. Previous devices have been disconnected.",
-          selectedAddress,
-        }),
-      );
-      return next;
-    }
-
-    if (parsed.action === "firewall") {
-      if (!current.running) {
-        throw new Error("Remote access is off. Run /remote to enable it first.");
-      }
-      const next = await requestRemote("remote/allow-network");
-      log("Windows firewall rule updated for the current remote port.");
-      return next;
-    }
-
-    if (parsed.action === "status") {
-      log(formatRemoteOutput(current, { selectedAddress }));
-      return current;
-    }
-
-    if (current.running) {
-      const wantsRestart =
-        (parsed.scope && parsed.scope !== current.scope) ||
-        (parsed.port !== undefined && parsed.port !== 0 && parsed.port !== current.port) ||
-        Boolean(parsed.externalOrigin);
-      if (!wantsRestart) {
-        if (parsed.action === "auto" && typeof askChoice === "function") {
-          const activeAddr =
-            selectedAddress && current.addresses.includes(selectedAddress)
-              ? selectedAddress
-              : current.addresses[0] || `http://127.0.0.1:${current.port}`;
-          const showOption = "Show QR code & connection details";
-          const switchOption = `Switch address · ${activeAddr}`;
-          const rotateOption = "Generate new code & disconnect devices";
-          const stopOption = "Turn off remote access";
-          const options = [
-            showOption,
-            ...(current.addresses.length > 1 ? [switchOption] : []),
-            rotateOption,
-            stopOption,
-          ];
-          const choice = await askChoice(options, {
-            title: "Remote access",
-            message: `${current.scope === "lan" ? "Local network" : "This computer"} · port ${current.port} · ${current.clients} connected`,
-          });
-          if (!choice) return current;
-          if (choice === showOption) {
-            const latest = await requestRemote("remote/get");
-            log(formatRemoteOutput(latest, { selectedAddress }));
-            return latest;
-          }
-          if (choice === switchOption) {
-            const picked = await askChoice(current.addresses, {
-              title: "Remote address",
-              message: "Choose the address encoded in the QR code and sign-in link.",
-            });
-            const latest = await requestRemote("remote/get");
-            if (picked && latest.addresses.includes(picked)) {
-              selectedAddress = picked;
-              log(formatRemoteOutput(latest, { selectedAddress }));
-            }
-            return latest;
-          }
-          if (choice === rotateOption) {
-            const next = await requestRemote("remote/rotate");
-            log(
-              formatRemoteOutput(next, {
-                heading: "Access code rotated. Previous devices have been disconnected.",
-                selectedAddress,
-              }),
-            );
-            return next;
-          }
-          if (choice === stopOption) {
-            const stopped = await requestRemote("remote/stop");
-            selectedAddress = "";
-            log("Remote access turned off.");
-            return stopped;
-          }
-        }
-        log(formatRemoteOutput(current, { selectedAddress }));
-        return current;
-      }
-    }
-
-    const startOptions = {
-      scope: parsed.scope || "lan",
-      ...(parsed.port !== undefined ? { port: parsed.port } : {}),
-      ...(parsed.externalOrigin ? { externalOrigin: parsed.externalOrigin } : {}),
+  async function startWithScope(scope) {
+    const next = await requestRemote("remote/start", {
+      scope,
       ...(webRoot ? { webRoot: resolveWebRoot(webRoot) } : {}),
       workspace_root: currentWorkspace(),
-    };
-    const next = await requestRemote("remote/start", startOptions);
+    });
     if (!selectedAddress || !next.addresses.includes(selectedAddress)) {
       selectedAddress = next.addresses[0] || "";
     }
@@ -431,15 +285,106 @@ export function createCliRemoteController({
     return next;
   }
 
+  async function handleCommand() {
+    await registerSharedWorkspace(rindHome, currentWorkspace(), { setActive: true }).catch(() => {});
+    let current = await requestRemote("remote/get");
+
+    if (!current.running) {
+      const choice = await askChoice?.({
+        title: "Remote access · Off",
+        message: "Share this session with your phone or browser via QR code.",
+        options: [TURN_ON_LAN_OPTION, TURN_ON_LOCAL_OPTION],
+      });
+      if (!choice) return current;
+      const scope = matchesChoice(choice, TURN_ON_LOCAL_OPTION)
+        ? "loopback"
+        : matchesChoice(choice, TURN_ON_LAN_OPTION)
+          ? "lan"
+          : "";
+      if (!scope) return current;
+      return startWithScope(scope);
+    }
+
+    while (true) {
+      const activeAddr =
+        selectedAddress && current.addresses.includes(selectedAddress)
+          ? selectedAddress
+          : current.addresses[0] || `http://127.0.0.1:${current.port}`;
+      const scopeLabel = current.scope === "lan" ? "Local network" : "This computer";
+      const clientLabel = `${current.clients} connected ${current.clients === 1 ? "device" : "devices"}`;
+      const switchScopeOption = current.scope === "lan" ? SWITCH_TO_LOCAL_OPTION : SWITCH_TO_LAN_OPTION;
+      const switchAddressOption = `Switch address · ${activeAddr}`;
+      const options = [
+        TURN_OFF_OPTION,
+        SHOW_QR_OPTION,
+        switchScopeOption,
+        ...(current.addresses.length > 1 ? [switchAddressOption] : []),
+        ROTATE_CODE_OPTION,
+      ];
+      const choice = await askChoice?.({
+        title: "Remote access · On",
+        message: `${scopeLabel} · ${activeAddr} · ${clientLabel}`,
+        options,
+      });
+      if (!choice) return current;
+
+      if (matchesChoice(choice, TURN_OFF_OPTION)) {
+        const stopped = await requestRemote("remote/stop");
+        selectedAddress = "";
+        log("Remote access turned off.");
+        return stopped;
+      }
+      if (matchesChoice(choice, SHOW_QR_OPTION)) {
+        const latest = await requestRemote("remote/get");
+        log(formatRemoteOutput(latest, { selectedAddress }));
+        return latest;
+      }
+      if (matchesChoice(choice, switchScopeOption)) {
+        const nextScope = current.scope === "lan" ? "loopback" : "lan";
+        selectedAddress = "";
+        return startWithScope(nextScope);
+      }
+      if (current.addresses.length > 1 && matchesChoice(choice, switchAddressOption)) {
+        const picked = await askChoice?.({
+          title: "Remote access · Address",
+          message: "Choose the address encoded in the QR code and sign-in link.",
+          options: current.addresses,
+        });
+        current = await requestRemote("remote/get");
+        if (!picked) {
+          if (!current.running) return current;
+          continue;
+        }
+        if (current.addresses.includes(picked)) {
+          selectedAddress = picked;
+          log(formatRemoteOutput(current, { selectedAddress }));
+        }
+        return current;
+      }
+      if (matchesChoice(choice, ROTATE_CODE_OPTION)) {
+        const next = await requestRemote("remote/rotate");
+        log(
+          formatRemoteOutput(next, {
+            heading: "Access code rotated. Previous devices have been disconnected.",
+            selectedAddress,
+          }),
+        );
+        return next;
+      }
+      return current;
+    }
+  }
+
   async function stop() {
     if (localHost) {
       await localHost.close().catch(() => {});
-      cachedState = { ...STOPPED_STATE };
+      applyState(STOPPED_STATE);
     }
   }
 
   return {
     state: () => (localHost ? localHost.state() : cachedState),
+    refresh,
     handleCommand,
     handleRuntimeEvent,
     stop,

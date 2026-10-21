@@ -175,6 +175,14 @@ test("promptText places reasoning effort between model and working directory", (
     promptText({ model: "glm-5.1", reasoning_effort: "xhigh", cwd: "E:\\project" }).split("\n")[1],
     "  glm-5.1 · xhigh · E:\\project",
   );
+  assert.equal(
+    promptText({ model: "glm-5.1", reasoning_effort: "xhigh", cwd: "E:\\project", remote_running: true }).split("\n")[1],
+    "  glm-5.1 · xhigh · E:\\project · ⚯",
+  );
+  assert.equal(
+    promptText({ model: "glm-5.1", reasoning_effort: "xhigh", cwd: "E:\\project", remote_running: false }).split("\n")[1],
+    "  glm-5.1 · xhigh · E:\\project",
+  );
 });
 
 test("promptText colors model and working directory with separate hierarchy", () => {
@@ -186,6 +194,12 @@ test("promptText colors model and working directory with separate hierarchy", ()
     const line = promptText({ model: "glm-5.1", cwd: "E:\\project" }).split("\n")[1];
 
     assert.match(line, /^  \x1b\[1m\x1b\[38;2;140;170;238mglm-5\.1\x1b\[0m\x1b\[0m\x1b\[2m · \x1b\[0m\x1b\[38;2;133;193;220mE:\\project\x1b\[0m$/);
+
+    const remoteLine = promptText({ model: "glm-5.1", reasoning_effort: "high", cwd: "E:\\project", remote_running: true }).split("\n")[1];
+    assert.match(
+      remoteLine,
+      /^  \x1b\[1m\x1b\[38;2;140;170;238mglm-5\.1\x1b\[0m\x1b\[0m\x1b\[2m · \x1b\[0m\x1b\[1m\x1b\[38;2;140;170;238mhigh\x1b\[0m\x1b\[0m\x1b\[2m · \x1b\[0m\x1b\[38;2;133;193;220mE:\\project\x1b\[0m\x1b\[2m · \x1b\[0m\x1b\[38;2;133;193;220m⚯\x1b\[0m$/,
+    );
   } finally {
     process.stdout.isTTY = originalIsTty;
     if (originalNoColor === undefined) {

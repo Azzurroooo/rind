@@ -16,12 +16,12 @@ import {
   decodeTerminalQr,
   encodeQrMatrix,
   formatRemoteOutput,
-  parseRemoteArgs,
   parseTerminalQrMatrix,
   RemoteWebSocket,
   renderSvgQrDataUrl,
   renderTerminalQr,
 } from "../lib/remote.js";
+import { promptText } from "../lib/rendering.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 import { registerSharedWorkspace, samePath } from "../../rind-runtime-client/remote/workspaces.js";
@@ -74,53 +74,18 @@ test("QR matrix encoder and terminal half-block renderer round-trip pairing URLs
   }
 });
 
-test("parseRemoteArgs parses /remote subcommands, scopes, ports, and origins", () => {
-  assert.deepEqual(parseRemoteArgs([]), {
-    action: "auto",
-    scope: undefined,
-    port: undefined,
-    externalOrigin: undefined,
-  });
-  assert.deepEqual(parseRemoteArgs(["on", "loopback", "--port", "9123"]), {
-    action: "start",
-    scope: "loopback",
-    port: 9123,
-    externalOrigin: undefined,
-  });
-  assert.deepEqual(parseRemoteArgs(["lan", "--port=8899", "--origin=https://my.host.example"]), {
-    action: "start",
-    scope: "lan",
-    port: 8899,
-    externalOrigin: "https://my.host.example",
-  });
-  assert.deepEqual(parseRemoteArgs(["rotate"]), {
-    action: "rotate",
-    scope: undefined,
-    port: undefined,
-    externalOrigin: undefined,
-  });
-  assert.deepEqual(parseRemoteArgs(["off"]), {
-    action: "stop",
-    scope: undefined,
-    port: undefined,
-    externalOrigin: undefined,
-  });
-  assert.throws(() => parseRemoteArgs(["--port", "99999"]), /Invalid port/);
-  assert.throws(() => parseRemoteArgs(["unknown-subcommand"]), /Unknown \/remote option/);
-});
-
-test("/remote is registered in LOCAL_SLASH_COMMANDS and dispatches through commandController", async (t) => {
-  assert.equal(
-    LOCAL_SLASH_COMMANDS.some((cmd) => cmd.name === "remote"),
-    true,
-    "/remote must be listed in LOCAL_SLASH_COMMANDS",
-  );
+test("/remote is registered in LOCAL_SLASH_COMMANDS, rejects subcommand args, and drives remote access via menu and ⚯ indicator", async (t) => {
+  const remoteCmd = LOCAL_SLASH_COMMANDS.find((cmd) => cmd.name === "remote");
+  assert.ok(remoteCmd, "/remote must be listed in LOCAL_SLASH_COMMANDS");
+  assert.equal(remoteCmd.usage, "/remote", "/remote usage must not list subcommands");
 
   const webDir = await mkdtemp(path.join(os.tmpdir(), "rind-cli-remote-unit-"));
   await writeFile(path.join(webDir, "index.html"), "<!doctype html><title>Rind Remote</title>");
   const logs = [];
+  const menus = [];
+  let nextChoice = "";
   const sessionState = {
-    info: { session_id: "", workspace_root: webDir, model: "gpt-test", reasoning_effort: "medium" },
+    info: { session_id: "", cwd: webDir, workspace_root: webDir, model: "gpt-test", reasoning_effort: "medium" },
     reservedId: "",
     pendingName: "",
     pendingSkillSources: null,
@@ -132,6 +97,10 @@ test("/remote is registered in LOCAL_SLASH_COMMANDS and dispatches through comma
     },
     sessionState,
     log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)),
+    askChoice: async (dialog) => {
+      menus.push(dialog);
+      return typeof nextChoice === "function" ? nextChoice(dialog) : nextChoice;
+    },
     cwd: webDir,
     rindHome: webDir,
     getInitInfo: () => ({ capabilities: [], methods: ["session/prompt"] }),
@@ -147,38 +116,65 @@ test("/remote is registered in LOCAL_SLASH_COMMANDS and dispatches through comma
     turn: {},
     input: {
       isTerminal: true,
-      runRemote: (args) => remoteController.handleCommand(args),
+      runRemote: () => remoteController.handleCommand(),
     },
     state: { slashCommands: LOCAL_SLASH_COMMANDS },
     output: { log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)) },
   });
 
-  await commandController.handle("/remote loopback --port 0");
+  // 1. Subcommands are rejected cleanly with Usage: /remote
+  await commandController.handle("/remote status");
+  assert.equal(logs.at(-1), "Usage: /remote");
+  assert.equal(remoteController.state().running, false);
+  assert.equal(Boolean(sessionState.info.remote_running), false);
+  assert.equal(promptText(sessionState.info).includes("⚯"), false, "⚯ must not appear when remote is off");
+
+  // 2. Canceling the menu when off leaves remote off
+  nextChoice = "";
+  await commandController.handle("/remote");
+  assert.equal(menus.at(-1).title, "Remote access · Off");
+  assert.equal(remoteController.state().running, false);
+  assert.equal(Boolean(sessionState.info.remote_running), false);
+
+  // 3. Selecting "Turn on (This computer)" starts remote access, logs QR code, and lights up ⚯ in info bar
+  nextChoice = "Turn on (This computer)";
+  await commandController.handle("/remote");
   assert.equal(remoteController.state().running, true);
   assert.equal(remoteController.state().scope, "loopback");
+  assert.equal(sessionState.info.remote_running, true);
+  assert.match(promptText(sessionState.info).split("\n")[1], /gpt-test · medium · .* · ⚯$/);
+
   const output = logs.at(-1);
   const expectedUrl = buildPairingUrl(remoteController.state());
   assert.equal(decodeTerminalQr(output), expectedUrl);
   assert.equal(output.includes(remoteController.state().accessCode), true);
+  assert.equal(output.includes("/remote status"), false, "QR output must not advertise removed subcommands");
 
+  // 4. Selecting "Rotate access code" in the On menu rotates the code
   const oldCode = remoteController.state().accessCode;
-  await commandController.handle("/remote rotate");
+  nextChoice = "Rotate access code";
+  await commandController.handle("/remote");
+  assert.equal(menus.at(-1).title, "Remote access · On");
   const rotatedOutput = logs.at(-1);
   assert.notEqual(remoteController.state().accessCode, oldCode);
   assert.equal(decodeTerminalQr(rotatedOutput), buildPairingUrl(remoteController.state()));
 
-  await commandController.handle("/remote off");
+  // 5. Selecting "Turn off" in the On menu stops remote access and hides ⚯ in info bar
+  nextChoice = "Turn off";
+  await commandController.handle("/remote");
   assert.equal(remoteController.state().running, false);
+  assert.equal(sessionState.info.remote_running, false);
+  assert.equal(promptText(sessionState.info).includes("⚯"), false, "⚯ must disappear when remote is turned off");
   assert.match(logs.at(-1), /Remote access turned off/);
 });
 
-test("interactive TTY /remote menu, missing webRoot fallback, and port collision auto-fallback", async (t) => {
+test("interactive TTY /remote menu: scope switching, address submenu with Esc back, missing webRoot fallback, and port collision auto-fallback", async (t) => {
   const tempHome = await mkdtemp(path.join(os.tmpdir(), "rind-cli-remote-menu-"));
   const missingWebDir = path.join(tempHome, "missing-web");
   const logs = [];
   const choices = [];
   const sessionState = {
-    info: { session_id: "s-menu", workspace_root: tempHome, model: "gpt-test", reasoning_effort: "medium" },
+    info: { session_id: "s-menu", cwd: tempHome, workspace_root: tempHome, model: "gpt-test", reasoning_effort: "medium" },
     reservedId: "s-menu",
     pendingName: "",
     pendingSkillSources: null,
@@ -189,9 +185,9 @@ test("interactive TTY /remote menu, missing webRoot fallback, and port collision
     runtimeClient: { request: async () => ({}) },
     sessionState,
     log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)),
-    askChoice: async (options, meta) => {
-      choices.push({ options, meta });
-      return typeof nextChoice === "function" ? nextChoice(options) : nextChoice;
+    askChoice: async (dialog) => {
+      choices.push(dialog);
+      return typeof nextChoice === "function" ? nextChoice(dialog) : nextChoice;
     },
     cwd: tempHome,
     rindHome: tempHome,
@@ -199,10 +195,12 @@ test("interactive TTY /remote menu, missing webRoot fallback, and port collision
     webRoot: missingWebDir,
   });
 
+  let nextChoiceB = "Turn on (This computer)";
   const controllerB = createCliRemoteController({
     runtimeClient: { request: async () => ({}) },
-    sessionState,
+    sessionState: { info: { cwd: tempHome, workspace_root: tempHome } },
     log: () => {},
+    askChoice: async () => nextChoiceB,
     cwd: tempHome,
     rindHome: tempHome,
     getInitInfo: () => ({ capabilities: [], methods: ["session/prompt"] }),
@@ -215,36 +213,58 @@ test("interactive TTY /remote menu, missing webRoot fallback, and port collision
     await removeRindHome(tempHome);
   });
 
-  // 1. Start controllerA even when webRoot directory does not exist (allowMissingWebRoot: true)
-  const stateA = await controllerA.handleCommand(["loopback"]);
+  // 1. Start controllerA via menu even when webRoot directory does not exist (allowMissingWebRoot: true)
+  nextChoice = "Turn on (This computer)";
+  const stateA = await controllerA.handleCommand();
   assert.equal(stateA.running, true);
+  assert.equal(sessionState.info.remote_running, true);
   const rootRes = await fetch(`${stateA.addresses[0]}/`);
   assert.equal(rootRes.status, 200);
   assert.match(await rootRes.text(), /Rind Remote Access is active/);
 
-  // 2. If port 8766 was bound by controllerA, starting controllerB with no explicit --port falls back automatically
-  const stateB = await controllerB.handleCommand(["loopback"]);
+  // 2. If port 8766 was bound by controllerA, starting controllerB falls back automatically to an open port
+  const stateB = await controllerB.handleCommand();
   assert.equal(stateB.running, true);
   assert.notEqual(stateB.port, stateA.port);
 
-  // 3. Running bare /remote while already running opens interactive TTY choice menu:
-  //    - "Show QR code & connection details"
-  nextChoice = "Show QR code & connection details";
-  await controllerA.handleCommand([]);
-  assert.equal(choices.at(-1).meta.title, "Remote access");
+  // 3. Running /remote while already running opens the "Remote access · On" menu:
+  //    - "Show QR code"
+  nextChoice = "Show QR code";
+  await controllerA.handleCommand();
+  assert.equal(choices.at(-1).title, "Remote access · On");
   assert.equal(decodeTerminalQr(logs.at(-1)), buildPairingUrl(controllerA.state()));
 
-  //    - "Generate new code & disconnect devices"
+  //    - "Switch to local network" switches scope from loopback to lan
+  nextChoice = "Switch to local network";
+  await controllerA.handleCommand();
+  assert.equal(controllerA.state().scope, "lan");
+
+  //    - If multiple addresses exist on LAN, entering "Switch address" and pressing Esc returns to "Remote access · On"
+  if (controllerA.state().addresses.length > 1) {
+    let step = 0;
+    nextChoice = (dialog) => {
+      step += 1;
+      if (step === 1) return dialog.options.find((opt) => opt.startsWith("Switch address"));
+      if (step === 2) return ""; // Esc in address submenu -> returns to root menu
+      return "Show QR code";
+    };
+    await controllerA.handleCommand();
+    assert.equal(choices.at(-2).title, "Remote access · Address");
+    assert.equal(choices.at(-1).title, "Remote access · On");
+  }
+
+  //    - "Rotate access code"
   const prevCode = controllerA.state().accessCode;
-  nextChoice = "Generate new code & disconnect devices";
-  await controllerA.handleCommand([]);
+  nextChoice = "Rotate access code";
+  await controllerA.handleCommand();
   assert.notEqual(controllerA.state().accessCode, prevCode);
   assert.equal(decodeTerminalQr(logs.at(-1)), buildPairingUrl(controllerA.state()));
 
-  //    - "Turn off remote access"
-  nextChoice = "Turn off remote access";
-  await controllerA.handleCommand([]);
+  //    - "Turn off"
+  nextChoice = "Turn off";
+  await controllerA.handleCommand();
   assert.equal(controllerA.state().running, false);
+  assert.equal(sessionState.info.remote_running, false);
 });
 
 test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTTP/WS, prompts session, and syncs live to CLI", { timeout: 30000 }, async (t) => {
@@ -361,9 +381,11 @@ test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTT
   // Wait for CLI startup banner
   await waitForStdout((out) => out.includes("remote-e2e-model"), 15000, "startup banner");
 
-  // 1. User runs `/remote loopback` in CLI
-  cliChild.stdin.write("/remote loopback\n");
-  await waitForStdout((out) => out.includes("Commands:    /remote status · /remote rotate · /remote off"), 15000, "/remote QR output");
+  // 1. User runs `/remote` in CLI and selects "Turn on (This computer)" from the interactive menu
+  cliChild.stdin.write("/remote\n");
+  await waitForStdout((out) => out.includes("Remote access · Off ["), 15000, "/remote Off menu");
+  cliChild.stdin.write("Turn on (This computer)\n");
+  await waitForStdout((out) => out.includes("Access code:") && out.includes(" · ⚯"), 15000, "/remote QR output and ⚯ indicator");
 
   // 2. Scan/decode the terminal QR code directly from CLI stdout
   const qrDecodedUrl = decodeTerminalQr(stdoutText);
@@ -479,15 +501,17 @@ test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTT
   });
   assert.equal(fileWriteResp.result.path, "uploads/mobile-note.txt");
 
-  // 8. Rotate access code from CLI (`/remote rotate`) and verify old WS closes with 4401
+  // 8. Rotate access code from CLI (`/remote` -> "Rotate access code") and verify old WS closes with 4401
   const beforeRotateLen = stdoutText.length;
   const wsClosed = once(ws, "close");
-  cliChild.stdin.write("/remote rotate\n");
+  cliChild.stdin.write("/remote\n");
+  await waitForStdout((out) => out.slice(beforeRotateLen).includes("Remote access · On ["), 10000, "/remote On menu for rotate");
+  cliChild.stdin.write("Rotate access code\n");
   const [closeCode] = await wsClosed;
   assert.equal(closeCode, 4401, "rotating access code must disconnect existing WebSocket with 4401");
 
   await waitForStdout(
-    (out) => out.slice(beforeRotateLen).includes("Access code rotated.") && out.slice(beforeRotateLen).includes("Commands:"),
+    (out) => out.slice(beforeRotateLen).includes("Access code rotated.") && out.slice(beforeRotateLen).includes("Access code:"),
     10000,
     "rotated QR output",
   );
@@ -505,9 +529,18 @@ test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTT
   });
   assert.equal(newTicketAttempt.status, 200);
 
-  // 9. Turn off remote access (`/remote off`) and exit CLI
-  cliChild.stdin.write("/remote off\n");
-  await waitForStdout((out) => out.includes("Remote access turned off."), 10000, "/remote off confirmation");
+  // 9. Turn off remote access (`/remote` -> "Turn off") and verify ⚯ is removed from prompt header
+  const beforeOffLen = stdoutText.length;
+  cliChild.stdin.write("/remote\n");
+  await waitForStdout((out) => out.slice(beforeOffLen).includes("Remote access · On ["), 10000, "/remote On menu for stop");
+  cliChild.stdin.write("Turn off\n");
+  await waitForStdout(
+    (out) => out.slice(beforeOffLen).includes("Remote access turned off.") && out.slice(beforeOffLen).includes("  ▷ "),
+    10000,
+    "/remote off confirmation and next prompt",
+  );
+  const afterOffPrompt = stdoutText.slice(stdoutText.lastIndexOf("Remote access turned off."));
+  assert.equal(afterOffPrompt.includes("⚯"), false, "prompt after turning off remote must not show ⚯");
 
   cliChild.stdin.write("/exit\n");
   await once(cliChild, "exit");
@@ -604,9 +637,11 @@ test("E2E multi-surface unification: CLI and Desktop share Remote gateway, Works
   const initialDesktopRemote = await desktopPeer.request("remote/get");
   assert.equal(initialDesktopRemote.running, false);
 
-  // 4. Enable /remote in CLI -> verify Desktop immediately receives the running state and matches QR/code/port
-  cliChild.stdin.write("/remote loopback\n");
-  await waitForStdout((out) => out.includes("Commands:    /remote status · /remote rotate · /remote off"), 15000, "CLI /remote QR output");
+  // 4. Enable /remote in CLI via interactive menu -> verify Desktop immediately receives the running state and matches QR/code/port
+  cliChild.stdin.write("/remote\n");
+  await waitForStdout((out) => out.includes("Remote access · Off ["), 15000, "CLI /remote Off menu");
+  cliChild.stdin.write("Turn on (This computer)\n");
+  await waitForStdout((out) => out.includes("Access code:") && out.includes(" · ⚯"), 15000, "CLI /remote QR output and ⚯ indicator");
 
   const cliQrUrl = decodeTerminalQr(stdoutText);
   const parsedUrl = new URL(cliQrUrl);

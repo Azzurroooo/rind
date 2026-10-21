@@ -59,9 +59,12 @@ export function createCommandController({
       return true;
     }
     if (name === "remote") {
-      const remoteArgs = arg ? arg.split(/\s+/).filter(Boolean) : [];
+      if (arg) {
+        output.log?.("Usage: /remote");
+        return true;
+      }
       if (input.runRemote) {
-        await input.runRemote(remoteArgs);
+        await input.runRemote();
       } else {
         output.log?.("/remote is unavailable.");
       }

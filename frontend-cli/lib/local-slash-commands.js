@@ -22,7 +22,7 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "login", description: "Configure a provider", usage: "/login [provider]" },
   { name: "logout", description: "Remove a stored provider credential", usage: "/logout [provider]" },
   { name: "model", description: "Show or change the active model", usage: "/model | /model set <model>" },
-  { name: "remote", description: "Share this session with your phone or browser via QR code", usage: "/remote [on | off | status | rotate | lan | loopback] [--port <port>]" },
+  { name: "remote", description: "Share this session with your phone or browser via QR code", usage: "/remote" },
   { name: "rename", description: "Name this conversation (otherwise it is shown by its first message)", usage: "/rename <name> | /rename --reset" },
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
   { name: "settings", description: "Configure brief output, color theme, working spinner, and skill imports", usage: SETTINGS_USAGE },
