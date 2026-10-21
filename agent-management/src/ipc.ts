@@ -36,7 +36,7 @@ function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
-export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string; serviceNonce?: string; idleTtlMs?: number; onShutdown?: () => void }) {
+export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string; serviceNonce?: string; idleTtlMs?: number; stopWhenIdle?: boolean; onShutdown?: () => void }) {
   const startedAt = new Date().toISOString();
   const recordNonce = options.serviceNonce || randomUUID();
   // Fingerprint the code this process loaded, before anything can rebuild it.
@@ -58,8 +58,21 @@ export async function startServer(options: { home?: string; python?: string; rep
   let runtimeConnecting: Promise<any> | undefined;
   let closing = false;
   const idleTtlMs = resolveIdleTtlMs(options);
-  let idleSince = Date.now(), idleTimer: NodeJS.Timeout | undefined;
-  const touchActivity = () => { idleSince = Date.now(); };
+  let idleSince = Date.now(), idleTimer: NodeJS.Timeout | undefined, stopTimer: NodeJS.Timeout | undefined;
+  let stopWhenIdle = Boolean(options.stopWhenIdle), hasConnectedClient = false;
+  const clearStopTimer = () => { if (stopTimer) { clearTimeout(stopTimer); stopTimer = undefined; } };
+  const isIdle = () => sockets.size === 0 && workload().working === 0 && reconciling.size === 0;
+  const touchActivity = () => {
+    idleSince = Date.now();
+    if (!stopWhenIdle || closing || !service || !isIdle()) { clearStopTimer(); return; }
+    if (!stopTimer) {
+      stopTimer = setTimeout(() => {
+        stopTimer = undefined;
+        if (!closing && stopWhenIdle && service && isIdle()) void close("shutdown").finally(() => options.onShutdown?.());
+      }, hasConnectedClient ? 200 : 5000);
+      stopTimer.unref?.();
+    }
+  };
   async function sessionToolsFor(session: any) {
     const agent = store.state.agents[session.agentId];
     if (!agent) return undefined;
@@ -100,6 +113,7 @@ export async function startServer(options: { home?: string; python?: string; rep
     })().finally(() => {
       reconcilePending.delete(session.id);
       reconciling.delete(session.id);
+      if (service && isIdle()) touchActivity();
     });
     reconciling.set(session.id, work);
     return work;
@@ -234,13 +248,12 @@ export async function startServer(options: { home?: string; python?: string; rep
         : managed || !session ? {} : { instructions: memberInstructions(store.state, session) }),
     };
   }
-  const isIdle = () => sockets.size === 0 && workload().working === 0 && reconciling.size === 0;
   const server = net.createServer(socket => {
     sockets.add(socket);
     touchActivity();
     socket.setEncoding("utf8");
     let buffer = ""; let unsubscribe: (() => void) | undefined;
-    const attached: string[] = [];
+    const attached: string[] = [], oneShotAttached = new Set<string>();
     let connectionPrincipal: Principal | undefined;
     function send(value: object) {
       if (!socket.destroyed) {
@@ -261,6 +274,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       let id: unknown;
       try {
         await ready;
+        hasConnectedClient = true;
         const message = JSON.parse(line); id = message.id;
         requireValue(typeof message.method === "string" && message.params && typeof message.params === "object" && !Array.isArray(message.params), "INVALID_REQUEST", "Expected a method and params object.");
         const grant = decode(message.token);
@@ -281,6 +295,7 @@ export async function startServer(options: { home?: string; python?: string; rep
           result = await service.request({ kind: "user" }, message.method, { ...message.params, sessionId: grant.principal.sessionId, runtimeSessionId: message.runtimeSessionId });
         } else if (message.method === "subscribe") {
           requireValue(principal.kind !== "agent", "FORBIDDEN", "Members work through delegate and report.");
+          stopWhenIdle = false;
           // A connection counts once, however often it resubscribes.
           if (!unsubscribe) watchRuntime(true);
           unsubscribe?.();
@@ -310,6 +325,17 @@ export async function startServer(options: { home?: string; python?: string; rep
         } else if (message.method === "serviceShutdown") {
           // Leaving Rind never calls this; it is the explicit "stop background services" action.
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can stop the service.");
+          if (message.params.ifIdle === true) {
+            if (reconciling.size) await Promise.allSettled(reconciling.values());
+            const load = workload();
+            if (sockets.size > 1 || load.working > 0 || reconciling.size > 0) {
+              send({ id, result: { stopped: false, ...load } });
+              return;
+            }
+            send({ id, result: { stopped: true, ...load } });
+            void close("shutdown").catch(reportError).finally(() => options.onShutdown?.());
+            return;
+          }
           const load = workload();
           // restart: replace only this service (to load an update). The Runtime and
           // every conversation keep running; windows reattach to the new service.
@@ -359,7 +385,11 @@ export async function startServer(options: { home?: string; python?: string; rep
           result = { deleted: true, runtimeSessionId };
         } else {
           result = await service.request(principal, message.method, message.params);
-          if (message.method === "attachSession" || message.method === "reattachSession") attached.push(result.id);
+          if (message.method === "attachSession" || message.method === "reattachSession") {
+            attached.push(result.id);
+            if (message.params.oneShot === true) oneShotAttached.add(result.id);
+            else stopWhenIdle = false;
+          }
           if (message.method === "bindSession") await reconcile(result);
           else if (message.method === "cancelRun" && result?.runtimeSessionId) {
             const host = runtime || await executionHost(false).catch(() => undefined);
@@ -386,6 +416,9 @@ export async function startServer(options: { home?: string; python?: string; rep
       unsubscribe?.();
       if (service && !closing) {
         if (connectionPrincipal && connectionPrincipal.kind !== "user") service.releaseWait(connectionPrincipal.sessionId);
+        for (const sessionId of oneShotAttached) {
+          void service.request({ kind: "user" }, "detachSession", { requestId: "close-" + randomBytes(12).toString("hex"), sessionId }).catch(() => {});
+        }
         void service.disconnect(attached).catch(() => {});
       }
       if (service && isIdle()) touchActivity();
@@ -469,12 +502,14 @@ export async function startServer(options: { home?: string; python?: string; rep
       }, checkMs);
       idleTimer.unref?.();
     }
+    touchActivity();
     readyResolve!();
   } catch (error) { readyReject!(error); for (const socket of sockets) socket.destroy(); server.close(); await releaseRecord(); throw error; }
   let closed: Promise<void> | undefined;
   function close(reason = "shutdown") {
     return closed ||= (async () => {
       closing = true;
+      clearStopTimer();
       if (idleTimer) { clearInterval(idleTimer); idleTimer = undefined; }
       if (probe) clearInterval(probe);
       // The process always lets go of its endpoint, even when stopping the
@@ -488,6 +523,9 @@ export async function startServer(options: { home?: string; python?: string; rep
         await probing?.catch(() => {});
         await runtimeConnecting?.catch(() => {});
         await Promise.allSettled(reconciling.values());
+        if (reason === "shutdown" && runtime?.spawned) {
+          await runtime.request("runtime/shutdown", { if_idle: true }).catch(() => {});
+        }
         runtime?.close();
         for (const socket of sockets) socket.destroy();
         await new Promise<void>(resolve => server.close(() => resolve()));

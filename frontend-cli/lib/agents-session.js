@@ -3,7 +3,8 @@ import { realpath, readFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { managementClient, selectRecord } from "./agents-client.js";
-import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { connectSharedRuntime, sharedRuntimePaths } from "../../rind-runtime-client/shared-runtime.js";
+import { probeEndpoint } from "../../rind-runtime-client/endpoint.js";
 import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
 
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
@@ -74,7 +75,7 @@ export async function plainSession(args, home) {
   return { args, shared: true };
 }
 
-export async function prepareManagement(args, launch, { interactive = !!process.stdin.isTTY, chooseTeam } = {}) {
+export async function prepareManagement(args, launch, { interactive = !!process.stdin.isTTY, stopSpawnedService = false, chooseTeam } = {}) {
   const options = managementArgs(args);
   const rindHome = resolveRindHome(launch?.home);
   validateSharedArgs(options.args, rindHome);
@@ -84,8 +85,9 @@ export async function prepareManagement(args, launch, { interactive = !!process.
   // Agents page, or by running Rind there — is the same conversation.
   const asManager = options.manager || await sameDirectory(argument(options.args, "--cwd") || argument(options.args, "--dir") || process.cwd(), managerFolder);
   if (!asManager && !options.team && !existsSync(path.join(root, "state", "user-token"))) return plainSession(options.args, rindHome);
+  const runtimeWasRunning = await probeEndpoint(sharedRuntimePaths(rindHome).endpoint);
   let client, session, runtimeSessionId = "", reconnecting, reattachSession, detached = false, disconnected = false;
-  const connectionOptions = { ...launch, home: rindHome, onDisconnect: () => {
+  const connectionOptions = { ...launch, home: rindHome, stopSpawnedService, onDisconnect: () => {
     if (detached) return;
     disconnected = true;
     process.stderr.write("Agents management disconnected; verifying runtime activity before reconnecting.\n");
@@ -139,7 +141,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     const agent = snapshot.agents.find(a => a.canonicalWorkspace === workspace && a.adapter === "rind");
     if (!agent && !asManager) {
       if (options.team) throw new Error("This directory is not registered. Add it from Agents management first.");
-      client.close(); return plainSession(options.args, rindHome);
+      await client.closeSpawned(); return plainSession(options.args, rindHome);
     }
     if (!resumeId && (asManager || agent) && (options.args.includes("--resume-latest") || options.args.includes("-c"))) {
       const history = asManager
@@ -166,12 +168,13 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       const answer = String(await choose(teams));
       if (answer !== "0") { team = teams[Number(answer) - 1]; if (!team) throw new Error("Select a listed team, or 0 for an independent session."); }
     }
-    session = await client.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: asManager, runtimeSessionId: resumeId, shared: true });
+    const sessionScope = { agentId: agent?.id, teamId: team?.id, manager: asManager, shared: true, ...(stopSpawnedService ? { oneShot: true } : {}) };
+    session = await client.request("attachSession", { ...sessionScope, runtimeSessionId: resumeId });
     const externalTools = await client.request("sessionTools", { sessionId: session.id });
     let needsAttachment = false, attaching;
     reattachSession = async nextClient => {
       if (needsAttachment) return;
-      const attached = await nextClient.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: asManager, runtimeSessionId: runtimeSessionId || resumeId, shared: true });
+      const attached = await nextClient.request("attachSession", { ...sessionScope, runtimeSessionId: runtimeSessionId || resumeId });
       if (runtimeSessionId && !attached.runtimeSessionId) await nextClient.request("bindSession", { sessionId: attached.id, runtimeSessionId });
       session = attached;
     };
@@ -179,7 +182,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     return {
       chatContext: { agent, teamId: team?.id, manager: asManager },
       prefill: options.prefill,
-      shared: true, args: runtimeArgs, externalTools, label: asManager ? "Manager" : team ? "Team: " + team.name : "Independent member session",
+      shared: true, spawnedRuntime: !runtimeWasRunning, args: runtimeArgs, externalTools, label: asManager ? "Manager" : team ? "Team: " + team.name : "Independent member session",
       sessionDeleted(id) {
         if (id !== runtimeSessionId) return;
         runtimeSessionId = "";
@@ -200,7 +203,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
         if (reconnecting || disconnected) await reconnect();
         if (method === "session/create" && needsAttachment) {
           attaching ||= (async () => {
-            const replacement = await client.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: asManager, shared: true });
+            const replacement = await client.request("attachSession", sessionScope);
             try {
               const tools = await client.request("sessionTools", { sessionId: replacement.id });
               // The runtime client holds this object; renew its credentials in place.
@@ -225,13 +228,21 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       },
       async close() {
         if (detached) return; detached = true;
-        try { await attaching; if (!needsAttachment) await client.request("detachSession", { sessionId: session.id }); }
-        finally { client.close(); }
+        try { await attaching; if (!needsAttachment) await client.request("detachSession", { sessionId: session.id }).catch(() => {}); }
+        finally { if (stopSpawnedService) await client.closeSpawned(); else client.close(); }
       },
     };
   } catch (error) {
     if (session) await client.request("detachSession", { sessionId: session.id }).catch(() => {});
-    client.close(); throw error;
+    await client.closeSpawned();
+    if (!runtimeWasRunning) {
+      const host = await connectSharedRuntime({ rindHome, start: false }).catch(() => null);
+      if (host) {
+        try { await host.request("runtime/shutdown", { if_idle: true }).catch(() => {}); }
+        finally { host.close(); }
+      }
+    }
+    throw error;
   }
 }
 function argument(args, flag) { const index = args.indexOf(flag); return index >= 0 ? args[index + 1] : undefined; }
@@ -257,6 +268,6 @@ export function observeRuntime(client, management) {
       await management.after(method, result);
       return result;
     },
-    async shutdown() { try { await client.shutdown(); } finally { await management.close(); } },
+    async shutdown() { try { await management.close(); } finally { await client.shutdown(); } },
   };
 }

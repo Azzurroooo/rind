@@ -49,9 +49,17 @@ export async function startSharedServer(options) {
     ...live.list().filter(item => item.turn !== "idle" || item.background).map(item => item.id),
   ]).size;
   const idleTtlMs = resolveIdleTtlMs(options);
-  let idleSince = Date.now(), idleTimer = null;
-  const isIdle = () => peers.size === 0 && busyCount() === 0 && opening.size === 0 && deleting.size === 0 && !authOwner;
-  const touchActivity = () => { idleSince = Date.now(); };
+  let idleSince = Date.now(), idleTimer = null, stopTimer = null, stopWhenIdle = Boolean(options.stopWhenIdle), hasConnectedPeer = false;
+  const clearStopTimer = () => { if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; } };
+  const isIdle = () => ![...peers].some(peer => !peer.observe) && busyCount() === 0 && opening.size === 0 && deleting.size === 0 && !authOwner;
+  const touchActivity = () => {
+    idleSince = Date.now();
+    if (!stopWhenIdle || stopping || !isIdle()) { clearStopTimer(); return; }
+    if (!stopTimer) {
+      stopTimer = setTimeout(() => { stopTimer = null; if (!stopping && stopWhenIdle && isIdle()) void close("shutdown"); }, hasConnectedPeer ? 200 : 5000);
+      stopTimer.unref?.();
+    }
+  };
   const client = createRuntimeClient({ ...options, rindHome, cwd: paths.directory, cliArgs: [], env: { RIND_SHARED_HOST_PID: String(process.pid) },
     onMessage(event) {
       // Sign-in progress (the URL to open) is for the window signing in.
@@ -101,9 +109,16 @@ export async function startSharedServer(options) {
   ready.catch(() => {});
   const server = net.createServer(socket => {
     socket.setEncoding("utf8"); let buffer = "";
-    const peer = { socket, sessions: new Set(), observe: false, send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
+    const peer = { socket, sessions: new Set(), prompts: new Set(), observe: false, oneShot: false, send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
     peers.add(peer); touchActivity(); socket.on("error", () => {});
-    socket.on("close", () => { peers.delete(peer); live.leave(peer); for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); } if (isIdle()) touchActivity(); });
+    socket.on("close", () => {
+      peers.delete(peer); live.leave(peer);
+      if (peer.oneShot && initialized) {
+        for (const sessionId of peer.prompts) void client.request("session/cancel", { session_id: sessionId }).catch(() => {});
+      }
+      for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); }
+      if (isIdle()) touchActivity();
+    });
     socket.on("data", chunk => {
       buffer += chunk;
       if (buffer.length > 32 * 1024 * 1024) { socket.destroy(); return; }
@@ -163,21 +178,31 @@ export async function startSharedServer(options) {
           return;
         }
         const base = await initialize(); let result;
+        if (method !== "runtime/observe") hasConnectedPeer = true;
         if (method === "initialize") result = base;
         else if (method === "runtime/observe") { peer.observe = true; result = { pid: client.child.pid }; }
         else if (method === "shutdown") { result = { detached: true }; peer.sessions.clear(); live.leave(peer); }
         else {
+          if (["session/open", "session/create", "session/subscribe"].includes(method)) {
+            if (params.one_shot === true) {
+              peer.oneShot = true;
+              if (params.stop_when_idle === true) stopWhenIdle = true;
+            } else if (!peer.oneShot) {
+              stopWhenIdle = false;
+            }
+          }
+          const { one_shot: _oneShot, stop_when_idle: _stopWhenIdle, ...workerParams } = params;
           if (method === "session/prompt" && prompts.has(params.session_id)) throw new Error("This session already has an active request. Use steering or follow-up input.");
-          if (method === "session/prompt") { prompts.add(params.session_id); viewIfOpen(peer, params.session_id); }
+          if (method === "session/prompt") { prompts.add(params.session_id); peer.prompts.add(params.session_id); viewIfOpen(peer, params.session_id); }
           if (method === "rind/auth/login") { if (authOwner) throw new Error("Another connection is signing in."); authOwner = peer; }
           if (method === "session/subscribe" || method === "session/prompt") peer.sessions.add(params.session_id);
           if (method === "session/unsubscribe") { peer.sessions.delete(params.session_id); live.leave(peer, params.session_id); result = { ok: true }; }
           let promptFailed = false;
-          try { if (method !== "session/unsubscribe") result = await client.request(method, params); }
+          try { if (method !== "session/unsubscribe") result = await client.request(method, workerParams); }
           catch (error) { promptFailed = true; throw error; }
           finally {
             if (method === "rind/auth/login") authOwner = null;
-            if (method === "session/prompt") { prompts.delete(params.session_id); live.settle(params.session_id, promptFailed); }
+            if (method === "session/prompt") { prompts.delete(params.session_id); peer.prompts.delete(params.session_id); live.settle(params.session_id, promptFailed); }
           }
           // A window before its first message has no session; session/create makes one.
           if (["session/open", "session/new", "session/switch", "session/create"].includes(method) && result.session_id) { peer.sessions.add(result.session_id); viewIfOpen(peer, result.session_id, { workspace: result.workspace_root }); }
@@ -225,6 +250,7 @@ export async function startSharedServer(options) {
       }, checkMs);
       idleTimer.unref?.();
     }
+    touchActivity();
     readyResolve();
   } catch (error) {
     readyReject(error);
@@ -241,6 +267,7 @@ export async function startSharedServer(options) {
   function close(reason = "shutdown") {
     return closing ||= (async () => {
       stopping = true;
+      clearStopTimer();
       if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
       const forced = setTimeout(() => { for (const peer of peers) peer.socket.destroy(); }, 1000);
       forced.unref?.();

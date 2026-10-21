@@ -153,11 +153,25 @@ export async function connectClient({ endpoint, token, runtimeSessionId, onSnaps
   };
 }
 export async function connectManagement(options: {
-  home?: string; python?: string; repoRoot?: string; runtimePath?: string; start?: boolean;
+  home?: string; python?: string; repoRoot?: string; runtimePath?: string; start?: boolean; stopSpawnedService?: boolean;
   onSnapshot?: (snapshot: any) => void; onDisconnect?: () => void;
 } = {}) {
   const home = resolveRindHome(options.home);
   const paths = managementPaths(home);
+  let replaced = false;
+  const attachHelpers = <T extends ManagementClient>(client: T, service: any, spawned: boolean) => Object.assign(client, {
+    service,
+    spawned,
+    async closeSpawned() {
+      if (spawned) {
+        const result = await within(client.request("serviceShutdown", { ifIdle: true }).catch(() => null), 5000);
+        client.close();
+        if (result?.stopped) await waitForFreeEndpoint(paths, 5000);
+        return;
+      }
+      client.close();
+    },
+  });
   const connect = async () => {
     const token = (await readFile(paths.token, "utf8")).trim();
     if (!token) throw new Error("The agents management credentials are not written yet.");
@@ -177,8 +191,9 @@ export async function connectManagement(options: {
         within(client.request("serviceInfo").catch(error => { legacy = error.code === "UNKNOWN_METHOD"; return null; }), 3000),
         managementBuildId(),
       ]);
-      if (info?.buildId === expected) return Object.assign(client, { service: info });
+      if (info?.buildId === expected) return attachHelpers(client, info, false);
       if (info && info.working === 0) {
+        replaced = true;
         // Replace only this service; the shared Runtime and its windows keep running.
         await client.request("serviceShutdown", { restart: true }).catch(() => {});
         client.close();
@@ -186,9 +201,9 @@ export async function connectManagement(options: {
       }
       if (legacy) {
         const result = await endLegacyService(client, home);
-        if (result.ended) return (await stopped()) && null;
+        if (result.ended) { replaced = true; return (await stopped()) && null; }
         if (!result.working) throw new Error("An agents management service from an older Rind is running and could not be stopped. End its process and try again.");
-        return Object.assign(client, { service: null, stale: { reason: "legacy", working: result.working } });
+        return Object.assign(attachHelpers(client, null, false), { stale: { reason: "legacy", working: result.working } });
       }
       if (!info) {
         client.close();
@@ -196,7 +211,7 @@ export async function connectManagement(options: {
         if (await endStuckService(paths, connect) && await waitForFreeEndpoint(paths, 5000)) return null;
         throw new Error("An agents management service is holding " + paths.endpoint + " without answering, and it would not stop.");
       }
-      return Object.assign(client, { service: info, stale: { reason: "busy", working: info.working } });
+      return Object.assign(attachHelpers(client, info, false), { stale: { reason: "busy", working: info.working } });
     } catch (error) {
       client.close();
       throw error;
@@ -214,7 +229,7 @@ export async function connectManagement(options: {
     }
     return null;
   }
-  if (options.start === false) return Object.assign(await connect(), { service: null });
+  if (options.start === false) return attachHelpers(await connect(), null, false);
   try { const current = await checked(await connect()); if (current) return current; } catch {}
   const existing = await waitForStartingService();
   if (existing) return existing;
@@ -226,7 +241,7 @@ export async function connectManagement(options: {
     if (taken) return taken;
     const log = await open(path.join(paths.state, "service.log"), "a", 0o600);
     const repoRoot = options.repoRoot || path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./server.js", import.meta.url)), JSON.stringify({ home, python: options.python || process.env.RIND_PYTHON || undefined, repoRoot, runtimePath: options.runtimePath || process.env.RIND_RUNTIME_PATH || "" }), "--rind-service-nonce=" + randomUUID()], { detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd], env: process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env });
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./server.js", import.meta.url)), JSON.stringify({ home, python: options.python || process.env.RIND_PYTHON || undefined, repoRoot, runtimePath: options.runtimePath || process.env.RIND_RUNTIME_PATH || "", ...(options.stopSpawnedService && !replaced ? { stopWhenIdle: true } : {}) }), "--rind-service-nonce=" + randomUUID()], { detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd], env: process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env });
     child.on("error", () => {}); child.unref(); await log.close();
     let last: unknown;
     for (let i = 0; i < 40; i++) {
@@ -234,7 +249,7 @@ export async function connectManagement(options: {
       try {
         const client = await connect();
         const service = await client.request("serviceInfo").catch(error => { if (error.code === "UNKNOWN_METHOD") return null; client.close(); throw error; });
-        return Object.assign(client, { service });
+        return attachHelpers(client, service, !replaced);
       } catch (error) { last = error; }
       await delay(100);
     }
