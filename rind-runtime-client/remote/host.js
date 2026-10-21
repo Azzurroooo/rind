@@ -8,10 +8,15 @@ import { isRemoteRuntimeMethod } from "./policy.js";
 import { RemoteServer } from "./server.js";
 import {
   asObject,
+  browseWorkspaceDirectories,
+  canonicalDirectory,
+  isInternalRindPath,
   listAvailableWorkspaces,
   readJsonObject,
+  registerSharedWorkspace,
   samePath,
   writeJsonObject,
+  writeSharedWorkspaces,
 } from "./workspaces.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -427,21 +432,25 @@ export function createRemoteBridge({
   settingsLoad,
   settingsSave,
 }) {
+  const isManaged = management
+    ? (p) => management.isManagedWorkspacePath(p)
+    : async () => false;
+  const loadWorkspaces = (rindHome) =>
+    listAvailableWorkspaces(rindHome, {
+      fallbackConfigFile: getFallbackConfigFile(),
+      isManagedWorkspacePath: isManaged,
+    }).catch(() => ({
+      availableProjects: [],
+      registeredWorkspaces: [],
+      activeProjectPath: "",
+    }));
+
   return {
     initialize: async () => {
       const rindHome = getRindHome();
       const initialized = asObject(await initializeRuntime()) || {};
       const { availableProjects, registeredWorkspaces, activeProjectPath } =
-        await listAvailableWorkspaces(rindHome, {
-          fallbackConfigFile: getFallbackConfigFile(),
-          isManagedWorkspacePath: management
-            ? (p) => management.isManagedWorkspacePath(p)
-            : async () => false,
-        }).catch(() => ({
-          availableProjects: [],
-          registeredWorkspaces: [],
-          activeProjectPath: "",
-        }));
+        await loadWorkspaces(rindHome);
       const currentWs =
         typeof initialized.workspace_root === "string" ? initialized.workspace_root.trim() : "";
       const runtimeDir = join(rindHome, "runtime");
@@ -451,9 +460,9 @@ export function createRemoteBridge({
       const activeProject = activeProjectPath
         ? availableProjects.find((item) => samePath(item.path, activeProjectPath))
         : undefined;
-      const preferredProject = matchedProject || activeProject || availableProjects[0];
+      const preferredProject = activeProject || matchedProject || availableProjects[0];
       if (preferredProject) {
-        const nextSessionId = matchedProject
+        const nextSessionId = samePath(preferredProject.path, currentWs)
           ? initialized.session_id
           : preferredProject.sessions[0]?.id || "";
         return {
@@ -466,14 +475,34 @@ export function createRemoteBridge({
       const isInternalOrManaged =
         !currentWs ||
         samePath(currentWs, runtimeDir) ||
-        (management ? await management.isManagedWorkspacePath(currentWs) : false);
+        isInternalRindPath(rindHome, currentWs) ||
+        (await isManaged(currentWs));
       return {
         ...initialized,
         ...(isInternalOrManaged ? { workspace_root: "", session_id: "" } : {}),
         workspaces: registeredWorkspaces,
       };
     },
+    workspaceDirs: (params = {}) =>
+      browseWorkspaceDirectories(
+        getRindHome(),
+        typeof params?.path === "string" ? params.path : "",
+        {
+          fallbackConfigFile: getFallbackConfigFile(),
+          isManagedWorkspacePath: isManaged,
+        },
+      ),
     request: async (method, params = {}) => {
+      if (method === "workspace/dirs") {
+        return browseWorkspaceDirectories(
+          getRindHome(),
+          typeof params?.path === "string" ? params.path : "",
+          {
+            fallbackConfigFile: getFallbackConfigFile(),
+            isManagedWorkspacePath: isManaged,
+          },
+        );
+      }
       if (!isRemoteRuntimeMethod(method)) throw new Error("Unsupported remote method.");
       const nextParams =
         method === "session/replay" && management
@@ -482,24 +511,30 @@ export function createRemoteBridge({
       try {
         if (method === "session/list") {
           const rindHome = getRindHome();
-          const { availableProjects, registeredWorkspaces, activeProjectPath } =
-            await listAvailableWorkspaces(rindHome, {
-              fallbackConfigFile: getFallbackConfigFile(),
-              isManagedWorkspacePath: management
-                ? (p) => management.isManagedWorkspacePath(p)
-                : async () => false,
-            }).catch(() => ({
-              availableProjects: [],
-              registeredWorkspaces: [],
-              activeProjectPath: "",
-            }));
+          let { availableProjects, registeredWorkspaces, activeProjectPath } =
+            await loadWorkspaces(rindHome);
           const requestedWs =
             typeof params.workspace_root === "string" ? params.workspace_root.trim() : "";
-          const matchedProject = requestedWs
+          let matchedProject = requestedWs
             ? availableProjects.find((item) => samePath(item.path, requestedWs))
             : (activeProjectPath
                 ? availableProjects.find((item) => samePath(item.path, activeProjectPath))
                 : undefined) || availableProjects[0];
+          if (requestedWs && !matchedProject) {
+            const canonical = await canonicalDirectory(requestedWs);
+            if (isInternalRindPath(rindHome, canonical) || (await isManaged(canonical))) {
+              throw new Error("Cannot open an internal Rind directory as a workspace.");
+            }
+            await registerSharedWorkspace(rindHome, canonical, { setActive: true });
+            ({ availableProjects, registeredWorkspaces, activeProjectPath } =
+              await loadWorkspaces(rindHome));
+            matchedProject = availableProjects.find((item) => samePath(item.path, canonical));
+          } else if (requestedWs && matchedProject && !samePath(activeProjectPath, matchedProject.path)) {
+            await writeSharedWorkspaces(rindHome, {
+              projects: registeredWorkspaces,
+              activeProjectPath: matchedProject.path,
+            }).catch(() => {});
+          }
           if (!matchedProject) {
             return { sessions: [], workspaces: registeredWorkspaces };
           }
@@ -517,9 +552,20 @@ export function createRemoteBridge({
           });
           return {
             ...(asObject(result) || {}),
+            workspace_root: matchedProject.path,
             sessions: filteredSessions,
             workspaces: registeredWorkspaces,
           };
+        }
+        if (
+          (method === "session/new" || method === "session/create") &&
+          typeof nextParams?.workspace_root === "string" &&
+          nextParams.workspace_root.trim()
+        ) {
+          const rindHome = getRindHome();
+          await registerSharedWorkspace(rindHome, nextParams.workspace_root.trim(), {
+            setActive: true,
+          }).catch(() => {});
         }
         return await requestRuntime(method, nextParams);
       } catch (error) {

@@ -106,7 +106,7 @@ export function Sidebar({
       const matched = raw ? paths.find((p) => normalizePathKey(p) === normalizePathKey(raw)) : "";
       return matched || paths[0] || "";
     }
-    return raw;
+    return (project.workspaces || []).find((p) => normalizePathKey(p) === normalizePathKey(raw)) || raw;
   }, [project]);
 
   const recent = useMemo(() => {

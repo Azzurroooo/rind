@@ -52,6 +52,7 @@ export const methods = Object.freeze({
   agentsRequest: "agents/request",
   agentsOpenSession: "agents/openSession",
   agentsCreateSession: "agents/createSession",
+  workspaceDirs: "workspace/dirs",
 });
 
 export function parseSlashCommand(value) {

@@ -235,4 +235,72 @@ describe("Sidebar", () => {
       }),
     ).toBe("be-api conversation");
   });
+
+  it("matches Windows workspace paths case-insensitively without jumping back to the first folder", () => {
+    const onSelectWorkspace = vi.fn();
+    renderSidebar({
+      project: {
+        workspace: "e:\\code\\agent1\\rind",
+        workspaces: ["E:\\code\\agent1\\test\\1", "E:\\code\\agent1\\rind"],
+        allowCustomFolder: false,
+        onSelect: onSelectWorkspace,
+      },
+      sessions: [
+        { id: "s-rind", title: "Rind session", workspace_root: "e:\\code\\agent1\\rind" },
+      ],
+    });
+    expect(screen.getByLabelText("Project: rind")).not.toBeNull();
+    expect(screen.getByText("E:\\code\\agent1\\rind")).not.toBeNull();
+    expect(row("s-rind")).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Project: rind"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "1" }));
+    expect(onSelectWorkspace).toHaveBeenCalledWith("E:\\code\\agent1\\test\\1");
+  });
+
+  it("browses and selects any host folder via the remote folder browser dialog", async () => {
+    const onSelectWorkspace = vi.fn();
+    const onBrowseDirs = vi.fn(async (targetPath) => {
+      if (targetPath === "E:\\code\\agent1\\new-project") {
+        return {
+          current: "E:\\code\\agent1\\new-project",
+          parent: "E:\\code\\agent1",
+          roots: [{ label: "E:", path: "E:\\" }],
+          directories: [],
+        };
+      }
+      return {
+        current: "E:\\code\\agent1",
+        parent: "E:\\code",
+        roots: [{ label: "E:", path: "E:\\" }],
+        directories: [
+          { name: "rind", path: "E:\\code\\agent1\\rind" },
+          { name: "new-project", path: "E:\\code\\agent1\\new-project" },
+        ],
+      };
+    });
+
+    renderSidebar({
+      project: {
+        workspace: "E:\\code\\agent1\\rind",
+        workspaces: ["E:\\code\\agent1\\rind"],
+        allowCustomFolder: true,
+        onSelect: onSelectWorkspace,
+        onBrowseDirs,
+      },
+    });
+
+    fireEvent.click(screen.getByLabelText("Project: rind"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open another folder…" }));
+
+    await waitFor(() => expect(onBrowseDirs).toHaveBeenCalledWith("E:\\code\\agent1\\rind"));
+    await waitFor(() => expect(screen.getByText("new-project")).not.toBeNull());
+
+    fireEvent.click(screen.getByText("new-project"));
+    await waitFor(() => expect(onBrowseDirs).toHaveBeenCalledWith("E:\\code\\agent1\\new-project"));
+
+    const openBtn = await screen.findByRole("button", { name: 'Open "new-project"' });
+    fireEvent.click(openBtn);
+    expect(onSelectWorkspace).toHaveBeenCalledWith("E:\\code\\agent1\\new-project");
+  });
 });

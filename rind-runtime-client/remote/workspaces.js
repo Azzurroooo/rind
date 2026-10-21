@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -37,8 +37,16 @@ export async function writeJsonObject(filePath, value, secret = false) {
   }
 }
 
+function normalizeDriveRoot(raw) {
+  const trimmed = String(raw || "").trim();
+  if (process.platform === "win32" && /^[A-Za-z]:$/.test(trimmed)) {
+    return `${trimmed}\\`;
+  }
+  return trimmed;
+}
+
 export function storedPath(path) {
-  return resolve(String(path || "").trim());
+  return resolve(normalizeDriveRoot(path));
 }
 
 export function samePath(left, right) {
@@ -63,14 +71,14 @@ export function uniquePaths(paths) {
 export async function isDirectory(path) {
   if (!path) return false;
   try {
-    return (await stat(path)).isDirectory();
+    return (await stat(normalizeDriveRoot(path))).isDirectory();
   } catch {
     return false;
   }
 }
 
 export async function canonicalDirectory(path) {
-  const candidate = String(path || "").trim();
+  const candidate = normalizeDriveRoot(path);
   if (!candidate) throw new Error("Choose a project folder.");
   let info;
   try {
@@ -82,7 +90,15 @@ export async function canonicalDirectory(path) {
   return realpath(candidate);
 }
 
-const INTERNAL_RIND_DIRS = ["runtime", "sessions", "agents", "teams", "management", "desktop"];
+const INTERNAL_RIND_DIRS = [
+  "runtime",
+  "sessions",
+  "agents",
+  "teams",
+  "management",
+  "desktop",
+  "agents-management",
+];
 
 function isPathInside(parentPath, childPath) {
   const parentNorm = storedPath(parentPath);
@@ -99,7 +115,7 @@ function isPathInside(parentPath, childPath) {
   return candidate.startsWith(`${prefix}\\`) || candidate.startsWith(`${prefix}/`);
 }
 
-function isInternalRindPath(rindHome, targetPath) {
+export function isInternalRindPath(rindHome, targetPath) {
   if (!rindHome || !targetPath) return true;
   if (samePath(rindHome, targetPath)) return true;
   return INTERNAL_RIND_DIRS.some((sub) => isPathInside(join(rindHome, sub), targetPath));
@@ -295,5 +311,90 @@ export async function listAvailableWorkspaces(
     availableProjects,
     registeredWorkspaces,
     activeProjectPath: state.activeProjectPath,
+  };
+}
+
+const IGNORED_BROWSE_DIRS = new Set([
+  "$recycle.bin",
+  "system volume information",
+  "recovery",
+  "perflogs",
+  "node_modules",
+  "__pycache__",
+]);
+
+export async function listFilesystemRoots() {
+  const home = homedir();
+  const roots = [];
+  if (process.platform === "win32") {
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+    const checks = await Promise.all(
+      letters.map(async (letter) => {
+        const drivePath = `${letter}:\\`;
+        return (await isDirectory(drivePath)) ? { label: `${letter}:`, path: drivePath } : null;
+      }),
+    );
+    for (const item of checks) {
+      if (item) roots.push(item);
+    }
+  } else {
+    roots.push({ label: "/", path: "/" });
+  }
+  if (home && (await isDirectory(home)) && !roots.some((r) => samePath(r.path, home))) {
+    roots.push({ label: "Home", path: home });
+  }
+  return roots;
+}
+
+export async function browseWorkspaceDirectories(
+  rindHome,
+  requestedPath = "",
+  { fallbackConfigFile = "", isManagedWorkspacePath = async () => false } = {},
+) {
+  let targetPath = String(requestedPath || "").trim();
+  if (!targetPath) {
+    const state = await readSharedWorkspaces(rindHome, fallbackConfigFile);
+    if (state.activeProjectPath && (await isDirectory(state.activeProjectPath))) {
+      targetPath = state.activeProjectPath;
+    } else {
+      targetPath = homedir() || process.cwd();
+    }
+  }
+  const current = await canonicalDirectory(targetPath);
+  const parentDir = dirname(current);
+  const parent = samePath(parentDir, current) ? "" : parentDir;
+  const [roots, rawEntries] = await Promise.all([
+    listFilesystemRoots(),
+    readdir(current, { withFileTypes: true }).catch(() => []),
+  ]);
+
+  const candidates = await Promise.all(
+    rawEntries.map(async (entry) => {
+      const name = String(entry?.name || "");
+      if (!name || name.startsWith(".") || IGNORED_BROWSE_DIRS.has(name.toLowerCase())) {
+        return null;
+      }
+      const fullPath = join(current, name);
+      const isDir =
+        entry.isDirectory() || (entry.isSymbolicLink() && (await isDirectory(fullPath)));
+      if (!isDir) return null;
+      if (isInternalRindPath(rindHome, fullPath) || (await isManagedWorkspacePath(fullPath))) {
+        return null;
+      }
+      return { name, path: fullPath };
+    }),
+  );
+
+  const directories = candidates
+    .filter(Boolean)
+    .sort((left, right) =>
+      left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }),
+    );
+
+  return {
+    current,
+    parent,
+    roots,
+    directories,
   };
 }

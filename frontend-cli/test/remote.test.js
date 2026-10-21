@@ -133,12 +133,13 @@ test("/remote is registered in LOCAL_SLASH_COMMANDS and dispatches through comma
     sessionState,
     log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)),
     cwd: webDir,
+    rindHome: webDir,
     getInitInfo: () => ({ capabilities: [], methods: ["session/prompt"] }),
     webRoot: webDir,
   });
   t.after(async () => {
     await remoteController.stop();
-    await rm(webDir, { recursive: true, force: true });
+    await removeRindHome(webDir);
   });
 
   const commandController = createCommandController({
@@ -172,11 +173,12 @@ test("/remote is registered in LOCAL_SLASH_COMMANDS and dispatches through comma
 });
 
 test("interactive TTY /remote menu, missing webRoot fallback, and port collision auto-fallback", async (t) => {
-  const missingWebDir = path.join(os.tmpdir(), `rind-missing-web-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const tempHome = await mkdtemp(path.join(os.tmpdir(), "rind-cli-remote-menu-"));
+  const missingWebDir = path.join(tempHome, "missing-web");
   const logs = [];
   const choices = [];
   const sessionState = {
-    info: { session_id: "s-menu", workspace_root: process.cwd(), model: "gpt-test", reasoning_effort: "medium" },
+    info: { session_id: "s-menu", workspace_root: tempHome, model: "gpt-test", reasoning_effort: "medium" },
     reservedId: "s-menu",
     pendingName: "",
     pendingSkillSources: null,
@@ -191,7 +193,8 @@ test("interactive TTY /remote menu, missing webRoot fallback, and port collision
       choices.push({ options, meta });
       return typeof nextChoice === "function" ? nextChoice(options) : nextChoice;
     },
-    cwd: process.cwd(),
+    cwd: tempHome,
+    rindHome: tempHome,
     getInitInfo: () => ({ capabilities: [], methods: ["session/prompt"] }),
     webRoot: missingWebDir,
   });
@@ -200,7 +203,8 @@ test("interactive TTY /remote menu, missing webRoot fallback, and port collision
     runtimeClient: { request: async () => ({}) },
     sessionState,
     log: () => {},
-    cwd: process.cwd(),
+    cwd: tempHome,
+    rindHome: tempHome,
     getInitInfo: () => ({ capabilities: [], methods: ["session/prompt"] }),
     webRoot: missingWebDir,
   });
@@ -208,6 +212,7 @@ test("interactive TTY /remote menu, missing webRoot fallback, and port collision
   t.after(async () => {
     await controllerA.stop();
     await controllerB.stop();
+    await removeRindHome(tempHome);
   });
 
   // 1. Start controllerA even when webRoot directory does not exist (allowMissingWebRoot: true)
@@ -655,6 +660,43 @@ test("E2E multi-surface unification: CLI and Desktop share Remote gateway, Works
     remoteWorkspaces.some((w) => samePath(w, cliWorkspace)),
     true,
     "Remote workspaces must include CLI active workspace",
+  );
+  assert.equal(
+    initResp.result.methods.includes("workspace/dirs"),
+    true,
+    "initialize must advertise workspace/dirs for remote folder browsing",
+  );
+
+  // Browse host directories via workspace/dirs and open an unregistered folder dynamically
+  const unregisteredWorkspace = path.join(home, "ws-unregistered");
+  await mkdir(unregisteredWorkspace, { recursive: true });
+  const browseResp = await wsRequest("workspace/dirs", { path: home });
+  assert.ok(browseResp.result, "workspace/dirs must return directory listing");
+  assert.equal(
+    browseResp.result.directories.some((d) => d.name === "ws-unregistered"),
+    true,
+    "workspace/dirs must list ws-unregistered subfolder",
+  );
+  assert.equal(
+    browseResp.result.directories.some((d) => d.name === "runtime" || d.name === "sessions"),
+    false,
+    "workspace/dirs must hide internal Rind runtime/sessions directories",
+  );
+
+  const openUnregisteredResp = await wsRequest("session/list", {
+    limit: 20,
+    workspace_root: unregisteredWorkspace,
+  });
+  assert.ok(openUnregisteredResp.result, "session/list must succeed for a valid unregistered host directory");
+  assert.equal(
+    samePath(openUnregisteredResp.result.workspace_root, unregisteredWorkspace),
+    true,
+    "session/list must return canonical workspace_root of newly opened folder",
+  );
+  assert.equal(
+    (openUnregisteredResp.result.workspaces || []).some((w) => samePath(w, unregisteredWorkspace)),
+    true,
+    "Newly opened folder must be automatically added to shared workspaces list",
   );
 
   // Verify existing Team ("Unified Alpha Team") is loaded when connected to CLI-started Remote!

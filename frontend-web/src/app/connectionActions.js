@@ -1,6 +1,6 @@
 import { methods, sessionIdOf } from "../methods.js";
 import { isAuthError } from "../runtimeClient.js";
-import { isManagedAgentWorkspace } from "../lib/agentsModel.js";
+import { isManagedAgentWorkspace, normalizePathKey } from "../lib/agentsModel.js";
 import { finalAssistantText, showNotification, truncateFirstLine } from "../lib/notifications.js";
 import { readPreference } from "../lib/sessionPreferences.js";
 import { fetchTicket, loginErrorMessage, unauthorizedMessage } from "../ticket.js";
@@ -261,7 +261,7 @@ export function createConnectionActions(ctx) {
         ? [...new Set(result.workspaces.map((w) => String(w || "").trim()).filter(Boolean))]
         : [];
       const workspace = hasHostWorkspaces
-        ? (hostWorkspaces.includes(rawWorkspace) ? rawWorkspace : (hostWorkspaces[0] || ""))
+        ? (hostWorkspaces.find((w) => normalizePathKey(w) === normalizePathKey(rawWorkspace)) || hostWorkspaces[0] || "")
         : rawWorkspace;
       if (hasHostWorkspaces) {
         ctx.setWorkspaces(hostWorkspaces);

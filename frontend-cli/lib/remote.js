@@ -155,12 +155,17 @@ export function createCliRemoteController({
   cwd = process.cwd(),
   getInitInfo = () => null,
   webRoot = "",
+  rindHome: explicitRindHome = "",
   managementLaunch = {},
 } = {}) {
   const eventListeners = new Set();
   const pendingPromptInputs = new Map();
   const client = rawClient || runtimeClient;
-  const rindHome = managementLaunch?.home ? resolve(managementLaunch.home) : resolveRindHome();
+  const rindHome = explicitRindHome
+    ? resolve(explicitRindHome)
+    : managementLaunch?.home
+      ? resolve(managementLaunch.home)
+      : resolveRindHome();
   let cachedState = { ...STOPPED_STATE };
   let localHost = null;
   let sharedSupported = null;

@@ -41,6 +41,7 @@ const unscoped = new Set([
   "agents/request",
   "agents/openSession",
   "agents/createSession",
+  "workspace/dirs",
 ]);
 
 const mime = {
@@ -948,6 +949,8 @@ export class RemoteServer {
       const agentMethods = this.bridge.agentsRequest
         ? ["agents/get", "agents/request", "agents/openSession", "agents/createSession"]
         : [];
+      const workspaceMethods =
+        typeof this.bridge.workspaceDirs === "function" ? ["workspace/dirs"] : [];
       const caps = Array.isArray(result.capabilities) ? result.capabilities : [];
       const capabilities = this.bridge.agentsRequest ? [...new Set([...caps, "agents_management"])] : caps;
       const agentsState = this.bridge.agentsRequest
@@ -956,10 +959,26 @@ export class RemoteServer {
       return {
         ...result,
         capabilities,
-        methods: [...new Set([...allowed, "initialize", "ping", "session/subscribe", "session/unsubscribe", ...agentMethods])],
+        methods: [
+          ...new Set([
+            ...allowed,
+            "initialize",
+            "ping",
+            "session/subscribe",
+            "session/unsubscribe",
+            ...agentMethods,
+            ...workspaceMethods,
+          ]),
+        ],
         gateway: { desktop: true, files_follow_session: true, agents: Boolean(this.bridge.agentsRequest) },
         ...(agentsState ? { agents_state: agentsState } : {}),
       };
+    }
+    if (method === "workspace/dirs") {
+      if (typeof this.bridge.workspaceDirs === "function") {
+        return this.bridge.workspaceDirs(params);
+      }
+      return this.bridge.request("workspace/dirs", params);
     }
     if (
       method === "agents/get" ||
@@ -1043,6 +1062,17 @@ export class RemoteServer {
       client.selected = String(object(result).session_id || sessionId);
       client.workspace = String(object(result).workspace_root || params.workspace_root || client.workspace);
       if (client.selected && client.subscriptions.size < 128) client.subscriptions.add(client.selected);
+    } else if (
+      method === "session/list" &&
+      typeof params.workspace_root === "string" &&
+      params.workspace_root.trim()
+    ) {
+      const nextWorkspace = String(object(result).workspace_root || params.workspace_root.trim());
+      if (nextWorkspace) {
+        client.workspace = nextWorkspace;
+        const sessions = Array.isArray(object(result).sessions) ? object(result).sessions : [];
+        if (sessions.length === 0) client.selected = "";
+      }
     }
     return result;
   }
