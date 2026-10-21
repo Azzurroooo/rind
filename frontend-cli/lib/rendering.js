@@ -1898,11 +1898,13 @@ function startupBannerText(info, frameWidth) {
   const width = startupBannerWidth(frameWidth);
   const modelLine = `model ${singleLine(info.model) || "unknown"} · session ${singleLine(info.session_id) || "new"}`;
   const version = singleLine(info.version) || "unknown";
+  const updateVersion = singleLine(info.update_available);
   const cwd = middleClip(info.cwd || process.cwd(), width - 4);
   const team = info.team_main;
   return [
     startupBannerBorder("┌", "┐", width),
     startupBannerLine(`${bold("Rind")} ${dim(`v${version}`)}${team ? `  ${teamBadge()}` : ""}`, width),
+    ...(updateVersion ? [startupBannerLine(`${accent("↑")} ${bold(`Update available: v${version} → v${updateVersion}`)} ${dim("· run rind update")}`, width)] : []),
     ...(team ? [startupBannerLine(`${bold(singleLine(team.agent_id))}${dim(" · ")}${singleLine(team.project_name)}`, width)] : []),
     startupBannerLine(modelLine, width),
     startupBannerLine(cwd, width),

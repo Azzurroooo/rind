@@ -69,6 +69,7 @@ function statusResult(context, argument) {
     { label: "model", value: info.model || "unknown" },
     { label: "reasoningEffort", value: info.reasoning_effort || "unset" },
     { label: "configured", value: configured.join(", ") || "none — run /login" },
+    ...(info.update_available ? [{ label: "update", value: `v${info.update_available} available · run rind update` }] : []),
   ];
   return {
     text: "Status",

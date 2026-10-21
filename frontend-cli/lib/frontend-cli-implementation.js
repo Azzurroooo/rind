@@ -3,7 +3,15 @@
 import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
+import {
+  detectInstallation,
+  promptStartupUpdate,
+  refreshUpdateCacheInBackground,
+  resolveInstalledRuntime,
+  runUpdate,
+  shouldPromptStartupUpdate,
+  updateHelp,
+} from "./update.js";
 import { runAgentsCommand, followConversation, leaveSummary, returnTarget } from "./agents-commands.js";
 import { takeHandoffPath, writeHandoff, writeHandoffSync } from "./agents-handoff.js";
 import { runAgentsPage } from "./agents-page.js";
@@ -76,7 +84,7 @@ const handoffWindow = Boolean(handoffFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
 const python = process.env.RIND_PYTHON || undefined;
-const runtimePath = process.env.RIND_RUNTIME_PATH || resolveInstalledRuntime();
+const runtimePath = resolveInstalledRuntime({ repoRoot });
 const managementLaunch = { python, repoRoot, runtimePath };
 if (cliArgs[0] === "agents") {
   try { await runAgentsCommand(cliArgs.slice(1), managementLaunch); }
@@ -84,20 +92,18 @@ if (cliArgs[0] === "agents") {
   return;
 }
 
-function resolveInstalledRuntime() {
-  const packageNames = {
-    win32: "@rind-ai/runtime-win32-x64",
-    linux: "@rind-ai/runtime-linux-x64",
-    darwin: process.arch === "arm64" ? "@rind-ai/runtime-darwin-arm64" : "@rind-ai/runtime-darwin-x64",
-  };
-  const packageName = packageNames[process.platform];
-  if (!packageName) return "";
-  try {
-    const packageRoot = path.dirname(createRequire(import.meta.url).resolve(`${packageName}/package.json`));
-    return path.join(packageRoot, "bin", process.platform === "win32" ? "rind-runtime.exe" : "rind-runtime");
-  } catch {
-    return "";
+if (cliArgs[0] === "update") {
+  if (cliArgs.some((arg) => arg === "--help" || arg === "-h")) {
+    process.stdout.write(`${updateHelp}\n`);
+    return;
   }
+  try {
+    process.exitCode = await runUpdate({ args: cliArgs.slice(1) });
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 2;
+  }
+  return;
 }
 
 if (cliArgs[0] === "run" && cliArgs.some((arg) => arg === "--help" || arg === "-h")) {
@@ -174,6 +180,27 @@ if (cliArgs[0] === "run") {
   return;
 }
 
+const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+let startupUpdateVersion = "";
+if (isTty && !handoffWindow) {
+  const installation = detectInstallation();
+  const promptCandidate = shouldPromptStartupUpdate({ installation });
+  if (promptCandidate) {
+    const choice = await promptStartupUpdate({ installation, latestVersion: promptCandidate });
+    if (choice === "update") {
+      try {
+        process.exitCode = await runUpdate({ args: [promptCandidate], installation });
+      } catch (error) {
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 2;
+      }
+      return;
+    }
+    if (choice === "skip") startupUpdateVersion = promptCandidate;
+  }
+  void refreshUpdateCacheInBackground({ installation });
+}
+
 const windowLog = createWindowLog();
 windowLog.step("start " + JSON.stringify(cliArgs));
 // A window opened from Agents is still starting until it reads keys itself:
@@ -207,7 +234,6 @@ const promptHistory = loadPromptHistory();
 let input = null;
 let ipcServer = null;
 const compactContextState = createCompactContextState();
-const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 const tui = isTty
   ? createTui({ input: process.stdin, output: process.stdout })
   : null;
@@ -535,6 +561,7 @@ try {
   sessionState.info = { cwd: process.cwd(), management_label: management.label };
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
+  if (startupUpdateVersion) sessionState.info.update_available = startupUpdateVersion;
   windowLog.step("runtime ready");
   const startupInfo = () => ({ ...sessionState.info, resume_preview: "" });
   if (management.label) logOutput(management.label);
