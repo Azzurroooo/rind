@@ -373,3 +373,25 @@ async def test_interrupted_batch_and_empty_reasoning_do_not_break_background_con
     finally:
         await worker.close()
 
+
+@pytest.mark.asyncio
+async def test_interrupted_request_terminates_running_request_tasks(tmp_path, monkeypatch, task_shell):
+    steps = [{"args": {"command": "work", "yield_time_ms": 0}}, "Waiting."]
+    worker, sid, processes, calls, clients = await worker_with_script(tmp_path, monkeypatch, task_shell, steps)
+    try:
+        worker.execution.begin_request(sid)
+        events = [event async for event in worker.execution.run_turn(sid, query="Build")]
+        assert events[-1]["background_wait"]["count"] == 1
+        assert processes[0].returncode is None
+        waiting = asyncio.create_task(worker.execution.wait_request(sid))
+        await asyncio.sleep(0)
+        worker.execution.interrupt(sid, "User interrupted")
+        with pytest.raises(RuntimeError, match="User interrupted"):
+            await asyncio.wait_for(waiting, 5)
+        assert processes[0].returncode is not None
+        record = next(iter((await worker.shell_tools.supervisor.journal.records(sid)).values()))
+        assert record["status"] == "cancelled"
+    finally:
+        await worker.close()
+
+

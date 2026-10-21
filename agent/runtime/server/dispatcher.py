@@ -605,14 +605,14 @@ class RuntimeDispatcher:
                 request_result = await self._worker.execution.wait_request(session_id)
         except Exception:
             if completion_scope == "request":
-                self._worker.execution.abandon_request(session_id)
+                await self._worker.execution.abandon_request(session_id)
             # A turn that failed to start never saved its message: that
             # conversation never existed. The worker decides; a saved one stays.
             await self._discard_if_unsaved(session_id)
             raise
         except BaseException:
             if completion_scope == "request":
-                self._worker.execution.abandon_request(session_id)
+                await self._worker.execution.abandon_request(session_id)
             raise
         await self._respond(
             request,
