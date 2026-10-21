@@ -13,6 +13,7 @@ import {
   runtimeProtocolVersion,
   type DesktopAuthPrompt,
   type DesktopAuthUpdate,
+  type GatewayState,
   type RuntimeEvent,
   type RuntimeEventEnvelope,
   type RuntimeMethod,
@@ -47,6 +48,7 @@ type RuntimeWorker = {
 
 const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
 const eventListeners = new Set<(event: RuntimeEvent) => void>()
+const remoteStateListeners = new Set<(state: GatewayState) => void>()
 const inputs = new RuntimeInputs()
 const authPromptListeners = new Set<(prompt: DesktopAuthPrompt) => void>()
 const authUpdateListeners = new Set<(update: DesktopAuthUpdate) => void>()
@@ -102,6 +104,13 @@ function runtimeExitError(code: number | null, signal: NodeJS.Signals | null, st
 }
 
 function dispatchRuntimeEnvelope(message: unknown) {
+  const record = asRecord(message)
+  if (record?.kind === "remote" && asRecord(record.state)) {
+    for (const listener of remoteStateListeners) {
+      listener(record.state as unknown as GatewayState)
+    }
+    return true
+  }
   const authUpdate = parseAuthUpdate(message)
   if (authUpdate) {
     for (const listener of authUpdateListeners) listener(authUpdate)
@@ -223,12 +232,39 @@ function ensureSharedClient(): Promise<SharedRuntimeConnection> {
       },
     })) as SharedRuntimeConnection
     worker.sharedClient = conn
+    void conn
+      .request("remote/get")
+      .then((state) => {
+        if (asRecord(state)) {
+          for (const listener of remoteStateListeners) {
+            listener(state as unknown as GatewayState)
+          }
+        }
+      })
+      .catch(() => {})
     return conn
   })().finally(() => {
     worker.sharedConnecting = undefined
   })
 
   return worker.sharedConnecting
+}
+
+export async function requestSharedRemote(
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<GatewayState> {
+  const client = await ensureSharedClient()
+  const state = (await client.request(method, params)) as GatewayState
+  if (asRecord(state)) {
+    for (const listener of remoteStateListeners) listener(state)
+  }
+  return state
+}
+
+export function subscribeRemoteState(listener: (state: GatewayState) => void) {
+  remoteStateListeners.add(listener)
+  return () => remoteStateListeners.delete(listener)
 }
 
 export function startRuntime(workspace: string) {

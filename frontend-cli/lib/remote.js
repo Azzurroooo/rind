@@ -1,9 +1,9 @@
-import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { allowRemoteOnWindows } from "../../rind-runtime-client/remote/firewall.js";
+import { resolve } from "node:path";
+import {
+  createRemoteHost,
+  resolveRindHome,
+  resolveWebRoot,
+} from "../../rind-runtime-client/remote/host.js";
 import {
   decodeQrMatrix,
   decodeTerminalQr,
@@ -13,6 +13,7 @@ import {
   renderTerminalQr,
 } from "../../rind-runtime-client/remote/qr.js";
 import { RemoteServer, RemoteWebSocket } from "../../rind-runtime-client/remote/server.js";
+import { registerSharedWorkspace } from "../../rind-runtime-client/remote/workspaces.js";
 
 export {
   decodeQrMatrix,
@@ -23,55 +24,17 @@ export {
   RemoteWebSocket,
   renderSvgQrDataUrl,
   renderTerminalQr,
+  resolveWebRoot,
 };
 
-const currentDir = dirname(fileURLToPath(import.meta.url));
-const defaultRepoRoot = resolve(currentDir, "../..");
-
-export function resolveWebRoot(override = "") {
-  if (override) return override;
-  const candidates = [
-    process.env.RIND_WEB_ROOT || "",
-    resolve(defaultRepoRoot, "frontend-web/dist"),
-    resolve(defaultRepoRoot, "desktop/out/web"),
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, "index.html"))) {
-      return candidate;
-    }
-  }
-  return resolve(defaultRepoRoot, "frontend-web/dist");
-}
-
-function resolveRindHome() {
-  const envHome = process.env.RIND_HOME?.trim();
-  return envHome ? resolve(envHome) : join(homedir(), ".rind");
-}
-
-async function loadCliSettings() {
-  const filePath = join(resolveRindHome(), "settings.json");
-  try {
-    const raw = JSON.parse(await readFile(filePath, "utf8"));
-    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  } catch {
-    return {};
-  }
-}
-
-async function saveCliSettings(patch) {
-  const rindHome = resolveRindHome();
-  await mkdir(rindHome, { recursive: true });
-  const filePath = join(rindHome, "settings.json");
-  const current = await loadCliSettings();
-  const next = {
-    ...current,
-    ...(patch && typeof patch === "object" && !Array.isArray(patch) ? patch : {}),
-  };
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-  await rename(tempPath, filePath);
-  return next;
-}
+const STOPPED_STATE = {
+  running: false,
+  scope: "loopback",
+  port: 8766,
+  addresses: [],
+  accessCode: "",
+  clients: 0,
+};
 
 export function parseRemoteArgs(args = []) {
   const tokens = Array.isArray(args) ? args.map((arg) => String(arg).trim()).filter(Boolean) : [];
@@ -181,26 +144,6 @@ export function formatRemoteOutput(state, { heading = "", selectedAddress = "" }
   return lines.filter((line) => line !== undefined).join("\n");
 }
 
-function emptyAgentsSnapshot() {
-  return {
-    seq: 0,
-    teams: [],
-    memberships: [],
-    agents: [],
-    tasks: [],
-    runs: [],
-    sessions: [],
-    connectedSessions: [],
-    live: [],
-    folderDefaultsVersion: 0,
-    notices: [],
-    approvals: [],
-    archivedTeams: [],
-    notes: [],
-    artifacts: [],
-  };
-}
-
 export function createCliRemoteController({
   runtimeClient,
   rawClient,
@@ -215,43 +158,18 @@ export function createCliRemoteController({
   managementLaunch = {},
 } = {}) {
   const eventListeners = new Set();
-  const agentListeners = new Set();
   const pendingPromptInputs = new Map();
   const client = rawClient || runtimeClient;
-  let mgmtClient = null;
-  let mgmtSnapshot = emptyAgentsSnapshot();
+  const rindHome = managementLaunch?.home ? resolve(managementLaunch.home) : resolveRindHome();
+  let cachedState = { ...STOPPED_STATE };
+  let localHost = null;
+  let sharedSupported = null;
   let selectedAddress = "";
 
-  async function ensureManagementClient({ start = false } = {}) {
-    if (mgmtClient) return mgmtClient;
-    try {
-      const { connectManagement } = await import("../../agent-management/dist/client.js");
-      mgmtClient = await connectManagement({
-        ...managementLaunch,
-        home: managementLaunch?.home || resolveRindHome(),
-        start,
-        onEvent(event) {
-          if (event?.type === "snapshot" && event.snapshot) {
-            mgmtSnapshot = { ...emptyAgentsSnapshot(), ...event.snapshot };
-            const payload = { snapshot: mgmtSnapshot, connection: "connected", service: mgmtClient?.service || null };
-            for (const listener of agentListeners) {
-              try {
-                listener(payload);
-              } catch {
-                // ignore
-              }
-            }
-          }
-        },
-      });
-      if (mgmtClient?.snapshot) {
-        mgmtSnapshot = { ...emptyAgentsSnapshot(), ...mgmtClient.snapshot };
-      }
-      return mgmtClient;
-    } catch {
-      return null;
-    }
-  }
+  const currentWorkspace = () =>
+    String(sessionState?.info?.workspace_root || sessionState?.info?.cwd || cwd || process.cwd());
+
+  void registerSharedWorkspace(rindHome, currentWorkspace(), { setActive: true }).catch(() => {});
 
   function bindCliSessionIfEmpty(result, fallbackWorkspace = "") {
     const nextSessionId = String(result?.session_id || "").trim();
@@ -260,7 +178,7 @@ export function createCliRemoteController({
       ...sessionState.info,
       ...(result && typeof result === "object" ? result : {}),
       session_id: nextSessionId,
-      workspace_root: String(result?.workspace_root || fallbackWorkspace || sessionState.info?.workspace_root || cwd),
+      workspace_root: String(result?.workspace_root || fallbackWorkspace || currentWorkspace()),
     };
     sessionState.reservedId = nextSessionId;
     sessionState.pendingName = "";
@@ -269,104 +187,105 @@ export function createCliRemoteController({
     onSessionRestored?.();
   }
 
-  const bridge = {
-    async initialize() {
-      const initInfo = getInitInfo?.() || {};
-      return {
-        protocol_version: "2",
-        capabilities: Array.isArray(initInfo.capabilities) ? initInfo.capabilities : [],
-        methods: Array.isArray(initInfo.methods) ? initInfo.methods : [],
-        session_id: String(sessionState?.info?.session_id || ""),
-        workspace_root: String(sessionState?.info?.workspace_root || cwd),
-        model: String(sessionState?.info?.model || ""),
-        reasoning_effort: String(sessionState?.info?.reasoning_effort || ""),
-      };
-    },
-    async request(method, params = {}) {
-      if (method === "session/new" || method === "session/create") {
-        // When the CLI window has no active session yet, create it through runtimeController
-        // so draft settings apply and the CLI window attaches to the new session.
-        if (!sessionState?.info?.session_id && runtimeClient?.request) {
-          const result = await runtimeClient.request("session/create", params);
+  function getLocalHost() {
+    if (localHost) return localHost;
+    localHost = createRemoteHost({
+      getRindHome: () => rindHome,
+      repoRoot: managementLaunch?.repoRoot,
+      getRuntimePath: () => managementLaunch?.runtimePath || "",
+      getPython: () => managementLaunch?.python,
+      initializeRuntime: async () => {
+        const initInfo = getInitInfo?.() || {};
+        return {
+          protocol_version: "2",
+          capabilities: Array.isArray(initInfo.capabilities) ? initInfo.capabilities : [],
+          methods: Array.isArray(initInfo.methods) ? initInfo.methods : [],
+          session_id: String(sessionState?.info?.session_id || ""),
+          workspace_root: currentWorkspace(),
+          model: String(sessionState?.info?.model || ""),
+          reasoning_effort: String(sessionState?.info?.reasoning_effort || ""),
+        };
+      },
+      requestRuntime: async (method, params = {}) => {
+        if (method === "session/new" || method === "session/create") {
+          const target = !sessionState?.info?.session_id && runtimeClient?.request ? runtimeClient : client;
+          const result = await target.request("session/create", params);
           bindCliSessionIfEmpty(result, params.workspace_root);
           return result;
         }
-        const result = await client.request(method, params);
-        bindCliSessionIfEmpty(result, params.workspace_root);
-        return result;
-      }
-      if (method === "session/switch") {
-        const result = await client.request("session/switch", params);
-        bindCliSessionIfEmpty(result, result?.workspace_root);
-        return result;
-      }
-      if (method === "session/prompt") {
-        const targetSessionId = String(params.session_id || "").trim();
-        if (targetSessionId && !sessionState?.info?.session_id) {
-          bindCliSessionIfEmpty({ session_id: targetSessionId }, cwd);
+        if (method === "session/switch") {
+          const result = await client.request("session/switch", params);
+          bindCliSessionIfEmpty(result, result?.workspace_root);
+          return result;
         }
-        if (targetSessionId && typeof params.input === "string" && params.input.trim()) {
-          pendingPromptInputs.set(targetSessionId, params.input);
+        if (method === "session/prompt") {
+          const targetSessionId = String(params.session_id || "").trim();
+          if (targetSessionId && !sessionState?.info?.session_id) {
+            bindCliSessionIfEmpty({ session_id: targetSessionId }, currentWorkspace());
+          }
+          if (targetSessionId && typeof params.input === "string" && params.input.trim()) {
+            pendingPromptInputs.set(targetSessionId, params.input);
+          }
+          try {
+            return await client.request("session/prompt", params);
+          } catch (error) {
+            if (targetSessionId) pendingPromptInputs.delete(targetSessionId);
+            throw error;
+          }
         }
-        try {
-          return await client.request("session/prompt", params);
-        } catch (error) {
-          if (targetSessionId) pendingPromptInputs.delete(targetSessionId);
-          throw error;
-        }
-      }
-      return client.request(method, params);
-    },
-    subscribe(listener) {
-      eventListeners.add(listener);
-      return () => eventListeners.delete(listener);
-    },
-    async agentsRequest(method, params = {}) {
-      if (method === "getState") {
-        const mgmt = await ensureManagementClient({ start: false });
-        if (!mgmt) return { snapshot: mgmtSnapshot, connection: "offline", service: null };
-        const res = await mgmt.request("state/get", {}).catch(() => null);
-        if (res?.snapshot) mgmtSnapshot = { ...emptyAgentsSnapshot(), ...res.snapshot };
-        return { snapshot: mgmtSnapshot, connection: "connected", service: mgmt.service || null };
-      }
-      const mgmt = await ensureManagementClient({ start: true });
-      if (!mgmt) throw new Error("Agents management is offline.");
-      if (method === "openSession") {
-        const opened = await mgmt.request("session/open", params);
-        const runtimeSessionId = String(opened?.runtimeSessionId || opened?.session?.session_id || "");
-        if (runtimeSessionId) {
-          await client.request("session/subscribe", { session_id: runtimeSessionId }).catch(() => {});
-        }
-        return opened;
-      }
-      if (method === "createSession") {
-        const created = await client.request("session/create", {
-          workspace_root: params.workspace_root || sessionState?.info?.workspace_root || cwd,
-        });
-        return created;
-      }
-      return mgmt.request(method, params);
-    },
-    subscribeAgents(listener) {
-      agentListeners.add(listener);
-      return () => agentListeners.delete(listener);
-    },
-    settingsLoad: loadCliSettings,
-    settingsSave: saveCliSettings,
-  };
+        return client.request(method, params);
+      },
+      subscribeRuntime: (listener) => {
+        eventListeners.add(listener);
+        return () => eventListeners.delete(listener);
+      },
+      webRoot: resolveWebRoot(webRoot),
+      allowMissingWebRoot: true,
+      onStateChange: (state) => {
+        cachedState = state;
+        redraw?.();
+      },
+    });
+    return localHost;
+  }
 
-  const server = new RemoteServer(
-    bridge,
-    resolveWebRoot(webRoot),
-    () => {
-      redraw?.();
-    },
-    { allowMissingWebRoot: true },
-  );
+  async function requestRemote(method, params = {}) {
+    if (sharedSupported !== false && client?.request) {
+      try {
+        const res = await client.request(method, params);
+        if (res && typeof res.running === "boolean" && Array.isArray(res.addresses)) {
+          sharedSupported = true;
+          cachedState = res;
+          return res;
+        }
+        if (sharedSupported === null) {
+          sharedSupported = false;
+        }
+      } catch (error) {
+        if (sharedSupported === true) throw error;
+        sharedSupported = false;
+      }
+    }
+    const host = getLocalHost();
+    if (method === "remote/get") cachedState = host.state();
+    else if (method === "remote/start") cachedState = await host.start(params);
+    else if (method === "remote/stop") cachedState = await host.stop();
+    else if (method === "remote/rotate") cachedState = host.rotate();
+    else if (method === "remote/allow-network") cachedState = await host.allowNetwork(process.execPath);
+    return cachedState;
+  }
 
   function handleRuntimeEvent(message) {
     if (!message || typeof message !== "object") return;
+    if (message.kind === "remote" && message.state) {
+      cachedState = message.state;
+      redraw?.();
+      return;
+    }
     const sessionId = String(message.session_id || "");
+    if (sessionId && !sessionState?.info?.session_id) {
+      bindCliSessionIfEmpty({ session_id: sessionId }, currentWorkspace());
+    }
     if (message.event?.type === "turn_started" && sessionId && pendingPromptInputs.has(sessionId)) {
       const remoteInput = pendingPromptInputs.get(sessionId);
       pendingPromptInputs.delete(sessionId);
@@ -385,24 +304,25 @@ export function createCliRemoteController({
 
   async function handleCommand(args = []) {
     const parsed = parseRemoteArgs(args);
-    const current = server.state();
+    await registerSharedWorkspace(rindHome, currentWorkspace(), { setActive: true }).catch(() => {});
+    const current = await requestRemote("remote/get");
 
     if (parsed.action === "stop") {
       if (!current.running) {
         log("Remote access is already off.");
-        return server.state();
+        return current;
       }
-      await server.stop();
+      const stopped = await requestRemote("remote/stop");
       selectedAddress = "";
       log("Remote access turned off.");
-      return server.state();
+      return stopped;
     }
 
     if (parsed.action === "rotate") {
       if (!current.running) {
         throw new Error("Remote access is off. Run /remote to enable it first.");
       }
-      const next = server.rotate();
+      const next = await requestRemote("remote/rotate");
       log(
         formatRemoteOutput(next, {
           heading: "Access code rotated. Previous devices have been disconnected.",
@@ -416,9 +336,9 @@ export function createCliRemoteController({
       if (!current.running) {
         throw new Error("Remote access is off. Run /remote to enable it first.");
       }
-      await allowRemoteOnWindows(process.execPath, current.port);
+      const next = await requestRemote("remote/allow-network");
       log("Windows firewall rule updated for the current remote port.");
-      return current;
+      return next;
     }
 
     if (parsed.action === "status") {
@@ -426,7 +346,6 @@ export function createCliRemoteController({
       return current;
     }
 
-    // action === "auto" or "start"
     if (current.running) {
       const wantsRestart =
         (parsed.scope && parsed.scope !== current.scope) ||
@@ -454,22 +373,24 @@ export function createCliRemoteController({
           });
           if (!choice) return current;
           if (choice === showOption) {
-            log(formatRemoteOutput(server.state(), { selectedAddress }));
-            return server.state();
+            const latest = await requestRemote("remote/get");
+            log(formatRemoteOutput(latest, { selectedAddress }));
+            return latest;
           }
           if (choice === switchOption) {
             const picked = await askChoice(current.addresses, {
               title: "Remote address",
               message: "Choose the address encoded in the QR code and sign-in link.",
             });
-            if (picked && current.addresses.includes(picked)) {
+            const latest = await requestRemote("remote/get");
+            if (picked && latest.addresses.includes(picked)) {
               selectedAddress = picked;
-              log(formatRemoteOutput(server.state(), { selectedAddress }));
+              log(formatRemoteOutput(latest, { selectedAddress }));
             }
-            return server.state();
+            return latest;
           }
           if (choice === rotateOption) {
-            const next = server.rotate();
+            const next = await requestRemote("remote/rotate");
             log(
               formatRemoteOutput(next, {
                 heading: "Access code rotated. Previous devices have been disconnected.",
@@ -479,34 +400,25 @@ export function createCliRemoteController({
             return next;
           }
           if (choice === stopOption) {
-            await server.stop();
+            const stopped = await requestRemote("remote/stop");
             selectedAddress = "";
             log("Remote access turned off.");
-            return server.state();
+            return stopped;
           }
         }
         log(formatRemoteOutput(current, { selectedAddress }));
         return current;
       }
-      await server.stop();
     }
 
-    const scope = parsed.scope || "lan";
     const startOptions = {
-      scope,
-      port: parsed.port ?? 8766,
+      scope: parsed.scope || "lan",
+      ...(parsed.port !== undefined ? { port: parsed.port } : {}),
       ...(parsed.externalOrigin ? { externalOrigin: parsed.externalOrigin } : {}),
+      ...(webRoot ? { webRoot: resolveWebRoot(webRoot) } : {}),
+      workspace_root: currentWorkspace(),
     };
-    let next;
-    try {
-      next = await server.start(startOptions);
-    } catch (error) {
-      if (parsed.port === undefined && error?.code === "EADDRINUSE") {
-        next = await server.start({ ...startOptions, port: 0 });
-      } else {
-        throw error;
-      }
-    }
+    const next = await requestRemote("remote/start", startOptions);
     if (!selectedAddress || !next.addresses.includes(selectedAddress)) {
       selectedAddress = next.addresses[0] || "";
     }
@@ -515,20 +427,19 @@ export function createCliRemoteController({
   }
 
   async function stop() {
-    await server.stop().catch(() => {});
-    try {
-      mgmtClient?.close?.();
-    } catch {
-      // ignore
+    if (localHost) {
+      await localHost.close().catch(() => {});
+      cachedState = { ...STOPPED_STATE };
     }
-    mgmtClient = null;
   }
 
   return {
-    state: () => server.state(),
+    state: () => (localHost ? localHost.state() : cachedState),
     handleCommand,
     handleRuntimeEvent,
     stop,
-    server,
+    get server() {
+      return localHost?.server || null;
+    },
   };
 }

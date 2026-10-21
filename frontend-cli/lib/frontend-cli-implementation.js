@@ -290,6 +290,7 @@ const runtimeClient = observeRuntime(createSharedRuntimeClient({
   onDeliver: ({ session_id: target, input }) => { if (target === sessionState.info.session_id) inputActions.dispatchExternal(input); },
   onMessage: (message) => {
     remoteController?.handleRuntimeEvent(message);
+    if (message?.kind === "remote") return;
     // Events are rendered one at a time, and an open question holds that queue
     // until it is answered; an answer from another window must jump the queue.
     if (message?.event?.type === "user_question_answered") { inputActions.questionAnswered(message.event); return; }

@@ -23,6 +23,9 @@ import {
   renderTerminalQr,
 } from "../lib/remote.js";
 import { removeRindHome } from "./helpers/rind-home.js";
+import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { registerSharedWorkspace, samePath } from "../../rind-runtime-client/remote/workspaces.js";
+import { connectManagement } from "../../agent-management/dist/client.js";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cliBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));
@@ -503,5 +506,207 @@ test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTT
 
   cliChild.stdin.write("/exit\n");
   await once(cliChild, "exit");
+  await removeRindHome(home);
+});
+
+test("E2E multi-surface unification: CLI and Desktop share Remote gateway, Workspaces, Teams, and auto-reclaim on last window exit", { timeout: 30000 }, async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-multi-surface-e2e-"));
+  const desktopWorkspace = path.join(home, "desktop-project");
+  const cliWorkspace = path.join(home, "cli-project");
+  const teamMemberWorkspace = path.join(home, "team-member");
+  await mkdir(desktopWorkspace, { recursive: true });
+  await mkdir(cliWorkspace, { recursive: true });
+  await mkdir(teamMemberWorkspace, { recursive: true });
+
+  await writeFile(
+    path.join(home, "settings.json"),
+    JSON.stringify({ provider: "openai", model: "gpt-4o" }),
+    "utf8",
+  );
+
+  // 1. Simulate Desktop registering a project workspace and creating a Team in RIND_HOME
+  await registerSharedWorkspace(home, desktopWorkspace, { setActive: true });
+  const mgmt = await connectManagement({ home, repoRoot, start: true });
+  await mgmt.request("createTeam", { name: "Unified Alpha Team", description: "Shared across CLI and Desktop" });
+  mgmt.close();
+
+  // 2. Start CLI in cliWorkspace
+  const cliChild = spawn(process.execPath, [cliBin, "--cwd", cliWorkspace], {
+    cwd: cliWorkspace,
+    env: {
+      ...process.env,
+      RIND_HOME: home,
+      NO_COLOR: "1",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  let stdoutText = "";
+  let stderrText = "";
+  cliChild.stdout.setEncoding("utf8");
+  cliChild.stderr.setEncoding("utf8");
+  cliChild.stdout.on("data", (chunk) => {
+    stdoutText += chunk;
+  });
+  cliChild.stderr.on("data", (chunk) => {
+    stderrText += chunk;
+  });
+
+  const desktopRemoteEvents = [];
+  let desktopPeer = null;
+
+  t.after(async () => {
+    try {
+      desktopPeer?.close();
+    } catch {
+      // ignore
+    }
+    try {
+      cliChild.kill();
+    } catch {
+      // ignore
+    }
+    await removeRindHome(home);
+  });
+
+  async function waitForStdout(predicate, timeoutMs = 15000, description = "stdout condition") {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate(stdoutText)) return stdoutText;
+      if (cliChild.exitCode !== null) {
+        throw new Error(`CLI exited early (${cliChild.exitCode}) while waiting for ${description}.\nSTDOUT:\n${stdoutText}\nSTDERR:\n${stderrText}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+    throw new Error(`Timed out waiting for ${description}.\nSTDOUT:\n${stdoutText}\nSTDERR:\n${stderrText}`);
+  }
+
+  await waitForStdout((out) => out.includes("gpt-4o"), 15000, "CLI startup banner");
+
+  // 3. Connect Desktop peer to the same shared runtime (initialize + runtime/observe, matching desktop/src/main/runtime.ts)
+  desktopPeer = await connectSharedRuntime({
+    rindHome: home,
+    repoRoot,
+    onMessage: (event) => {
+      if (event?.kind === "remote" && event.state) {
+        desktopRemoteEvents.push(event.state);
+      }
+    },
+  });
+  await desktopPeer.request("initialize");
+  await desktopPeer.request("runtime/observe");
+
+  const initialDesktopRemote = await desktopPeer.request("remote/get");
+  assert.equal(initialDesktopRemote.running, false);
+
+  // 4. Enable /remote in CLI -> verify Desktop immediately receives the running state and matches QR/code/port
+  cliChild.stdin.write("/remote loopback\n");
+  await waitForStdout((out) => out.includes("Commands:    /remote status · /remote rotate · /remote off"), 15000, "CLI /remote QR output");
+
+  const cliQrUrl = decodeTerminalQr(stdoutText);
+  const parsedUrl = new URL(cliQrUrl);
+  const origin = parsedUrl.origin;
+  const cliAccessCode = new URLSearchParams(parsedUrl.hash.replace(/^#/, "")).get("connect");
+
+  const syncedDesktopRemote = await desktopPeer.request("remote/get");
+  assert.equal(syncedDesktopRemote.running, true, "Desktop must see Remote running when enabled from CLI");
+  assert.equal(syncedDesktopRemote.accessCode, cliAccessCode, "Desktop and CLI must share the exact same accessCode");
+  assert.equal(syncedDesktopRemote.port, Number(parsedUrl.port), "Desktop and CLI must share the exact same port");
+  assert.equal(
+    desktopRemoteEvents.some((s) => s.running && s.accessCode === cliAccessCode),
+    true,
+    "Desktop must receive real-time remote state broadcast when CLI starts /remote",
+  );
+
+  // 5. Connect remote WebSocket client and verify unified Workspaces AND existing Teams are loaded!
+  const ticketRes = await fetch(`${origin}/ticket`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${cliAccessCode}` },
+  });
+  const { ticket } = await ticketRes.json();
+  const ws = new RemoteWebSocket(`${origin.replace("http:", "ws:")}/ws?ticket=${ticket}`, { origin });
+  t.after(() => ws.terminate());
+  await once(ws, "open");
+
+  let reqSeq = 0;
+  const pending = new Map();
+  ws.on("message", (raw) => {
+    const msg = JSON.parse(raw.toString("utf8"));
+    if (msg.kind === "response") {
+      pending.get(msg.request_id)?.(msg);
+      pending.delete(msg.request_id);
+    }
+  });
+  const wsRequest = (method, params = {}) =>
+    new Promise((resolve) => {
+      const id = `r-${++reqSeq}`;
+      pending.set(id, resolve);
+      ws.send(JSON.stringify({ kind: "request", request_id: id, method, params }));
+    });
+
+  const initResp = await wsRequest("initialize", {});
+  const remoteWorkspaces = initResp.result.workspaces || [];
+  assert.equal(
+    remoteWorkspaces.some((w) => samePath(w, desktopWorkspace)),
+    true,
+    "Remote workspaces must include Desktop registered project",
+  );
+  assert.equal(
+    remoteWorkspaces.some((w) => samePath(w, cliWorkspace)),
+    true,
+    "Remote workspaces must include CLI active workspace",
+  );
+
+  // Verify existing Team ("Unified Alpha Team") is loaded when connected to CLI-started Remote!
+  const agentsState = initResp.result.agents_state;
+  assert.ok(agentsState, "initialize must include agents_state");
+  assert.equal(agentsState.connection, "connected");
+  assert.equal(
+    agentsState.snapshot.teams.some((team) => team.name === "Unified Alpha Team"),
+    true,
+    "CLI /remote must load existing Teams from agents-management",
+  );
+
+  // Also verify Desktop received clients: 1 update when WS connected
+  const withClientDesktopState = await desktopPeer.request("remote/get");
+  assert.equal(withClientDesktopState.clients, 1);
+
+  ws.terminate();
+
+  // 6. Lifecycle test: exit CLI while Desktop is still open -> Remote MUST stay running!
+  cliChild.stdin.write("/exit\n");
+  await once(cliChild, "exit");
+
+  const afterCliExitState = await desktopPeer.request("remote/get");
+  assert.equal(
+    afterCliExitState.running,
+    true,
+    "Remote must remain running when CLI exits while Desktop window is still open",
+  );
+  const stillAliveRes = await fetch(origin);
+  assert.equal(stillAliveRes.status, 200);
+
+  // 7. Now close Desktop (the last local frontend window) -> Remote MUST automatically stop!
+  desktopPeer.close();
+  desktopPeer = null;
+
+  const deadline = Date.now() + 5000;
+  let remoteStopped = false;
+  while (Date.now() < deadline) {
+    const checkPeer = await connectSharedRuntime({ rindHome: home, start: false }).catch(() => null);
+    if (!checkPeer) {
+      remoteStopped = true;
+      break;
+    }
+    const st = await checkPeer.request("remote/get").catch(() => ({ running: false }));
+    checkPeer.close();
+    if (!st.running) {
+      remoteStopped = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(remoteStopped, true, "Remote must automatically stop when the last local frontend window exits");
+
   await removeRindHome(home);
 });

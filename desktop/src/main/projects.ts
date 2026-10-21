@@ -1,10 +1,21 @@
-import { readFile, realpath, stat, unlink } from "node:fs/promises"
-import { basename, dirname, join, resolve } from "node:path"
+import { stat, unlink } from "node:fs/promises"
+import { dirname } from "node:path"
 
 import type { DesktopProject, DesktopProjectOverview, DesktopRecentSession, DesktopSessionSummary, DesktopTheme, DesktopPrefsPatch } from "../preload/types"
 import { asObject, readJsonObject, writeJsonObject } from "./json-store.ts"
+import {
+  canonicalDirectory,
+  projectSummaryForPath,
+  readSessionIndex,
+  readSharedWorkspaces,
+  samePath,
+  storedPath,
+  uniquePaths,
+  writeSharedWorkspaces,
+} from "../../../rind-runtime-client/remote/workspaces.js"
 
-const recentSessionLimit = 5
+export { samePath }
+
 const recentDesktopSessionLimit = 200
 const sessionPageLimit = 20
 const maxSessionPageLimit = 50
@@ -43,9 +54,13 @@ export class DesktopProjectStore {
     this.legacyRecentSessionsFile = legacyRecentSessionsFile
   }
 
+  private get rindHome(): string {
+    return dirname(this.sessionIndexFile)
+  }
+
   async overview(): Promise<DesktopProjectOverview> {
-    const [state, sessions] = await Promise.all([this.readState(), this.readSessionIndex()])
-    const projects = await Promise.all(state.projects.map((path) => this.projectSummary(path, sessions)))
+    const [state, sessions] = await Promise.all([this.readState(), readSessionIndex(this.sessionIndexFile)])
+    const projects = await Promise.all(state.projects.map((path): Promise<DesktopProject> => projectSummaryForPath(path, sessions)))
     const recent = await this.recentSessions(state, sessions)
     return {
       projects,
@@ -115,7 +130,7 @@ export class DesktopProjectStore {
     if (!projectPath) throw new Error("Project is not registered in Rind Desktop.")
     const safeOffset = Number.isInteger(offset) && offset >= 0 ? offset : 0
     const safeLimit = Number.isInteger(limit) ? Math.max(1, Math.min(maxSessionPageLimit, limit)) : sessionPageLimit
-    const sessions = (await this.readSessionIndex())
+    const sessions = (await readSessionIndex(this.sessionIndexFile))
       .filter((session) => session.hasUserMessage)
       .filter((session) => samePath(session.workspaceRoot, projectPath))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
@@ -129,7 +144,7 @@ export class DesktopProjectStore {
   }
 
   async recentPage(offset = 0, limit = 10) {
-    const [state, sessions] = await Promise.all([this.readState(), this.readSessionIndex()])
+    const [state, sessions] = await Promise.all([this.readState(), readSessionIndex(this.sessionIndexFile)])
     const recent = await this.recentSessions(state, sessions)
     const start = Number.isInteger(offset) ? Math.max(0, offset) : 0
     const count = Number.isInteger(limit) ? Math.max(1, Math.min(50, limit)) : 10
@@ -139,7 +154,7 @@ export class DesktopProjectStore {
   private async markRecentNow(sessionId: string): Promise<DesktopProjectOverview> {
     const cleanId = sessionId.trim()
     if (!cleanId) return this.overview()
-    const [state, sessions] = await Promise.all([this.readState(), this.readSessionIndex()])
+    const [state, sessions] = await Promise.all([this.readState(), readSessionIndex(this.sessionIndexFile)])
     const session = sessions.find((item) => item.id === cleanId && this.sessionBelongsToProjects(item, state.projects))
     if (!session) return this.overview()
     const next = [{ session_id: session.id, last_interacted_at: new Date().toISOString() }]
@@ -159,31 +174,24 @@ export class DesktopProjectStore {
     const cleanId = sessionId.trim()
     if (!cleanId) return undefined
     const state = await this.readState()
-    return (await this.readSessionIndex()).find((session) => session.id === cleanId && this.sessionBelongsToProjects(session, state.projects))
-  }
-
-  private async projectSummary(path: string, sessions: DesktopSessionSummary[]): Promise<DesktopProject> {
-    const available = await isDirectory(path)
-    const projectSessions = sessions
-      .filter((session) => session.hasUserMessage)
-      .filter((session) => samePath(session.workspaceRoot, path))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-    return {
-      path,
-      name: basename(path) || path,
-      available,
-      sessions: projectSessions.slice(0, recentSessionLimit),
-      totalSessions: projectSessions.length,
-    }
+    return (await readSessionIndex(this.sessionIndexFile)).find((session) => session.id === cleanId && this.sessionBelongsToProjects(session, state.projects))
   }
 
   private async readState(): Promise<StoredProjectState> {
-    const raw = await readJsonObject(this.configFile)
-    const legacyRecentSessions = await this.readLegacyRecentSessions()
+    const [raw, shared, legacyRecentSessions] = await Promise.all([
+      readJsonObject(this.configFile),
+      readSharedWorkspaces(this.rindHome, this.configFile),
+      this.readLegacyRecentSessions(),
+    ])
     const rawProjects = Array.isArray(raw.projects) ? raw.projects.filter((item): item is string => typeof item === "string") : []
     const legacyWorkspace = typeof raw.workspace === "string" ? raw.workspace : ""
-    const projects = uniquePaths([...rawProjects, legacyWorkspace].filter(Boolean).map(storedPath))
-    const requestedActive = typeof raw.activeProjectPath === "string" ? raw.activeProjectPath : legacyWorkspace
+    const configProjects = uniquePaths([...rawProjects, legacyWorkspace].filter(Boolean).map(storedPath))
+    const projects = shared.exists ? shared.projects : configProjects
+    const requestedActive = shared.exists
+      ? shared.activeProjectPath
+      : typeof raw.activeProjectPath === "string"
+        ? raw.activeProjectPath
+        : legacyWorkspace
     const activeProjectPath = projects.find((path) => samePath(path, requestedActive)) || projects.at(0) || ""
     const state: StoredProjectState = {
       projects,
@@ -199,7 +207,7 @@ export class DesktopProjectStore {
       theme: themes.includes(raw.theme as DesktopTheme) ? raw.theme as DesktopTheme : "system",
       notificationsEnabled: raw.notificationsEnabled === undefined ? true : raw.notificationsEnabled === true,
     }
-    if (needsMigration(raw, state) || legacyRecentSessions) {
+    if (needsMigration(raw, state) || legacyRecentSessions || !shared.exists) {
       await this.writeState(state)
       if (legacyRecentSessions) await unlink(this.legacyRecentSessionsFile)
     }
@@ -207,44 +215,23 @@ export class DesktopProjectStore {
   }
 
   private async writeState(state: StoredProjectState) {
-    await writeJsonObject(this.configFile, {
-      projects: state.projects,
-      activeProjectPath: state.activeProjectPath,
-      recentSessions: state.recentSessions,
-      sidebarOpen: state.sidebarOpen,
-      sidebarWidth: state.sidebarWidth,
-      filesOpen: state.filesOpen,
-      filePanelWidth: state.filePanelWidth,
-      theme: state.theme,
-      notificationsEnabled: state.notificationsEnabled,
-    })
-  }
-
-  private async readSessionIndex(): Promise<DesktopSessionSummary[]> {
-    const index = await readJsonObject(this.sessionIndexFile)
-    if (!Array.isArray(index.sessions)) return []
-    const sessions = index.sessions.flatMap((value) => {
-      const session = asObject(value)
-      if (!session) return []
-      const id = typeof session.id === "string" ? session.id : ""
-      const workspaceRoot = typeof session.workspace_root === "string" ? session.workspace_root : ""
-      if (!id || !workspaceRoot) return []
-      return [{
-        id,
-        title: typeof session.title === "string" ? session.title : "Untitled",
-        preview: typeof session.preview === "string" ? session.preview : "",
-        updatedAt: typeof session.updated_at === "string" ? session.updated_at : "",
-        workspaceRoot: storedPath(workspaceRoot),
-        hasUserMessage: session.has_user_message === true,
-        hasUserMessageMarker: typeof session.has_user_message === "boolean",
-      }]
-    })
-    return Promise.all(sessions.map(async (session) => ({
-      ...session,
-      hasUserMessage: session.hasUserMessageMarker
-        ? session.hasUserMessage
-        : await hasPersistedUserMessage(dirname(this.sessionIndexFile), session.id),
-    }))).then((items) => items.map(({ hasUserMessageMarker: _marker, ...session }) => session))
+    await Promise.all([
+      writeJsonObject(this.configFile, {
+        projects: state.projects,
+        activeProjectPath: state.activeProjectPath,
+        recentSessions: state.recentSessions,
+        sidebarOpen: state.sidebarOpen,
+        sidebarWidth: state.sidebarWidth,
+        filesOpen: state.filesOpen,
+        filePanelWidth: state.filePanelWidth,
+        theme: state.theme,
+        notificationsEnabled: state.notificationsEnabled,
+      }),
+      writeSharedWorkspaces(this.rindHome, {
+        projects: state.projects,
+        activeProjectPath: state.activeProjectPath,
+      }),
+    ])
   }
 
   private sessionBelongsToProjects(session: DesktopSessionSummary, projects: string[]) {
@@ -257,7 +244,6 @@ export class DesktopProjectStore {
       await this.writeState({ ...state, recentSessions: normalized })
     }
     const visited = new Map(normalized.map((record) => [record.session_id, record.last_interacted_at]))
-    // Opening a conversation and new messages both count as interaction.
     return sessions.filter((session) => this.sessionBelongsToProjects(session, state.projects))
       .map((session) => ({ ...session, lastInteractedAt: [Number.isFinite(Date.parse(session.updatedAt)) ? session.updatedAt : "", visited.get(session.id) || ""].sort().at(-1) || "" }))
       .sort((left, right) => right.lastInteractedAt.localeCompare(left.lastInteractedAt))
@@ -286,7 +272,6 @@ export class DesktopProjectStore {
       .sort((left, right) => right.last_interacted_at.localeCompare(left.last_interacted_at) || left.session_id.localeCompare(right.session_id))
       .slice(0, recentDesktopSessionLimit)
   }
-
 }
 
 function needsMigration(raw: Record<string, unknown>, state: StoredProjectState) {
@@ -337,52 +322,4 @@ function storedFilePanelWidth(raw: Record<string, unknown>) {
   const treeWidth = typeof raw.fileTreeWidth === "number" ? raw.fileTreeWidth : 0
   const previewWidth = typeof raw.filePreviewWidth === "number" ? raw.filePreviewWidth : 0
   return treeWidth && previewWidth ? treeWidth + previewWidth + 8 : treeWidth
-}
-
-function storedPath(path: string) {
-  return resolve(path.trim())
-}
-
-function uniquePaths(paths: string[]) {
-  return paths.filter((path, index) => paths.findIndex((item) => samePath(item, path)) === index)
-}
-
-export function samePath(left: string, right: string) {
-  if (process.platform === "win32") {
-    const cleanLeft = left.trim().replace(/[\\/]+/g, "\\").replace(/\\+$/, "")
-    const cleanRight = right.trim().replace(/[\\/]+/g, "\\").replace(/\\+$/, "")
-    return cleanLeft.toLocaleLowerCase() === cleanRight.toLocaleLowerCase()
-  }
-  return left.trim().replace(/\/+$/, "") === right.trim().replace(/\/+$/, "")
-}
-
-async function isDirectory(path: string) {
-  try {
-    return (await stat(path)).isDirectory()
-  } catch {
-    return false
-  }
-}
-
-async function canonicalDirectory(path: string) {
-  const canonicalPath = await realpath(path)
-  if (!(await stat(canonicalPath)).isDirectory()) throw new Error("Project path must be an existing directory.")
-  return canonicalPath
-}
-
-async function hasPersistedUserMessage(rindHome: string, sessionId: string) {
-  try {
-    const messages = await readFile(join(rindHome, "sessions", sessionId, "messages.jsonl"), "utf8")
-    return messages.split(/\r?\n/).some((line) => {
-      if (!line.trim()) return false
-      try {
-        const message = asObject(JSON.parse(line))
-        return message?.role === "user" && typeof message.content === "string" && message.content.trim().length > 0
-      } catch {
-        return false
-      }
-    })
-  } catch {
-    return false
-  }
 }

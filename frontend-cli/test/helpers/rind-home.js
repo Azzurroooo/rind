@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { rm } from "node:fs/promises";
 import { connectSharedRuntime } from "../../../rind-runtime-client/shared-runtime.js";
 
@@ -5,6 +7,14 @@ import { connectSharedRuntime } from "../../../rind-runtime-client/shared-runtim
 // a window in a temporary home stop that Runtime before removing the folder,
 // or the detached host would keep the folder locked and keep running.
 export async function removeRindHome(home) {
+  if (existsSync(path.join(home, "agents-management"))) {
+    try {
+      const { stopManagementService } = await import("../../../agent-management/dist/client.js");
+      await stopManagementService({ home }).catch(() => {});
+    } catch {
+      // ignore
+    }
+  }
   const host = await connectSharedRuntime({ rindHome: home, start: false }).catch(() => null);
   if (host) {
     await host.request("runtime/shutdown").catch(() => {});

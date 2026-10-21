@@ -5,26 +5,27 @@ import { existsSync, rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopTheme, DesktopUpdateState, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
+import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopTheme, DesktopUpdateState, GatewayOptions, GatewayState, RuntimeEvent, RuntimeMethod, RuntimeSnapshot } from "../preload/types"
 import { asObject, readJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile, workspaceFileRequest } from "../../../rind-runtime-client/remote/files.js"
+import { createRemoteHost, type RemoteHost } from "../../../rind-runtime-client/remote/host.js"
 import { DesktopProjectStore, samePath } from "./projects"
 import { loadRuntimeSettings as loadSharedRuntimeSettings, resolveRindPaths, saveRuntimeSettings as saveSharedRuntimeSettings } from "./runtime-settings"
 import { readRindVersion } from "./version"
 import { DesktopUpdater } from "./updater"
 import { wrapRuntimeIpcError } from "../shared/ipc-error"
-import { DesktopGateway } from "../../../rind-runtime-client/remote/server.js"
-import { allowGatewayOnWindows } from "../../../rind-runtime-client/remote/firewall.js"
-import type { GatewayOptions } from "../preload/types"
-import { isDesktopRuntimeMethod, isRemoteRuntimeMethod } from "../../../rind-runtime-client/remote/policy.js"
+import { isDesktopRuntimeMethod } from "../../../rind-runtime-client/remote/policy.js"
 import {
   getRuntimeSnapshot,
   initializeRuntime,
+  isSharedRuntime,
   requestRuntime,
+  requestSharedRemote,
   respondAuthPrompt,
   subscribeAuthPrompts,
   subscribeAuthUpdates,
+  subscribeRemoteState,
   shutdownRuntime,
   startRuntime,
   subscribeRuntime,
@@ -37,6 +38,7 @@ import {
   forwardControlToSharedRuntimeIfNeeded,
   getManagementState,
   isManagedWorkspacePath,
+  managementBridge,
   openAgentSession,
   requestManagement,
   subscribeManagement,
@@ -66,7 +68,7 @@ let cachedDockIcon: NativeImage | null = null
 function resourceDirs(): string[] {
   const dirs = [
     join(root, "../../resources"),
-    join( process.cwd(), "resources"),
+    join(process.cwd(), "resources"),
   ]
   try {
     dirs.unshift(join(app.getAppPath(), "resources"))
@@ -153,8 +155,16 @@ let desktopProjectStore: DesktopProjectStore | undefined
 let quitting = false
 let runtimeShutdownComplete = false
 let windowFocused = false
-let remoteGateway: DesktopGateway | undefined
+let remoteGateway: RemoteHost | undefined
 let desktopUpdater: DesktopUpdater | undefined
+
+function desktopWebRoot() {
+  return app.isPackaged ? join(process.resourcesPath, "web") : join(app.getAppPath(), "../frontend-web/dist")
+}
+
+function notifyGatewayState(state: GatewayState) {
+  mainWindow?.webContents.send("gateway-changed", state)
+}
 
 function updater() {
   desktopUpdater ||= new DesktopUpdater({
@@ -171,104 +181,28 @@ function updater() {
   return desktopUpdater
 }
 
-function gateway() {
-  remoteGateway ||= new DesktopGateway({
-    initialize: async () => {
-      const initialized = asObject(await initializeRuntime()) || {}
-      const overview = await projectStore().overview().catch(() => null)
-      const availableProjects = (overview?.projects || []).filter((item) => item.available)
-      const registeredWorkspaces = availableProjects.map((item) => item.path)
-      const currentWs = typeof initialized.workspace_root === "string" ? initialized.workspace_root.trim() : ""
-      const runtimeDir = join(rindHomeDir(), "runtime")
-      const matchedProject = currentWs
-        ? availableProjects.find((item) => samePath(item.path, currentWs))
-        : undefined
-      const activeProject = overview?.activeProjectPath
-        ? availableProjects.find((item) => samePath(item.path, overview.activeProjectPath))
-        : undefined
-      const preferredProject = matchedProject || activeProject || availableProjects[0]
-      if (preferredProject) {
-        const nextSessionId = matchedProject
-          ? initialized.session_id
-          : (preferredProject.sessions[0]?.id || "")
-        return {
-          ...initialized,
-          workspace_root: preferredProject.path,
-          session_id: nextSessionId,
-          workspaces: registeredWorkspaces,
-        }
-      }
-      const isInternalOrManaged =
-        !currentWs ||
-        samePath(currentWs, runtimeDir) ||
-        (await isManagedWorkspacePath(currentWs))
-      return {
-        ...initialized,
-        ...(isInternalOrManaged ? { workspace_root: "", session_id: "" } : {}),
-        workspaces: registeredWorkspaces,
-      }
-    },
-    request: async (method, params) => {
-      if (!isRemoteRuntimeMethod(method)) throw new Error("Unsupported remote method.")
-      const nextParams = method === "session/replay"
-        ? await enrichSessionReplayParams(String(params.session_id || ""), params)
-        : params
-      try {
-        if (method === "session/list") {
-          const overview = await projectStore().overview().catch(() => null)
-          const availableProjects = (overview?.projects || []).filter((item) => item.available)
-          const registeredWorkspaces = availableProjects.map((item) => item.path)
-          const requestedWs = typeof params.workspace_root === "string" ? params.workspace_root.trim() : ""
-          const matchedProject = requestedWs
-            ? availableProjects.find((item) => samePath(item.path, requestedWs))
-            : (overview?.activeProjectPath
-                ? availableProjects.find((item) => samePath(item.path, overview.activeProjectPath))
-                : undefined) || availableProjects[0]
-          if (!matchedProject) {
-            return { sessions: [], workspaces: registeredWorkspaces }
-          }
-          const result = await requestRuntime(method, {
-            ...nextParams,
-            workspace_root: matchedProject.path,
-          })
-          const rawSessions =
-            result && typeof result === "object" && Array.isArray((result as Record<string, unknown>).sessions)
-              ? ((result as Record<string, unknown>).sessions as Array<Record<string, unknown>>)
-              : []
-          const filteredSessions = rawSessions.filter((s) => {
-            const ws = typeof s?.workspace_root === "string" ? s.workspace_root.trim() : ""
-            return Boolean(ws && samePath(ws, matchedProject.path))
-          })
-          return {
-            ...(result && typeof result === "object" ? (result as Record<string, unknown>) : {}),
-            sessions: filteredSessions,
-            workspaces: registeredWorkspaces,
-          }
-        }
-        return await requestRuntime(method, nextParams)
-      } catch (error: any) {
-        if (error?.name === "TurnNotActive" || error?.name === "QuestionNotFound") {
-          const forwarded = await forwardControlToSharedRuntimeIfNeeded(method, nextParams)
-          if (forwarded !== undefined) return forwarded
-        }
-        throw error
-      }
-    },
-    subscribe: (listener) => {
-      const offDirect = subscribeRuntimeEvents(listener)
-      const offShared = subscribeSharedRuntimeEvents(listener)
-      return () => {
-        offDirect()
-        offShared()
-      }
-    },
-    agentsRequest: (method, params) => requestManagement(method, params),
-    subscribeAgents: subscribeManagement,
+function localGateway() {
+  remoteGateway ||= createRemoteHost({
+    getRindHome: rindHomeDir,
+    getFallbackConfigFile: configPath,
+    initializeRuntime,
+    requestRuntime: (method, params) => requestRuntime(method as RuntimeMethod, params),
+    subscribeRuntime: subscribeRuntimeEvents,
+    management: managementBridge,
     settingsLoad: loadRuntimeSettings,
     settingsSave: saveRuntimeSettings,
-  }, app.isPackaged ? join(process.resourcesPath, "web") : join(app.getAppPath(), "../frontend-web/dist"),
-  (state) => mainWindow?.webContents.send("gateway-changed", state))
+    webRoot: desktopWebRoot(),
+    onStateChange: notifyGatewayState,
+  })
   return remoteGateway
+}
+
+function notifyRemoteWorkspacesChanged() {
+  if (isSharedRuntime()) {
+    void requestSharedRemote("remote/workspaces-changed", { fallbackConfigFile: configPath() }).catch(() => {})
+    return
+  }
+  remoteGateway?.notifyWorkspacesChanged()
 }
 
 function configPath() {
@@ -344,7 +278,7 @@ async function chooseProject() {
   const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] })
   if (result.canceled || !result.filePaths[0]) return null
   const overview = await projectStore().add(result.filePaths[0])
-  remoteGateway?.notifyWorkspacesChanged()
+  notifyRemoteWorkspacesChanged()
   return overview
 }
 
@@ -363,16 +297,27 @@ async function requireProject(path: unknown) {
 }
 
 function registerIpc() {
-  ipcMain.handle("gateway-get", () => gateway().state())
-  ipcMain.handle("gateway-start", (_event, options: GatewayOptions) => gateway().start(options))
-  ipcMain.handle("gateway-stop", async () => { await gateway().stop(); return gateway().state() })
-  ipcMain.handle("gateway-rotate", () => gateway().rotate())
-  ipcMain.handle("gateway-allow-network", async () => {
-    const current = gateway().state()
-    if (!current.running || current.scope !== "lan") throw new Error("Enable local-network access first.")
-    await allowGatewayOnWindows(process.execPath, current.port)
-    return gateway().state()
-  })
+  ipcMain.handle("gateway-get", () =>
+    isSharedRuntime() ? requestSharedRemote("remote/get") : localGateway().state(),
+  )
+  ipcMain.handle("gateway-start", (_event, options: GatewayOptions) =>
+    isSharedRuntime()
+      ? requestSharedRemote("remote/start", {
+          ...options,
+          webRoot: desktopWebRoot(),
+          fallbackConfigFile: configPath(),
+        })
+      : localGateway().start(options),
+  )
+  ipcMain.handle("gateway-stop", () =>
+    isSharedRuntime() ? requestSharedRemote("remote/stop") : localGateway().stop(),
+  )
+  ipcMain.handle("gateway-rotate", () =>
+    isSharedRuntime() ? requestSharedRemote("remote/rotate") : localGateway().rotate(),
+  )
+  ipcMain.handle("gateway-allow-network", () =>
+    isSharedRuntime() ? requestSharedRemote("remote/allow-network") : localGateway().allowNetwork(process.execPath),
+  )
   ipcMain.handle("runtime-start", async (_event, workspace: unknown) => {
     const projectPath = await requireProject(workspace)
     return startRuntime(projectPath)
@@ -449,7 +394,7 @@ function registerIpc() {
   ipcMain.handle("projects-remove", async (_event, path: unknown) => {
     if (typeof path !== "string") throw new Error("Project path must be a string.")
     const overview = await projectStore().remove(path)
-    remoteGateway?.notifyWorkspacesChanged()
+    notifyRemoteWorkspacesChanged()
     return overview
   })
   ipcMain.handle("projects-recent-page", (_event, offset: number, limit?: number) => projectStore().recentPage(offset, limit))
@@ -568,6 +513,11 @@ function createMainWindow() {
     if (snapshot) notifyRuntime(snapshot)
     notifyAgentsState(getManagementState())
     notifyUpdateState(updater().getState())
+    if (isSharedRuntime()) {
+      void requestSharedRemote("remote/get").then(notifyGatewayState).catch(() => {})
+    } else if (remoteGateway) {
+      notifyGatewayState(remoteGateway.state())
+    }
   })
   win.on("focus", () => { windowFocused = true })
   win.on("blur", () => { windowFocused = false })
@@ -579,7 +529,9 @@ function createMainWindow() {
 }
 
 function notifyRuntime(snapshot: RuntimeSnapshot) {
-  if (["stopping", "stopped", "error"].includes(snapshot.status)) void remoteGateway?.stop()
+  if (!isSharedRuntime() && ["stopping", "stopped", "error"].includes(snapshot.status)) {
+    void remoteGateway?.stop()
+  }
   mainWindow?.webContents.send("runtime-status", snapshot)
 }
 
@@ -670,6 +622,7 @@ if (!hasLock) {
     subscribeManagement(notifyAgentsState)
     subscribeAuthPrompts(notifyAuthPrompt)
     subscribeAuthUpdates(notifyAuthUpdate)
+    subscribeRemoteState(notifyGatewayState)
     registerIpc()
     try {
       const overview = await projectStore().overview()
