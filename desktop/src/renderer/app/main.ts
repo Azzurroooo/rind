@@ -69,6 +69,12 @@ const unsubscribeThemeChanged = window.api.prefs.onThemeChanged(() => {
   // nativeTheme flips (system mode); re-resolve the CSS dataset.
   renderTheme()
 })
+const unsubscribeUpdate = window.api.update
+  ? window.api.update.subscribe((updateState) => {
+      state.update = updateState
+      render()
+    })
+  : () => {}
 const themeMedia = window.matchMedia("(prefers-color-scheme: light)")
 const onThemeMediaChange = () => { if (state.theme === "system") renderTheme() }
 if (typeof themeMedia.addEventListener === "function") themeMedia.addEventListener("change", onThemeMediaChange)
@@ -79,6 +85,7 @@ window.addEventListener("beforeunload", () => {
   unsubscribeEvents()
   unsubscribeNotifyActivate()
   unsubscribeThemeChanged()
+  unsubscribeUpdate()
   if (typeof themeMedia.removeEventListener === "function") themeMedia.removeEventListener("change", onThemeMediaChange)
 }, { once: true })
 runAction(async () => {
