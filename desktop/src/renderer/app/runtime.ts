@@ -244,9 +244,7 @@ export async function loadReplayNow(sessionId: string) {
   const snapshotLive = conversationFromLiveTurn(liveSnapshot)
   const snapshotTurnId = asRecordText(liveSnapshot.turn_id)
   if (snapshotTurnId && snapshotLive.activeTurnId) state.activeTurnIds[sessionId] = snapshotTurnId
-  else if (asRecord(result.turn_state).status === "running" && asRecordText(asRecord(result.turn_state).turn_id)) {
-    state.activeTurnIds[sessionId] = asRecordText(asRecord(result.turn_state).turn_id)
-  } else if (!snapshotTurnId) delete state.activeTurnIds[sessionId]
+  else if (!snapshotTurnId) delete state.activeTurnIds[sessionId]
   const mergedLive = mergeLiveConversation(live, snapshotLive)
   const conversation = mergeReplayConversation(persisted, mergedLive)
   setConversationFor(sessionId, conversation)
