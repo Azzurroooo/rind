@@ -7,8 +7,7 @@ import readline from "node:readline"
 import test from "node:test"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
-import { WebSocket } from "ws"
-import { DesktopGateway } from "../src/main/gateway/server.ts"
+import { DesktopGateway, RemoteWebSocket as WebSocket } from "../../rind-runtime-client/remote/server.js"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 

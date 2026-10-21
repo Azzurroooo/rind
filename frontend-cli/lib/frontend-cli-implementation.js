@@ -47,6 +47,7 @@ import { runSend, sendHelp } from "./send.js";
 import { configHelp, runConfig } from "./config-command.js";
 import { createWindowLog, guardStartup } from "./window-startup.js";
 import { listenIpc } from "./ipc.js";
+import { createCliRemoteController } from "./remote.js";
 import { runTour, unknownTourPageText } from "./tour/run-tour.js";
 import { createTui } from "./tui/tui.js";
 import { createTranscript } from "./tui/transcript.js";
@@ -278,6 +279,7 @@ const {
   setTurnContext,
 } = outputController;
 
+let remoteController;
 const runtimeClient = observeRuntime(createSharedRuntimeClient({
   python,
   repoRoot,
@@ -287,6 +289,7 @@ const runtimeClient = observeRuntime(createSharedRuntimeClient({
   // `rind send` input, routed here by the shared Runtime because this window shows the session.
   onDeliver: ({ session_id: target, input }) => { if (target === sessionState.info.session_id) inputActions.dispatchExternal(input); },
   onMessage: (message) => {
+    remoteController?.handleRuntimeEvent(message);
     // Events are rendered one at a time, and an open question holds that queue
     // until it is answered; an answer from another window must jump the queue.
     if (message?.event?.type === "user_question_answered") { inputActions.questionAnswered(message.event); return; }
@@ -375,6 +378,17 @@ const runtimeController = createCliRuntimeController({
   writeError: writeErrorOutput,
   redraw: redrawInput,
 });
+remoteController = createCliRemoteController({
+  runtimeClient: runtimeController,
+  rawClient: runtimeClient, askChoice: tui ? (...args) => inputActions.askChoice(...args) : null,
+  sessionState,
+  log: logOutput,
+  redraw: redrawInput,
+  onSessionRestored: rebindSendEndpoint,
+  cwd: sessionState.info.workspace_root || sessionState.info.cwd || process.cwd(),
+  getInitInfo: () => runtimeState.initialization,
+  managementLaunch,
+});
 const request = runtimeController.request;
 turnController = createTurnController({
   request,
@@ -407,6 +421,7 @@ commandController = createCommandController({
     runLogin: (providerId) => runLogin(providerId),
     runLogout: (providerId) => runLogout(providerId),
     runTour: (pageId) => enterInSessionTour(pageId),
+    runRemote: (args) => remoteController.handleCommand(args),
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
     runForkSelector: runtimeController.runForkSelector,
@@ -1054,6 +1069,7 @@ function forceCloseRuntime() {
   windowLog.close();
   clearActivityTimer();
   taskMonitorController.stop();
+  void remoteController?.stop();
   void ipcServer?.close();
   closeInput();
   runtimeClient.forceShutdown();
@@ -1071,6 +1087,7 @@ async function shutdownRuntime() {
   windowLog.close();
   clearActivityTimer();
   taskMonitorController.stop();
+  await remoteController?.stop();
   void ipcServer?.close();
   try {
     await runtimeClient.shutdown();

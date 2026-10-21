@@ -4,8 +4,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
-import { WebSocket } from "ws";
-import { DesktopGateway } from "../src/main/gateway/server.ts";
+import { DesktopGateway, RemoteWebSocket as WebSocket } from "../../rind-runtime-client/remote/server.js";
 
 test("packaged mobile origins require one-time tickets and share revocation", async (t) => {
   const web = await mkdtemp(join(tmpdir(), "rind-mobile-gateway-"));

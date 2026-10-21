@@ -183,6 +183,7 @@ test("local command catalog stays complete before the runtime starts", async () 
     "login",
     "logout",
     "model",
+    "remote",
     "rename",
     "sessions",
     "settings",

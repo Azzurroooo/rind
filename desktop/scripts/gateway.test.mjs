@@ -5,9 +5,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { once } from "node:events"
 import { request as httpRequest } from "node:http"
-import { WebSocket } from "ws"
-import { DesktopGateway } from "../src/main/gateway/server.ts"
-import { workspaceFileRequest } from "../src/main/gateway/files.ts"
+import { DesktopGateway, RemoteWebSocket as WebSocket } from "../../rind-runtime-client/remote/server.js"
+import { workspaceFileRequest } from "../../rind-runtime-client/remote/files.js"
 
 test("desktop gateway authenticates, isolates sessions, revokes access and serves the web build", { timeout: 15000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "rind-gateway-test-"))

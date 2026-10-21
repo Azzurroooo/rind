@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { spawnSync } from "node:child_process"
-import { firewallScript } from "../src/main/gateway/firewall.ts"
+import { firewallScript } from "../../rind-runtime-client/remote/firewall.js"
 
 test("firewall repair scopes access to this executable, TCP port and local subnet", () => {
   const script = firewallScript("C:\\Apps\\Rind's desktop\\rind.exe", 8766)

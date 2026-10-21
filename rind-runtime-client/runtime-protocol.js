@@ -9,11 +9,16 @@ export const runtimeMethods = Object.freeze({
   sessionList: "session/list",
   sessionSwitch: "session/switch",
   sessionFork: "session/fork",
+  sessionSubscribe: "session/subscribe",
+  sessionOpen: "session/open",
+  sessionDeliver: "rind/session/deliver",
+  sessionDelete: "session/delete",
   sessionReplay: "session/replay",
   sessionPrompt: "session/prompt",
   sessionCancel: "session/cancel",
   modelList: "model/list",
   modelSet: "model/set",
+  modelEffort: "model/effort",
   modelEffortSet: "model/effort",
   authList: "rind/auth/list",
   authLogin: "rind/auth/login",
@@ -47,6 +52,9 @@ export const runtimeMethods = Object.freeze({
   folderDefaultsUnset: "rind/folder_defaults/unset",
   folderDefaultsApply: "rind/folder_defaults/apply",
   folderDefaultsResolve: "rind/folder_defaults/resolve",
+  fileRead: "file/read",
+  fileList: "file/list",
+  fileWrite: "file/write",
 });
 
 export const sessionScopedMethods = new Set([
@@ -55,8 +63,11 @@ export const sessionScopedMethods = new Set([
   runtimeMethods.sessionSwitch,
   runtimeMethods.sessionFork,
   runtimeMethods.sessionCancel,
+  runtimeMethods.sessionDelete,
+  runtimeMethods.sessionDeliver,
   runtimeMethods.modelSet,
   runtimeMethods.modelEffortSet,
+  runtimeMethods.folderDefaultsApply,
   runtimeMethods.authList,
   runtimeMethods.authLogin,
   runtimeMethods.authLogout,
@@ -80,6 +91,12 @@ export const sessionScopedMethods = new Set([
   runtimeMethods.goalStatus,
   runtimeMethods.goalClear,
   runtimeMethods.contextInspect,
+]);
+
+export const localOnlyRuntimeMethods = new Set([
+  runtimeMethods.authLogin,
+  runtimeMethods.authLogout,
+  runtimeMethods.sessionOpen,
 ]);
 
 export const turnScopedMethods = new Set([

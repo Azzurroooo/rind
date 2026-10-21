@@ -23,14 +23,10 @@
     "electron-log": "^5.4.3",
     "electron-window-state": "^5.0.3",
     "highlight.js": "^11.11.2",
-    "lucide": "^1.31.0",
-    "qrcode": "^1.5.4",
-    "ws": "^8.22.0"
+    "lucide": "^1.31.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
-    "@types/qrcode": "^1.5.6",
-    "@types/ws": "^8.18.1",
     "electron": "42.11.8",
     "electron-builder": "26.15.2",
     "electron-vite": "^5.0.0",

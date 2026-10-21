@@ -10,7 +10,7 @@ import ts from "typescript"
 import * as ipcError from "../src/shared/ipc-error.ts"
 import * as types from "../src/preload/types.ts"
 import { buildAuthReply, maxAuthReplyChars, parseAuthPrompt, parseAuthUpdate, validateAuthReply } from "../src/main/auth-messages.ts"
-import { isDesktopRuntimeMethod, isRemoteRuntimeMethod } from "../src/main/method-policy.ts"
+import { isDesktopRuntimeMethod, isRemoteRuntimeMethod } from "../../rind-runtime-client/remote/policy.js"
 
 const { runtimeMethods, sessionScopedMethods, localOnlyRuntimeMethods } = types
 

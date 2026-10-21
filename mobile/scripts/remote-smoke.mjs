@@ -6,8 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium, expect } from "@playwright/test";
 import { preview } from "vite";
-import { WebSocket } from "../../desktop/node_modules/ws/wrapper.mjs";
-import { DesktopGateway } from "../../desktop/src/main/gateway/server.ts";
+import { DesktopGateway, RemoteWebSocket as WebSocket } from "../../rind-runtime-client/remote/server.js";
 
 const root = await mkdtemp(join(tmpdir(), "rind-mobile-smoke-"));
 const listeners = new Set(), requests = [], sockets = new Set(), errors = [];

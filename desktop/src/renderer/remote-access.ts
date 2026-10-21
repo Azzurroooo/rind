@@ -1,5 +1,5 @@
 import type { GatewayState } from "../preload/types"
-import QRCode from "qrcode"
+import { renderSvgQrDataUrl } from "../../../rind-runtime-client/remote/qr.js"
 import { bindCustomSelects, renderCustomSelectHtml, setCustomSelectOptions } from "./custom-select.ts"
 
 export function remoteAccessMarkup() {
@@ -69,7 +69,7 @@ export function bindRemoteAccess() {
       : addresses.value.startsWith("https:") ? "Use your phone’s camera to open your private HTTPS address." : "Use your phone’s camera on the same Wi-Fi network."
     if (localOnly) return
     try {
-      const data = await QRCode.toDataURL(value, { width: 192, margin: 2, errorCorrectionLevel: "M" })
+      const data = renderSvgQrDataUrl(value, { margin: 2 })
       if (qrValue === value) target.src = data
     } catch { message.textContent = "QR unavailable. Copy the address and access code below." }
   }

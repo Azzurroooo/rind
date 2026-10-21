@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { isDesktopRuntimeMethod as isRuntimeMethod, isRemoteRuntimeMethod } from "../src/main/method-policy.ts"
+import { isDesktopRuntimeMethod as isRuntimeMethod, isRemoteRuntimeMethod } from "../../rind-runtime-client/remote/policy.js"
 import { runtimeMethods, sessionScopedMethods } from "../src/preload/types.ts"
 
 test("unblocked desktop methods pass the runtime allowlist", () => {

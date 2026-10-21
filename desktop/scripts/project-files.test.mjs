@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-import { listProjectFiles, previewProjectFile } from "../src/main/project-files.ts"
+import { listProjectFiles, previewProjectFile } from "../../rind-runtime-client/remote/files.js"
 
 async function withTempDirectory(run) {
   const directory = await mkdtemp(join(tmpdir(), "rind-desktop-files-"))

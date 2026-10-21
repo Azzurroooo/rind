@@ -1,16 +1,20 @@
-import { execFile } from "node:child_process"
-import { createHash } from "node:crypto"
-import { win32 } from "node:path"
-import { promisify } from "node:util"
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { win32 } from "node:path";
+import { promisify } from "node:util";
 
-const execute = promisify(execFile)
-const literal = (value: string) => `'${value.replace(/'/g, "''")}'`
+const execute = promisify(execFile);
+const literal = (value) => `'${value.replace(/'/g, "''")}'`;
 
-/** The main process supplies its own executable and the active gateway port. */
-export function firewallScript(executable: string, port: number) {
-  if (!win32.isAbsolute(executable) || !/\.exe$/i.test(executable) || /[\r\n\0]/.test(executable)) throw new Error("Invalid application path.")
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid gateway port.")
-  const name = `Rind-Remote-${createHash("sha256").update(executable.toLowerCase()).digest("hex").slice(0, 16)}`
+/** The host process supplies its own executable and the active remote port. */
+export function firewallScript(executable, port) {
+  if (!win32.isAbsolute(executable) || !/\.exe$/i.test(executable) || /[\r\n\0]/.test(executable)) {
+    throw new Error("Invalid application path.");
+  }
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    throw new Error("Invalid gateway port.");
+  }
+  const name = `Rind-Remote-${createHash("sha256").update(executable.toLowerCase()).digest("hex").slice(0, 16)}`;
   return `$ErrorActionPreference = 'Stop'
 try {
   $program = ${literal(executable)}
@@ -43,18 +47,30 @@ try {
   }
   exit 0
 } catch { exit 1 }
-`
+`;
 }
 
 /** Explicit user action only. UAC owns elevation; no firewall changes at startup. */
-export async function allowGatewayOnWindows(executable: string, port: number) {
-  if (process.platform !== "win32") throw new Error("This action is available on Windows only.")
-  const payload = Buffer.from(firewallScript(executable, port), "utf16le").toString("base64")
-  const launcher = `$ErrorActionPreference = 'Stop'; try { $child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', '${payload}') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $child.ExitCode } catch { exit 1 }`
+export async function allowRemoteOnWindows(executable, port) {
+  if (process.platform !== "win32") throw new Error("This action is available on Windows only.");
+  const payload = Buffer.from(firewallScript(executable, port), "utf16le").toString("base64");
+  const launcher = `$ErrorActionPreference = 'Stop'; try { $child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', '${payload}') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $child.ExitCode } catch { exit 1 }`;
   try {
-    await execute("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(launcher, "utf16le").toString("base64")], { windowsHide: true, timeout: 120000 })
+    await execute(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(launcher, "utf16le").toString("base64")],
+      { windowsHide: true, timeout: 120000 },
+    );
   } catch (error) {
-    if ((error as { code?: number }).code === 3) throw new Error("A custom Windows firewall rule still blocks Rind. Ask your administrator to allow this app’s gateway port; Rind has left custom rules unchanged.")
-    throw new Error("Windows did not apply the local-network rule. Approve the administrator prompt and try again, or ask your administrator if this computer is managed.")
+    if (error?.code === 3) {
+      throw new Error(
+        "A custom Windows firewall rule still blocks Rind. Ask your administrator to allow this app’s gateway port; Rind has left custom rules unchanged.",
+      );
+    }
+    throw new Error(
+      "Windows did not apply the local-network rule. Approve the administrator prompt and try again, or ask your administrator if this computer is managed.",
+    );
   }
 }
+
+export const allowGatewayOnWindows = allowRemoteOnWindows;
