@@ -331,8 +331,11 @@ function penaltyScore(modules) {
   return score;
 }
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder("utf-8");
+
 export function encodeQrMatrix(text) {
-  const bytes = Buffer.from(String(text), "utf8");
+  const bytes = textEncoder.encode(String(text));
   const version = chooseVersion(bytes.length);
   const dataCodewords = encodeDataCodewords(bytes, version);
   const allCodewords = interleaveCodewords(dataCodewords, version);
@@ -406,7 +409,7 @@ export function renderTerminalQr(text, { margin = 2, invert = true } = {}) {
   return lines.join("\n");
 }
 
-export function renderSvgQrDataUrl(text, { margin = 2 } = {}) {
+export function renderSvgQrDataUrl(text, { margin = 2, size: pixelSize = 192 } = {}) {
   const matrix = Array.isArray(text) ? text : encodeQrMatrix(text);
   const size = matrix.length;
   const total = size + margin * 2;
@@ -418,8 +421,8 @@ export function renderSvgQrDataUrl(text, { margin = 2 } = {}) {
       }
     }
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#ffffff"/><path d="${path}" fill="#0c0e12"/></svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${pixelSize}" height="${pixelSize}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="${total}" height="${total}" fill="#ffffff"/><path d="${path}" fill="#0c0e12"/></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 function stripAnsi(value) {
@@ -600,7 +603,7 @@ export function decodeQrMatrix(matrix) {
     bytes[i] = readBits(cursor, 8);
     cursor += 8;
   }
-  return Buffer.from(bytes).toString("utf8");
+  return textDecoder.decode(bytes);
 }
 
 export function decodeTerminalQr(rendered) {

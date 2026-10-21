@@ -59,9 +59,15 @@ test("QR matrix encoder and terminal half-block renderer round-trip pairing URLs
     assert.deepEqual(parsedMatrix, matrix, "parsed terminal QR matrix must equal encoded QR matrix");
     assert.equal(decodeTerminalQr(terminalQr), url, "terminal QR must decode back to exact pairing URL");
 
-    const svgDataUrl = renderSvgQrDataUrl(url, { margin: 2 });
-    assert.match(svgDataUrl, /^data:image\/svg\+xml;utf8,/);
-    assert.match(decodeURIComponent(svgDataUrl), /<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+    const savedBuffer = globalThis.Buffer;
+    try {
+      globalThis.Buffer = undefined;
+      const svgDataUrl = renderSvgQrDataUrl(url, { margin: 2 });
+      assert.match(svgDataUrl, /^data:image\/svg\+xml;charset=utf-8,/);
+      assert.match(decodeURIComponent(svgDataUrl), /<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="192" height="192"/);
+    } finally {
+      globalThis.Buffer = savedBuffer;
+    }
   }
 });
 

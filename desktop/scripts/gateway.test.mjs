@@ -275,3 +275,78 @@ test("gateway proxies agents management requests, binds opened sessions, and bro
   assert.equal(events.some((e) => e.method === "agents/update" && e.event.snapshot.seq === 5), true)
   assert.equal(events.some((e) => e.method === "session/update" && e.event?.type === "folder_defaults_changed"), true)
 })
+
+test("desktop remote access dialog renders SVG QR code in a sandboxed browser environment without Node Buffer", async () => {
+  const { JSDOM } = await import("jsdom")
+  const { bindRemoteAccess, remoteAccessMarkup } = await import("../src/renderer/remote-access.ts")
+  const dom = new JSDOM(`<!doctype html><body><button id="open-remote"></button>${remoteAccessMarkup()}</body>`)
+  const prevWindow = globalThis.window
+  const prevDocument = globalThis.document
+  const prevHTMLElement = globalThis.HTMLElement
+  const prevElement = globalThis.Element
+  const prevBuffer = globalThis.Buffer
+  globalThis.window = dom.window
+  globalThis.document = dom.window.document
+  globalThis.HTMLElement = dom.window.HTMLElement
+  globalThis.Element = dom.window.Element
+  const dialog = dom.window.document.getElementById("remote-dialog")
+  dialog.showModal = () => { dialog.open = true }
+  dialog.close = () => { dialog.open = false }
+
+  let gatewayState = {
+    running: false,
+    scope: "lan",
+    port: 8766,
+    addresses: [],
+    accessCode: "",
+    clients: 0,
+  }
+  dom.window.api = {
+    platform: "win32",
+    gateway: {
+      get: async () => gatewayState,
+      start: async ({ scope, port }) => {
+        gatewayState = {
+          running: true,
+          scope,
+          port,
+          addresses: ["http://192.168.1.42:8766", "http://127.0.0.1:8766"],
+          accessCode: "secret_access_code_1234567890abcdef",
+          clients: 0,
+        }
+        return gatewayState
+      },
+      stop: async () => {
+        gatewayState = { ...gatewayState, running: false, addresses: [], accessCode: "" }
+        return gatewayState
+      },
+      rotate: async () => gatewayState,
+      allowNetwork: async () => gatewayState,
+      subscribe: () => () => {},
+    },
+  }
+
+  try {
+    globalThis.Buffer = undefined
+    const remote = bindRemoteAccess()
+    remote.open()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    dom.window.document.getElementById("remote-toggle").click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const qrImg = dom.window.document.getElementById("remote-qr")
+    const messageEl = dom.window.document.getElementById("remote-message")
+    assert.equal(messageEl.textContent, "")
+    assert.equal(qrImg.hidden, false)
+    assert.match(qrImg.getAttribute("src") || "", /^data:image\/svg\+xml;charset=utf-8,%3Csvg/)
+    remote.dispose()
+  } finally {
+    globalThis.Buffer = prevBuffer
+    globalThis.window = prevWindow
+    globalThis.document = prevDocument
+    globalThis.HTMLElement = prevHTMLElement
+    globalThis.Element = prevElement
+    dom.window.close()
+  }
+})

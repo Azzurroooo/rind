@@ -54,7 +54,7 @@ export function bindRemoteAccess() {
   let busy = false
   let qrValue = ""
   const signInLink = () => `${addresses.value}/#connect=${encodeURIComponent(code.value)}`
-  async function updateQr() {
+  function updateQr() {
     const value = state?.running && addresses.value && code.value ? signInLink() : ""
     if (value === qrValue) return
     qrValue = value
@@ -69,8 +69,7 @@ export function bindRemoteAccess() {
       : addresses.value.startsWith("https:") ? "Use your phone’s camera to open your private HTTPS address." : "Use your phone’s camera on the same Wi-Fi network."
     if (localOnly) return
     try {
-      const data = renderSvgQrDataUrl(value, { margin: 2 })
-      if (qrValue === value) target.src = data
+      target.src = renderSvgQrDataUrl(value, { margin: 2 })
     } catch { message.textContent = "QR unavailable. Copy the address and access code below." }
   }
   function render(next: GatewayState) {
@@ -92,7 +91,7 @@ export function bindRemoteAccess() {
       addresses.value,
     )
     code.value = next.accessCode
-    void updateQr()
+    updateQr()
     const trigger = document.getElementById("open-remote")
     trigger?.classList.toggle("remote-active", next.running)
     trigger?.setAttribute("title", next.running ? `Remote access · ${next.clients} devices` : "Remote access")
@@ -102,7 +101,7 @@ export function bindRemoteAccess() {
     busy = true; message.textContent = ""; toggle.disabled = true
     element<HTMLButtonElement>("remote-rotate").disabled = true
     element<HTMLButtonElement>("remote-allow-network").disabled = true
-    try { render(await run()); message.textContent = success }
+    try { const next = await run(); message.textContent = success; render(next) }
     catch (error) { message.textContent = error instanceof Error ? error.message : String(error) }
     finally { busy = false; toggle.disabled = false; element<HTMLButtonElement>("remote-rotate").disabled = false; element<HTMLButtonElement>("remote-allow-network").disabled = false }
   }
@@ -118,7 +117,7 @@ export function bindRemoteAccess() {
   element("remote-rotate").addEventListener("click", () => void action(() => window.api.gateway.rotate(), "New access code generated. Previous devices have been disconnected."))
   element("remote-allow-network").addEventListener("click", () => void action(() => window.api.gateway.allowNetwork(), "Rind is allowed on the local network. Scan the QR code again on your phone."))
   element("remote-reveal").addEventListener("click", () => { code.type = code.type === "password" ? "text" : "password"; element("remote-reveal").textContent = code.type === "password" ? "Show" : "Hide"; element("remote-reveal").setAttribute("aria-label", `${code.type === "password" ? "Show" : "Hide"} access code`) })
-  addresses.addEventListener("change", () => void updateQr())
+  addresses.addEventListener("change", () => updateQr())
   for (const [id, value] of [["remote-copy-address", () => addresses.value], ["remote-copy-code", () => code.value], ["remote-copy-link", signInLink]] as const) {
     element(id).addEventListener("click", () => { void navigator.clipboard.writeText(value()).then(() => { message.textContent = id === "remote-copy-code" ? "Access code copied." : id === "remote-copy-link" ? "Sign-in link copied. Share it only with your own devices." : "Address copied." }).catch(() => { message.textContent = "Select and copy the address and access code below." }) })
   }
