@@ -23,8 +23,10 @@ The launch arguments require a prompt; an absolute workspace and session may als
 
 The request scope records the tasks created by this request_id and does not miscount tasks left over from older sessions; it ends only when there is no busy turn, no associated on_exit task, and no deliverable notification. Task failures are delivered first as a model-visible notification, so a single non-zero exit from the shell does not automatically make the one-shot a failure. A request interruption, a model failure, or a failed final shutdown makes the command return non-zero.
 
+SIGINT and SIGTERM cancel the request's turn before the command exits; SIGKILL cannot be caught, so the turn keeps running in the shared Runtime. A registered member's folder allows one run at a time, so the next `rind run` there fails with the id of the run that holds the folder and `rind agents stop <run>` (`rind agents resolve <run> --confirm-stopped` when its status is unknown). An automated caller that times out should send SIGTERM, wait a few seconds, and only then SIGKILL.
+
 The run log is written under `logs` in the caller's current directory, even if `--dir` points to another workspace. A run shares the same local Runtime as interactive windows — its conversation stays visible to every window and the Agents page, and a second run reuses the already-started host — so after it finishes the shared host keeps running like any other; stop it from the Background page or with `rind agents stop`. With `--trace-llm` (host-wide tracing) the run keeps its own private worker instead, and the client is closed in the finally phase either way.
 
-Source: [one-shot](../../../frontend-cli/lib/one-shot.js), [progress output](../../../frontend-cli/lib/one-shot-progress.js). Verification: [one-shot tests](../../../frontend-cli/test/one-shot.test.js). Related: [Task notifications](../05-autonomy/task-notifications.md).
+Source: [one-shot](../../../frontend-cli/lib/one-shot.js), [progress output](../../../frontend-cli/lib/one-shot-progress.js). Verification: [one-shot tests](../../../frontend-cli/test/one-shot.test.js), [a busy member folder](../../../frontend-cli/test/workspace-busy-journey.test.js). Related: [Task notifications](../05-autonomy/task-notifications.md).
 
 [Back to the series map](../README.md)
