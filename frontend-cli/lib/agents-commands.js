@@ -6,7 +6,7 @@ import { createHandoff, HANDOFF_ENV } from "./agents-handoff.js";
 import { applySavedTheme } from "./cli-state-store.js";
 import { terminalKeyboard, TERMINAL_KEYBOARD_ENV } from "./tui/tui.js";
 import { releaseInput, takeInput } from "./tui/console-input.js";
-import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
+import { privateDirectory, resolveRindHome } from "../../rind-runtime-client/local-files.js";
 
 export const agentsHelp = [
   "Usage: rind agents [list | team | task | open | manager | import] [--json]",
@@ -51,14 +51,16 @@ export async function openAgentChat({ agent, teamId, manager = false, runtimeSes
   process.on("SIGINT", ignore);
   const handoff = await createHandoff();
   try {
-    const args = manager ? ["--manager"] : ["--cwd", agent.canonicalWorkspace, ...(teamId ? ["--team", teamId] : ["--standalone"])];
+    const cwd = manager ? managerWorkspace(launch) : agent.canonicalWorkspace;
+    if (manager) await privateDirectory(cwd);
+    const args = manager ? ["--manager"] : ["--cwd", cwd, ...(teamId ? ["--team", teamId] : ["--standalone"])];
     if (runtimeSessionId) args.push("--session", runtimeSessionId);
     if (prefill) args.push("--prefill", prefill);
     clearForConversation();
     // Where the window says to go next: leave, open another conversation, or Agents.
     return await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [windowScript, ...args], {
-        cwd: manager ? managerWorkspace(launch) : agent.canonicalWorkspace,
+        cwd,
         stdio: "inherit", windowsHide: true, env: { ...process.env, RIND_HOME: launch.home || process.env.RIND_HOME, RIND_PYTHON: launch.python || process.env.RIND_PYTHON, RIND_RUNTIME_PATH: launch.runtimePath || "", [HANDOFF_ENV]: handoff.file, [TERMINAL_KEYBOARD_ENV]: terminalKeyboard() },
       });
       child.once("error", reject);

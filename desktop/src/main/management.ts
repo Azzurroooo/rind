@@ -695,27 +695,17 @@ async function resolveManagedAgentByWorkspace(workspaceRoot: string): Promise<{
 } | null> {
   const wsKey = normalizeWorkspaceKey(workspaceRoot)
   if (!wsKey) return null
-  try {
-    const { managementPaths } = await loadManagementModule()
-    const managerFolder = normalizeWorkspaceKey(managementPaths(launchOptions().home).manager)
-    if (wsKey === managerFolder || wsKey.replace(/\\/g, "/").endsWith("/agents/manager")) {
-      return { manager: true, teamId: "", agentId: "", workspaceRoot }
-    }
-  } catch {
-    if (wsKey.replace(/\\/g, "/").endsWith("/agents/manager")) {
-      return { manager: true, teamId: "", agentId: "", workspaceRoot }
-    }
-  }
+  const managerFolder = normalizeWorkspaceKey(join(launchOptions().home, "agents-management", "manager"))
   const agent = currentSnapshot.agents.find((a) => normalizeWorkspaceKey(a.canonicalWorkspace) === wsKey)
-  if (!agent) return null
-  if (String(agent.name || "").toLowerCase() === "manager") {
+  if (wsKey === managerFolder || wsKey.replace(/\\/g, "/").endsWith("/agents-management/manager")) {
     return {
       manager: true,
       teamId: "",
-      agentId: String(agent.id || ""),
-      workspaceRoot: String(agent.canonicalWorkspace || workspaceRoot),
+      agentId: String(agent?.id || ""),
+      workspaceRoot: String(agent?.canonicalWorkspace || workspaceRoot),
     }
   }
+  if (!agent) return null
   const membership = currentSnapshot.memberships.find((m) => m.agentId === agent.id)
   return {
     manager: false,

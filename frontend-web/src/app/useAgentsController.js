@@ -9,6 +9,7 @@ import {
   emptyAgentsSnapshot,
   groupTeamTasks,
   inboxBadgeCount,
+  isManagerWorkspace,
   mergeManagerSessions,
   normalizeAgentsSnapshot,
   resolveSessionAgentContext,
@@ -471,16 +472,10 @@ export function useAgentsController(ctx) {
 
   const activeSessionContext = useMemo(() => {
     if (activeAgentOverride?.kind === "manager") {
-      const mgrAgent = snapshot.agents.find((a) => String(a.name).toLowerCase() === "manager");
+      const mgrAgent = snapshot.agents.find((a) => isManagerWorkspace(a.canonicalWorkspace));
       return {
         ...activeAgentOverride,
-        workspaceRoot: String(
-          activeAgentOverride.workspaceRoot ||
-            mgrAgent?.canonicalWorkspace ||
-            ctx.selectedWorkspace ||
-            ctx.info?.workspace_root ||
-            "",
-        ),
+        workspaceRoot: String(activeAgentOverride.workspaceRoot || mgrAgent?.canonicalWorkspace || ""),
       };
     }
     if (activeAgentOverride?.kind === "member" && activeAgentOverride.teamId) {

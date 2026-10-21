@@ -34,7 +34,7 @@ const sampleSnapshot = normalizeAgentsSnapshot({
     { id: "agent-lead", name: "lead", canonicalWorkspace: "/workspace/core/lead", adapter: "rind" },
     { id: "agent-fe", name: "frontend-specialist", canonicalWorkspace: "/workspace/core/fe", adapter: "rind", worktreeOf: "/workspace/core" },
     { id: "agent-qa", name: "qa-verifier", canonicalWorkspace: "/workspace/core/qa", adapter: "rind" },
-    { id: "agent-mgr", name: "manager", canonicalWorkspace: "/home/user/.rind/agents/manager", adapter: "rind" },
+    { id: "agent-mgr", name: "manager", canonicalWorkspace: "/home/user/.rind/agents-management/manager", adapter: "rind" },
   ],
   memberships: [
     {
@@ -185,11 +185,31 @@ test("resolveSessionAgentContext identifies team member, manager, and independen
     assert.equal(workspaceOnlyMemberCtx.teamId, "team-1")
   }
 
-  const managerCtx = resolveSessionAgentContext(sampleSnapshot, "rt-mgr-1", "/home/user/.rind/agents/manager")
+  const managerCtx = resolveSessionAgentContext(sampleSnapshot, "rt-mgr-1", "/home/user/.rind/agents-management/manager")
   assert.equal(managerCtx.kind, "manager")
 
-  const workspaceOnlyManagerCtx = resolveSessionAgentContext(sampleSnapshot, "", "/home/user/.rind/agents/manager")
+  const workspaceOnlyManagerCtx = resolveSessionAgentContext(sampleSnapshot, "", "/home/user/.rind/agents-management/manager")
   assert.equal(workspaceOnlyManagerCtx.kind, "manager")
+
+  // Obsolete /agents/manager paths and user folders named "manager" must not be mistaken for the system Manager:
+  assert.equal(resolveSessionAgentContext(sampleSnapshot, "", "/home/user/.rind/agents/manager").kind, "independent")
+  const snapshotWithUserManagerFolder = normalizeAgentsSnapshot({
+    ...sampleSnapshot,
+    agents: [
+      ...sampleSnapshot.agents,
+      { id: "agent-user-mgr", name: "manager", canonicalWorkspace: "/workspace/agents/manager" },
+    ],
+    sessions: [
+      ...sampleSnapshot.sessions,
+      { id: "ms-user-mgr", agentId: "agent-user-mgr", runtimeSessionId: "rt-user-mgr", origin: "direct" },
+    ],
+  })
+  assert.equal(
+    resolveSessionAgentContext(snapshotWithUserManagerFolder, "rt-user-mgr", "/workspace/agents/manager").kind,
+    "independent",
+  )
+  const mergedMgr = mergeManagerSessions(snapshotWithUserManagerFolder, [])
+  assert.equal(mergedMgr.some((s) => s.runtimeSessionId === "rt-user-mgr"), false)
 
   const indepCtx = resolveSessionAgentContext(sampleSnapshot, "rt-other", "/workspace/my-app")
   assert.equal(indepCtx.kind, "independent")

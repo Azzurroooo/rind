@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -174,6 +174,7 @@ test("shared session credentials remain valid across management restart before a
   const next = structuredClone(store.state);
   next.sessions[session.id].shared = true;
   await store.commit(next);
+  await store.close();
   server = await startServer(options);
 
   // Even after management restart while disconnected, hostTurnStart and delegate succeed on the shared session without SESSION_EXPIRED.
@@ -252,6 +253,58 @@ test("disconnecting an agent connection while waiting in delegate({ wait: true }
   await assert.rejects(waiting, { code: "CONNECTION_LOST" });
   await new Promise(resolve => setTimeout(resolve, 40));
 
+  await server.close();
   const store = await openStore(server.paths.state);
   assert.equal(Boolean(store.state.delegations[taskId].returned), false, "disconnecting the bridge socket must not consume unreturned results");
+  await store.close();
+});
+
+test("openStore rejects while store.lock is held, and a busy server steps down on nonce change so the new owner acquires store.lock without corrupting journal", { timeout: 30000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-record-busy-"));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  t.after(async () => { await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+
+  const stateDir = path.join(home, "agents-management");
+  await mkdir(stateDir, { recursive: true });
+  const heldStore = await openStore(stateDir);
+  await assert.rejects(openStore(stateDir), { code: "ALREADY_RUNNING" });
+  await heldStore.close();
+
+  let recordStopped;
+  const recordExited = new Promise(resolve => { recordStopped = resolve; });
+  const server1 = await startServer({ home, repoRoot, idleTtlMs: 60_000, onShutdown: recordStopped });
+  const token = (await readFile(server1.paths.token, "utf8")).trim();
+  const user1 = await connectClient({ endpoint: server1.paths.endpoint, token });
+  const session = await user1.request("attachSession", { manager: true, shared: true });
+  await user1.request("bindSession", { sessionId: session.id, runtimeSessionId: "rt-busy-mgr" });
+  const run = await user1.request("beginRun", { sessionId: session.id });
+  assert.equal(run.status, "starting");
+
+  // Simulate a new server publishing its nonce to service.json while server1 is still busy and holding store.lock:
+  await writeFile(server1.paths.record, JSON.stringify({ pid: process.pid, nonce: "00000000-0000-4000-8000-000000000002", startedAt: new Date().toISOString() }), { mode: 0o600 });
+  // Immediately call openStore(server1.paths.state) while server1 is still running; it waits on store.lock until server1's idleTimer detects !recordOwned and releases store.lock:
+  const takeoverStore = await openStore(server1.paths.state);
+  await recordExited;
+  user1.close();
+  await server1.close();
+  await takeoverStore.close();
+
+  const log = await readFile(path.join(server1.paths.state, "service.log"), "utf8");
+  assert.match(log, /reason=record_removed/);
+
+  // Before a new server recovers, the old server must NOT have written status="cancelled" into store:
+  const rawEvents = await readFile(path.join(server1.paths.state, "events.jsonl"), "utf8");
+  assert.doesNotMatch(rawEvents, /"status":"cancelled"/);
+
+  // A replacement server starts and answers serviceInfo immediately even with a shared session awaiting background reconciliation:
+  const t0 = Date.now();
+  const server2 = await startServer({ home, repoRoot });
+  const user2 = await connectClient({ endpoint: server2.paths.endpoint, token });
+  const info = await user2.request("serviceInfo");
+  assert.ok(Date.now() - t0 < 2000, "serviceInfo must respond without blocking on shared Runtime reconciliation");
+  assert.equal(info.unconfirmed, 1);
+  const snap = await user2.request("snapshot");
+  assert.equal(snap.runs.find(r => r.id === run.id)?.status, "unknown");
+  user2.close();
+  await server2.close();
 });

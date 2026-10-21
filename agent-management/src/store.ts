@@ -1,90 +1,110 @@
 import { open, readFile, rename, truncate } from "node:fs/promises";
 import path from "node:path";
-import { emptyState, requireValue, type State } from "./model.js";
+import { ManagementError, emptyState, requireValue, type State } from "./model.js";
 import { privateDirectory } from "./paths.js";
+import { acquireProcessLock } from "../../rind-runtime-client/process-lock.js";
 
 type Changes = Partial<Record<Exclude<keyof State, "seq">, Record<string, unknown>>>;
 interface Entry { seq: number; changes: Changes }
 export async function openStore(directory: string, rotateEvery = 256) {
-  await privateDirectory(directory);
-  const journal = path.join(directory, "events.jsonl");
-  const snapshot = path.join(directory, "snapshot.json");
-  let state = emptyState();
-  // Tables added later start empty for snapshots written before them.
-  try { state = { ...emptyState(), ...JSON.parse(await readFile(snapshot, "utf8")) }; }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  requireValue(Number.isSafeInteger(state.seq), "CORRUPT_STORE", "Invalid management snapshot.");
-  let raw = "";
-  try { raw = await readFile(journal, "utf8"); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  const tail = raw.lastIndexOf("\n") + 1;
-  if (tail !== raw.length) await truncate(journal, Buffer.byteLength(raw.slice(0, tail)));
-  let previous = 0;
-  for (const line of raw.slice(0, tail).split("\n").filter(Boolean)) {
-    const entry: Entry = JSON.parse(line);
-    requireValue(Number.isSafeInteger(entry.seq) && (previous === 0 || entry.seq === previous + 1), "CORRUPT_STORE", "Management journal sequence is corrupt.");
-    previous = entry.seq;
-    if (entry.seq <= state.seq) continue;
-    requireValue(entry.seq === state.seq + 1, "CORRUPT_STORE", "Management journal has a gap.");
-    apply(state, entry);
-  }
-  for (const [id, task] of Object.entries(state.tasks)) {
-    if ("parentTaskId" in (task as unknown as Record<string, unknown>)) {
-      delete state.tasks[id];
-      for (const [runId, run] of Object.entries(state.runs)) if (run.taskId === id) delete state.runs[runId];
+  let lock: Awaited<ReturnType<typeof acquireProcessLock>> | undefined;
+  try {
+    await privateDirectory(directory);
+    try {
+      lock = await acquireProcessLock(path.join(directory, "store.lock"), 5000);
+    } catch {
+      throw new ManagementError("ALREADY_RUNNING", "Management state store is already in use.");
     }
-  }
-  for (const [id, session] of Object.entries(state.sessions)) {
-    if (
-      session.origin === "managed" &&
-      !(session.delegationId && state.delegations[session.delegationId]) &&
-      !state.deliveries[id] &&
-      !Object.values(state.runs).some(r => r.sessionId === id)
-    ) {
-      delete state.sessions[id];
+    const journal = path.join(directory, "events.jsonl");
+    const snapshot = path.join(directory, "snapshot.json");
+    let state = emptyState();
+    // Tables added later start empty for snapshots written before them.
+    try { state = { ...emptyState(), ...JSON.parse(await readFile(snapshot, "utf8")) }; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    requireValue(Number.isSafeInteger(state.seq), "CORRUPT_STORE", "Invalid management snapshot.");
+    let raw = "";
+    try { raw = await readFile(journal, "utf8"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const tail = raw.lastIndexOf("\n") + 1;
+    if (tail !== raw.length) await truncate(journal, Buffer.byteLength(raw.slice(0, tail)));
+    let previous = 0;
+    for (const line of raw.slice(0, tail).split("\n").filter(Boolean)) {
+      const entry: Entry = JSON.parse(line);
+      requireValue(Number.isSafeInteger(entry.seq) && (previous === 0 || entry.seq === previous + 1), "CORRUPT_STORE", "Management journal sequence is corrupt.");
+      previous = entry.seq;
+      if (entry.seq <= state.seq) continue;
+      requireValue(entry.seq === state.seq + 1, "CORRUPT_STORE", "Management journal has a gap.");
+      apply(state, entry);
     }
-  }
-  let fatal: unknown;
-  return {
-    get state() { return state; },
-    async commit(next: State) {
-      if (fatal) throw fatal;
-      const changes: Changes = {};
-      for (const table of Object.keys(state).filter(key => key !== "seq") as (keyof Changes)[]) {
-        const delta: Record<string, unknown> = {};
-        for (const id of new Set([...Object.keys(state[table]), ...Object.keys(next[table])])) {
-          const before = (state[table] as Record<string, unknown>)[id];
-          const after = (next[table] as Record<string, unknown>)[id];
-          if (JSON.stringify(before) !== JSON.stringify(after)) delta[id] = after ?? null;
-        }
-        if (Object.keys(delta).length) changes[table] = delta;
+    for (const [id, task] of Object.entries(state.tasks)) {
+      if ("parentTaskId" in (task as unknown as Record<string, unknown>)) {
+        delete state.tasks[id];
+        for (const [runId, run] of Object.entries(state.runs)) if (run.taskId === id) delete state.runs[runId];
       }
-      if (!Object.keys(changes).length) return;
-      const entry: Entry = { seq: state.seq + 1, changes };
-      try {
-        const file = await open(journal, "a", 0o600);
-        try { await file.writeFile(JSON.stringify(entry) + "\n"); await file.sync(); }
-        finally { await file.close(); }
-        next.seq = entry.seq;
-        state = next;
-        if (state.seq % rotateEvery === 0) {
-          const temporary = snapshot + ".tmp";
-          const file = await open(temporary, "w", 0o600);
-          try { await file.writeFile(JSON.stringify(state)); await file.sync(); }
-          finally { await file.close(); }
-          await rename(temporary, snapshot);
-          if (process.platform !== "win32") {
-            const parent = await open(directory, "r");
-            try { await parent.sync(); } finally { await parent.close(); }
+    }
+    for (const [id, session] of Object.entries(state.sessions)) {
+      if (
+        session.origin === "managed" &&
+        !(session.delegationId && state.delegations[session.delegationId]) &&
+        !state.deliveries[id] &&
+        !Object.values(state.runs).some(r => r.sessionId === id)
+      ) {
+        delete state.sessions[id];
+      }
+    }
+    let fatal: unknown;
+    let writing = Promise.resolve();
+    let closed: Promise<void> | undefined;
+    const close = () => closed ||= writing.catch(() => {}).then(() => lock!.release());
+    return {
+      get state() { return state; },
+      close,
+      async commit(next: State) {
+        if (fatal) throw fatal;
+        const changes: Changes = {};
+        for (const table of Object.keys(state).filter(k => k !== "seq") as (keyof Changes)[]) {
+          const delta: Record<string, unknown> = {};
+          for (const id of new Set([...Object.keys(state[table]), ...Object.keys(next[table])])) {
+            const before = (state[table] as Record<string, unknown>)[id];
+            const after = (next[table] as Record<string, unknown>)[id];
+            if (JSON.stringify(before) !== JSON.stringify(after)) delta[id] = after ?? null;
           }
-          // Either the previous journal or an empty journal can recover from this snapshot.
-          const journalFile = await open(journal, "r+");
-          try { await journalFile.truncate(0); await journalFile.sync(); }
-          finally { await journalFile.close(); }
+          if (Object.keys(delta).length) changes[table] = delta;
         }
-      } catch (error) { fatal = error; throw error; }
-    },
-  };
+        if (!Object.keys(changes).length) return;
+        requireValue(!closed, "ALREADY_RUNNING", "Management state store is already in use.");
+        const entry: Entry = { seq: state.seq + 1, changes };
+        const write = writing.then(async () => {
+          requireValue(!closed, "ALREADY_RUNNING", "Management state store is already in use.");
+          const file = await open(journal, "a", 0o600);
+          try { await file.writeFile(JSON.stringify(entry) + "\n"); await file.sync(); }
+          finally { await file.close(); }
+          next.seq = entry.seq;
+          state = next;
+          if (state.seq % rotateEvery === 0) {
+            const temporary = snapshot + ".tmp";
+            const file = await open(temporary, "w", 0o600);
+            try { await file.writeFile(JSON.stringify(state)); await file.sync(); }
+            finally { await file.close(); }
+            await rename(temporary, snapshot);
+            if (process.platform !== "win32") {
+              const parent = await open(directory, "r");
+              try { await parent.sync(); } finally { await parent.close(); }
+            }
+            // Either the previous journal or an empty journal can recover from this snapshot.
+            const journalFile = await open(journal, "r+");
+            try { await journalFile.truncate(0); await journalFile.sync(); }
+            finally { await journalFile.close(); }
+          }
+        });
+        writing = write.catch(() => {});
+        try { await write; } catch (error) { fatal = error; throw error; }
+      },
+    };
+  } catch (error) {
+    await lock?.release();
+    throw error;
+  }
 }
 function apply(state: State, entry: Entry) {
   for (const [table, changes] of Object.entries(entry.changes)) {

@@ -48,7 +48,7 @@ const sampleSnapshot = {
     {
       id: "agent-mgr",
       name: "manager",
-      canonicalWorkspace: "C:/Users/admin/.rind/agents/manager",
+      canonicalWorkspace: "C:/Users/admin/.rind/agents-management/manager",
       adapter: "rind",
     },
   ],
@@ -353,9 +353,40 @@ describe("agentsModel", () => {
     const managerCtx = resolveSessionAgentContext(
       sampleSnapshot,
       "rs-mgr-1",
-      "C:/Users/admin/.rind/agents/manager",
+      "C:/Users/admin/.rind/agents-management/manager",
     );
     expect(managerCtx.kind).toBe("manager");
+
+    const mgmtPathCtx = resolveSessionAgentContext(
+      sampleSnapshot,
+      "",
+      "C:/Users/admin/.rind/agents-management/manager",
+    );
+    expect(mgmtPathCtx.kind).toBe("manager");
+
+    expect(
+      resolveSessionAgentContext(sampleSnapshot, "", "C:/Users/admin/.rind/agents/manager").kind,
+    ).toBe("independent");
+
+    const snapshotWithUserManagerFolder = {
+      ...sampleSnapshot,
+      agents: [
+        ...sampleSnapshot.agents,
+        { id: "agent-user-mgr", name: "manager", canonicalWorkspace: "E:/projects/agents/manager" },
+      ],
+      sessions: [
+        ...sampleSnapshot.sessions,
+        { id: "s-user-mgr", agentId: "agent-user-mgr", runtimeSessionId: "rs-user-mgr", origin: "direct" },
+      ],
+    };
+    expect(
+      resolveSessionAgentContext(snapshotWithUserManagerFolder, "rs-user-mgr", "E:/projects/agents/manager").kind,
+    ).toBe("independent");
+    expect(
+      mergeManagerSessions(snapshotWithUserManagerFolder, []).sessions.some(
+        (s) => s.runtimeSessionId === "rs-user-mgr",
+      ),
+    ).toBe(false);
 
     const indCtx = resolveSessionAgentContext(sampleSnapshot, "rs-other", "E:/other/repo");
     expect(indCtx.kind).toBe("independent");
@@ -363,8 +394,9 @@ describe("agentsModel", () => {
 
   it("identifies managed agent and team workspaces to exclude them from user Workspaces", () => {
     expect(isManagedAgentWorkspace("E:\\teams\\core\\lead", sampleSnapshot)).toBe(true);
-    expect(isManagedAgentWorkspace("C:/Users/admin/.rind/agents/manager", sampleSnapshot)).toBe(true);
-    expect(isManagedAgentWorkspace("C:/Users/admin/.rind/agents/workspaces/team-1/dev", sampleSnapshot)).toBe(true);
+    expect(isManagedAgentWorkspace("C:/Users/admin/.rind/agents-management/manager", sampleSnapshot)).toBe(true);
+    expect(isManagedAgentWorkspace("C:/Users/admin/.rind/agents-management/workspaces/team-1/dev", sampleSnapshot)).toBe(true);
+    expect(isManagedAgentWorkspace("E:/projects/agents/manager", sampleSnapshot)).toBe(false);
     expect(isManagedAgentWorkspace("E:/other/repo", sampleSnapshot)).toBe(false);
   });
 });

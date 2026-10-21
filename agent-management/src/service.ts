@@ -516,7 +516,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         const tasks = view.tasks.filter(t => t.teamId === p.teamId);
         return { team: state.teams[p.teamId], members: view.memberships.filter(m => m.teamId === p.teamId), tasks, briefing: teamBriefing(tasks, state.agents) };
       }
-      case "getTask": { const task = taskAccess(state, actor, p.taskId, true); return { ...task, notes: Object.values(state.notes).filter(n => n.taskId === task.id), artifacts: Object.values(state.artifacts).filter(a => a.taskId === task.id) }; }
+      case "getTask": {
+        const task = taskAccess(state, actor, p.taskId, true);
+        const queueReason = task.status === "queued" ? queuedReason(projectionIndex(state, connected, runtimeSessions), task) : undefined;
+        return { ...task, ...(queueReason ? { queueReason } : {}), notes: Object.values(state.notes).filter(n => n.taskId === task.id), artifacts: Object.values(state.artifacts).filter(a => a.taskId === task.id) };
+      }
       case "createTeam": {
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can create teams.");
         const id = randomUUID();
@@ -1266,7 +1270,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     onChange(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     async recover() { await transaction(state => {
       for (const run of Object.values(state.runs)) if (activeRun(run)) {
-        run.status = "unknown";
+        run.status = state.sessions[run.sessionId]?.runtimeSessionId ? "unknown" : "failed";
         if (run.delegationId && state.delegations[run.delegationId]) {
           const d = state.delegations[run.delegationId];
           d.status = "failed"; d.error = "Execution host disconnected. Confirm the old process stopped before retrying."; delete d.dispatch;

@@ -222,6 +222,10 @@ export function mergeTeamSessions(rawSnapshot, teamId, historyEntries = []) {
   return rows;
 }
 
+export function isManagerWorkspace(value) {
+  return normalizePathKey(value).endsWith("/agents-management/manager");
+}
+
 /**
  * Merges saved Manager session history (`listSessions({ manager: true })`) with
  * live Manager sessions in `snapshot.sessions` and `snapshot.live`.
@@ -230,16 +234,10 @@ export function mergeManagerSessions(rawSnapshot, historyEntries = []) {
   const snapshot = normalizeAgentsSnapshot(rawSnapshot);
   const connected = new Set(snapshot.connectedSessions || []);
   const liveByRuntime = new Map((snapshot.live || []).map((item) => [item.id, item]));
-  const memberIds = new Set(snapshot.memberships.map((m) => m.agentId));
-  const managerAgents = snapshot.agents.filter(
-    (a) =>
-      (!memberIds.has(a.id) && String(a.name || "").toLowerCase() === "manager") ||
-      normalizePathKey(a.canonicalWorkspace).endsWith("/agents-management/manager") ||
-      normalizePathKey(a.canonicalWorkspace).endsWith("/agents/manager"),
-  );
+  const managerAgents = snapshot.agents.filter((a) => isManagerWorkspace(a.canonicalWorkspace));
   const managerAgentIds = new Set(managerAgents.map((a) => a.id));
   const liveManagerSessions = snapshot.sessions.filter(
-    (s) => !s.teamId && (managerAgentIds.has(s.agentId) || !memberIds.has(s.agentId)),
+    (s) => !s.teamId && (managerAgentIds.has(s.agentId) || isManagerWorkspace(s.workspaceRoot)),
   );
   const savedById = new Map(
     (Array.isArray(historyEntries) ? historyEntries : [])
@@ -934,7 +932,7 @@ export function buildBackgroundModel(rawSnapshot, service = null) {
 
     const scopeLabel = team
       ? `${team.name} › ${agent?.name || session?.agentId || "Member"}`
-      : agent && String(agent.name).toLowerCase() === "manager"
+      : isManagerWorkspace(agent?.canonicalWorkspace || liveItem.workspace)
         ? "Manager"
         : liveItem.workspace
           ? `Workspace · ${String(liveItem.workspace).replace(/\\/g, "/").split("/").filter(Boolean).pop()}`
@@ -1021,12 +1019,7 @@ export function normalizePathKey(value) {
 export function isManagedAgentWorkspace(workspacePath, rawSnapshot) {
   const wsKey = normalizePathKey(workspacePath);
   if (!wsKey) return false;
-  if (
-    wsKey.endsWith("/agents-management/manager") ||
-    wsKey.endsWith("/agents/manager") ||
-    wsKey.includes("/agents-management/workspaces/") ||
-    wsKey.includes("/agents/workspaces/")
-  ) {
+  if (isManagerWorkspace(wsKey) || wsKey.includes("/agents-management/workspaces/")) {
     return true;
   }
   const snapshot = normalizeAgentsSnapshot(rawSnapshot);
@@ -1065,11 +1058,14 @@ export function resolveSessionAgentContext(rawSnapshot, sessionId, workspaceRoot
           status: String(membership?.status || "Idle"),
         };
       }
-      if (!managedSession.teamId && agent && String(agent.name).toLowerCase() === "manager") {
+      if (
+        !managedSession.teamId &&
+        (isManagerWorkspace(managedSession.workspaceRoot) || (agent && isManagerWorkspace(agent.canonicalWorkspace)))
+      ) {
         return {
           kind: "manager",
-          workspaceRoot: String(managedSession.workspaceRoot || agent.canonicalWorkspace || workspaceRoot || ""),
-          agentId: String(agent.id),
+          workspaceRoot: String(managedSession.workspaceRoot || agent?.canonicalWorkspace || workspaceRoot || ""),
+          agentId: String(agent?.id || ""),
           agentName: "Manager",
           roleLabel: "Organization Coordinator",
         };
@@ -1078,7 +1074,7 @@ export function resolveSessionAgentContext(rawSnapshot, sessionId, workspaceRoot
   }
 
   if (wsKey) {
-    if (wsKey.endsWith("/agents-management/manager") || wsKey.endsWith("/agents/manager")) {
+    if (isManagerWorkspace(wsKey)) {
       return {
         kind: "manager",
         workspaceRoot: String(workspaceRoot || ""),

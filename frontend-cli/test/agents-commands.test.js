@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, realpath, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, symlink, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { removeRindHome } from "./helpers/rind-home.js";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { managerWorkspace, openAgentChat } from "../lib/agents-commands.js";
 
 const rindBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));
 
@@ -76,3 +78,24 @@ test("rind agents stop also stops a shared Runtime that only plain conversations
   }
   assert.equal(host, null, "the shared Runtime is still running");
 });
+
+test("openAgentChat creates the Manager private workspace directory before spawning in a fresh home", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rind-manager-open-"));
+  const home = path.join(root, "fresh-home");
+  t.after(() => removeRindHome(root));
+  const probeScript = path.join(root, "probe-window.mjs");
+  await writeFile(
+    probeScript,
+    `import { writeFileSync } from "node:fs";
+const handoffFile = process.env.RIND_AGENTS_HANDOFF;
+if (handoffFile) writeFileSync(handoffFile, JSON.stringify({ action: "leave", from: { workspace: process.cwd() } }));
+process.exit(0);
+`,
+  );
+  const expectedDir = managerWorkspace({ home });
+  assert.equal(existsSync(expectedDir), false);
+  const next = await openAgentChat({ manager: true, launch: { home }, windowScript: probeScript });
+  assert.equal(existsSync(expectedDir), true);
+  assert.equal(next.action, "leave");
+});
+

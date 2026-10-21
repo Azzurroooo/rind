@@ -3,6 +3,7 @@ import {
   buildTeamSummary,
   DEFAULT_SIDEBAR_SESSIONS_LIMIT,
   inboxBadgeCount,
+  isManagerWorkspace,
   mergeManagerSessions,
   mergeTeamSessions,
   normalizeAgentsSnapshot,
@@ -80,10 +81,8 @@ export function currentSessionAgentContext(): SessionAgentContext {
     const fallbackWs =
       state.agentChatContext.kind === "manager"
         ? String(
-            state.agentsSnapshot.agents.find((a) => String(a.name).toLowerCase() === "manager")?.canonicalWorkspace ||
+            state.agentsSnapshot.agents.find((a) => isManagerWorkspace(a.canonicalWorkspace))?.canonicalWorkspace ||
               state.managerSessions[0]?.workspaceRoot ||
-              state.viewedProjectPath ||
-              state.chatProjectPath ||
               "",
           )
         : String(
@@ -455,14 +454,17 @@ export async function openManagedAgentChat(options: {
     const managementSessionId = asRecordText(opened.managementSessionId) || asRecordText(mgmtSession.id)
     const fallbackAgentWorkspace = options.manager
       ? String(
-          state.agentsSnapshot.agents.find((a) => String(a.name).toLowerCase() === "manager")?.canonicalWorkspace ||
+          state.agentsSnapshot.agents.find((a) => isManagerWorkspace(a.canonicalWorkspace))?.canonicalWorkspace ||
             state.managerSessions[0]?.workspaceRoot ||
             "",
         )
       : options.agentId
         ? String(state.agentsSnapshot.agents.find((a) => a.id === options.agentId)?.canonicalWorkspace || "")
         : ""
-    const workspaceRoot = asRecordText(opened.workspaceRoot) || fallbackAgentWorkspace || state.chatProjectPath
+    const workspaceRoot =
+      asRecordText(opened.workspaceRoot) ||
+      fallbackAgentWorkspace ||
+      (options.manager ? "" : state.chatProjectPath)
     const runtimeSessionId =
       asRecordText(opened.runtimeSessionId) ||
       asRecordText(mgmtSession.runtimeSessionId) ||

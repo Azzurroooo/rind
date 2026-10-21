@@ -326,6 +326,14 @@ export function mergeTeamSessions(
   return byAgent
 }
 
+function normalizePathKey(value: unknown): string {
+  return String(value || "").trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
+}
+
+export function isManagerWorkspace(value: unknown): boolean {
+  return normalizePathKey(value).endsWith("/agents-management/manager")
+}
+
 export function mergeManagerSessions(
   rawSnapshot: unknown,
   savedManagerSessions: Array<Record<string, any>> = [],
@@ -370,38 +378,37 @@ export function mergeManagerSessions(
     })
   }
 
-  const managerAgent = snapshot.agents.find((a) => String(a.name).toLowerCase() === "manager")
-  if (managerAgent) {
-    for (const ms of snapshot.sessions) {
-      if (ms.agentId !== managerAgent.id || ms.teamId || !ms.runtimeSessionId) continue
-      const rid = String(ms.runtimeSessionId)
-      if (seen.has(rid)) continue
-      seen.add(rid)
-      const live = liveByRuntimeId.get(rid) || null
-      const connected = connectedSet.has(rid)
-      const status = live?.question
-        ? "Needs input"
-        : live?.turnStatus === "running"
-          ? "Working"
-          : connected
-            ? "Open"
-            : "Idle"
-      result.push({
-        runtimeSessionId: rid,
-        managementSessionId: String(ms.id || ""),
-        workspaceRoot: String(ms.workspaceRoot || managerAgent.canonicalWorkspace || ""),
-        origin: String(ms.origin || "direct"),
-        taskId: "",
-        title: "Manager conversation",
-        updatedAt: String(ms.updatedAt || ms.createdAt || ""),
-        createdAt: String(ms.createdAt || ""),
-        model: "",
-        status,
-        tone: memberStatusTone(status),
-        connected,
-        live,
-      })
-    }
+  const managerAgent = snapshot.agents.find((a) => isManagerWorkspace(a.canonicalWorkspace))
+  for (const ms of snapshot.sessions) {
+    if (ms.teamId || !ms.runtimeSessionId) continue
+    if (ms.agentId !== managerAgent?.id && !isManagerWorkspace(ms.workspaceRoot)) continue
+    const rid = String(ms.runtimeSessionId)
+    if (seen.has(rid)) continue
+    seen.add(rid)
+    const live = liveByRuntimeId.get(rid) || null
+    const connected = connectedSet.has(rid)
+    const status = live?.question
+      ? "Needs input"
+      : live?.turnStatus === "running"
+        ? "Working"
+        : connected
+          ? "Open"
+          : "Idle"
+    result.push({
+      runtimeSessionId: rid,
+      managementSessionId: String(ms.id || ""),
+      workspaceRoot: String(ms.workspaceRoot || managerAgent?.canonicalWorkspace || ""),
+      origin: String(ms.origin || "direct"),
+      taskId: "",
+      title: "Manager conversation",
+      updatedAt: String(ms.updatedAt || ms.createdAt || ""),
+      createdAt: String(ms.createdAt || ""),
+      model: "",
+      status,
+      tone: memberStatusTone(status),
+      connected,
+      live,
+    })
   }
 
   result.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
@@ -912,7 +919,11 @@ export function buildBackgroundModel(rawSnapshot: unknown, serviceInfo: Record<s
       teamId: team?.id ? String(team.id) : "",
       teamName: team?.name ? String(team.name) : "",
       agentId: agent?.id ? String(agent.id) : "",
-      agentName: String(agent?.name || (ms && !ms.teamId ? "Manager" : "Session")),
+      agentName: String(
+        isManagerWorkspace(ms?.workspaceRoot || agent?.canonicalWorkspace || live.workspace)
+          ? "Manager"
+          : agent?.name || "Session",
+      ),
       status: live.question
         ? "Needs input"
         : Number(live.background?.count) > 0
@@ -939,10 +950,6 @@ export function buildBackgroundModel(rawSnapshot: unknown, serviceInfo: Record<s
 
 export function activeBackgroundCount(rawSnapshot: unknown): number {
   return buildBackgroundModel(rawSnapshot).runningCount
-}
-
-function normalizePathKey(value: unknown): string {
-  return String(value || "").trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
 }
 
 export function resolveSessionAgentContext(
@@ -978,11 +985,14 @@ export function resolveSessionAgentContext(
           status: String(membership?.status || "Idle"),
         }
       }
-      if (!managedSession.teamId && agent && String(agent.name).toLowerCase() === "manager") {
+      if (
+        !managedSession.teamId &&
+        (isManagerWorkspace(managedSession.workspaceRoot) || (agent && isManagerWorkspace(agent.canonicalWorkspace)))
+      ) {
         return {
           kind: "manager",
           managementSessionId: String(managedSession.id || ""),
-          workspaceRoot: String(managedSession.workspaceRoot || agent.canonicalWorkspace || ""),
+          workspaceRoot: String(managedSession.workspaceRoot || agent?.canonicalWorkspace || ""),
           agentName: "Manager",
           roleLabel: "Organization Coordinator",
         }
@@ -991,7 +1001,7 @@ export function resolveSessionAgentContext(
   }
 
   if (wsKey) {
-    if (wsKey.endsWith("/agents/manager")) {
+    if (isManagerWorkspace(wsKey)) {
       return {
         kind: "manager",
         workspaceRoot,

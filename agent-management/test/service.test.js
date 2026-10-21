@@ -202,9 +202,11 @@ test("registration, explicit sharing and durable idempotency", async t => {
   const params = { name: "Idempotent", requestId: "same" };
   const team = await f.call("createTeam", params);
   assert.deepEqual(await f.call("createTeam", params), team);
+  await f.store.close();
   const restored = await openStore(f.paths.state, 5);
   assert.ok(restored.state.teams[team.id]);
   assert.equal(Object.values(restored.state.teams).filter(t => t.name === "Idempotent").length, 1);
+  await restored.close();
 });
 test("same workspace queues while distinct worktrees run independently; reports gate completion", async t => {
   const f = await fixture(t);
@@ -346,8 +348,11 @@ test("store discards only an incomplete tail and rejects earlier corrupt records
   const next = structuredClone(store.state);
   next.teams.t = { id: "t", name: "T", createRoot: home };
   await store.commit(next);
+  await store.close();
   await appendFile(path.join(home, "events.jsonl"), '{"seq":2');
-  assert.equal((await openStore(home)).state.teams.t.name, "T");
+  const reopened = await openStore(home);
+  assert.equal(reopened.state.teams.t.name, "T");
+  await reopened.close();
   await appendFile(path.join(home, "events.jsonl"), "broken\n");
   await assert.rejects(openStore(home));
 });
@@ -362,11 +367,16 @@ test("snapshot rotation recovers before or after the previous journal is truncat
   const previous = await readFile(path.join(home, "events.jsonl"), "utf8");
   const second = structuredClone(store.state); second.teams.t.name = "Second";
   await store.commit(second);
+  await store.close();
   assert.equal(await readFile(path.join(home, "events.jsonl"), "utf8"), "");
   await writeFile(path.join(home, "events.jsonl"), previous);
-  assert.equal((await openStore(home)).state.teams.t.name, "Second");
+  const recovered1 = await openStore(home);
+  assert.equal(recovered1.state.teams.t.name, "Second");
+  await recovered1.close();
   await writeFile(path.join(home, "events.jsonl"), "");
-  assert.equal((await openStore(home)).state.teams.t.name, "Second");
+  const recovered2 = await openStore(home);
+  assert.equal(recovered2.state.teams.t.name, "Second");
+  await recovered2.close();
 });
 
 test("team names are unique among live teams, ignoring case and spaces", async t => {
@@ -705,6 +715,55 @@ test("retain bounds settled delegations and completed tasks with cascading notes
   assert.equal(Object.keys(state.tasks).length, COMPLETED_TASK_LIMIT);
   assert.equal(Object.keys(state.notes).length, COMPLETED_TASK_LIMIT);
   assert.equal(Object.keys(state.artifacts).length, COMPLETED_TASK_LIMIT);
-  assert.equal(Object.values(state.sessions).filter(s => s.runtimeSessionId).length, 220, "bound direct team sessions are never evicted");
+  assert.equal(Object.values(state.sessions).filter(s => Boolean(s.runtimeSessionId)).length, 220, "bound direct team sessions are never evicted");
   assert.equal(Object.values(state.sessions).filter(s => !s.runtimeSessionId).length, UNBOUND_SESSION_LIMIT, "leaked unbound sessions are bounded");
 });
+
+test("recover settles interrupted runs without runtimeSessionId as failed so subsequent tasks are not stuck queued, and getTask surfaces queueReason", async t => {
+  const f = await fixture(t);
+  const task1 = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Interrupted before session bound" });
+  await eventually(() => f.starts.length === 1);
+  const run1 = Object.values(f.store.state.runs).find(r => r.taskId === task1.id);
+  // Simulate daemon interruption during adapter.start before runtimeSessionId was bound:
+  f.store.state.sessions[run1.sessionId].runtimeSessionId = "";
+  delete f.store.state.runs[run1.id].runtimeSessionId;
+
+  const reopened = createService({
+    store: f.store,
+    paths: f.paths,
+    adapters: {
+      rind: {
+        async start(input) {
+          let finish;
+          const completion = new Promise(resolve => { finish = resolve; });
+          f.starts.push({ input, finish });
+          return { runtimeSessionId: randomUUID(), completion, async cancel() { finish({ content: "" }); } };
+        },
+      },
+    },
+    toolConfig: () => ({}),
+  });
+  await reopened.recover();
+  assert.equal(f.store.state.runs[run1.id].status, "failed", "unbound interrupted run cannot be reconciled and must settle as failed");
+  assert.equal(f.store.state.tasks[task1.id].status, "needs_attention");
+
+  // Starting task1 again now dispatches immediately instead of staying queued forever:
+  const restarted = await reopened.request({ kind: "user" }, "startTask", { requestId: "req-restart", taskId: task1.id });
+  await eventually(() => f.starts.length === 2);
+  assert.equal(f.store.state.tasks[restarted.id].status, "running");
+
+  // While task1 is running on f.leader's workspace, a second task assigned to f.leader is queued and getTask explains why:
+  const task2 = await reopened.request({ kind: "user" }, "assignTask", {
+    requestId: "req-task2",
+    teamId: f.team.id,
+    assigneeAgentId: f.leader.id,
+    brief: "Queued behind active run",
+  });
+  assert.equal(task2.status, "queued");
+  const detailQueued = await reopened.request({ kind: "user" }, "getTask", { requestId: "req-get2", taskId: task2.id });
+  assert.equal(detailQueued.status, "queued");
+  assert.equal(detailQueued.queueReason, "Waiting for this workspace to become free");
+  for (const s of f.starts) s.finish({ content: "done" });
+  await reopened.stop();
+});
+

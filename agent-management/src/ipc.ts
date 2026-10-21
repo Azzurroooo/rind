@@ -427,7 +427,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       return unlink(paths.record).catch(() => {});
     }, () => {}).catch(() => {});
   }
-  let store: Awaited<ReturnType<typeof openStore>>;
+  let store!: Awaited<ReturnType<typeof openStore>>;
   const realManager = (async () => { await privateDirectory(paths.manager); const { canonicalDirectory } = await import("./paths.js"); return canonicalDirectory(paths.manager); })();
   // Awaited by the requests that need it; a failure surfaces there, never as an unhandled rejection.
   realManager.catch(() => {});
@@ -455,24 +455,25 @@ export async function startServer(options: { home?: string; python?: string; rep
     await service.recover();
     await writeLog("service started", { pid: process.pid, home: paths.root, endpoint: paths.endpoint });
     if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) {
-      await executionHost(false).catch(() => {});
-      await Promise.allSettled(reconciling.values());
+      void executionHost(false).catch(() => {});
+      // Reconciliation proceeds in the background so IPC readiness is never delayed by shared Runtime replay.
     }
     if (daemonEntry || options.idleTtlMs !== undefined) {
       const checkMs = Math.max(50, Math.min(idleTtlMs || 1000, 1000));
       idleTimer = setInterval(async () => {
         if (closing) return;
-        if (!isIdle()) { touchActivity(); return; }
+        // Always verify record ownership first so a superseded server exits even while busy.
         const raw = await readFile(paths.record, "utf8").catch(() => null);
         let recordOwned = false;
         try { recordOwned = Boolean(raw && JSON.parse(raw).nonce === recordNonce); } catch {}
         if (!recordOwned) { void close("record_removed").finally(() => options.onShutdown?.()); return; }
+        if (!isIdle()) { touchActivity(); return; }
         if (idleTtlMs > 0 && Date.now() - idleSince >= idleTtlMs) void close("idle_timeout").finally(() => options.onShutdown?.());
       }, checkMs);
       idleTimer.unref?.();
     }
     readyResolve!();
-  } catch (error) { readyReject!(error); for (const socket of sockets) socket.destroy(); server.close(); await releaseRecord(); throw error; }
+  } catch (error) { readyReject!(error); for (const socket of sockets) socket.destroy(); server.close(); await store?.close().catch(() => {}); await releaseRecord(); throw error; }
   let closed: Promise<void> | undefined;
   function close(reason = "shutdown") {
     return closed ||= (async () => {
@@ -482,7 +483,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       // The process always lets go of its endpoint, even when stopping the
       // service failed: a service nobody can stop is worse than a loud error.
       try {
-        await service.stop();
+        if (reason === "record_removed") await store?.close().catch(() => {}); else await service.stop();
       } finally {
         // Even failed service cleanup must join an in-flight host connection.
         await realManager.catch(() => {});
@@ -493,7 +494,7 @@ export async function startServer(options: { home?: string; python?: string; rep
         for (const socket of sockets) socket.destroy();
         await new Promise<void>(resolve => server.close(() => resolve()));
         await writeLog("service stopped", { pid: process.pid, reason });
-        await releaseRecord();
+        await store?.close().catch(() => {}); await releaseRecord();
       }
     })();
   }
