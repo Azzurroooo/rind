@@ -14,6 +14,7 @@ declare module "*shared-runtime.js" {
 declare module "*local-files.js" {
   export function privateDirectory(directory: string): Promise<void>;
   export function resolveRindHome(home?: string): string;
+  export function recordedNonce(file: string): Promise<string>;
 }
 
 declare module "*endpoint.js" {

@@ -1,6 +1,6 @@
 import net from "node:net";
 import { existsSync } from "node:fs";
-import { privateDirectory, resolveRindHome } from "./local-files.js";
+import { privateDirectory, recordedNonce, resolveRindHome } from "./local-files.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { appendFile, readFile, writeFile, unlink } from "node:fs/promises";
 import { createRuntimeClient } from "./runtime-client.js";
@@ -12,6 +12,11 @@ import { createLiveSessions } from "./live-sessions.js";
 // Only the detached entry point exits on its own; a test imports this module.
 const hostEntry = Boolean(process.argv[1]?.endsWith("shared-server.js"));
 const DEFAULT_IDLE_TTL_MS = 15 * 60 * 1000;
+// The detached host's stderr is the Runtime log: every line it carries gets a time.
+const writeStderr = text => {
+  const at = `[${new Date().toISOString()}] `;
+  process.stderr.write(text.replace(/^(?=.)/gm, at));
+};
 const OBSERVE_EVENTS = new Set([
   "turn_started", "turn_completed", "turn_failed", "turn_cancelled",
   "user_question_requested", "user_question_answered", "background_wait_changed",
@@ -62,7 +67,7 @@ export async function startSharedServer(options) {
       if (isIdle()) touchActivity();
     },
     onRequest(prompt) { return new Promise(resolve => { if (!authOwner || authOwner.socket.destroyed) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
-    onStderr: text => process.stderr.write(text),
+    onStderr: writeStderr,
     // A crashed worker ends every turn it was running; nothing will report their end.
     // The host stops with it: a later client starts a fresh host instead of
     // reaching one that can no longer spawn a worker.
@@ -151,7 +156,7 @@ export async function startSharedServer(options) {
           if (initialized) {
             // A worker that already died mid-shutdown is no reason to stay up.
             try { await client.shutdown(); }
-            catch (error) { process.stderr.write("runtime shutdown: " + (error?.message || String(error)) + "\n"); }
+            catch (error) { writeStderr("runtime shutdown: " + (error?.message || String(error)) + "\n"); }
           }
           peer.send({ id, result: { stopped: true } });
           await close("shutdown");
@@ -192,7 +197,7 @@ export async function startSharedServer(options) {
   try {
     await listenOwned(server, paths.endpoint);
   } catch (error) {
-    if (error?.code === "ENDPOINT_OCCUPIED") throw new Error("Shared Runtime is already running.");
+    if (error?.code === "ENDPOINT_OCCUPIED") throw Object.assign(new Error("Shared Runtime is already running."), { code: "ALREADY_RUNNING" });
     throw error;
   }
   try {
@@ -211,11 +216,11 @@ export async function startSharedServer(options) {
       const checkMs = Math.max(50, Math.min(idleTtlMs || 1000, 1000));
       idleTimer = setInterval(async () => {
         if (stopping) return;
+        // A host that published itself here since owns the endpoint; this one is unreachable.
+        const owner = await recordedNonce(paths.record);
+        if (owner && owner !== recordNonce) { void close("superseded"); return; }
         if (!isIdle()) { touchActivity(); return; }
-        const raw = await readFile(paths.record, "utf8").catch(() => null);
-        let recordOwned = false;
-        try { recordOwned = Boolean(raw && JSON.parse(raw).nonce === recordNonce); } catch {}
-        if (!recordOwned) { void close("record_removed"); return; }
+        if (owner !== recordNonce) { void close("record_removed"); return; }
         if (idleTtlMs > 0 && Date.now() - idleSince >= idleTtlMs) void close("idle_timeout");
       }, checkMs);
       idleTimer.unref?.();
@@ -227,11 +232,8 @@ export async function startSharedServer(options) {
     await new Promise(resolve => server.close(resolve));
     throw error;
   }
-  function releaseRecord() {
-    return readFile(paths.record, "utf8").then(value => {
-      if (JSON.parse(value).nonce !== recordNonce) return; // a later host owns it now
-      return unlink(paths.record).catch(() => {});
-    }, () => {}).catch(() => {});
+  async function releaseRecord() {
+    if (await recordedNonce(paths.record) === recordNonce) await unlink(paths.record).catch(() => {});
   }
   // Keep ownership until the worker stops, so a replacement cannot run a
   // second worker against the same history during cleanup. Every peer is let
@@ -263,5 +265,9 @@ if (hostEntry) {
     const stop = signal => { void server.close(signal); };
     process.once("SIGTERM", () => stop("SIGTERM"));
     process.once("SIGINT", () => stop("SIGINT"));
-  }).catch(error => { console.error(error); process.exitCode = 1; });
+  }).catch(error => {
+    // Losing a start race to a live host is expected; the client uses that host.
+    if (error?.code !== "ALREADY_RUNNING") writeStderr(String(error?.stack || error) + "\n");
+    process.exitCode = 1;
+  });
 }

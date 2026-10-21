@@ -6,6 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import { startSharedServer } from "../../rind-runtime-client/shared-server.js";
 import { connectSharedRuntime, createSharedRuntimeClient, sharedRuntimePaths, stopSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
@@ -238,4 +239,42 @@ test("idle TTL and record removal automatically stop an unattached shared host",
     conn.close();
   }
   assert.equal(gone, true, "unattached host stops when its record file is removed");
+});
+
+test("a host replaced in host.json stops while a window is still attached and leaves the replacement's record", { timeout: 25000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-superseded-host-"));
+  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  t.after(async () => { await stopSharedRuntime(options); await removeRindHome(home); });
+  const host = await startSharedServer({ ...options, idleTtlMs: 60000 });
+  const window = await connectSharedRuntime({ ...options, start: false });
+  const successor = JSON.stringify({ pid: process.pid, nonce: randomUUID(), startedAt: new Date().toISOString() });
+  await writeFile(host.paths.record, successor);
+  let gone = false;
+  for (let i = 0; i < 40 && !gone; i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    gone = !(await connectSharedRuntime({ ...options, start: false }).then(conn => { conn.close(); return true; }, () => false));
+  }
+  window.close();
+  assert.equal(gone, true, "the replaced host stops serving although a window is attached");
+  assert.equal(await readFile(host.paths.record, "utf8"), successor);
+  assert.match(await readFile(host.paths.log, "utf8"), /reason=superseded/);
+});
+
+test("every line of a detached host's Runtime log carries a time, including the worker's stderr", { timeout: 30000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-log-time-"));
+  // A worker that fails at once writes a multi-line error to stderr.
+  const options = { rindHome: home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)), runtimePath: process.execPath };
+  t.after(async () => { await stopSharedRuntime(options); await removeRindHome(home); });
+  const runtime = await connectSharedRuntime(options);
+  await assert.rejects(runtime.request("initialize"));
+  runtime.close();
+  const { log } = sharedRuntimePaths(home);
+  let text = "";
+  for (let i = 0; i < 100 && !/host stopped/.test(text); i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    text = await readFile(log, "utf8").catch(() => "");
+  }
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  assert.ok(lines.some(line => /Cannot find module/.test(line)), "the worker's own stderr reached the log");
+  for (const line of lines) assert.match(line, /^\[\d{4}-\d\d-\d\dT[\d:.]+Z\] /);
 });

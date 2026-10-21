@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime, stopSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 import { listenOwned, EndpointOccupiedError } from "../../rind-runtime-client/endpoint.js";
+import { recordedNonce } from "../../rind-runtime-client/local-files.js";
 import { canDelegate, managerInstructions, memberInstructions, toolsFor } from "./tools.js";
 
 const RUNTIME_START_MS = 30000;
@@ -421,11 +422,8 @@ export async function startServer(options: { home?: string; python?: string; rep
     await stopSharedRuntime({ rindHome: options.home }).catch(() => {});
     await close("shutdown");
   }
-  function releaseRecord() {
-    return readFile(paths.record, "utf8").then(value => {
-      if (JSON.parse(value).nonce !== recordNonce) return;
-      return unlink(paths.record).catch(() => {});
-    }, () => {}).catch(() => {});
+  async function releaseRecord() {
+    if (await recordedNonce(paths.record) === recordNonce) await unlink(paths.record).catch(() => {});
   }
   let store: Awaited<ReturnType<typeof openStore>>;
   const realManager = (async () => { await privateDirectory(paths.manager); const { canonicalDirectory } = await import("./paths.js"); return canonicalDirectory(paths.manager); })();
@@ -462,11 +460,11 @@ export async function startServer(options: { home?: string; python?: string; rep
       const checkMs = Math.max(50, Math.min(idleTtlMs || 1000, 1000));
       idleTimer = setInterval(async () => {
         if (closing) return;
+        // A service that published itself here since owns the endpoint and the state; this one is unreachable.
+        const owner = await recordedNonce(paths.record);
+        if (owner && owner !== recordNonce) { void close("superseded").finally(() => options.onShutdown?.()); return; }
         if (!isIdle()) { touchActivity(); return; }
-        const raw = await readFile(paths.record, "utf8").catch(() => null);
-        let recordOwned = false;
-        try { recordOwned = Boolean(raw && JSON.parse(raw).nonce === recordNonce); } catch {}
-        if (!recordOwned) { void close("record_removed").finally(() => options.onShutdown?.()); return; }
+        if (owner !== recordNonce) { void close("record_removed").finally(() => options.onShutdown?.()); return; }
         if (idleTtlMs > 0 && Date.now() - idleSince >= idleTtlMs) void close("idle_timeout").finally(() => options.onShutdown?.());
       }, checkMs);
       idleTimer.unref?.();
@@ -481,8 +479,9 @@ export async function startServer(options: { home?: string; python?: string; rep
       if (probe) clearInterval(probe);
       // The process always lets go of its endpoint, even when stopping the
       // service failed: a service nobody can stop is worse than a loud error.
+      // A superseded service leaves its runs and the store to the service that replaced it.
       try {
-        await service.stop();
+        if (reason !== "superseded") await service.stop();
       } finally {
         // Even failed service cleanup must join an in-flight host connection.
         await realManager.catch(() => {});
