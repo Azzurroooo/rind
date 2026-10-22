@@ -5,7 +5,6 @@ import {
   delegatedWaitingLine,
   errorLine,
   planUpdatedLine,
-  systemNoticeLine,
   turnCompletedLine,
   backgroundWaitingLine,
 } from "./rendering.js";
@@ -78,7 +77,7 @@ export function createEventController({
           pendingDelegations.clear();
           if (output.sessionDeleted) output.sessionDeleted(event.session_id);
           else state.sessionInfo.session_id = "";
-          output.log?.("This conversation was deleted. Your next message starts a new one.");
+          output.notify?.("This conversation was deleted. Your next message starts a new one.");
         }
         return;
       case "task_updated":
@@ -126,16 +125,17 @@ export function createEventController({
           const previous = imageNotices.get(session);
           if (!previous || previous.level !== level || images.some((path) => !previous.images.has(path))) {
             output.closeAssistant?.();
-            output.log?.(() => systemNoticeLine(String(decisions.image_notice), { level }));
+            output.notify?.(String(decisions.image_notice), { level });
           }
           imageNotices.set(session, { model, level, images: new Set([...(previous?.images || []), ...images]) });
         }
         if (output.handleContextBuilt?.(event)) {
           output.resetContextUsage?.();
         }
-        if (contextBuiltLine(event)) {
+        const trimmedNotice = contextBuiltLine(event);
+        if (trimmedNotice) {
           output.closeAssistant?.();
-          output.log?.(() => contextBuiltLine(event));
+          output.notify?.(trimmedNotice, { level: "warning" });
         }
         return;
       }
@@ -225,7 +225,7 @@ export function createEventController({
         output.clearCompactContext?.();
         output.settleTools?.();
         output.closeAssistant?.();
-        output.log?.(() => cancelledText());
+        output.notify?.(cancelledText(), { level: "warning" });
         resetTurnState();
         return;
       case "turn_completed":

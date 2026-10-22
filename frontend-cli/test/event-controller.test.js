@@ -55,13 +55,16 @@ test("delegated work shows a waiting line and a delivered result clears it", asy
   assert.match(lines.at(-1), /Worked for/, "once settled, the ordinary completion line returns");
 });
 
-test("image notices use normal output without changing the input buffer", async () => {
+test("image notices use notify without changing the input buffer", async () => {
   const state = { inputBuffer: "未发送内容", cursorIndex: 3 };
   const before = { ...state };
-  const lines = [];
-  const controller = createEventController({ state, output: { log: (line) => lines.push(line()) } });
-  await controller.handle({ event: { type: "context_built", decisions: { image_notice: "Images not sent: unsupported model." } } });
-  assert.deepEqual(lines, ["  · System: Images not sent: unsupported model."]);
+  const notices = [];
+  const controller = createEventController({
+    state,
+    output: { notify: (text, opts) => notices.push({ text, level: opts?.level ?? "info" }) },
+  });
+  await controller.handle({ event: { type: "context_built", decisions: { image_notice: "Images not sent: unsupported model.", image_notice_level: "warning" } } });
+  assert.deepEqual(notices, [{ text: "Images not sent: unsupported model.", level: "warning" }]);
   assert.deepEqual(state, before);
 });
 
@@ -222,7 +225,7 @@ test("background activity does not clear retry status; tool recovery stays worki
 test("image notices deduplicate by session, model, severity and newly seen images", async () => {
   const state = { sessionInfo: { model: "unknown", provider: "fake" } };
   const lines = [];
-  const controller = createEventController({ state, output: { log: (line) => lines.push(line()) } });
+  const controller = createEventController({ state, output: { notify: (text, opts) => lines.push({ text, level: opts?.level ?? "info" }) } });
   const send = (images, level = "info", session = "s1") => controller.handle({ session_id: session,
     event: { type: "context_built", decisions: { image_notice: "Image notice", image_notice_level: level, image_notice_images: images } } });
   await send(["a"]);
@@ -245,6 +248,39 @@ test("image notices deduplicate by session, model, severity and newly seen image
   state.sessionInfo.provider = "another";
   await send(["a"], "warning");
   assert.equal(lines.length, 6);
+});
+
+test("session_deleted, context_built truncation, and turn_cancelled emit system notices with expected levels", async () => {
+  const notices = [];
+  const state = { sessionInfo: { session_id: "s1" } };
+  const controller = createEventController({
+    state,
+    output: {
+      notify: (text, opts) => notices.push({ text, level: opts?.level ?? "info" }),
+      closeAssistant() {},
+    },
+  });
+
+  await controller.handle({
+    event: {
+      type: "context_built",
+      decisions: { rind_docs_truncated: true, rind_docs_truncated_scopes: ["user", "project"] },
+    },
+  });
+  assert.equal(notices.at(-1).level, "warning");
+  assert.match(notices.at(-1).text, /Context trimmed/);
+  assert.match(notices.at(-1).text, /RIND\.md: user, project/);
+
+  await controller.handle({ event: { type: "turn_cancelled" } });
+  assert.equal(notices.at(-1).level, "warning");
+  assert.match(notices.at(-1).text, /Interrupted/);
+
+  await controller.handle({ event: { type: "session_deleted", session_id: "s1" } });
+  assert.equal(state.sessionInfo.session_id, "");
+  assert.deepEqual(notices.at(-1), {
+    text: "This conversation was deleted. Your next message starts a new one.",
+    level: "info",
+  });
 });
 
 test("a settings change follows in every window showing the conversation", async () => {
