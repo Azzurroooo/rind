@@ -102,13 +102,12 @@
   accent-color: var(--accent);
 }
 
-/* Usage and Shortcuts dialogs keep their header/close button fixed */
+/* Usage dialog keeps its header/close button fixed */
 .usage-dialog {
   width: min(680px, calc(100vw - 32px));
   padding: 20px;
 }
-.usage-dialog #inspector-usage,
-.shortcuts-dialog .shortcut-table {
+.usage-dialog #inspector-usage {
   flex: 1;
   min-height: 0;
   overflow-y: auto;

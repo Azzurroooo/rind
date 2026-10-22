@@ -92,12 +92,345 @@ export function formatRemoteOutput(state, { heading = "", selectedAddress = "" }
   return lines.filter((line) => line !== undefined).join("\n");
 }
 
+function buildQrView(state, selectedAddress = "", notice = "") {
+  if (!state?.running) return null;
+  const primaryAddress =
+    selectedAddress && state.addresses?.includes(selectedAddress)
+      ? selectedAddress
+      : state.addresses?.[0] || `http://127.0.0.1:${state.port}`;
+  const pairingUrl = buildPairingUrl(state, primaryAddress);
+  const qrBlock = pairingUrl ? renderTerminalQr(pairingUrl, { margin: 2 }) : "";
+  const scopeLabel = state.scope === "lan" ? "Local network" : "This computer";
+  const clientLabel = `${state.clients} connected ${state.clients === 1 ? "device" : "devices"}`;
+  const alternates = (state.addresses || []).filter((addr) => addr !== primaryAddress);
+  return {
+    primaryAddress,
+    pairingUrl,
+    qrBlock,
+    scopeLabel,
+    clientLabel,
+    alternates,
+    accessCode: state.accessCode || "",
+    notice,
+  };
+}
+
+export function createRemoteMenuState({
+  initialState = STOPPED_STATE,
+  initialScope = "lan",
+  initialAddress = "",
+  onToggle = async () => initialState,
+  onScopeChange = async () => initialState,
+  onAddressChange = () => {},
+  onRotate = async () => initialState,
+} = {}) {
+  let state = { ...STOPPED_STATE, ...(initialState && typeof initialState === "object" ? initialState : {}) };
+  let preferredScope = state.running
+    ? state.scope === "loopback" ? "loopback" : "lan"
+    : initialScope === "loopback" ? "loopback" : "lan";
+  let selectedAddress = initialAddress || state.addresses?.[0] || "";
+  let level = "root";
+  let rootIndex = 0;
+  let subIndex = 0;
+  let busy = false;
+  let qrNotice = "";
+
+  function syncState(next, notice = "") {
+    if (next && typeof next === "object") {
+      state = { ...STOPPED_STATE, ...next };
+      if (state.running) {
+        preferredScope = state.scope === "loopback" ? "loopback" : "lan";
+        if (!selectedAddress || !state.addresses?.includes(selectedAddress)) {
+          selectedAddress = state.addresses?.[0] || "";
+        }
+      } else {
+        selectedAddress = "";
+        if (level === "qr" || level === "address") {
+          level = "root";
+        }
+      }
+    }
+    qrNotice = notice;
+    const maxRoot = Math.max(0, rootItems().length - 1);
+    if (rootIndex > maxRoot) rootIndex = maxRoot;
+  }
+
+  function activeAddress() {
+    if (!state.running) return "";
+    return selectedAddress && state.addresses?.includes(selectedAddress)
+      ? selectedAddress
+      : state.addresses?.[0] || `http://127.0.0.1:${state.port}`;
+  }
+
+  function scopeLabel(scope = state.running ? state.scope : preferredScope) {
+    return scope === "loopback" ? "This computer" : "Local network";
+  }
+
+  function rootItems() {
+    const running = Boolean(state.running);
+    const clientLabel = `${state.clients} connected ${state.clients === 1 ? "device" : "devices"}`;
+    const items = [
+      {
+        id: "toggle",
+        label: "Remote access",
+        value: running ? `On · ${clientLabel}` : "Off",
+        description: running
+          ? "Press space or enter to turn off remote access"
+          : `Press space or enter to turn on (${scopeLabel(preferredScope)}) and show QR code`,
+      },
+    ];
+    if (running) {
+      items.push({
+        id: "qr",
+        label: "QR code & sign-in link",
+        value: `${activeAddress()} ›`,
+        description: "Display pairing QR code and connection details (Esc to close)",
+      });
+    }
+    items.push({
+      id: "scope",
+      label: "Network scope",
+      value: `${scopeLabel()} ›`,
+      description:
+        (running ? state.scope : preferredScope) === "loopback"
+          ? "127.0.0.1 only on this computer"
+          : "Wi-Fi / LAN devices and this computer",
+    });
+    if (running && Array.isArray(state.addresses) && state.addresses.length > 1) {
+      items.push({
+        id: "address",
+        label: "Address",
+        value: `${activeAddress()} ›`,
+        description: "Choose the address encoded in the QR code",
+      });
+    }
+    if (running) {
+      items.push({
+        id: "rotate",
+        label: "Rotate access code",
+        value: "rotate ›",
+        description: "Generate a new code and disconnect connected devices",
+      });
+    }
+    return items;
+  }
+
+  function scopeItems() {
+    const current = state.running ? state.scope : preferredScope;
+    return [
+      {
+        name: "lan",
+        label: "Local network",
+        description: "Share on Wi-Fi / LAN and this computer",
+        current: current === "lan",
+      },
+      {
+        name: "loopback",
+        label: "This computer",
+        description: "Restrict access to 127.0.0.1 only",
+        current: current === "loopback",
+      },
+    ];
+  }
+
+  function addressItems() {
+    const current = activeAddress();
+    return (state.addresses || []).map((addr) => ({
+      name: addr,
+      label: addr,
+      description: addr.startsWith("http://127.0.0.1") ? "Loopback interface" : "LAN interface",
+      current: addr === current,
+    }));
+  }
+
+  async function handleKey(key) {
+    if (busy) return null;
+    const rawKey = String(key?.name || key?.text || "").toLowerCase();
+
+    if (level === "qr") {
+      if (key?.name === "escape") {
+        return "close";
+      }
+      if (key?.name === "left" || key?.name === "backspace" || key?.name === "enter" || key?.name === "return") {
+        qrNotice = "";
+        level = "root";
+        const idx = rootItems().findIndex((item) => item.id === "qr");
+        if (idx >= 0) rootIndex = idx;
+        return "redraw";
+      }
+      if (rawKey === "r") {
+        busy = true;
+        try {
+          const next = await onRotate();
+          syncState(next, "Access code rotated. Previous devices were disconnected.");
+        } finally {
+          busy = false;
+        }
+        return "redraw";
+      }
+      return null;
+    }
+
+    if (level === "scope") {
+      const items = scopeItems();
+      if (key?.name === "up") {
+        subIndex = (subIndex - 1 + items.length) % items.length;
+        return "redraw";
+      }
+      if (key?.name === "down") {
+        subIndex = (subIndex + 1) % items.length;
+        return "redraw";
+      }
+      if (key?.name === "escape" || key?.name === "left" || key?.name === "backspace") {
+        level = "root";
+        const idx = rootItems().findIndex((item) => item.id === "scope");
+        if (idx >= 0) rootIndex = idx;
+        return "redraw";
+      }
+      if (key?.name === "enter" || key?.name === "return" || key?.text === " ") {
+        const picked = items[subIndex]?.name || "lan";
+        preferredScope = picked;
+        busy = true;
+        try {
+          const next = await onScopeChange(picked);
+          syncState(next);
+          level = "root";
+          const idx = rootItems().findIndex((item) => item.id === "scope");
+          if (idx >= 0) rootIndex = idx;
+        } finally {
+          busy = false;
+        }
+        return "redraw";
+      }
+      return null;
+    }
+
+    if (level === "address") {
+      const items = addressItems();
+      if (!items.length) {
+        level = "root";
+        return "redraw";
+      }
+      if (key?.name === "up") {
+        subIndex = (subIndex - 1 + items.length) % items.length;
+        return "redraw";
+      }
+      if (key?.name === "down") {
+        subIndex = (subIndex + 1) % items.length;
+        return "redraw";
+      }
+      if (key?.name === "escape" || key?.name === "left" || key?.name === "backspace") {
+        level = "root";
+        const idx = rootItems().findIndex((item) => item.id === "address");
+        if (idx >= 0) rootIndex = idx;
+        return "redraw";
+      }
+      if (key?.name === "enter" || key?.name === "return" || key?.text === " ") {
+        const picked = items[subIndex]?.name || "";
+        if (picked) {
+          selectedAddress = picked;
+          onAddressChange(picked);
+        }
+        level = "qr";
+        return "redraw";
+      }
+      return null;
+    }
+
+    const items = rootItems();
+    const count = items.length;
+    if (!count) return "close";
+    if (key?.name === "up") {
+      rootIndex = (rootIndex - 1 + count) % count;
+      return "redraw";
+    }
+    if (key?.name === "down") {
+      rootIndex = (rootIndex + 1) % count;
+      return "redraw";
+    }
+    if (key?.name === "escape") {
+      return "close";
+    }
+    if (key?.name === "enter" || key?.name === "return" || key?.text === " " || key?.name === "right") {
+      const target = items[rootIndex]?.id;
+      if (target === "toggle") {
+        if (key?.name === "right" && state.running) {
+          qrNotice = "";
+          level = "qr";
+          return "redraw";
+        }
+        busy = true;
+        try {
+          const nextRunning = !state.running;
+          const next = await onToggle(nextRunning, preferredScope);
+          syncState(next);
+          if (state.running) {
+            level = "qr";
+          }
+        } finally {
+          busy = false;
+        }
+        return "redraw";
+      }
+      if (target === "qr") {
+        qrNotice = "";
+        level = "qr";
+        return "redraw";
+      }
+      if (target === "scope") {
+        const sItems = scopeItems();
+        subIndex = Math.max(0, sItems.findIndex((item) => item.current));
+        level = "scope";
+        return "redraw";
+      }
+      if (target === "address") {
+        const aItems = addressItems();
+        subIndex = Math.max(0, aItems.findIndex((item) => item.current));
+        level = "address";
+        return "redraw";
+      }
+      if (target === "rotate") {
+        if (key?.name === "right") return null;
+        busy = true;
+        try {
+          const next = await onRotate();
+          syncState(next, "Access code rotated. Previous devices were disconnected.");
+          level = "qr";
+        } finally {
+          busy = false;
+        }
+        return "redraw";
+      }
+    }
+    return null;
+  }
+
+  return {
+    level: () => level,
+    items: () => {
+      if (level === "scope") return scopeItems();
+      if (level === "address") return addressItems();
+      return rootItems();
+    },
+    selectedIndex: () => {
+      if (level === "scope" || level === "address") return subIndex;
+      return rootIndex;
+    },
+    qrView: () => buildQrView(state, selectedAddress, qrNotice),
+    state: () => state,
+    selectedAddress: () => selectedAddress,
+    updateState: (next) => syncState(next),
+    handleKey,
+  };
+}
+
 export function createCliRemoteController({
   runtimeClient,
   rawClient,
   sessionState,
   log = () => {},
   redraw = () => {},
+  askRemoteMenu = null,
   askChoice = null,
   onSessionRestored = () => {},
   cwd = process.cwd(),
@@ -118,6 +451,8 @@ export function createCliRemoteController({
   let localHost = null;
   let sharedSupported = null;
   let selectedAddress = "";
+  let preferredScope = "lan";
+  let activeMenuState = null;
 
   const currentWorkspace = () =>
     String(sessionState?.info?.workspace_root || sessionState?.info?.cwd || cwd || process.cwd());
@@ -127,9 +462,13 @@ export function createCliRemoteController({
   function applyState(state) {
     cachedState = state && typeof state === "object" ? { ...STOPPED_STATE, ...state } : { ...STOPPED_STATE };
     const running = Boolean(cachedState.running);
+    if (running) {
+      preferredScope = cachedState.scope === "loopback" ? "loopback" : "lan";
+    }
     if (sessionState?.info && Boolean(sessionState.info.remote_running) !== running) {
       sessionState.info = { ...sessionState.info, remote_running: running };
     }
+    activeMenuState?.updateState(cachedState);
     redraw?.();
     return cachedState;
   }
@@ -272,7 +611,7 @@ export function createCliRemoteController({
     }
   }
 
-  async function startWithScope(scope) {
+  async function startRemote(scope, { printOutput = false } = {}) {
     const next = await requestRemote("remote/start", {
       scope,
       ...(webRoot ? { webRoot: resolveWebRoot(webRoot) } : {}),
@@ -281,13 +620,57 @@ export function createCliRemoteController({
     if (!selectedAddress || !next.addresses.includes(selectedAddress)) {
       selectedAddress = next.addresses[0] || "";
     }
-    log(formatRemoteOutput(next, { selectedAddress }));
+    if (printOutput) {
+      log(formatRemoteOutput(next, { selectedAddress }));
+    }
     return next;
   }
 
   async function handleCommand() {
     await registerSharedWorkspace(rindHome, currentWorkspace(), { setActive: true }).catch(() => {});
     let current = await requestRemote("remote/get");
+
+    if (typeof askRemoteMenu === "function") {
+      const menuState = createRemoteMenuState({
+        initialState: current,
+        initialScope: preferredScope,
+        initialAddress: selectedAddress,
+        onToggle: async (enable, scope) => {
+          if (enable) {
+            preferredScope = scope === "loopback" ? "loopback" : "lan";
+            current = await startRemote(preferredScope, { printOutput: false });
+            return current;
+          }
+          current = await requestRemote("remote/stop");
+          selectedAddress = "";
+          return current;
+        },
+        onScopeChange: async (nextScope) => {
+          preferredScope = nextScope === "loopback" ? "loopback" : "lan";
+          if (current.running && current.scope !== preferredScope) {
+            selectedAddress = "";
+            current = await startRemote(preferredScope, { printOutput: false });
+          }
+          return current;
+        },
+        onAddressChange: (addr) => {
+          selectedAddress = addr;
+        },
+        onRotate: async () => {
+          current = await requestRemote("remote/rotate");
+          return current;
+        },
+      });
+      activeMenuState = menuState;
+      try {
+        await askRemoteMenu(menuState);
+      } finally {
+        if (activeMenuState === menuState) {
+          activeMenuState = null;
+        }
+      }
+      return current;
+    }
 
     if (!current.running) {
       const choice = await askChoice?.({
@@ -302,7 +685,7 @@ export function createCliRemoteController({
           ? "lan"
           : "";
       if (!scope) return current;
-      return startWithScope(scope);
+      return startRemote(scope, { printOutput: true });
     }
 
     while (true) {
@@ -342,7 +725,7 @@ export function createCliRemoteController({
       if (matchesChoice(choice, switchScopeOption)) {
         const nextScope = current.scope === "lan" ? "loopback" : "lan";
         selectedAddress = "";
-        return startWithScope(nextScope);
+        return startRemote(nextScope, { printOutput: true });
       }
       if (current.addresses.length > 1 && matchesChoice(choice, switchAddressOption)) {
         const picked = await askChoice?.({
@@ -393,3 +776,4 @@ export function createCliRemoteController({
     },
   };
 }
+

@@ -60,6 +60,7 @@ import {
   authSecretFrame,
   modelMenuText,
   settingsMenuText,
+  remoteMenuText,
   questionMenuFrame,
   sessionMenuText,
   promptPlaceholderText,
@@ -381,7 +382,9 @@ const runtimeController = createCliRuntimeController({
 });
 remoteController = createCliRemoteController({
   runtimeClient: runtimeController,
-  rawClient: runtimeClient, askChoice: (...args) => inputActions.askChoice(...args),
+  rawClient: runtimeClient,
+  askRemoteMenu: tui ? (...args) => inputActions.askRemoteMenu(...args) : null,
+  askChoice: (...args) => inputActions.askChoice(...args),
   sessionState,
   log: logOutput,
   redraw: redrawInput,
@@ -897,7 +900,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   if (!session) {
     return null;
   }
-  const choiceMenu = ["model", "settings", "sessions", "fork", "choice-dialog"].includes(session.mode);
+  const choiceMenu = ["model", "settings", "remote", "sessions", "fork", "choice-dialog"].includes(session.mode);
   if (session.mode === "prompt" && session.menuState) {
     session.menuState.setInput(session.editor.input());
   }
@@ -960,6 +963,15 @@ function composeFrame(width = process.stdout.columns || 80) {
         session.settingsState.selectedIndex(),
         session.settingsState.level(),
       ).trimEnd(),
+    };
+  }
+  if (session.mode === "remote") {
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
+      inputText: session.inputText,
+      cursor: { line: 0, column: session.inputText.length },
+      menuText: remoteMenuText(session.remoteState, width).trimEnd(),
     };
   }
   if (session.mode === "question") {

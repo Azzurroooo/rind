@@ -1148,3 +1148,158 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     tui.stop();
   }
 });
+
+test("/remote transient dropdown menu E2E in headless virtual terminal: toggle switch, QR submenu, and Esc dismissal leave zero transcript residue", async () => {
+  const { createRemoteMenuState, decodeTerminalQr, buildPairingUrl } = await import("../lib/remote.js");
+  const { remoteMenuText } = await import("../lib/rendering.js");
+  const { createCommandController } = await import("../lib/command-controller.js");
+  const { createCliInputActions } = await import("../lib/cli-input-actions.js");
+  const virtual = createVirtualOutput({ columns: 96, rows: 36 });
+  const input = createVirtualInput();
+  const tui = createTui({
+    input,
+    output: virtual.output,
+    renderIntervalMs: 0,
+    setTimeout: (fn) => setTimeout(fn, 0),
+    clearTimeout,
+  });
+  const state = createCliState();
+  state.runtime.status = "ready";
+  state.session.info = {
+    session_id: "s-remote-vt",
+    model: "gpt-5.4",
+    reasoning_effort: "medium",
+    cwd: "/workspace/proj",
+  };
+  const transcriptContainer = createTranscript();
+  const output = createCliOutputController({
+    state,
+    terminalUi: tui,
+    transcript: transcriptContainer,
+  });
+  const composerArea = new ComposerArea((width) => {
+    const session = state.input.session;
+    if (!session) return null;
+    if (session.mode === "remote") {
+      return {
+        showCaret: false,
+        prompt: output.mainPromptText(width),
+        inputText: session.inputText,
+        cursor: { line: 0, column: session.inputText.length },
+        menuText: remoteMenuText(session.remoteState, width).trimEnd(),
+      };
+    }
+    return {
+      showCaret: true,
+      prompt: output.mainPromptText(width),
+      inputText: session.editor?.input?.() || "",
+      cursor: session.editor?.cursorPosition?.() || { line: 0, column: 0 },
+      placeholder: promptPlaceholderText(),
+      menuText: "",
+    };
+  });
+  tui.addChild(transcriptContainer);
+  tui.addChild(composerArea);
+
+  let remoteRunning = false;
+  let remoteCode = "init-secret-code-1234567890abcdef";
+  const currentRemoteState = () => ({
+    running: remoteRunning,
+    scope: "lan",
+    port: 8766,
+    addresses: remoteRunning ? ["http://192.168.1.88:8766"] : [],
+    accessCode: remoteRunning ? remoteCode : "",
+    clients: 0,
+  });
+
+  let inputActions;
+  const commandController = createCommandController({
+    request: async () => ({}),
+    turn: { submit() {} },
+    input: {
+      isTerminal: true,
+      runRemote: async () => {
+        const menuState = createRemoteMenuState({
+          initialState: currentRemoteState(),
+          initialScope: "lan",
+          onToggle: async (enable) => {
+            remoteRunning = Boolean(enable);
+            state.session.info = { ...state.session.info, remote_running: remoteRunning };
+            return currentRemoteState();
+          },
+          onRotate: async () => {
+            remoteCode = "rotated-secret-code-9876543210fedcba";
+            return currentRemoteState();
+          },
+        });
+        await inputActions.askRemoteMenu(menuState);
+      },
+    },
+    state: { slashCommands: [] },
+    output: { log: output.log },
+  });
+
+  inputActions = createCliInputActions({
+    state,
+    request: async () => ({}),
+    output,
+    getTurnController: () => ({}),
+    getCommandController: () => commandController,
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    getEffortLevels: async () => [],
+    pausePrompt: () => {},
+    resumePrompt: () => {},
+    handleSigint: () => {},
+  });
+
+  tui.start();
+  try {
+    output.writeUserInput("Check remote menu");
+    const promptPromise = inputActions.ask(output.mainPromptText, promptPlaceholderText());
+    await settle(virtual);
+
+    // 1. User types /remote and presses Enter
+    for (const ch of "/remote") inputActions.handleTerminalInput(ch);
+    inputActions.handleTerminalInput("\r");
+    const submitted = await promptPromise;
+    assert.equal(submitted, "/remote");
+
+    const remoteDone = commandController.handle(submitted);
+    await settle(virtual);
+    let screen = virtual.getViewport().join("\n");
+    assert.match(screen, /› Remote access\s+Off/);
+    assert.match(screen, /· Network scope\s+Local network ›/);
+
+    // 2. Toggle Remote access On with Space -> transitions to transient QR view in composer
+    inputActions.handleTerminalInput(" ");
+    await settle(virtual);
+    screen = virtual.getViewport().join("\n");
+    assert.match(screen, /gpt-5\.4 · medium · \/workspace\/proj · ⚯/);
+    assert.match(screen, /Remote access · QR code \(Local network · 0 connected devices\)/);
+    assert.equal(
+      decodeTerminalQr(screen),
+      buildPairingUrl(currentRemoteState()),
+      "QR code in virtual terminal viewport must decode to exact pairing URL",
+    );
+
+    // 3. Press Esc to dismiss the QR display -> QR code and menu must be completely erased from viewport and scrollback!
+    const nextPromptPromise = remoteDone.then(() =>
+      inputActions.ask(output.mainPromptText, promptPlaceholderText()),
+    );
+    inputActions.handleTerminalInput("\x1b");
+    await settle(virtual);
+    screen = virtual.getViewport().join("\n");
+    const scrollback = virtual.getScrollBuffer().join("\n");
+    assert.doesNotMatch(screen, /[█▀▄]/, "QR code blocks must be erased from viewport after Esc");
+    assert.doesNotMatch(scrollback, /[█▀▄]/, "QR code blocks must not remain in terminal scrollback after Esc");
+    assert.doesNotMatch(screen, /Sign-in URL:/, "Sign-in URL must be erased after Esc");
+    assert.match(screen, /gpt-5\.4 · medium · \/workspace\/proj · ⚯/, "⚯ indicator remains in prompt header while remote is on");
+    assert.match(screen, /Check remote menu/, "prior conversation transcript remains intact");
+    inputActions.cancel();
+    await nextPromptPromise;
+  } finally {
+    tui.stop();
+  }
+});
+

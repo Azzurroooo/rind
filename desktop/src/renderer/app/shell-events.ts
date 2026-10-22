@@ -1,4 +1,4 @@
-import { requiredElement, settingsNotifications, shortcutsDialog, sidebarResizeHandle, sidebarToggle, topbarUpdateButton } from "./dom.ts"
+import { requiredElement, settingsNotifications, sidebarResizeHandle, sidebarToggle, topbarUpdateButton } from "./dom.ts"
 import { openPalette } from "./palette-ui.ts"
 import { runAction } from "./runtime.ts"
 import { addProject, startNewChat } from "./sessions.ts"
@@ -29,15 +29,6 @@ export function bindShellEvents(): void {
   })
 
   document.getElementById("toggle-theme")?.addEventListener("click", () => setTheme(nextTheme()))
-
-  document.getElementById("open-shortcuts")?.addEventListener("click", () => {
-    state.shortcutsOpen = true
-    render()
-  })
-
-  requiredElement("close-shortcuts").addEventListener("click", () => { state.shortcutsOpen = false; render() })
-
-  shortcutsDialog.addEventListener("cancel", () => { state.shortcutsOpen = false; render() })
 
   settingsNotifications.addEventListener("change", () => {
     const enabled = settingsNotifications.checked

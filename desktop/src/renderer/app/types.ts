@@ -113,7 +113,6 @@ export type AppState = {
   paletteOpen: boolean
   paletteQuery: string
   paletteActiveIndex: number
-  shortcutsOpen: boolean
   lastPrompts: Record<string, string>
   notice: string
   agentsSnapshot: AgentsSnapshotData

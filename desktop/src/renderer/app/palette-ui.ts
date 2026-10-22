@@ -40,7 +40,7 @@ export function paletteCommands(): PaletteCommand[] {
     { id: "theme-dark", title: "Theme: dark", detail: "Dark theme", run: () => setTheme("dark") },
     { id: "theme-light", title: "Theme: light", detail: "Light theme", run: () => setTheme("light") },
     { id: "theme-system", title: "Theme: system", detail: "Follow the OS theme", run: () => setTheme("system") },
-    { id: "shortcuts", title: "Help: keyboard shortcuts", detail: "Keyboard shortcuts", shortcut: "?", run: () => { state.shortcutsOpen = true; render() } },
+    { id: "shortcuts", title: "Help: keyboard shortcuts", detail: "View keyboard shortcuts in Preferences", run: () => openSettings("preferences") },
   ]
   if (state.viewedSessionId && !runtimeTurnActive()) {
     commands.push({ id: "delete-current", title: `Delete session: ${clipLine(sessionTitle.textContent || state.viewedSessionId, 32)}`, detail: state.viewedSessionId, run: () => runAction(() => deleteSessionRequest(state.viewedSessionId)) })

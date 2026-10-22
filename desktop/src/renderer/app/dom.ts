@@ -1,6 +1,6 @@
 import brandMarkUrl from "../assets/brand-mark.svg"
 import { composerRegionMarkup } from "../composer-region.ts"
-import { ArrowDown, Bell, ChartNoAxesColumn, Ellipsis, Keyboard, KeyRound, ListTodo, Maximize2, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
+import { ArrowDown, Bell, ChartNoAxesColumn, Ellipsis, KeyRound, ListTodo, Maximize2, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
 import { INSPECTOR_TAB_LABELS, INSPECTOR_TABS } from "../inspector-model.ts"
 import { remoteAccessMarkup } from "../remote-access.ts"
 import { escapeHtml } from "./html.ts"
@@ -30,7 +30,6 @@ appRoot.innerHTML = `
         <button id="open-remote" type="button" class="icon-button topbar-button" data-tooltip="Remote access" aria-label="Remote access">${renderIcon(MonitorSmartphone)}</button>
         <button id="toggle-theme" type="button" class="icon-button topbar-button" data-tooltip="Switch theme" aria-label="Switch theme">${renderIcon(SunMoon)}</button>
         <button id="toggle-sidebar" type="button" class="icon-button topbar-button" data-tooltip="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar (Ctrl+B)" aria-expanded="true">${renderIcon(PanelLeft)}</button>
-        <button id="open-shortcuts" type="button" class="icon-button topbar-button" data-tooltip="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts (?)">${renderIcon(Keyboard)}</button>
         <button id="open-settings" type="button" class="icon-button topbar-button" data-tooltip="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>
       </div>
     </header>
@@ -253,12 +252,6 @@ appRoot.innerHTML = `
         <div class="settings-actions"><button id="auth-prompt-cancel" type="button" class="ghost-button">Cancel</button><button id="auth-prompt-submit" type="submit" class="primary-button">Continue</button></div>
       </form>
     </dialog>
-    <dialog id="shortcuts-dialog" class="settings-dialog shortcuts-dialog" aria-labelledby="shortcuts-title">
-      <form method="dialog">
-        <div class="settings-heading"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button id="close-shortcuts" type="button" class="icon-button" aria-label="Close shortcuts">${renderIcon(X)}</button></div>
-        <div class="shortcut-table panel-scroll" id="shortcut-table"></div>
-      </form>
-    </dialog>
     <div id="command-palette" class="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
       <div class="command-palette-box">
         <input id="palette-input" type="text" placeholder="Type a command…" aria-label="Search commands" autocomplete="off" />
@@ -306,8 +299,6 @@ export const sessionSearchInput = requiredElement<HTMLInputElement>("session-sea
 export const paletteOverlay = requiredElement("command-palette")
 export const paletteInput = requiredElement<HTMLInputElement>("palette-input")
 export const paletteList = requiredElement("palette-list")
-export const shortcutsDialog = requiredElement<HTMLDialogElement>("shortcuts-dialog")
-export const shortcutTable = requiredElement("shortcut-table")
 export const messageStream = requiredElement("message-stream")
 export const jumpLatest = requiredElement<HTMLButtonElement>("jump-latest")
 export const pendingInputDock = requiredElement("pending-input-dock")

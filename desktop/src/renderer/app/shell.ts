@@ -6,8 +6,7 @@ import { currentSessionAgentContext, renderAgentsUI } from "./agents-ui.ts"
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
 import { renderSlashCommandMenu } from "./composer.ts"
-import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, prompt, retry, send, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu, steer, topbarUpdateButton } from "./dom.ts"
-import { escapeHtml } from "./html.ts"
+import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, prompt, retry, send, sidebar, sidebarToggle, slashCommandMenu, steer, topbarUpdateButton } from "./dom.ts"
 import { renderInspector } from "./inspector.ts"
 import { renderPalette } from "./palette-ui.ts"
 import { discardPendingInput, promoteFollowUp, recallPendingInput } from "./pending-inputs.ts"
@@ -65,7 +64,6 @@ export function render() {
   renderSettings()
   renderTheme()
   renderTopbarUpdate()
-  renderShortcuts()
   syncWorkingTimer()
 }
 
@@ -175,16 +173,6 @@ export function setTheme(theme: DesktopTheme) {
   })
 }
 
-export function renderShortcuts() {
-  if (state.shortcutsOpen && !shortcutsDialog.open) shortcutsDialog.showModal()
-  if (!state.shortcutsOpen && shortcutsDialog.open) shortcutsDialog.close()
-  if (shortcutTable.dataset.rendered) return
-  shortcutTable.dataset.rendered = "1"
-  shortcutTable.innerHTML = shortcutRows.map(([combo, label]) => `
-    <div class="shortcut-row"><span>${escapeHtml(label)}</span><code>${escapeHtml(combo)}</code></div>
-  `).join("")
-}
-
 export const shortcutRows: Array<[string, string]> = [
   ["Ctrl+K", "Command palette"],
   ["Ctrl+N", "New chat"],
@@ -197,7 +185,6 @@ export const shortcutRows: Array<[string, string]> = [
   ["Alt+Enter (running)", "Steer the running turn"],
   ["Up (empty composer)", "Recall the last prompt"],
   ["Esc", "Close menus / stop turn / focus composer"],
-  ["?", "This cheat sheet"],
 ]
 
 export function runtimeStatusLabel(status: RuntimeSnapshot["status"]) {

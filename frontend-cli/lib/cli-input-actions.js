@@ -349,6 +349,10 @@ export function createCliInputActions({
       handleSettingsInput(session, event);
       return;
     }
+    if (session.mode === "remote") {
+      void handleRemoteInput(session, event);
+      return;
+    }
     if (session.mode === "question") {
       handleQuestionInput(session, event);
       return;
@@ -413,7 +417,7 @@ export function createCliInputActions({
       return;
     }
     const session = state.input.session;
-    if (!session || session.mode === "model" || session.mode === "settings" || session.mode === "sessions" || session.mode === "fork" || session.mode === "context-board") {
+    if (!session || session.mode === "model" || session.mode === "settings" || session.mode === "remote" || session.mode === "sessions" || session.mode === "fork" || session.mode === "context-board") {
       return;
     }
     if (session.mode === "question" && !session.questionState.isEditing()) {
@@ -473,6 +477,35 @@ export function createCliInputActions({
       return;
     }
     if (action === "redraw") {
+      output.redraw();
+    }
+  }
+
+  function askRemoteMenu(remoteState) {
+    return new Promise((resolve) => {
+      const session = { mode: "remote", inputText: "/remote", remoteState, resolve };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, null, false);
+      output.redraw(true);
+    });
+  }
+
+  async function handleRemoteInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (modified) return;
+    try {
+      const action = await session.remoteState.handleKey(key);
+      if (state.input.session !== session) return;
+      if (action === "close") {
+        completeTtyInput(session, session.remoteState.state(), false);
+        return;
+      }
+      if (action === "redraw") {
+        output.redraw();
+      }
+    } catch (error) {
+      output.writeError(`${error instanceof Error ? error.message : String(error)}\n`);
       output.redraw();
     }
   }
@@ -779,6 +812,7 @@ export function createCliInputActions({
     askModelMenu,
     askEffortMenu,
     askSettingsMenu,
+    askRemoteMenu,
     askSessionMenu,
     askForkPointMenu,
     askContextBoard,

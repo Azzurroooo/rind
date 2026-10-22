@@ -86,7 +86,6 @@ export const state: AppState = {
   paletteOpen: false,
   paletteQuery: "",
   paletteActiveIndex: 0,
-  shortcutsOpen: false,
   lastPrompts: {},
   notice: "",
   agentsSnapshot: emptyAgentsSnapshot(),

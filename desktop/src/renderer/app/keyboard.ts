@@ -16,12 +16,6 @@ export function modifierPressed(event: KeyboardEvent) {
   return event.ctrlKey || event.metaKey
 }
 
-export function isTypingTarget(event: KeyboardEvent) {
-  const target = event.target as HTMLElement | null
-  if (!target) return false
-  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable
-}
-
 export function quickSwitchSessions() {
   return knownSessions().filter((item) => item.id !== state.viewedSessionId).slice(0, 9)
 }
@@ -70,27 +64,12 @@ export const keyBindings: KeyBinding[] = [
     },
   },
   {
-    id: "cheat-sheet",
-    matches: (event) => event.key === "?" && !modifierPressed(event) && !isTypingTarget(event),
-    run: (event) => {
-      event.preventDefault()
-      state.shortcutsOpen = !state.shortcutsOpen
-      render()
-    },
-  },
-  {
     id: "escape-chain",
     matches: (event) => event.key === "Escape",
     run: (event) => {
       if (state.paletteOpen) {
         event.preventDefault()
         closePalette()
-        return
-      }
-      if (state.shortcutsOpen) {
-        event.preventDefault()
-        state.shortcutsOpen = false
-        render()
         return
       }
       if (state.slashMenuOpen) {
@@ -142,7 +121,7 @@ export const keyBindings: KeyBinding[] = [
         render()
         return
       }
-      if (state.settingsOpen || state.shortcutsOpen) return
+      if (state.settingsOpen) return
       // Esc with nothing open: interrupt the active turn, else refocus the
       // composer ("stop" semantics, matching the web surface).
       if (runtimeTurnActive() && !state.settingsOpen) {

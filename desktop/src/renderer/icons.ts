@@ -36,7 +36,6 @@ export {
   GitBranch,
   Hand,
   Inbox,
-  Keyboard,
   KeyRound,
   Layers,
   ListTodo,

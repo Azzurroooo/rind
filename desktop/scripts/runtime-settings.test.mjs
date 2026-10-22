@@ -213,4 +213,12 @@ test("desktop settings close button is pinned, General locks Global Default Conf
       !cssSource.includes("max-height: 220px;"),
     "Settings and Preferences shortcuts must use the unified thin sidebar scrollbar without a nested 220px scrollbar",
   )
+  assert.ok(
+    !domSource.includes('id="open-shortcuts"') &&
+      !domSource.includes('id="shortcuts-dialog"') &&
+      !domSource.includes('id="shortcut-list"') &&
+      domSource.includes("Keyboard Shortcuts") &&
+      domSource.includes('id="settings-shortcuts-list"'),
+    "Top-right Keyboard Shortcuts icon button and standalone modal must be removed while keeping Keyboard Shortcuts in Settings -> Preferences",
+  )
 })

@@ -776,6 +776,78 @@ export function settingsMenuText(items, selectedIndex = 0, level = "root") {
   return `${lines.join("\n")}\n`;
 }
 
+export function remoteMenuText(remoteState, width = process.stdout.columns) {
+  if (!remoteState) return "";
+  const level = remoteState.level();
+  if (level === "qr") {
+    const qrView = remoteState.qrView();
+    if (!qrView) return "";
+    const lines = [
+      dim(`  Remote access · QR code (${qrView.scopeLabel} · ${qrView.clientLabel})`),
+    ];
+    if (qrView.notice) {
+      lines.push(`  ${accent(qrView.notice)}`);
+    }
+    if (qrView.qrBlock) {
+      lines.push("");
+      for (const qrLine of qrView.qrBlock.split("\n")) {
+        lines.push(`  ${qrLine}`);
+      }
+      lines.push("");
+    }
+    lines.push(`  ${dim("Sign-in URL:")} ${accent(qrView.pairingUrl)}`);
+    lines.push(`  ${dim("Address:")}     ${qrView.primaryAddress}`);
+    if (qrView.alternates.length > 0) {
+      lines.push(`  ${dim("Alternates:")}  ${dim(qrView.alternates.join(", "))}`);
+    }
+    lines.push(`  ${dim("Access code:")} ${bold(qrView.accessCode)}`);
+    lines.push(dim("    r rotate code · ← back · esc close"));
+    return `${lines.join("\n")}\n`;
+  }
+  const items = remoteState.items();
+  const selectedIndex = remoteState.selectedIndex();
+  if (level === "scope" || level === "address") {
+    const visible = menuWindow(items, selectedIndex);
+    if (!visible.items.length) return "";
+    const title = level === "scope" ? "Remote access · Network scope" : "Remote access · Address";
+    const lines = [dim(`  ${title}`)];
+    const labelWidth = Math.max(12, ...items.map((item) => visibleLength(clipSingleLine(item?.label || item?.name, 36))));
+    const descWidth = Math.max(16, ...items.map((item) => visibleLength(clipSingleLine(item?.description, 56))));
+    for (const [index, item] of visible.items.entries()) {
+      const active = index === visible.activeIndex;
+      const marker = active ? accent("›") : dim("·");
+      const label = padRight(clipSingleLine(item?.label || item?.name, 36), labelWidth);
+      const name = active ? bold(label) : dim(label);
+      const rawDesc = clipSingleLine(item?.description, 56);
+      const desc = rawDesc ? dim(padRight(rawDesc, descWidth)) : "";
+      const suffix = item?.current ? dim("current") : "";
+      lines.push(`  ${marker} ${name}${desc ? `  ${desc}` : ""}${suffix ? `  ${suffix}` : ""}`.trimEnd());
+    }
+    lines.push(dim("    ↑↓ select · enter apply · esc back"));
+    return `${lines.join("\n")}\n`;
+  }
+  if (!items.length) return "";
+  const labelWidth = Math.max(18, ...items.map((item) => visibleLength(item.label)));
+  const valueWidth = Math.max(11, ...items.map((item) => visibleLength(item.value || "")));
+  const lines = [dim("  Remote access")];
+  const columns = Number(width);
+  const contentWidth = Number.isFinite(columns) && columns > 0 ? Math.max(28, Math.min(96, columns - 6)) : slashContentWidth();
+  const descWidth = Math.max(18, contentWidth - labelWidth - valueWidth - 10);
+  for (const [index, item] of items.entries()) {
+    const active = index === selectedIndex;
+    const marker = active ? accent("›") : dim("·");
+    const label = padRight(item.label, labelWidth);
+    const name = active ? bold(label) : dim(label);
+    const rawValue = String(item.value || "");
+    const paddedValue = padRight(rawValue, valueWidth);
+    const value = active ? accent(paddedValue) : dim(paddedValue);
+    const description = item.description ? `  ${dim(clipSingleLine(item.description, descWidth))}` : "";
+    lines.push(`  ${marker} ${name}  ${value}${description}`);
+  }
+  lines.push(dim("    ↑↓ select · space/enter toggle or open · esc close"));
+  return `${lines.join("\n")}\n`;
+}
+
 export function taskMonitorTabs(_page = "background", backgroundCount = 0) {
   return `${bold(accent("› Background"))} ${dim(`[${Math.max(0, Number(backgroundCount) || 0)}]`)}`;
 }
