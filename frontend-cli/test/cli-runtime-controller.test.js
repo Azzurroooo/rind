@@ -48,6 +48,7 @@ function createHarness({
   const notices = [];
   let cleared = 0;
   const logs = [];
+  const levels = [];
   const restored = [];
   const client = {
     startCount: 0,
@@ -149,10 +150,13 @@ function createHarness({
     refreshInputState() {},
     updateGoalState() {},
     log: (value) => logs.push(typeof value === "function" ? value() : value),
-    writeError() {},
+    notify: (text, opts) => {
+      logs.push(text);
+      levels.push(opts?.level ?? "info");
+    },
     redraw() {},
   });
-  return { state, client, requests, history, notices, logs, restored, controller, cleared: () => cleared };
+  return { state, client, requests, history, notices, logs, levels, restored, controller, cleared: () => cleared };
 }
 
 test("managed history opens separately and leaves the current conversation intact", async () => {
@@ -431,6 +435,7 @@ test("fork selector refuses during an active turn", async () => {
   assert.equal(harness.requests.length, 0);
   assert.equal(harness.state.session.info.session_id, "session-a");
   assert.deepEqual(harness.logs, ["Cannot fork while a turn is running. Wait for it to finish or stop it first."]);
+  assert.deepEqual(harness.levels, ["warning"]);
 });
 
 test("fork selector refuses delegated and empty sessions", async () => {
@@ -438,6 +443,7 @@ test("fork selector refuses delegated and empty sessions", async () => {
   delegated.state.session.info.session_type = "delegated_task";
   await delegated.controller.runForkSelector();
   assert.deepEqual(delegated.logs, ["Delegated task sessions cannot be forked."]);
+  assert.deepEqual(delegated.levels, ["warning"]);
 
   const empty = createHarness();
   empty.client.request = (method, params) => {
@@ -448,6 +454,7 @@ test("fork selector refuses delegated and empty sessions", async () => {
   };
   await empty.controller.runForkSelector();
   assert.deepEqual(empty.logs, ["Nothing to fork: this session has no messages yet."]);
+  assert.deepEqual(empty.levels, ["info"]);
 });
 
 test("fork selector cancel leaves state untouched", async () => {
@@ -464,6 +471,7 @@ test("fork selector reports fork failures without switching", async () => {
 
   assert.equal(harness.state.session.info.session_id, "session-a");
   assert.ok(harness.logs.some((line) => line.includes("Fork failed: Nothing to fork")));
+  assert.deepEqual(harness.levels, ["error"]);
 });
 
 test("fork selector keeps the fork reachable when switching fails", async () => {
@@ -472,6 +480,7 @@ test("fork selector keeps the fork reachable when switching fails", async () => 
 
   assert.equal(harness.state.session.info.session_id, "session-a");
   assert.ok(harness.logs.some((line) => line.includes("Forked to session-fork-1, but switching failed")));
+  assert.deepEqual(harness.levels, ["error"]);
 });
 
 test("session restore notifies once with the restored session id", async () => {
@@ -622,10 +631,12 @@ test("/history in a new-window conversation reports whole conversation shown aft
   harness.state.display.history = null;
   await harness.controller.runHistoryLoader();
   assert.equal(harness.logs.at(-1), "/history needs a conversation. Send your first message to start one.");
+  assert.equal(harness.levels.at(-1), "warning");
 
   harness.state.session.info = { session_id: "created-1", model: "model-a" };
   await harness.controller.runHistoryLoader();
   assert.equal(harness.logs.at(-1), "The whole conversation is shown.");
+  assert.equal(harness.levels.at(-1), "info");
 });
 
 test("/model set before the first message updates the window model and carries it to session/create", async () => {
@@ -634,10 +645,12 @@ test("/model set before the first message updates the window model and carries i
   harness.state.session.info = { session_id: "", provider: "openai", model: "model-a" };
   await harness.controller.runModelCommand("invalid");
   assert.equal(harness.logs.at(-1), "Usage: /model or /model set <model>");
+  assert.equal(harness.levels.at(-1), "warning");
 
   await harness.controller.runModelCommand("set model-b");
   assert.equal(harness.state.session.info.model, "model-b");
   assert.match(harness.logs.at(-1), /Session model updated/);
+  assert.equal(harness.levels.at(-1), "info");
 });
 
 test("command controller reports usage for local commands with extra arguments instead of unknown command", async () => {

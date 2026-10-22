@@ -1,4 +1,4 @@
-import { commandResultText, contextBoardText, goalCommandText, historyTruncatedText, modelListErrorText, sessionSwitchedText, usageBoardText } from "./rendering.js";
+import { contextBoardText, goalCommandText, historyTruncatedText, modelListErrorText, sessionSwitchedText, usageBoardText } from "./rendering.js";
 
 // A conversation opens on its newest messages; /history loads the previous page.
 const HISTORY_WINDOW = 200;
@@ -36,7 +36,7 @@ export function createCliRuntimeController({
   refreshInputState,
   updateGoalState,
   log,
-  writeError,
+  notify = log,
   redraw,
 }) {
   let switchGeneration = 0;
@@ -125,7 +125,7 @@ export function createCliRuntimeController({
     state.session.pendingName = name;
     return { text: `Will be named: ${name} (when your first message starts the conversation)` };
   }
-  const needsConversation = what => { log(what + " needs a conversation. Send your first message to start one."); };
+  const needsConversation = what => { notify(what + " needs a conversation. Send your first message to start one.", { level: "warning" }); };
 
   async function ensureRuntime() {
     if (state.runtime.status === "ready") {
@@ -164,33 +164,33 @@ export function createCliRuntimeController({
   async function runGoalCommand(command) {
     if (!hasConversation()) return needsConversation("/goal");
     if (command.action === "set" && state.turn.active) {
-      log(() => commandResultText("Goal not started", "pause or finish the active turn first"));
+      notify("Goal not started · pause or finish the active turn first", { level: "warning" });
       return;
     }
     try {
       if (command.action === "set") {
         const result = await request(methods.goalSet, { objective: command.objective });
         updateGoalState(result?.goal);
-        log(() => goalCommandText(result?.goal, "set"));
+        notify(goalCommandText(result?.goal, "set"));
         return;
       }
       if (command.action === "clear") {
         const result = await request(methods.goalClear);
         updateGoalState(result?.goal || null);
-        log(() => goalCommandText(null, "clear"));
+        notify(goalCommandText(null, "clear"));
         return;
       }
       if (command.action === "pause" || command.action === "resume") {
         const result = await request(methods.goalStatus, { status: command.action === "resume" ? "active" : "paused" });
         updateGoalState(result?.goal);
-        log(() => goalCommandText(result?.goal, command.action));
+        notify(goalCommandText(result?.goal, command.action));
         return;
       }
       const result = await request(methods.goalGet);
       updateGoalState(result?.goal || null);
-      log(() => goalCommandText(result?.goal || null));
+      notify(goalCommandText(result?.goal || null));
     } catch (error) {
-      log(`Goal command failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Goal command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
     }
   }
 
@@ -286,14 +286,14 @@ export function createCliRuntimeController({
 
   async function runSessionsSelector() {
     if (state.turn.active || state.display.activeCompact) {
-      log("Cannot switch sessions while a turn is running.");
+      notify("Cannot switch sessions while a turn is running.", { level: "warning" });
       return;
     }
     let result;
     try {
       result = await request(methods.commandExecute, { input: "/sessions 100" });
     } catch (error) {
-      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
       return;
     }
     const sessions = Array.isArray(result?.display?.sessions) ? result.display.sessions : [];
@@ -317,7 +317,7 @@ export function createCliRuntimeController({
         announce: (info) => log(() => sessionSwitchedText(info)),
       });
     } catch (error) {
-      log(`Session switch failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Session switch failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
     }
   }
 
@@ -326,12 +326,12 @@ export function createCliRuntimeController({
   async function runHistoryLoader() {
     if (!hasConversation()) return needsConversation("/history");
     if (state.turn.active || state.display.activeCompact) {
-      log("Cannot load earlier messages while a turn is running.");
+      notify("Cannot load earlier messages while a turn is running.", { level: "warning" });
       return;
     }
     const history = state.display.history;
     if (!history?.start) {
-      log("The whole conversation is shown.");
+      notify("The whole conversation is shown.");
       return;
     }
     const sessionId = state.session.info.session_id;
@@ -343,7 +343,7 @@ export function createCliRuntimeController({
       replay = await request(methods.sessionReplay, { session_id: sessionId, start });
       pendingDelegations = await getPendingDelegations(sessionId).catch(() => null);
     } catch (error) {
-      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
       return;
     }
     if (state.runtime.status === "closing" || state.turn.active || state.display.activeCompact
@@ -362,24 +362,24 @@ export function createCliRuntimeController({
   async function runForkSelector() {
     if (!hasConversation()) return needsConversation("/fork");
     if (state.turn.active || state.display.activeCompact) {
-      log("Cannot fork while a turn is running. Wait for it to finish or stop it first.");
+      notify("Cannot fork while a turn is running. Wait for it to finish or stop it first.", { level: "warning" });
       return;
     }
     if (String(state.session.info.session_type || "") === "delegated_task") {
-      log("Delegated task sessions cannot be forked.");
+      notify("Delegated task sessions cannot be forked.", { level: "warning" });
       return;
     }
     let replay;
     try {
       replay = await request(methods.sessionReplay);
     } catch (error) {
-      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
       return;
     }
     const messages = Array.isArray(replay?.messages) ? replay.messages : [];
     const userMessages = messages.filter(isForkableUserMessage).slice(-FORK_MENU_MESSAGE_LIMIT);
     if (!userMessages.length) {
-      log("Nothing to fork: this session has no messages yet.");
+      notify("Nothing to fork: this session has no messages yet.");
       return;
     }
     const items = [
@@ -398,17 +398,17 @@ export function createCliRuntimeController({
     try {
       fork = await request(methods.sessionFork, selected.id ? { before_message_id: selected.id } : {});
     } catch (error) {
-      log(`Fork failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Fork failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
       return;
     }
     const newId = String(fork?.session_id || "");
     if (!newId) {
-      log("Fork failed: the runtime returned no session id.");
+      notify("Fork failed: the runtime returned no session id.", { level: "error" });
       return;
     }
     if (openManagedSession) {
       try { await openManagedSession(newId, selected.text || ""); }
-      catch (error) { log(`Forked to ${newId}, but opening failed: ${error instanceof Error ? error.message : String(error)}`); }
+      catch (error) { notify(`Forked to ${newId}, but opening failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" }); }
       return;
     }
     try {
@@ -420,13 +420,13 @@ export function createCliRuntimeController({
         return;
       }
     } catch (error) {
-      log(`Forked to ${newId}, but switching failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Forked to ${newId}, but switching failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
       return;
     }
     const kept = selected.id
       ? Math.max(0, messages.findIndex((message) => String(message.id || "") === selected.id))
       : messages.length;
-    log(`Forked ${newId} ← ${fork.forked_from} (${kept === messages.length ? `kept all ${kept}` : `kept the first ${kept} of ${messages.length}`} messages).`);
+    notify(`Forked ${newId} ← ${fork.forked_from} (${kept === messages.length ? `kept all ${kept}` : `kept the first ${kept} of ${messages.length}`} messages).`);
     if (selected.text) {
       state.input.prefill = selected.text;
     }
@@ -435,14 +435,14 @@ export function createCliRuntimeController({
   async function runContextBoard() {
     if (!hasConversation()) return needsConversation("/context");
     if (state.turn.active || state.display.activeCompact) {
-      log("Cannot open the context board while a turn is running. Wait for it to finish or stop it first.");
+      notify("Cannot open the context board while a turn is running. Wait for it to finish or stop it first.", { level: "warning" });
       return;
     }
     let data;
     try {
       data = await fetchContextBoardData();
     } catch (error) {
-      log(`Context board failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Context board failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
       return;
     }
     if (!askContextBoard) {
@@ -459,7 +459,7 @@ export function createCliRuntimeController({
     try {
       data = await fetchContextBoardData();
     } catch (error) {
-      log(`Context report failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Context report failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
       return;
     }
     printContextPages(data);
@@ -492,7 +492,7 @@ export function createCliRuntimeController({
   function startCompactCommand() {
     if (!hasConversation()) return needsConversation("/compact");
     if (state.turn.active || state.display.activeCompact || compactRequest) {
-      log("Wait for the current task to finish or interrupt it before compacting.");
+      notify("Wait for the current task to finish or interrupt it before compacting.", { level: "warning" });
       return;
     }
     state.display.activeCompact = true;
@@ -501,7 +501,7 @@ export function createCliRuntimeController({
     refreshInputState();
     compactRequest = runCompactCommand().catch((error) => {
       if (state.runtime.status !== "closing") {
-        writeError(`${error instanceof Error ? error.message : String(error)}\n`);
+        notify(error instanceof Error ? error.message : String(error), { level: "error" });
       }
     }).finally(() => { compactRequest = null; });
   }
@@ -523,15 +523,15 @@ export function createCliRuntimeController({
     try {
       result = await request(methods.modelList);
     } catch (error) {
-      log(() => modelListErrorText(error instanceof Error ? error.message : String(error), state.session.info.model));
+      notify(modelListErrorText(error instanceof Error ? error.message : String(error), state.session.info.model), { level: "error" });
       return;
     }
     if (result?.warning) {
-      log(String(result.warning));
+      notify(String(result.warning), { level: "warning" });
     }
     const models = Array.isArray(result?.models) ? result.models : [];
     if (!models.length) {
-      log("No models available. Run /login to configure a provider.");
+      notify("No models available. Run /login to configure a provider.", { level: "warning" });
       return;
     }
     const currentModel = result?.current || result?.current_model || state.session.info.model || result?.default_model || "";
@@ -547,14 +547,14 @@ export function createCliRuntimeController({
     if (!hasConversation()) {
       // Kept with the window and used when its first message creates the conversation.
       state.session.info = { ...state.session.info, provider: selected.providerId || state.session.info.provider, model: selected.modelId };
-      log(() => modelSetResultText({ provider_id: state.session.info.provider, model_id: selected.modelId }, selected.modelId));
+      notify(modelSetResultText({ provider_id: state.session.info.provider, model_id: selected.modelId }, selected.modelId));
     } else {
       try {
         const update = await request(methods.modelSet, { provider_id: selected.providerId || undefined, model_id: selected.modelId });
         state.session.info = { ...state.session.info, provider: update?.provider_id || selected.providerId, model: update?.model_id || selected.modelId };
-        log(() => modelSetResultText(update, selected.modelId));
+        notify(modelSetResultText(update, selected.modelId));
       } catch (error) {
-        log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+        notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
         return;
       }
     }
@@ -573,16 +573,16 @@ export function createCliRuntimeController({
     }
     const parts = String(argument || "").trim().split(/\s+/).filter(Boolean);
     if (!parts.length) {
-      log(`Model: ${state.session.info.model || "unknown"}`);
+      notify(`Model: ${state.session.info.model || "unknown"}`);
       return;
     }
     if (parts.length !== 2 || parts[0].toLowerCase() !== "set" || parts[1].length > 128) {
-      log(parts[0]?.toLowerCase() === "set" && parts.length === 2 ? "Usage: /model set <model>" : "Usage: /model or /model set <model>");
+      notify(parts[0]?.toLowerCase() === "set" && parts.length === 2 ? "Usage: /model set <model>" : "Usage: /model or /model set <model>", { level: "warning" });
       return;
     }
     const model = parts[1];
     state.session.info = { ...state.session.info, model };
-    log(() => modelSetResultText({ provider_id: state.session.info.provider, model_id: model }, model));
+    notify(modelSetResultText({ provider_id: state.session.info.provider, model_id: model }, model));
   }
 
   // /settings: configures global brief output, color theme, and conversation skill imports.
@@ -593,12 +593,12 @@ export function createCliRuntimeController({
     try {
       listed = await request(methods.commandExecute, { input: "/import" });
     } catch (error) {
-      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
       return;
     }
     const sources = Array.isArray(listed?.display?.sources) ? listed.display.sources : [];
     if (initialLevel === "import" && !sources.length) {
-      log(String(listed?.text || "No skill sources to import."));
+      notify(String(listed?.text || "No skill sources to import."));
       return;
     }
     const selected = await askSettingsMenu?.({
@@ -620,7 +620,7 @@ export function createCliRuntimeController({
     if (!choices || !Object.keys(choices).length) return;
     if (!hasConversation()) {
       state.session.pendingSkillSources = { ...(state.session.pendingSkillSources || {}), ...choices };
-      log(() => commandResultText("Skill imports chosen.", "they apply when the conversation starts"));
+      notify("Skill imports chosen · they apply when the conversation starts");
       return;
     }
     const answer = await askChoice?.({
@@ -632,9 +632,9 @@ export function createCliRuntimeController({
     const changes = Object.entries(choices).map(([source, on]) => `${source}=${on ? "on" : "off"}`).join(" ");
     try {
       await request(methods.commandExecute, { input: `/import ${changes}` });
-      log(() => commandResultText("Skill imports updated.", "the next request will not hit the prompt cache"));
+      notify("Skill imports updated · the next request will not hit the prompt cache");
     } catch (error) {
-      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
     }
   }
 
@@ -650,13 +650,13 @@ export function createCliRuntimeController({
         ...values,
       });
       if (scope === "global") {
-        log(() => commandResultText("Global default updated.", `settings.json: ${label} · folders with their own default keep theirs`));
+        notify(`Global default updated · settings.json: ${label} · folders with their own default keep theirs`);
       } else {
-        log(() => commandResultText("Folder default updated.", `new conversations here: ${label} · open ones keep theirs`));
+        notify(`Folder default updated · new conversations here: ${label} · open ones keep theirs`);
       }
     } catch (error) {
       const target = scope === "global" ? "Global default" : "Folder default";
-      log(`${target} not changed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`${target} not changed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
     }
   }
 
@@ -677,16 +677,16 @@ export function createCliRuntimeController({
     try {
       levels = await currentModelEfforts();
     } catch (error) {
-      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
       return;
     }
     if (!levels.length) {
-      log("The current model does not declare reasoning effort levels.");
+      notify("The current model does not declare reasoning effort levels.", { level: "warning" });
       return;
     }
     if (!requested) {
       if (!askEffortMenu) {
-        log(`Reasoning effort menu requires a TTY. Use /effort <${levels.join("|")}>.`);
+        notify(`Reasoning effort menu requires a TTY. Use /effort <${levels.join("|")}>.`, { level: "warning" });
         return;
       }
       const selected = await askEffortMenu(currentReasoningEffort(), levels);
@@ -699,7 +699,7 @@ export function createCliRuntimeController({
       return;
     }
     if (!levels.includes(requested)) {
-      log(`Unknown reasoning effort "${requested}". Available: ${levels.join(", ")}.`);
+      notify(`Unknown reasoning effort "${requested}". Available: ${levels.join(", ")}.`, { level: "warning" });
       return;
     }
     await applyReasoningEffort(requested);
@@ -712,14 +712,14 @@ export function createCliRuntimeController({
   async function applyReasoningEffort(effort, scope = "session") {
     if (!hasConversation()) {
       state.session.info = { ...state.session.info, reasoning_effort: effort };
-      log(() => commandResultText("Reasoning effort updated.", `- session effort: ${effort}`));
+      notify(`Reasoning effort: ${effort}`);
     } else {
       try {
         const update = await request(methods.modelEffortSet, { reasoning_effort: effort });
         state.session.info = { ...state.session.info, reasoning_effort: effort };
-        log(() => commandResultText("Reasoning effort updated.", `- session effort: ${effort} · ${appliesNote(update)}`));
+        notify(`Reasoning effort: ${effort} · ${appliesNote(update)}`);
       } catch (error) {
-        log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+        notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
         return;
       }
     }
@@ -798,7 +798,7 @@ function modelSetResultText(result, model) {
   if (sessionModel) lines.push(`- session model: ${sessionModel}`);
   if (defaultModel) lines.push(`- default model: ${defaultModel} (unchanged)`);
   lines.push(`- ${appliesNote(result)}`);
-  return commandResultText(lines[0], lines.slice(1).join(" · "));
+  return lines.join("\n");
 }
 
 function singleLineText(value) {

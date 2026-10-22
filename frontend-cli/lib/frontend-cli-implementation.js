@@ -379,7 +379,6 @@ const runtimeController = createCliRuntimeController({
   updateGoalState,
   log: logOutput,
   notify: notifyOutput,
-  writeError: writeErrorOutput,
   redraw: redrawInput,
 });
 remoteController = createCliRemoteController({
