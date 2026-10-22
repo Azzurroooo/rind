@@ -273,6 +273,7 @@ const {
   clearActivityTimer,
   mainPromptText,
   log: logOutput,
+  notify: notifyOutput,
   writeError: writeErrorOutput,
   closeAssistant,
   settleTools,
@@ -300,7 +301,7 @@ const runtimeClient = observeRuntime(createSharedRuntimeClient({
       .then(() => message?.method === runtimeMethods.authUpdate ? renderAuthUpdate(message) : renderEvent(message))
       .catch((error) => {
         if (runtimeState.status !== "closing") {
-          writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
+          notifyOutput(error instanceof Error ? error.message : String(error), { level: "error" });
         }
       });
   },
@@ -322,7 +323,7 @@ const runtimeClient = observeRuntime(createSharedRuntimeClient({
     if (!wasClosing) {
       void management.close?.().catch(error => writeErrorOutput(error.message + "\n"));
       runtimeState.failure = error;
-      writeErrorOutput(`Runtime stopped (${signal || (code ?? "startup failure")}): ${error.message}. Runtime commands are unavailable until it restarts.\n`);
+      notifyOutput(`Runtime stopped (${signal || (code ?? "startup failure")}): ${error.message}. Runtime commands are unavailable until it restarts.`, { level: "error" });
     }
   },
 }), management);
@@ -375,7 +376,7 @@ const runtimeController = createCliRuntimeController({
   refreshInputState,
   updateGoalState,
   log: logOutput,
-  writeError: writeErrorOutput,
+  notify: notifyOutput,
   redraw: redrawInput,
 });
 remoteController = createCliRemoteController({
@@ -399,12 +400,12 @@ turnController = createTurnController({
   output: {
     queueInput: (...args) => inputActions.addPendingInput(...args),
     restoreInputText: (...args) => inputActions.restoreInputText(...args),
-    writeError: (text) => writeErrorOutput(`${text}\n`),
+    writeError: (text) => notifyOutput(text, { level: "error" }),
     refreshInputState,
     closeAssistant,
     settleTools,
     cancelInput,
-    logInterrupt: () => logOutput(() => interruptText()),
+    logInterrupt: () => notifyOutput(interruptText(), { level: "warning" }),
   },
 });
 commandController = createCommandController({
@@ -462,6 +463,7 @@ commandController = createCommandController({
   },
   output: {
     log: logOutput,
+    notify: notifyOutput,
     setInputPrefill: (value) => {
       inputStateData.prefill = String(value || "");
     },
@@ -491,7 +493,7 @@ taskMonitorController = createTaskMonitorController({
     },
   },
   redraw: redrawInput,
-  log: logOutput,
+  notify: notifyOutput,
 });
 const eventController = createEventController({
   state: {
@@ -522,6 +524,7 @@ const eventController = createEventController({
     closeAssistant,
     settleTools,
     log: logOutput,
+    notify: notifyOutput,
     debug: (text) => writeErrorOutput(`${text}\n`),
     updateGoal: updateGoalState,
     setStats: (stats) => {
@@ -587,7 +590,7 @@ try {
   if (startupUpdateVersion) sessionState.info.update_available = startupUpdateVersion;
   windowLog.step("runtime ready");
   const startupInfo = () => ({ ...sessionState.info, resume_preview: "" });
-  if (management.label) logOutput(management.label);
+  if (management.label) notifyOutput(management.label);
   // A new conversation is greeted; one opened again says what it resumes.
   const resumed = Boolean(sessionState.info.session_id);
   const opening = (width) => resumed
@@ -649,11 +652,11 @@ async function rebindSendEndpoint() {
       sessionId,
       getSessionId: () => sessionState.info.session_id,
       dispatch: (text) => inputActions.dispatchExternal(text),
-      onUnavailable: () => logOutput(`Send endpoint unavailable: another rind process owns session ${sessionId}.`),
+      onUnavailable: () => notifyOutput(`Send endpoint unavailable: another rind process owns session ${sessionId}.`, { level: "warning" }),
     });
   } catch (error) {
     ipcServer = null;
-    writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
+    notifyOutput(error instanceof Error ? error.message : String(error), { level: "error" });
   }
 }
 function resetContextUsage() {
@@ -665,12 +668,12 @@ function resetContextUsage() {
 // mode is released while the tour owns the terminal), play, then restore.
 async function enterInSessionTour(pageId) {
   if (turnStateData.active || displayState.activeCompact) {
-    logOutput("/tour is available between turns.");
+    notifyOutput("/tour is available between turns.", { level: "warning" });
     return;
   }
   const unknown = unknownTourPageText(pageId);
   if (unknown) {
-    logOutput(unknown);
+    notifyOutput(unknown, { level: "warning" });
     return;
   }
   inputController.pause();
@@ -679,7 +682,7 @@ async function enterInSessionTour(pageId) {
   try {
     await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "", manageInput: false, onPageComplete: () => saveCliState({ tourSeen: true }) });
   } catch (error) {
-    writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
+    notifyOutput(error instanceof Error ? error.message : String(error), { level: "error" });
   } finally {
     process.on("SIGINT", handleSigint);
     tui.start({ acquireInput: false });
@@ -736,7 +739,7 @@ async function enterManagement(chat) {
 async function leaveRind(working = 0, notice = "") {
   leaveLatch.disarm();
   if (handoffWindow) await writeHandoff({ action: "leave" }, handoffFile);
-  else logOutput(leaveSummary({ working, notice }));
+  else notifyOutput(leaveSummary({ working, notice }));
   await shutdownRuntime();
 }
 
@@ -756,7 +759,7 @@ async function runLogin(providerId = "") {
       ? providers.find((item) => item.id === selected)?.methods || []
       : providers.flatMap((item) => item.methods || []));
     if (!method) {
-      logOutput(LOGIN_CANCELED);
+      notifyOutput(LOGIN_CANCELED);
       return;
     }
     if (!selected) {
@@ -766,7 +769,7 @@ async function runLogin(providerId = "") {
       const choice = await inputActions.askChoice({ title: "Login · Provider", options: method === "api_key" ? [...options, ADD_CONNECTION] : options });
       selected = choice === ADD_CONNECTION ? ADD_CONNECTION : String(choice || "").split(" · ")[0].trim();
       if (!selected) {
-        logOutput(LOGIN_CANCELED);
+        notifyOutput(LOGIN_CANCELED);
         return;
       }
     }
@@ -776,13 +779,17 @@ async function runLogin(providerId = "") {
     const selection = result?.selection && typeof result.selection === "object" ? result.selection : null;
     if (selection?.provider_id && selection.model_id) {
       sessionState.info = { ...sessionState.info, provider: selection.provider_id, model: selection.model_id };
-      logOutput(`Logged in to ${result?.provider_id || selected}. Switched to ${selection.provider_id} / ${selection.model_id}.`);
+      notifyOutput(`Logged in to ${result?.provider_id || selected}. Switched to ${selection.provider_id} / ${selection.model_id}.`);
     } else {
-      logOutput(`Logged in to ${result?.provider_id || selected}.`);
+      notifyOutput(`Logged in to ${result?.provider_id || selected}.`);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logOutput(/cancel/i.test(message) ? LOGIN_CANCELED : `Login failed: ${message}`);
+    if (/cancel/i.test(message)) {
+      notifyOutput(LOGIN_CANCELED);
+    } else {
+      notifyOutput(`Login failed: ${message}`, { level: "error" });
+    }
   }
 }
 
@@ -795,7 +802,7 @@ async function runLogout(providerId = "") {
       selected = String(stored[0].id || "");
     }
     if (!selected && !stored.length) {
-      logOutput("No stored provider credentials.");
+      notifyOutput("No stored provider credentials.");
       return;
     }
     if (!selected) {
@@ -804,15 +811,15 @@ async function runLogout(providerId = "") {
     }
     const result = await request(runtimeMethods.authLogout, { provider_id: selected });
     if (!result?.deleted) {
-      logOutput(`No stored credential for ${selected}.`);
+      notifyOutput(`No stored credential for ${selected}.`);
       return;
     }
     const suffix = result?.source === "settings"
       ? " It is still configured in settings.json."
       : "";
-    logOutput(`Logged out of ${selected}.${suffix}`);
+    notifyOutput(`Logged out of ${selected}.${suffix}`);
   } catch (error) {
-    logOutput(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
+    notifyOutput(`Logout failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
   }
 }
 
@@ -820,7 +827,7 @@ async function renderAuthUpdate(message) {
   const event = message?.event || {};
   if (event.type === "prompt_closed") { inputActions.closeAuthPrompt(event.request_id); return; }
   const text = String(event.message || "").trim();
-  if (text) logOutput(text);
+  if (text) notifyOutput(text);
 }
 
 async function renderEvent(message) {
@@ -853,7 +860,7 @@ async function renderEvent(message) {
     refreshInputState();
   }
   if (message?.event?.type === "context_compacted") {
-    if (displayState.activeCompact) logOutput("Compact complete.");
+    if (displayState.activeCompact) notifyOutput("Compact complete.");
     displayState.activeCompact = false;
     displayState.activityLabel = "Working";
     compactContextState.clear();
@@ -919,7 +926,11 @@ function composeFrame(width = process.stdout.columns || 80) {
       prompt: mainPromptText(width),
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
-      menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
+      menuText: modelMenuText(
+        session.modelState.items(),
+        session.modelState.selectedIndex(),
+        { kind: session.inputText === "/effort" ? "effort" : "model" },
+      ).trimEnd(),
     };
   }
   if (session.mode === "choice-dialog") {

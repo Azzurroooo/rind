@@ -21,7 +21,7 @@ function parseObject(value) {
   }
 }
 
-export function createTaskMonitorController({ request, state, redraw = () => {}, log = () => {}, terminalUi = false }) {
+export function createTaskMonitorController({ request, state, redraw = () => {}, log = () => {}, notify = log, terminalUi = false }) {
   const tasks = new Map();
   let monitor = null;
   let monitorInputWasActive = false;
@@ -104,7 +104,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
       }
     }
     if (!terminalUi && event.type === "task_updated" && oldStatus !== task.status) {
-      log(`Task ${task.task_id}: ${task.status}${task.notify ? ` (${task.notify})` : ""}`);
+      notify(`Task ${task.task_id}: ${task.status}${task.notify ? ` (${task.notify})` : ""}`);
     }
   }
 
@@ -131,7 +131,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     } catch (error) {
       if (generation !== currentGeneration) return;
       if (monitor?.followId === task.bg_id) monitor.followId = null;
-      log(`Task control failed: ${error instanceof Error ? error.message : String(error)}`);
+      notify(`Task control failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
     }
   }
 
@@ -234,7 +234,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
       if (monitor !== openedMonitor) return;
       if (!tasks.size && !listError) {
         exitMonitor();
-        log("No background tasks. Press Left from an empty prompt for team tasks.");
+        notify("No background tasks. Press Left from an empty prompt for team tasks.");
         return;
       }
       if (!monitor.pageChanged) {

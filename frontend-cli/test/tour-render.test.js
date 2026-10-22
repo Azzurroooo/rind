@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { renderTourCatalog, renderTourPage, renderTourHelp } from "../lib/tour/render.js";
-import { TOUR_TOPICS, tourPages } from "../lib/tour/pages/index.js";
+import { TOUR_TOPICS, tourPages, findTourPage } from "../lib/tour/pages/index.js";
 import { currentTheme, setTheme, paintRaw } from "../lib/theme.js";
 import { createTourStage } from "../lib/tour/stage.js";
 import { stripAnsi, textWidth } from "../lib/text-width.js";
 
-const INFO = { version: "0.8.0", model: "zai/glm-4.7", session_id: "s1", cwd: "~/demo", reasoning_effort: "high" };
+const INFO = { version: "0.8.0", model: "GPT-6-Astra", session_id: "s1", cwd: "~/demo", reasoning_effort: "xhigh" };
 
 const TOPICS = [
   {
@@ -42,7 +42,7 @@ function pageState(phase) {
   return {
     page: { id: "agents.create", title: "Create a Team" },
     pageIndex: 2,
-    pageCount: 16,
+    pageCount: tourPages().length,
     stepIndex: 3,
     stepCount: 8,
     speed: 1,
@@ -120,17 +120,17 @@ test("page frame titles the page and wraps every content line", () => {
     const plain = lines.map(stripAnsi);
     assert.ok(plain[0].includes("Demo"), "top border identifies the simulated terminal");
     assert.ok(plain[0].includes("Create a Team"), "top border carries the page title");
-    assert.ok(plain[0].includes("3/16"), "top border carries the page position");
+    assert.ok(plain[0].includes(`3/${tourPages().length}`), "top border carries the page position");
     for (const line of lines) {
       assert.ok(textWidth(line) <= width, `row exceeds ${width}: ${stripAnsi(line)}`);
     }
     const text = plain.join("\n");
     assert.ok(text.includes("Rind v0.8.0"), "startup banner rendered");
-    assert.ok(text.includes("zai/glm-4.7"), "model shown in banner");
+    assert.ok(text.includes("GPT-6-Astra"), "model shown in banner");
+    assert.ok(text.includes("xhigh"), "effort shown in composer header");
     assert.ok(text.includes("You"), "user echo rendered");
     assert.ok(text.includes("/status"), "submitted text rendered");
-    assert.ok(text.includes("✓ Status ready"), "result line rendered with the check prefix");
-    assert.ok(text.includes("— session loaded"), "result detail rendered");
+    assert.ok(text.includes("· System: Status ready · session loaded"), "result line rendered as system notice");
     assert.ok(!text.includes("Working"), "a slash command never shows the activity line");
   }
 });
@@ -240,7 +240,7 @@ test("plain runtime outputs stay verbatim while check results get the prefix", (
   ]);
   const text = view.render().lines.map(stripAnsi).join("\n");
   assert.ok(text.includes("Team Agents:"), "multi-line runtime output keeps its own lines");
-  assert.ok(text.includes("✓ Status ready — session loaded"), "check result carries prefix and detail");
+  assert.ok(text.includes("· System: Status ready · session loaded"), "result carries system notice prefix and detail");
 });
 
 test("pending queue and steering entries appear in the composer", () => {
@@ -258,15 +258,31 @@ test("pending queue and steering entries appear in the composer", () => {
   assert.ok(text.includes("Steering:"), "steering entry visible");
 });
 
-test("menu steps render through the real menu renderers", () => {
-  const view = playPage([
+test("menu steps render through the real menu renderers for /model, /effort, /settings and /remote", () => {
+  const modelView = playPage([
     { kind: "startup", info: INFO },
-    { kind: "menu", menu: { kind: "model", items: [{ header: true, name: "zai" }, { modelId: "glm-4.7", current: true }], selected: 0, target: 1, input: "/model" } },
+    { kind: "menu", menu: { kind: "model", items: [{ header: true, name: "openai" }, { modelId: "GPT-6-Astra", current: true, image_input: true }], selected: 0, target: 1, input: "/model" } },
   ]);
-  const text = view.render().lines.map(stripAnsi).join("\n");
-  assert.ok(text.includes("Model deck"), "model deck title shown");
-  assert.ok(text.includes("glm-4.7"), "model item shown");
-  assert.ok(text.includes("/model"), "menu input echo shown");
+  const modelText = modelView.render().lines.map(stripAnsi).join("\n");
+  assert.ok(modelText.includes("Model deck"), "model deck title shown");
+  assert.ok(modelText.includes("GPT-6-Astra"), "model item shown");
+  assert.ok(modelText.includes("/model"), "menu input echo shown");
+
+  const effortView = playPage([
+    { kind: "startup", info: INFO },
+    { kind: "menu", menu: { kind: "model", items: [{ modelId: "high" }, { modelId: "xhigh", current: true }], selected: 0, target: 1, input: "/effort" } },
+  ]);
+  const effortText = effortView.render().lines.map(stripAnsi).join("\n");
+  assert.ok(effortText.includes("Reasoning effort"), "reasoning effort menu title shown");
+  assert.ok(effortText.includes("xhigh"), "effort item shown");
+  assert.ok(effortText.includes("/effort"), "effort input echo shown");
+
+  const pickPage = findTourPage("model.pick");
+  const stage = createTourStage();
+  stage.rebuildTo(pickPage.steps, pickPage.steps.length - 1);
+  const pickFinal = renderTourPage(stage.snapshot(), { ...pageState("end"), page: pickPage }, 100, 30).lines.map(stripAnsi).join("\n");
+  assert.match(pickFinal, /Model changed to GPT-6-Astra \(session only\)/);
+  assert.match(pickFinal, /Reasoning effort set to xhigh \(session only\)/);
 });
 
 test("goodbye closes the session back to the shell prompt", () => {
@@ -276,7 +292,7 @@ test("goodbye closes the session back to the shell prompt", () => {
     { kind: "shell", command: "ls" },
   ]);
   const text = view.render().lines.map(stripAnsi).join("\n");
-  assert.ok(text.includes("Goodbye."), "goodbye line shown");
+  assert.ok(text.includes("· System: Goodbye."), "goodbye line shown as system notice");
   assert.ok(text.includes("~/demo $ ls"), "shell prompt returned");
   assert.ok(!text.includes("Ask Rind to do anything"), "composer hidden after exit");
 });
@@ -490,7 +506,7 @@ test("introduction layout depends on visible content rather than step position",
   history.shell = { blocks: [], typing: null };
   const retained = plainLines(renderTourPage(history, state, 80, 24).lines).join("\n");
   assert.match(retained, /Demo ·/);
-  assert.match(retained, /Goodbye/);
+  assert.match(retained, /· System: Goodbye\./);
   assert.match(retained, /PAUSED · Read this explanation/);
 });
 
@@ -514,6 +530,7 @@ test("long introduction cards scroll from the top while keeping the start action
 });
 
 test("catalog, introduction and demo preserve the same full feature name at every supported width", () => {
+  const totalPages = tourPages().length;
   for (const [selected, page] of tourPages().entries()) {
     for (const [width, height] of [[120, 30], [80, 24], [40, 16], [36, 14]]) {
       const catalog = plainLines(renderTourCatalog({ topics: TOUR_TOPICS, selected }, width, height).lines);
@@ -526,7 +543,7 @@ test("catalog, introduction and demo preserve the same full feature name at ever
         const view = renderTourPage(stage.snapshot(), state, width, height);
         const title = stripAnsi(view.lines[0]);
         assert.ok(title.includes(`${stepIndex === 0 ? "TOUR" : "Demo"} · ${page.feature}`), `${page.id} at ${width}: ${title}`);
-        assert.ok(title.includes(`${selected + 1}/16`), "catalog position remains visible too");
+        assert.ok(title.includes(`${selected + 1}/${totalPages}`), "catalog position remains visible too");
         assert.ok(textWidth(title) <= width);
         if (width === 80 && stepIndex === 0) {
           assert.ok(plainLines(view.lines).join("\n").includes(page.title), "introduction retains the descriptive subtitle");

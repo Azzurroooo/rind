@@ -1,7 +1,7 @@
 import { createCliOutputController } from "../cli-output-controller.js";
 import { createCliState } from "../cli-state.js";
 import { createTranscript } from "../tui/transcript.js";
-import { commandResultText, slashResultText, turnCompletedLine } from "../rendering.js";
+import { slashDisplayText, slashResultNotice, turnCompletedLine } from "../rendering.js";
 import { graphemes } from "../text-width.js";
 
 // Assemble fictional events through the live CLI's transcript controller.
@@ -35,16 +35,23 @@ export function renderTourTranscript(rind, width, expanded = false) {
         break;
       }
       case "result":
-        output.log(() => commandResultText(block.text, block.detail));
+        output.notify([block.text, block.detail].filter(Boolean).join(" · "));
         break;
-      case "slash-result":
-        output.log(() => slashResultText({ text: block.text, display: block.display }, []));
+      case "slash-result": {
+        const structured = () => slashDisplayText(block.display, []);
+        if (structured()) {
+          output.log(structured);
+        } else {
+          const notice = slashResultNotice({ text: block.text, display: block.display });
+          if (notice) output.notify(notice.text, { level: notice.level });
+        }
         break;
+      }
       case "turn-done":
         output.log(() => turnCompletedLine({ duration_ms: block.durationMs }, { completed: block.completed, failed: block.failed }));
         break;
       case "goodbye":
-        output.log("Goodbye.");
+        output.notify("Goodbye.");
         break;
     }
   }

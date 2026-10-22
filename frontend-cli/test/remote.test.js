@@ -293,7 +293,10 @@ test("/remote two-view menu: Off picks the scope to turn on with, On connects, x
       runRemote: () => remoteController.handleCommand(),
     },
     state: { slashCommands: LOCAL_SLASH_COMMANDS },
-    output: { log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)) },
+    output: {
+      log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)),
+      notify: (msg) => logs.push(String(msg)),
+    },
   });
 
   const flush = () => new Promise((resolve) => setTimeout(resolve, 25));
@@ -308,7 +311,10 @@ test("/remote two-view menu: Off picks the scope to turn on with, On connects, x
     turn: {},
     input: { isTerminal: false, runRemote: () => remoteController.handleCommand() },
     state: { slashCommands: LOCAL_SLASH_COMMANDS },
-    output: { log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)) },
+    output: {
+      log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)),
+      notify: (msg) => logs.push(String(msg)),
+    },
   });
   await nonTtyController.handle("/remote");
   assert.equal(logs.at(-1), "/remote requires an interactive terminal.");
@@ -457,8 +463,11 @@ test("/remote controller: missing webRoot still serves, a busy port falls back, 
 test("E2E CLI /remote: user turns remote on from the Off view, signs in over HTTP/WS with the shown link, prompts a session, gets a new code, and turns it off", { timeout: 30000 }, async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-cli-remote-e2e-"));
   const workspace = path.join(home, "workspace");
+  const webDir = path.join(home, "web-dist");
   await mkdir(workspace, { recursive: true });
+  await mkdir(webDir, { recursive: true });
   await writeFile(path.join(workspace, "HELLO.md"), "Workspace file for remote E2E test", "utf8");
+  await writeFile(path.join(webDir, "index.html"), "<!doctype html><title>Rind Remote</title>", "utf8");
 
   // Local fake OpenAI-compatible provider so the real Python runtime and CLI run end-to-end
   const provider = http.createServer((req, res) => {

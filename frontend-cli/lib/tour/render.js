@@ -9,6 +9,7 @@ import {
   modelMenuText,
   promptPlaceholderText,
   promptText,
+  remoteMenuText,
   sessionMenuText,
   settingsMenuText,
   slashMenuText,
@@ -145,7 +146,7 @@ function renderPage(snapshot, state, width, height) {
   if (!snapshot.agents) {
     for (const past of snapshot.history || []) {
       appendShell(rows, past.shell, write, () => {});
-      appendRind(rows, past.rind, { ...state, inner, expanded: snapshot.expanded }, write, () => {});
+      appendRind(rows, past.rind, { ...state, inner, budget, expanded: snapshot.expanded }, write, () => {});
     }
     appendShell(rows, snapshot.shell, write, point);
   }
@@ -153,7 +154,7 @@ function renderPage(snapshot, state, width, height) {
   if (snapshot.agents) {
     rows.push(...renderTourAgents(snapshot.agents, inner, Number.isFinite(budget) ? Math.max(12, budget + 1) : 24));
   } else {
-    appendRind(rows, snapshot.rind, { ...state, inner, expanded: snapshot.expanded }, write, point);
+    appendRind(rows, snapshot.rind, { ...state, inner, budget, expanded: snapshot.expanded }, write, point);
   }
   // An explanation without terminal content is a tour card, wherever it
   // occurs in the lesson. Rewind/replay naturally restores this introduction.
@@ -241,6 +242,7 @@ function demoAction(step) {
   if (step.kind === "shell") return "typing in the shell";
   if (step.kind === "close-menu") return step.key === "Enter" ? "Enter confirms selection" : "Esc closes menu";
   if (step.kind === "expand-tools") return "Ctrl+O toggles tool output";
+  if (step.kind === "consume") return step.mode === "steering" ? "steering consumed" : "queued turn starts";
   if (step.kind === "menu") return step.menu.kind === "monitor" ? "Ctrl+B opens monitor" : "menu preview";
   if (step.kind === "agents") return "Agents page preview";
   return "watch only";
@@ -300,7 +302,7 @@ function appendComposer(rows, rind, state, write, point) {
     return;
   }
   const menu = composer.menu;
-  const menuText = menu ? menuFrame(menu, state.inner) : null;
+  const menuText = menu ? menuFrame(menu, state.inner, state.budget) : null;
   const prepared = prepareComposerFrame({
     showCaret: !composer.running && !menu,
     prompt: promptText(rind.info, {}, {
@@ -327,15 +329,25 @@ function appendComposer(rows, rind, state, write, point) {
   }
 }
 
-function menuFrame(menu, inner) {
+function menuFrame(menu, inner, budget) {
   const selected = Number(menu.selected) || 0;
   switch (menu.kind) {
     case "slash":
       return { text: slashMenuText(menu.items, selected) };
     case "model":
-      return { text: modelMenuText(menu.items, selected) };
+      return { text: modelMenuText(menu.items, selected, { kind: menu.input === "/effort" ? "effort" : "model" }) };
+    case "settings":
+      return { text: settingsMenuText(menu.items, selected, menu.level || "root") };
     case "theme":
       return { text: settingsMenuText(menu.items, selected, "theme") };
+    case "remote":
+      return {
+        text: remoteMenuText({
+          connection: () => menu.connection || null,
+          scopes: () => menu.items || [],
+          scopeIndex: () => selected,
+        }, inner, Number.isFinite(budget) ? Math.max(8, budget - 5) : 24),
+      };
     case "sessions":
       return { text: sessionMenuText(menu.items, selected) };
     case "choice":
@@ -408,7 +420,7 @@ function playbackBanner(state, width) {
       : "▶ AUTO · continuing shortly";
   } else {
     const kind = state.page.steps?.[state.stepIndex]?.kind;
-    const action = { type: "Typing in Rind", shell: "Typing a command", assistant: "Streaming reply", tool: "Tool demonstration", menu: "Menu demonstration", "shell-out": "Showing output" }[kind] || "Demonstration";
+    const action = { type: "Typing in Rind", shell: "Typing a command", assistant: "Streaming reply", tool: "Tool demonstration", menu: "Menu demonstration", "shell-out": "Showing output", "expand-tools": "Toggling tool details", consume: "Consuming pending input" }[kind] || "Demonstration";
     label = `▶ PLAYING · ${action}`;
   }
   return style(paint.bold(clipCells(label, width)));

@@ -34,7 +34,9 @@ DIRECT_TOKEN_SCOPE = "chatgpt.tokens.use.direct"
 SCOPE = f"openid profile email offline_access resource.invoke {DIRECT_TOKEN_SCOPE}"
 REFRESH_BEFORE_SECONDS = 5 * 60
 TOKEN_TIMEOUT_SECONDS = 15
-SIGNED_IN_PAGE = "Signed in to ChatGPT. You can close this page and return to Rind."
+# The account a token belongs to, as /status names the sign-in.
+ACCOUNT_NAME = "ChatGPT"
+SIGNED_IN_PAGE = f"Signed in to {ACCOUNT_NAME}. You can close this page and return to Rind."
 
 
 async def login(interaction) -> Credential:

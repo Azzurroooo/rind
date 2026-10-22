@@ -1,6 +1,6 @@
 import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells, wrapTextWithAnsi } from "./text-width.js";
 import { formatDuration } from "./tool-display.js";
-import { DEFAULT_THEME, paint, paintRaw, flavorSwatch, themeNames, breathingAccent } from "./theme.js";
+import { DEFAULT_THEME, colorEnabled, paint, paintRaw, flavorSwatch, themeNames, breathingAccent } from "./theme.js";
 import { DEFAULT_SPINNER, isBriefMode, spinnerFrame, spinnerNames } from "./cli-state-store.js";
 import { homedir } from "node:os";
 import { encodeQrMatrix, renderTerminalQr } from "../../rind-runtime-client/remote/qr.js";
@@ -602,26 +602,39 @@ export function slashDisplayText(display, commands = []) {
       return slashThemeText(display);
     case "spinner":
       return slashSpinnerText(display);
-    case "brief":
-      return commandResultText(
-        display.enabled ? "Brief output enabled." : "Brief output disabled.",
-        "applies globally across live turns and replayed sessions",
-      );
-    case "concurrency":
-      return commandResultText(
-        `Max concurrent runs: ${display.current}.`,
-        "applies globally across managed agent runs",
-      );
     default:
       return "";
   }
 }
 
-export function slashResultText(result, commands = []) {
+export function slashResultNotice(result) {
   if (!result || typeof result !== "object") {
-    return "";
+    return null;
   }
-  return slashDisplayText(result.display, commands) || String(result.text || "");
+  if (result.display && typeof result.display === "object" && result.display.type === "brief") {
+    const label = result.display.enabled ? "Brief output enabled" : "Brief output disabled";
+    return {
+      text: `${label} · applies globally across live turns and replayed sessions`,
+      level: "info",
+    };
+  }
+  if (result.display && typeof result.display === "object" && result.display.type === "concurrency") {
+    return {
+      text: `Max concurrent runs: ${result.display.current} · applies globally across managed agent runs`,
+      level: "info",
+    };
+  }
+  if (slashDisplayText(result.display)) {
+    return null;
+  }
+  const text = String(result.text || "").trim();
+  if (!text) {
+    return null;
+  }
+  return {
+    text: String(result.text || ""),
+    level: result.level || "info",
+  };
 }
 
 export function answerPromptText() {
@@ -659,15 +672,18 @@ export function slashMenuText(items, selectedIndex = 0) {
   return `${lines.join("\n")}\n`;
 }
 
-export function modelMenuText(items, selectedIndex = 0) {
+export function modelMenuText(items, selectedIndex = 0, { kind = "model" } = {}) {
   const visible = menuWindow(items, selectedIndex);
   if (!visible.items.length) {
     return "";
   }
-  const lines = [dim(modelMenuTitle(visible))];
-  const selected = visible.items[visible.activeIndex];
-  const vision = selected?.image_input === true ? "supported" : selected?.image_input === false ? "unsupported" : "unknown";
-  lines.push(dim(`  Image input: ${vision}`));
+  const isEffort = kind === "effort";
+  const lines = [dim(isEffort ? choiceMenuTitle(visible, "Reasoning effort") : modelMenuTitle(visible))];
+  if (!isEffort) {
+    const selected = visible.items[visible.activeIndex];
+    const vision = selected?.image_input === true ? "supported" : selected?.image_input === false ? "unsupported" : "unknown";
+    lines.push(dim(`  Image input: ${vision}`));
+  }
   for (const [index, item] of visible.items.entries()) {
     if (item.header) {
       lines.push(dim(`  ${item.name}`));
@@ -1217,20 +1233,19 @@ export function goalCommandText(goal, action = "get") {
   };
   const label = labels[action] || "Goal updated";
   if (!goal) {
-    return commandResultText(label, "No active goal");
+    return `${label} · No active goal`;
   }
-  return commandResultText(label, `${goal.status} · ${clipSingleLine(goal.objective, 80)}`);
+  return `${label} · ${goal.status} · ${clipSingleLine(goal.objective, 80)}`;
 }
 
 export function modelListErrorText(error, currentModel = "") {
   const current = clipSingleLine(currentModel, 96);
   const detail = clipSingleLine(error, 96);
-  return notice(
-    "Model list unavailable",
+  return [
+    detail ? `Model list unavailable: ${detail}` : "Model list unavailable",
     current ? `current: ${current}` : "",
-    detail,
     "use /model set <name> to switch manually",
-  );
+  ].filter(Boolean).join("\n");
 }
 
 export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }) {
@@ -1242,23 +1257,107 @@ export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }) {
 }
 
 export function interruptText() {
-  return notice("Interrupt requested", "ctrl+c again to quit");
+  return "Interrupt requested · ctrl+c again to quit";
 }
 
 export function cancelledText() {
-  return notice("Interrupted", "session preserved; resume with -c");
+  return "Interrupted · session preserved; resume with -c";
 }
 
-export function commandResultText(text, detail = "") {
-  const extra = clipSingleLine(detail, 96);
-  return `${green("✓")} ${bold(clipSingleLine(text, 96))}${extra ? dim(` — ${extra}`) : ""}`;
+const SYSTEM_NOTICE_PREFIX = "· System:";
+const SYSTEM_NOTICE_HEAD_WIDTH = 12;
+const SYSTEM_NOTICE_INDENT = " ".repeat(SYSTEM_NOTICE_HEAD_WIDTH);
+const SYSTEM_NOTICE_NARROW_INDENT = "    ";
+
+export function systemNoticeLines(text, { level = "info", width, color = colorEnabled() } = {}) {
+  const normalized = String(text ?? "").replace(/\r\n?/g, "\n").trimEnd();
+  if (!normalized.trim()) {
+    return [];
+  }
+  const formatFirstLine = (chunk) => {
+    if (!color) {
+      return chunk ? `  ${SYSTEM_NOTICE_PREFIX} ${chunk}` : `  ${SYSTEM_NOTICE_PREFIX}`;
+    }
+    if (level === "warning") {
+      return chunk
+        ? `  ${paintRaw.warning(SYSTEM_NOTICE_PREFIX)} ${paintRaw.dim(chunk)}`
+        : `  ${paintRaw.warning(SYSTEM_NOTICE_PREFIX)}`;
+    }
+    if (level === "error") {
+      return chunk
+        ? `  ${paintRaw.danger(SYSTEM_NOTICE_PREFIX)} ${chunk}`
+        : `  ${paintRaw.danger(SYSTEM_NOTICE_PREFIX)}`;
+    }
+    return `  ${paintRaw.dim(chunk ? `${SYSTEM_NOTICE_PREFIX} ${chunk}` : SYSTEM_NOTICE_PREFIX)}`;
+  };
+  const formatContinuationLine = (chunk, indent) => {
+    if (!chunk) {
+      return "";
+    }
+    if (!color || level === "error") {
+      return `${indent}${chunk}`;
+    }
+    return `${indent}${paintRaw.dim(chunk)}`;
+  };
+
+  const logicalLines = normalized.split("\n");
+  if (width === undefined) {
+    return logicalLines.map((line, index) => (
+      index === 0 ? formatFirstLine(line) : formatContinuationLine(line, SYSTEM_NOTICE_INDENT)
+    ));
+  }
+
+  const columns = Math.max(1, Math.floor(Number(width) || 0));
+  if (columns < SYSTEM_NOTICE_HEAD_WIDTH + 1) {
+    const raw = `  ${SYSTEM_NOTICE_PREFIX} ${logicalLines.join(" ")}`;
+    return wrapTextCells(raw, columns, columns).map(({ text: chunk }) => {
+      if (!color || !chunk) return chunk;
+      if (level === "warning") return paintRaw.warning(chunk);
+      if (level === "error") return paintRaw.danger(chunk);
+      return paintRaw.dim(chunk);
+    });
+  }
+
+  const contIndent = columns - SYSTEM_NOTICE_HEAD_WIDTH < 16
+    ? SYSTEM_NOTICE_NARROW_INDENT
+    : SYSTEM_NOTICE_INDENT;
+  const firstBodyWidth = Math.max(1, columns - SYSTEM_NOTICE_HEAD_WIDTH);
+  const contBodyWidth = Math.max(1, columns - contIndent.length);
+  const lines = [];
+  for (const [index, logicalLine] of logicalLines.entries()) {
+    if (index === 0) {
+      if (!logicalLine) {
+        lines.push(formatFirstLine(""));
+        continue;
+      }
+      const firstCharWidth = textWidth(graphemes(logicalLine)[0] || "");
+      if (firstCharWidth > firstBodyWidth) {
+        lines.push(formatFirstLine(""));
+        for (const chunk of wrapTextCells(logicalLine, contBodyWidth, contBodyWidth)) {
+          lines.push(formatContinuationLine(chunk.text, contIndent));
+        }
+        continue;
+      }
+      const chunks = wrapTextCells(logicalLine, firstBodyWidth, contBodyWidth);
+      lines.push(formatFirstLine(chunks[0].text));
+      for (const chunk of chunks.slice(1)) {
+        lines.push(formatContinuationLine(chunk.text, contIndent));
+      }
+      continue;
+    }
+    if (!logicalLine) {
+      lines.push("");
+      continue;
+    }
+    for (const chunk of wrapTextCells(logicalLine, contBodyWidth, contBodyWidth)) {
+      lines.push(formatContinuationLine(chunk.text, contIndent));
+    }
+  }
+  return lines;
 }
 
-export function systemNoticeLine(text, { level = "info", color = Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined } = {}) {
-  const prefix = "· System:";
-  if (!color) return `  ${prefix} ${text}`;
-  if (level !== "warning") return `  ${paintRaw.dim(`${prefix} ${text}`)}`;
-  return `  ${paintRaw.warning(prefix)} ${paintRaw.dim(text)}`;
+export function systemNoticeLine(text, options = {}) {
+  return systemNoticeLines(text, options).join("\n");
 }
 
 export function contextBuiltLine(event) {
@@ -1269,17 +1368,7 @@ export function contextBuiltLine(event) {
   const scopes = Array.isArray(decisions.rind_docs_truncated_scopes)
     ? decisions.rind_docs_truncated_scopes.join(", ")
     : "unknown";
-  return notice("Context trimmed", `RIND.md: ${clipSingleLine(scopes, 96)}`);
-}
-
-function notice(label, ...details) {
-  const lines = [`${accent("◆")} ${bold(label)}`];
-  for (const detail of details.flat()) {
-    if (detail) {
-      lines.push(dim(`    ${detail}`));
-    }
-  }
-  return lines.join("\n");
+  return `Context trimmed · RIND.md: ${clipSingleLine(scopes, 96)}`;
 }
 
 export function toolRequestedLine(event) {
@@ -1432,24 +1521,90 @@ function slashHelpText(display, commands) {
   return lines.join("\n");
 }
 
+const STATUS_GROUPS = [["model", "Model"], ["provider", "Provider"], ["conversation", "Conversation"]];
+// Values that identify the setup are lit; paths read as paths.
+const STATUS_ACCENT_LABELS = new Set(["model", "effort", "provider", "session"]);
+const STATUS_LABEL_WIDTH = 12;
+const STATUS_VALUE_WIDTH = 28;
+
+// /status: what this conversation runs on (model, provider), the conversation
+// itself, and its context use. Entries carry their own group, note and tone;
+// anything to fix is drawn as a warning with the command that fixes it lit.
 function slashStatusText(display) {
-  const lines = [slashConfigText({ entries: display.entries })];
-  lines.push("", sectionRule("Assistant sampling"));
-  const usage = Array.isArray(display.usage) ? display.usage[0] : null;
-  if (!usage) {
-    lines.push(dim("  no completed sampling yet"));
-    return lines.join("\n");
+  const entries = (Array.isArray(display.entries) ? display.entries : []).filter((entry) => entry && typeof entry === "object" && entry.label);
+  const known = new Set(STATUS_GROUPS.map(([group]) => group));
+  const sections = STATUS_GROUPS
+    .map(([group, title]) => [title, entries.filter((entry) => entry.group === group).map(statusEntryRow)])
+    .filter(([, rows]) => rows.length);
+  // Entries from a host that does not group them stay visible, untitled.
+  const ungrouped = entries.filter((entry) => !known.has(entry.group) && entry.group !== "settings").map(statusEntryRow);
+  if (ungrouped.length) sections.push(["", ungrouped]);
+  sections.push(["Context", statusUsageRows(Array.isArray(display.usage) ? display.usage[0] : null)]);
+
+  const allRows = sections.flatMap(([, rows]) => rows).filter((row) => row.note);
+  const valueWidth = Math.min(STATUS_VALUE_WIDTH, Math.max(0, ...allRows.map((row) => visibleLength(row.value))));
+  const lines = [sectionRule("Status", statusSelectionSummary(display.selection))];
+  for (const [title, rows] of sections) {
+    if (title) lines.push(`  ${bold(title)}`);
+    lines.push(...rows.map((row) => statusRowText(row, valueWidth)));
   }
-  const windowTokens = Number(usage.context_window_tokens) || 0;
-  if (windowTokens > 0) {
-    lines.push(kvRow("context", `${usageMeter(usage.context_usage_percent)} ${dim(formatPercent(usage.context_usage_percent))}`));
-    lines.push(kvRow("input", `${formatCount(usage.input_tokens)} ${dim(`/ ${formatCount(windowTokens)} tokens`)}`));
-  } else {
-    lines.push(kvRow("input", formatCount(usage.input_tokens)));
+  const footer = entries.filter((entry) => entry.group === "settings");
+  if (footer.length) {
+    lines.push("", ...footer.map((entry) => {
+      const value = entry.label === "settings" ? promptPath(middleClip(homeRelativePath(entry.value), slashContentWidth() - 12)) : singleLine(entry.value);
+      const note = entry.note ? dim(`  ${clipSingleLine(entry.note, 40)}`) : "";
+      return `  ${dim(entry.label)} ${entry.tone === "warning" ? paint.warning(stripAnsi(value)) : value}${note}`;
+    }));
   }
-  lines.push(kvRow("cached", `${formatCount(usage.cached_input_tokens)} ${dim(`· ${formatPercent(usage.cache_hit_rate)} hit`)}`));
-  lines.push(kvRow("output", formatCount(usage.output_tokens)));
   return lines.join("\n");
+}
+
+function statusSelectionSummary(selection) {
+  if (!selection || typeof selection !== "object" || !selection.model) return "";
+  const model = [selection.provider, selection.model].map(singleLine).filter(Boolean).join(" / ");
+  const effort = singleLine(selection.reasoning_effort);
+  return effort ? `${model} · ${effort}` : model;
+}
+
+// A row is { label, value, note } with value and note already painted.
+function statusEntryRow(entry) {
+  const label = singleLine(entry.label);
+  const warning = entry.tone === "warning";
+  const raw = label === "endpoint" ? singleLine(entry.value).replace(/^https?:\/\//i, "") : singleLine(entry.value);
+  const valueText = label === "endpoint" ? middleClip(raw, STATUS_VALUE_WIDTH + 12) : clipSingleLine(raw, STATUS_VALUE_WIDTH + 12);
+  const value = warning ? paint.warning(valueText)
+    : label === "endpoint" ? promptPath(valueText)
+      : STATUS_ACCENT_LABELS.has(label) ? accent(valueText) : valueText;
+  return { label, value, note: statusNoteText(entry) };
+}
+
+function statusNoteText(entry) {
+  const text = clipSingleLine(entry.note, Math.max(18, slashContentWidth() - STATUS_LABEL_WIDTH - STATUS_VALUE_WIDTH - 8));
+  if (!text) return "";
+  const tone = entry.tone === "warning" ? paint.warning : entry.note_tone === "accent" ? accent : dim;
+  const actions = (Array.isArray(entry.actions) ? entry.actions : []).map(singleLine).filter(Boolean);
+  if (!actions.length) return tone(text);
+  const pattern = new RegExp(`(${actions.map((action) => action.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`);
+  return text.split(pattern).map((part) => (actions.includes(part) ? accent(part) : part ? tone(part) : "")).join("");
+}
+
+function statusUsageRows(usage) {
+  if (!usage || typeof usage !== "object") return [{ label: "", value: dim("no completed sampling yet"), note: "" }];
+  const windowTokens = Number(usage.context_window_tokens) || 0;
+  const rows = windowTokens > 0
+    ? [{ label: "usage", value: `${usageMeter(usage.context_usage_percent)} ${formatPercent(usage.context_usage_percent)}`,
+      note: dim(`${formatCount(usage.input_tokens)} / ${formatCount(windowTokens)} tokens`) }]
+    : [{ label: "input", value: formatCount(usage.input_tokens), note: "" }];
+  rows.push(
+    { label: "cached", value: formatCount(usage.cached_input_tokens), note: dim(`${formatPercent(usage.cache_hit_rate)} hit`) },
+    { label: "output", value: formatCount(usage.output_tokens), note: "" },
+  );
+  return rows;
+}
+
+function statusRowText(row, valueWidth) {
+  const value = row.note ? `${padRight(row.value, valueWidth)}  ${row.note}` : row.value;
+  return (row.label ? `    ${dim(padRight(row.label, STATUS_LABEL_WIDTH))}${value}` : `    ${value}`).trimEnd();
 }
 
 function slashSessionsText(display) {
@@ -1562,17 +1717,17 @@ function skillRowText(skill, nameWidth, noteWidth) {
 // Paths read best compressed: collapse the home directory to "~" and drop the
 // redundant SKILL.md filename that every entry shares.
 function prettySkillLocation(value) {
-  let location = String(value || "").trim();
-  if (!location) {
-    return "";
-  }
-  location = location.replace(/[\\/]+SKILL\.md$/i, "");
+  return homeRelativePath(String(value || "").trim().replace(/[\\/]+SKILL\.md$/i, ""));
+}
+
+// "~" for the home directory itself or a path inside it (not a sibling that
+// merely shares its prefix, like /home/al for /home/alice).
+function homeRelativePath(value) {
+  const location = String(value || "").trim();
   const home = homedir();
-  if (home && (location === home || location.startsWith(home))) {
-    const rest = location.slice(home.length);
-    location = rest ? `~${rest}` : "~";
-  }
-  return location;
+  if (!location || !home) return location;
+  if (location === home) return "~";
+  return location.startsWith(home) && /^[\\/]/.test(location.slice(home.length)) ? `~${location.slice(home.length)}` : location;
 }
 
 function sessionSizeText(session) {
@@ -1587,21 +1742,6 @@ function sessionSizeText(session) {
 function optionalNonnegativeNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : null;
-}
-
-function slashConfigText(display) {
-  const entries = (Array.isArray(display.entries) ? display.entries : [])
-    .filter((entry) => entry && typeof entry === "object");
-  const lines = [sectionRule("Config")];
-  for (const entry of entries) {
-    const label = clipSingleLine(entry.label, 22);
-    const rawValue = entry.label === "settings"
-      ? middleClip(entry.value, Math.max(18, slashContentWidth() - visibleLength(label) - 6))
-      : clipSingleLine(entry.value, Math.max(18, slashContentWidth() - visibleLength(label) - 6));
-    const state = entry.state ? dim(`  (${clipSingleLine(entry.state, 18)})`) : "";
-    lines.push(`  ${dim(padRight(label, 18))}${rawValue}${state}`.trimEnd());
-  }
-  return lines.join("\n");
 }
 
 function slashThemeText(display) {

@@ -43,7 +43,7 @@ function statusResult(context: LocalSlashContext): LocalSlashResult {
     ].join("\n"),
     display: { type: "status", entries: [
       { label: "session", value: session }, { label: "model", value: model },
-      { label: "reasoningEffort", value: context.settings.reasoningEffort || "unset" },
+      { label: "effort", value: context.settings.reasoningEffort || "unset" },
       { label: "runtime", value: runtime }, { label: "workspace", value: context.projectPath || "not selected" },
     ], usage: [] },
   }

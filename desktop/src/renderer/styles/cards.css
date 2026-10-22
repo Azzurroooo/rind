@@ -178,6 +178,7 @@
 .status-config dt, .status-metrics dt { color: var(--muted); }
 .status-config dd, .status-metrics dd { min-width: 0; margin: 0; color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .status-config dd { font-family: var(--font-mono); font-size: 11.5px; }
+.status-config > .status-warning dd, .status-config > .status-warning dd small { color: var(--warning); }
 .status-display small { color: var(--muted); font-size: 11px; font-family: var(--font-ui); }
 .status-sampling { padding: 14px; border-top: 1px solid var(--line); }
 .status-sampling h4 { margin: 0 0 12px; color: var(--muted); font-size: 11px; font-weight: 600; }

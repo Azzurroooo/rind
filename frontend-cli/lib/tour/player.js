@@ -6,17 +6,23 @@ const SPINNER_MS = 120;
 // holds for a keypress.
 const TIMING = {
   shell: { tickMs: 24, afterMs: 300 },
-  "shell-out": { tickMs: 40, afterMs: 80 },
+  "shell-out": { tickMs: 40, afterMs: 1000 },
   startup: { afterMs: 400 },
   type: { tickMs: 35, afterMs: 250 },
   submit: { afterMs: 250 },
   result: { afterMs: 1200 },
-  "slash-result": { afterMs: 1600 },
-  tool: { settleMs: 700, afterMs: 400 },
+  "slash-result": { settleMs: 120, afterMs: 1600 },
+  tool: { settleMs: 700, afterMs: 500 },
   assistant: { tickMs: 30, afterMs: 1800 },
   menu: { tickMs: 650, afterMs: 1800 },
-  // Keep complete management screens observable before the next explanation.
+  // Keep complete management screens and intermediate UI transitions observable before the next explanation.
   agents: { settleMs: 120, afterMs: 1800 },
+  "expand-tools": { settleMs: 120, afterMs: 1000 },
+  consume: { settleMs: 120, afterMs: 1100 },
+  info: { afterMs: 0 },
+  "close-menu": { afterMs: 0 },
+  "turn-start": { afterMs: 0 },
+  prefill: { afterMs: 0 },
   "turn-done": { afterMs: 500 },
   exit: { afterMs: 400 },
   note: { waitKey: true },
@@ -77,10 +83,13 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
     // If only instant updates separate this frame from an explanation, show
     // those updates and pause now. A countdown must lead to more playback,
     // never just another stop (e.g. tool -> expand-tools -> note).
+    // Before the final takeaway note, however, let any step that introduced
+    // its own caption hold so the caption is not immediately overwritten.
     for (let index = stepIndex + 1; index < steps().length; index++) {
       const next = steps()[index];
       const spec = timing(next.kind, next);
       if (spec.waitKey) {
+        if (index === steps().length - 1 && current().note) break;
         playStep(stepIndex + 1);
         return;
       }

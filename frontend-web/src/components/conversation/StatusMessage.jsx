@@ -1,4 +1,4 @@
-const LABELS = { session: "Session", settings: "Settings", apiKey: "API key", baseUrl: "Endpoint", model: "Model", reasoningEffort: "Reasoning effort", runtime: "Runtime", workspace: "Workspace" };
+const LABELS = { session: "Session", name: "Name", settings: "Settings", provider: "Provider", auth: "Sign-in", endpoint: "Endpoint", model: "Model", effort: "Reasoning effort", runtime: "Runtime", workspace: "Workspace" };
 const count = (value) => value != null && Number.isFinite(Number(value)) ? Number(value).toLocaleString() : "—";
 const percent = (value) => value != null && Number.isFinite(Number(value)) ? `${(Number(value) * 100).toFixed(1)}%` : "—";
 
@@ -10,7 +10,7 @@ export function StatusMessage({ display }) {
       <header>/status</header>
       <div className="status-display">
         <dl className="status-config">
-          {entries.map((entry, index) => <div key={index}><dt>{LABELS[entry.label] || entry.label}</dt><dd>{String(entry.value ?? "—")}{entry.state && <small> {String(entry.state)}</small>}</dd></div>)}
+          {entries.map((entry, index) => <div key={index} className={entry.tone === "warning" ? "status-warning" : undefined}><dt>{LABELS[entry.label] || entry.label}</dt><dd>{String(entry.value ?? "—")}{entry.note && <small> {String(entry.note)}</small>}</dd></div>)}
         </dl>
         <section className="status-sampling" aria-label="Latest model response">
           <h4>Latest model response</h4>

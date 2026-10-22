@@ -1,4 +1,5 @@
-import { note, shell, shellOut } from "./steps.js";
+import { demoInfo, REMOTE_CONNECTION, REMOTE_SCOPES } from "./demo.js";
+import { closeMenu, info, menu, note, shell, shellOut, slashResult, startup, submit, type } from "./steps.js";
 
 export const automationPages = [
   {
@@ -10,10 +11,14 @@ export const automationPages = [
         "rind run is the same agent, headless: the final reply lands on stdout,",
         "progress on stderr — built for hooks, cron and pipelines.",
       ]),
-      shell('rind run --prompt "Summarize the changes in src/" --dir /workspace/project 2>progress.log', ["This example redirects stderr to progress.log; only the final answer appears in the terminal. Replace /workspace/project with your own absolute path."]),
+      shell('rind run --prompt "Summarize the changes in src/" --dir /workspace/project 2>progress.log', [
+        "Redirect stderr (2>progress.log) so only the clean final answer is printed to stdout.",
+      ]),
       shellOut([
         "Two refactorings landed this week: the JSONL store now streams",
         "appends, and the parser tokenizer walks grapheme clusters.",
+      ], [
+        "The final reply streams to stdout ready for pipes or CI scripts, while tool progress is logged to progress.log.",
       ]),
       note([
         "Check progress.log for progress and errors. Session history is saved separately from the final stdout reply.",
@@ -30,17 +35,65 @@ export const automationPages = [
         "rind send delivers a prompt into a running session from any terminal",
         "or script — the session id is the address.",
       ]),
-      shell('rind send --session 20260917_103001_eff01a23 "Also update the README examples"'),
-      shellOut(["✓ sent to rind · session 20260917_103001_eff01a23"]),
-      note([
-        "If the session is mid-turn the message steers it; if it is idle,",
-        "send starts the turn. Read the reply in the already-open target session.",
+      shell('rind send --session 20260917_103001_eff01a23 "Also update the README examples"', [
+        "Target an open session by its id (shown in the startup banner and /status).",
+      ]),
+      shellOut([
+        "✓ sent to rind · session 20260917_103001_eff01a23",
+      ], [
+        "If the target session is mid-turn, the message steers it; if it is idle, send starts a new turn.",
       ]),
       note([
-        "Try it from a second terminal while the target CLI session is still open on this machine.",
-        "Copy its id from /status. The confirmation means delivered, not finished.",
+        "The confirmation means delivered, not finished — read the reply in the target session.",
+        "For a closed idle session, resume with rind --session <id> or rind run --session <id>.",
       ]),
-      note(["Without a window, a turn still running in the shared Runtime can receive send as a follow-up.", "For a closed, idle session, resume with rind --session <id> or rind run --session <id> instead."]),
+    ],
+  },
+  {
+    id: "auto.remote",
+    feature: "/remote",
+    title: "Remote web & mobile",
+    steps: [
+      note([
+        "/remote opens a local or LAN web interface with a pairing QR code",
+        "and rotatable access code so you can monitor or steer from your phone.",
+      ]),
+      shell("rind"),
+      startup(demoInfo({ session: "20260917_110200_44bc88ef" })),
+      type("/remote", [
+        "Run /remote in an interactive session to open the Remote access menu.",
+      ]),
+      submit(),
+      menu({
+        kind: "remote",
+        input: "/remote",
+        items: REMOTE_SCOPES,
+        selected: 0,
+        target: 0,
+      }, [
+        "Choose Local network (same Wi-Fi) or This computer (loopback) and press Enter to turn Remote access on.",
+      ]),
+      note([
+        "Choose Local network (same Wi-Fi) or This computer (loopback) and press Enter to turn Remote access on.",
+      ]),
+      info({ remote_running: true }),
+      menu({
+        kind: "remote",
+        input: "/remote",
+        connection: REMOTE_CONNECTION,
+        selected: 0,
+        target: 0,
+      }, [
+        "The On view shows connected devices, the pairing QR code, the sign-in link, and the access code (r rotates; x turns off).",
+      ]),
+      closeMenu("Esc"),
+      slashResult({ text: "Remote access enabled · Local network · http://192.168.1.24:8766" }, [
+        "While remote access is on, the composer header displays the ⚯ indicator next to your workspace path.",
+      ]),
+      note([
+        "Try /remote to pair a phone or browser on your Wi-Fi network, or choose This computer for local browser use.",
+        "Press r in /remote to rotate the access code, or x to turn Remote access off at any time.",
+      ]),
     ],
   },
 ];

@@ -205,7 +205,7 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
     concurrencyChanged: false,
     importChoices: {},
   });
-  assert.deepEqual(transcript.render(90).map(stripAnsi), ["▷ You", "  /settings"]);
+  assert.deepEqual(transcript.render(90).map(stripAnsi), []);
   output.clearTranscript();
 
   // 2. /settings brief command persists globally and updates active brief mode.
@@ -310,5 +310,111 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
   assert.match(fullReplayed, /◉ glob \*\*\/\*\.js · 1 matches/);
   assert.match(fullReplayed, /lint error/);
   assert.match(fullReplayed, /Summary: All checks complete\./);
+});
+
+test("notify appends system notices with block spacing and settles active tool groups in TUI", () => {
+  const state = createCliState();
+  state.runtime.status = "ready";
+  const transcript = createTranscript();
+  const output = createCliOutputController({
+    state,
+    transcript,
+    terminalUi: { started: true, requestRender() {} },
+    animateTools: false,
+    hasColor: () => false,
+  });
+
+  output.notify("First notice");
+  output.beginTool({ tool_call_id: "t1", tool_name: "read_file", args_preview: '{"path":"a.js"}' });
+  output.finishTool({ tool_call_id: "t1", tool_name: "read_file", status: "completed", result: '{"ok":true,"data":"a"}' });
+  output.notify("Interrupting notice", { level: "warning" });
+  output.beginTool({ tool_call_id: "t2", tool_name: "read_file", args_preview: '{"path":"b.js"}' });
+  output.finishTool({ tool_call_id: "t2", tool_name: "read_file", status: "completed", result: '{"ok":true,"data":"b"}' });
+  output.settleTools();
+
+  const lines = transcript.render(80).map(stripAnsi);
+  assert.equal(lines[0], "  · System: First notice", "first notice has no leading blank line");
+  const firstToolIdx = lines.findIndex((line) => line.includes("read a.js"));
+  const secondNoticeIdx = lines.findIndex((line) => line.includes("· System: Interrupting notice"));
+  const secondToolIdx = lines.findIndex((line) => line.includes("read b.js"));
+  assert.ok(firstToolIdx > 0, "first tool appears after first notice");
+  assert.ok(secondNoticeIdx > firstToolIdx, "second notice appears after first tool");
+  assert.equal(lines[secondNoticeIdx - 1], "", "subsequent notice has a leading blank line");
+  assert.ok(secondToolIdx > secondNoticeIdx, "second tool forms a new group below the notice");
+});
+
+test("notify routes info/warning to stdout and error to stderr when TUI is inactive or closing", () => {
+  const stdoutChunks = [];
+  const stderrChunks = [];
+  const origStdout = process.stdout.write;
+  const origStderr = process.stderr.write;
+  process.stdout.write = (chunk) => {
+    stdoutChunks.push(String(chunk));
+    return true;
+  };
+  process.stderr.write = (chunk) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  };
+  try {
+    const nonTuiState = createCliState();
+    const nonTuiOutput = createCliOutputController({
+      state: nonTuiState,
+      transcript: createTranscript(),
+      terminalUi: null,
+      animateTools: false,
+      hasColor: () => false,
+    });
+    nonTuiOutput.notify("   ");
+    nonTuiOutput.notify("Info line", { level: "info" });
+    nonTuiOutput.notify("Warn line", { level: "warning" });
+    nonTuiOutput.notify("Error line", { level: "error" });
+
+    assert.deepEqual(stdoutChunks, [
+      "  · System: Info line\n",
+      "\n  · System: Warn line\n",
+    ]);
+    assert.deepEqual(stderrChunks, [
+      "  · System: Error line\n",
+    ]);
+
+    stdoutChunks.length = 0;
+    stderrChunks.length = 0;
+
+    // TUI not yet started: error falls back to stderr, info goes to transcript.
+    const unstartedState = createCliState();
+    const unstartedTranscript = createTranscript();
+    const unstartedOutput = createCliOutputController({
+      state: unstartedState,
+      transcript: unstartedTranscript,
+      terminalUi: { started: false, requestRender() {} },
+      animateTools: false,
+      hasColor: () => false,
+    });
+    unstartedOutput.notify("Queued info");
+    unstartedOutput.notify("Startup error", { level: "error" });
+    assert.deepEqual(unstartedTranscript.render(80), ["  · System: Queued info"]);
+    assert.deepEqual(stderrChunks, ["  · System: Startup error\n"]);
+
+    stderrChunks.length = 0;
+
+    // TUI closing: error falls back to stderr.
+    const closingState = createCliState();
+    closingState.runtime.status = "closing";
+    const closingTranscript = createTranscript();
+    const closingOutput = createCliOutputController({
+      state: closingState,
+      transcript: closingTranscript,
+      terminalUi: { started: true, requestRender() {} },
+      animateTools: false,
+      hasColor: () => false,
+    });
+    closingOutput.notify("Closing error", { level: "error" });
+    assert.deepEqual(closingTranscript.render(80), []);
+    assert.deepEqual(stderrChunks, ["  · System: Closing error\n"]);
+  } finally {
+    process.stdout.write = origStdout;
+    process.stderr.write = origStderr;
+  }
 });
 

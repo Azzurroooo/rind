@@ -30,7 +30,7 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
   { name: "settings", description: "Configure brief output, color theme, working spinner, max concurrent runs, and skill imports", usage: SETTINGS_USAGE },
   { name: "skill", description: "List skills and where they come from", usage: "/skill" },
-  { name: "status", description: "Show session and provider status", usage: "/status" },
+  { name: "status", description: "Show model, provider, conversation and context use", usage: "/status" },
   { name: "tour", description: "Interactive feature walkthrough", usage: "/tour [page]" },
 ]);
 
@@ -50,7 +50,7 @@ export async function executeLocalSlashCommand(input, context = {}) {
 }
 
 function usageResult(usage) {
-  return { text: `Usage: ${usage}` };
+  return { text: `Usage: ${usage}`, level: "warning" };
 }
 
 function currentModelLabel(context) {
@@ -65,26 +65,34 @@ function statusResult(context, argument) {
   const info = context.sessionInfo || {};
   const providers = Array.isArray(info.providers) ? info.providers : [];
   const configured = providers.filter((item) => item?.configured).map((item) => String(item.id || ""));
+  const pendingName = !info.session_id && context.pendingName ? String(context.pendingName) : "";
   const entries = [
-    { label: "session", value: info.session_id || "none · the first message starts it" },
+    { group: "model", label: "model", value: info.model || "unknown" },
+    { group: "model", label: "effort", value: info.reasoning_effort || "unset" },
+    { group: "provider", label: "provider", value: info.provider || "unknown" },
+    configured.length
+      ? { group: "provider", label: "signed in", value: configured.join(", ") }
+      : { group: "provider", label: "signed in", value: "none", note: "/login", tone: "warning", actions: ["/login"] },
+    info.session_id
+      ? { group: "conversation", label: "session", value: info.session_id }
+      : { group: "conversation", label: "session", value: "none", note: "the first message starts it" },
     // The Runtime's /status reads the saved name; this one runs before the Runtime is reachable.
-    { label: "name", value: !info.session_id && context.pendingName ? `${context.pendingName} · applies when the conversation starts` : "unset · shown by its first message" },
-    { label: "connection", value: info.provider || "unknown" },
-    { label: "model", value: info.model || "unknown" },
-    { label: "reasoningEffort", value: info.reasoning_effort || "unset" },
-    { label: "configured", value: configured.join(", ") || "none — run /login" },
-    ...(info.update_available ? [{ label: "update", value: `v${info.update_available} available · run rind update` }] : []),
+    pendingName
+      ? { group: "conversation", label: "name", value: pendingName, note: "applies when the conversation starts" }
+      : { group: "conversation", label: "name", value: "unset", note: "shown by its first message" },
+    ...(info.update_available ? [{ group: "settings", label: "update", value: `v${info.update_available} available`, note: "run rind update" }] : []),
   ];
+  const selection = { provider: info.provider || "", model: info.model || "", reasoning_effort: info.reasoning_effort || "" };
   return {
     text: "Status",
-    display: { type: "status", entries, usage: [] },
+    display: { type: "status", selection, entries, usage: [] },
   };
 }
 
 function helpResult(argument, commands) {
   const name = argument.replace(/^\//, "").toLowerCase();
   const visible = commands.filter((command) => (!name || command.name === name || command.aliases?.includes(name)));
-  if (name && !visible.length) return { text: `Unknown command: /${name}\nRun /help to see available commands.` };
+  if (name && !visible.length) return { text: `Unknown command: /${name}\nRun /help to see available commands.`, level: "warning" };
   const selected = name ? visible[0] : null;
   const text = selected
     ? `/${selected.name}\n${selected.description}\nUsage: ${selected.usage || `/${selected.name}`}`
@@ -101,7 +109,7 @@ function themeResult(argument, context = {}) {
     const previous = currentTheme();
     const applied = setTheme(requested);
     if (!applied) {
-      return { text: `Unknown theme "${requested}". Available: ${themeNames().join(", ")}.` };
+      return { text: `Unknown theme "${requested}". Available: ${themeNames().join(", ")}.`, level: "warning" };
     }
     context.persistTheme?.(applied.name);
     return {
@@ -133,7 +141,7 @@ function spinnerResult(argument, context = {}) {
     const previous = currentSpinner();
     const applied = setSpinner(requested);
     if (!applied) {
-      return { text: `Unknown spinner "${requested}". Available: ${spinnerNames().join(", ")}.` };
+      return { text: `Unknown spinner "${requested}". Available: ${spinnerNames().join(", ")}.`, level: "warning" };
     }
     context.persistSpinner?.(applied.name);
     return {
@@ -165,7 +173,7 @@ async function concurrencyResult(argument, context = {}) {
     const previous = getMaxConcurrentRuns();
     const applied = setMaxConcurrentRuns(requested);
     if (!applied) {
-      return { text: `Invalid concurrency limit "${requested}". Available: ${CONCURRENT_RUN_OPTIONS.join(", ")}.` };
+      return { text: `Invalid concurrency limit "${requested}". Available: ${CONCURRENT_RUN_OPTIONS.join(", ")}.`, level: "warning" };
     }
     await context.persistMaxConcurrentRuns?.(applied);
     return {

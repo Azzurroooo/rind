@@ -12,9 +12,9 @@ import {
   answerPlaceholderText,
   backgroundMonitorText,
   cancelledText,
-  commandResultText,
   contextBuiltLine,
   systemNoticeLine,
+  systemNoticeLines,
   errorLine,
   goalCommandText,
   goalText,
@@ -38,7 +38,7 @@ import {
   choiceMenuText,
   slashDisplayText,
   slashMenuText,
-  slashResultText,
+  slashResultNotice,
   startupText,
   welcomeText,
   resumeLineText,
@@ -135,8 +135,8 @@ test("prompt and turn status copy match the compact terminal UI", () => {
   assert.equal(answerPromptText(), "\n  ▷ ");
   assert.equal(answerPlaceholderText(), "Type your answer");
   assert.equal(inputHintText("Ask Rind to do anything"), "Ask Rind to do anything");
-  assert.equal(interruptText(), "◆ Interrupt requested\n    ctrl+c again to quit");
-  assert.equal(cancelledText(), "◆ Interrupted\n    session preserved; resume with -c");
+  assert.equal(interruptText(), "Interrupt requested · ctrl+c again to quit");
+  assert.equal(cancelledText(), "Interrupted · session preserved; resume with -c");
   assert.equal(userInputText("hello"), "▷ You\n  hello");
   assert.equal(userInputText("first\r\nsecond"), "▷ You\n  first\n  second");
   const originalColumns = process.stdout.columns;
@@ -520,31 +520,39 @@ test("modelMenuText keeps the selected model visible", () => {
   );
 });
 
-test("modelListErrorText renders current model and fallback command", () => {
+test("modelMenuText with effort kind renders Reasoning effort title without Image input line", () => {
   assert.equal(
-    modelListErrorText("request failed", "model-a"),
+    modelMenuText([
+      { modelId: "low", current: false },
+      { modelId: "medium", current: true },
+      { modelId: "max", current: false },
+    ], 2, { kind: "effort" }),
     [
-      "◆ Model list unavailable",
-      "    current: model-a",
-      "    request failed",
-      "    use /model set <name> to switch manually",
+      "  Reasoning effort",
+      "    · low",
+      "    · medium                             current",
+      "    › max",
+      "    ↑↓ select · enter use · f folder default · g global default · esc cancel",
+      "",
     ].join("\n"),
   );
 });
 
-
-
-
-
-test("commandResultText renders a compact success line", () => {
-  assert.equal(commandResultText("Model updated: glm-5.1"), "✓ Model updated: glm-5.1");
+test("modelListErrorText renders current model and fallback command", () => {
   assert.equal(
-    commandResultText("Compact complete", "id abc123"),
-    "✓ Compact complete — id abc123",
+    modelListErrorText("request failed", "model-a"),
+    [
+      "Model list unavailable: request failed",
+      "current: model-a",
+      "use /model set <name> to switch manually",
+    ].join("\n"),
   );
-  assert.match(
-    commandResultText("x".repeat(120), "y".repeat(120)),
-    /^✓ x{93}\.\.\. — y{93}\.\.\.$/,
+  assert.equal(
+    modelListErrorText("", ""),
+    [
+      "Model list unavailable",
+      "use /model set <name> to switch manually",
+    ].join("\n"),
   );
 });
 
@@ -583,35 +591,82 @@ test("slashDisplayText renders command help payloads", () => {
   );
 });
 
-test("slashDisplayText renders the two status sections", () => {
+const STATUS_DISPLAY = {
+  type: "status",
+  selection: { provider: "team-gateway", model: "gw-beta", reasoning_effort: "max" },
+  entries: [
+    { group: "model", label: "model", value: "gw-beta", note: "folder default" },
+    { group: "model", label: "effort", value: "max", note: "this conversation" },
+    { group: "provider", label: "provider", value: "Team Gateway", note: "custom · providers.json", note_tone: "accent" },
+    { group: "provider", label: "auth", value: "not signed in", note: "/login or set GW_KEY", tone: "warning", actions: ["/login"] },
+    { group: "provider", label: "endpoint", value: "https://gw.example/v1", note: "openai-chat" },
+    { group: "conversation", label: "session", value: "session_1" },
+    { group: "conversation", label: "name", value: "unset", note: "shown as \"fix the login page\"" },
+    { group: "settings", label: "settings", value: "E:\\rind\\settings.json", note: "not created · defaults apply" },
+  ],
+  usage: [{
+    input_tokens: 121300,
+    context_window_tokens: 258400,
+    context_usage_percent: 121300 / 258400,
+    cached_input_tokens: 98700,
+    cache_hit_rate: 98700 / 121300,
+    output_tokens: 2100,
+  }],
+};
+
+test("slashDisplayText groups status into model, provider, conversation and context with aligned notes", () => {
   assert.equal(
-    slashDisplayText({
-      type: "status",
-      entries: [
-        { label: "session", value: "session_1" },
-        { label: "model", value: "model_a" },
-      ],
-      usage: [{
-        input_tokens: 121300,
-        context_window_tokens: 258400,
-        context_usage_percent: 121300 / 258400,
-        cached_input_tokens: 98700,
-        cache_hit_rate: 98700 / 121300,
-        output_tokens: 2100,
-      }],
-    }),
+    slashDisplayText(STATUS_DISPLAY),
     [
-      `  ── Config ${"─".repeat(84)}`,
-      "  session           session_1",
-      "  model             model_a",
+      `  ── Status · team-gateway / gw-beta · max ${"─".repeat(53)}`,
+      "  Model",
+      "    model       gw-beta           folder default",
+      "    effort      max               this conversation",
+      "  Provider",
+      "    provider    Team Gateway      custom · providers.json",
+      "    auth        not signed in     /login or set GW_KEY",
+      "    endpoint    gw.example/v1     openai-chat",
+      "  Conversation",
+      "    session     session_1",
+      "    name        unset             shown as \"fix the login page\"",
+      "  Context",
+      "    usage       ▮▮▮▮▮▯▯▯▯▯ 46.9%  121.3k / 258.4k tokens",
+      "    cached      98.7k             81.4% hit",
+      "    output      2.1k",
       "",
-      `  ── Assistant sampling ${"─".repeat(72)}`,
-      "  context     ▮▮▮▮▮▯▯▯▯▯ 46.9%",
-      "  input       121.3k / 258.4k tokens",
-      "  cached      98.7k · 81.4% hit",
-      "  output      2.1k",
+      "  settings E:\\rind\\settings.json  not created · defaults apply",
     ].join("\n"),
   );
+});
+
+test("status colors identify the setup, dim the notes and light the command that fixes a warning", () => {
+  const plain = slashDisplayText(STATUS_DISPLAY);
+  const tty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+  const priorNoColor = process.env.NO_COLOR;
+  Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+  delete process.env.NO_COLOR;
+  try {
+    const colored = slashDisplayText(STATUS_DISPLAY);
+    assert.equal(stripAnsi(colored), plain);
+    assert.ok(colored.includes(paintRaw.accent("gw-beta")), "the model is lit");
+    assert.ok(colored.includes(paintRaw.accent("Team Gateway")), "the provider is lit");
+    assert.ok(colored.includes(paintRaw.accent("custom · providers.json")), "a custom provider stands out");
+    assert.ok(colored.includes(paintRaw.dim("folder default")), "where a choice came from is dim");
+    assert.ok(colored.includes(paintRaw.warning("not signed in")), "what needs fixing is a warning");
+    assert.ok(colored.includes(paintRaw.accent("/login")), "with the command that fixes it lit");
+    assert.ok(colored.includes(paintRaw.warning(" or set GW_KEY")));
+    assert.ok(colored.includes(paintRaw.path("gw.example/v1")), "the endpoint reads as a path");
+  } finally {
+    if (tty) Object.defineProperty(process.stdout, "isTTY", tty);
+    else delete process.stdout.isTTY;
+    if (priorNoColor !== undefined) process.env.NO_COLOR = priorNoColor;
+  }
+});
+
+test("status settings path collapses the home directory but not a sibling sharing its prefix", () => {
+  const status = (value) => slashDisplayText({ type: "status", entries: [{ group: "settings", label: "settings", value }], usage: [] }).split("\n").at(-1);
+  assert.match(status(path.join(homedir(), ".rind", "settings.json")), /^  settings ~[\\/]\.rind[\\/]settings\.json$/);
+  assert.equal(status(`${homedir()}-other${path.sep}settings.json`), `  settings ${homedir()}-other${path.sep}settings.json`);
 });
 
 test("slashDisplayText renders sessions and skills payloads", () => {
@@ -707,22 +762,28 @@ test("skill paths collapse the home directory, clip long descriptions, and apply
   }
 });
 
-test("slashResultText prefers structured display and falls back to raw text", () => {
+test("slashDisplayText and slashResultNotice split structured displays from system notices", () => {
   assert.equal(
-    slashResultText({
+    slashDisplayText({ type: "status", entries: [{ label: "apiKey", value: "unset" }], usage: [] }),
+    [
+      `  ── Status ${"─".repeat(84)}`,
+      "    apiKey      unset",
+      "  Context",
+      "    no completed sampling yet",
+    ].join("\n"),
+  );
+  assert.equal(
+    slashResultNotice({
       text: "Raw status",
       display: { type: "status", entries: [{ label: "apiKey", value: "unset" }], usage: [] },
     }),
-    [
-      `  ── Config ${"─".repeat(84)}`,
-      "  apiKey            unset",
-      "",
-      `  ── Assistant sampling ${"─".repeat(72)}`,
-      "  no completed sampling yet",
-    ].join("\n"),
+    null,
   );
-  assert.equal(slashResultText({ text: "Raw text", display: { type: "unknown" } }), "Raw text");
-  assert.equal(slashResultText(null), "");
+  assert.deepEqual(
+    slashResultNotice({ text: "Raw text", display: { type: "unknown" } }),
+    { text: "Raw text", level: "info" },
+  );
+  assert.equal(slashResultNotice(null), null);
 });
 
 test("contextBuiltLine warns only when Rind docs are truncated", () => {
@@ -734,7 +795,7 @@ test("contextBuiltLine warns only when Rind docs are truncated", () => {
         rind_docs_truncated_scopes: ["user", "project"],
       },
     }),
-    "◆ Context trimmed\n    RIND.md: user, project",
+    "Context trimmed · RIND.md: user, project",
   );
   assert.match(
     contextBuiltLine({
@@ -743,7 +804,7 @@ test("contextBuiltLine warns only when Rind docs are truncated", () => {
         rind_docs_truncated_scopes: ["x".repeat(120)],
       },
     }),
-    /\n    RIND\.md: x{93}\.\.\.$/,
+    /^Context trimmed · RIND\.md: x{93}\.\.\.$/,
   );
 });
 
@@ -1312,8 +1373,8 @@ test("sessionSwitchedText renders target context and model", () => {
 
 test("goal rendering keeps status and objective visible", () => {
   assert.match(goalText({ objective: "ship it", status: "complete" }), /Goal · complete/);
-  assert.match(goalCommandText({ objective: "ship it", status: "paused" }, "pause"), /Goal paused/);
-  assert.match(goalCommandText(null, "clear"), /No active goal/);
+  assert.equal(goalCommandText({ objective: "ship it", status: "paused" }, "pause"), "Goal paused · paused · ship it");
+  assert.equal(goalCommandText(null, "clear"), "Goal cleared · No active goal");
 });
 
 test("AssistantMessage restyles history when the theme changes", () => {
@@ -1447,16 +1508,114 @@ test("AssistantRenderer keeps markdown structure markers dim", () => {
 });
 
 
-test("system notices use two-space indentation and theme warning only on the prefix", () => {
+test("system notices use two-space indentation and theme warning/danger only on the prefix", () => {
+  assert.equal(systemNoticeLine("notice", { color: false, level: "info" }), "  · System: notice");
   assert.equal(systemNoticeLine("notice", { color: false, level: "warning" }), "  · System: notice");
+  assert.equal(systemNoticeLine("notice", { color: false, level: "error" }), "  · System: notice");
   assert.equal(systemNoticeLine("notice", { color: true }), `  ${paintRaw.dim("· System: notice")}`);
+  assert.equal(
+    systemNoticeLine("failed", { color: true, level: "error" }),
+    `  ${paintRaw.danger("· System:")} failed`,
+  );
   try {
     for (const theme of ["dracula", "catppuccin-mocha"]) {
       setTheme(theme);
       assert.equal(systemNoticeLine("notice", { color: true, level: "warning" }),
         `  ${paintRaw.warning("· System:")} ${paintRaw.dim("notice")}`);
+      assert.equal(systemNoticeLine("failed\ndetail", { color: true, level: "error" }),
+        `  ${paintRaw.danger("· System:")} failed\n            detail`);
     }
   } finally { resetTheme(); }
+});
+
+test("systemNoticeLines handles empty input, CRLF normalization, and 12-space hanging indent", () => {
+  assert.deepEqual(systemNoticeLines(""), []);
+  assert.deepEqual(systemNoticeLines("   \r\n  "), []);
+  assert.deepEqual(
+    systemNoticeLines("line one\r\nline two\nline three   ", { color: false }),
+    [
+      "  · System: line one",
+      "            line two",
+      "            line three",
+    ],
+  );
+  const colored = systemNoticeLines("line one\nline two", { color: true, level: "warning" });
+  assert.deepEqual(colored, [
+    `  ${paintRaw.warning("· System:")} ${paintRaw.dim("line one")}`,
+    `            ${paintRaw.dim("line two")}`,
+  ]);
+});
+
+test("systemNoticeLines wraps English and CJK text within width and degrades indent on narrow terminals", () => {
+  const english = "Cannot fork while a turn is running. Wait for it to finish or stop it first.";
+  const wrapped60 = systemNoticeLines(english, { width: 60, color: false });
+  assert.ok(wrapped60.length >= 2);
+  assert.ok(wrapped60[0].startsWith("  · System: "));
+  assert.ok(wrapped60[1].startsWith("            "));
+  assert.ok(wrapped60.every((line) => textWidth(line) <= 60));
+
+  const cjk = "未发送的图片：当前模型不支持图像输入，已忽略剪贴板中的图片内容。";
+  const wrappedCjk = systemNoticeLines(cjk, { width: 36, color: true, level: "warning" });
+  assert.ok(wrappedCjk.length >= 2);
+  assert.ok(stripAnsi(wrappedCjk[0]).startsWith("  · System: "));
+  assert.ok(stripAnsi(wrappedCjk[1]).startsWith("            "));
+  assert.ok(wrappedCjk.every((line) => textWidth(line) <= 36));
+
+  for (const width of [20, 13, 4]) {
+    const narrowEn = systemNoticeLines("Model updated: glm-5.1", { width, color: false });
+    assert.ok(narrowEn.length >= 2);
+    assert.ok(narrowEn.every((line) => textWidth(line) <= width), `English lines fit width=${width}`);
+    if (width >= 13) {
+      assert.ok(narrowEn[0].startsWith("  · System: "));
+      assert.ok(narrowEn[0].length >= 13);
+      assert.ok(narrowEn[1].startsWith("    "));
+      assert.ok(!narrowEn[1].startsWith("     "));
+    }
+
+    const narrowCjk = systemNoticeLines("未发送的图片提示", { width, color: true, level: "error" });
+    assert.ok(narrowCjk.every((line) => textWidth(line) <= width), `CJK lines fit width=${width}`);
+  }
+});
+
+test("slashResultNotice converts brief display and plain text results while ignoring structured displays", () => {
+  assert.deepEqual(
+    slashResultNotice({ display: { type: "brief", enabled: true } }),
+    {
+      text: "Brief output enabled · applies globally across live turns and replayed sessions",
+      level: "info",
+    },
+  );
+  assert.deepEqual(
+    slashResultNotice({ display: { type: "brief", enabled: false } }),
+    {
+      text: "Brief output disabled · applies globally across live turns and replayed sessions",
+      level: "info",
+    },
+  );
+  assert.deepEqual(
+    slashResultNotice({ display: { type: "concurrency", current: 256 } }),
+    {
+      text: "Max concurrent runs: 256 · applies globally across managed agent runs",
+      level: "info",
+    },
+  );
+  assert.deepEqual(
+    slashResultNotice({ text: "Usage: /theme [name]", level: "warning" }),
+    { text: "Usage: /theme [name]", level: "warning" },
+  );
+  assert.deepEqual(
+    slashResultNotice({ text: "Model updated: m1" }),
+    { text: "Model updated: m1", level: "info" },
+  );
+  assert.equal(
+    slashResultNotice({
+      text: "Status summary",
+      display: { type: "status", entries: [{ label: "model", value: "m1" }], usage: [] },
+    }),
+    null,
+  );
+  assert.equal(slashResultNotice({ text: "   " }), null);
+  assert.equal(slashResultNotice(null), null);
 });
 
 test("the unmatched slash note names the way back", async () => {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { createTourStage } from "../lib/tour/stage.js";
 
-const INFO = { version: "0.8.0", model: "zai/glm-4.7", session_id: "s1", cwd: "~/demo" };
+const INFO = { version: "0.8.0", model: "GPT-6-Astra", reasoning_effort: "xhigh", session_id: "s1", cwd: "~/demo" };
 
 test("injected tour version survives replay without changing page fixtures", () => {
   const stage = createTourStage({ version: "9.8.7" });

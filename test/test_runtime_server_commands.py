@@ -74,7 +74,8 @@ class EmptyStream:
 
 async def _explain(selection, source):
     """What the dispatcher answers for /status: a stored-login DeepSeek connection."""
-    return {**selection, "connection": {"name": "DeepSeek", "endpoint": "https://api.deepseek.com/v1", "credential": "stored"},
+    return {**selection, "connection": {"name": "DeepSeek", "endpoint": "https://api.deepseek.com/v1", "api": "openai-chat",
+                                           "kind": "builtin", "auth": "api_key", "credential": "stored", "env_key": "", "account": ""},
             "model_source": (source or {}).get("model", "session"), "effort_source": (source or {}).get("effort", "session")}
 
 
@@ -90,7 +91,7 @@ async def test_help_returns_command_list() -> None:
     assert "Commands" in result.text
     assert "Operate" in result.text
     assert "/status" in result.text
-    assert "Show config and assistant sampling" in result.text
+    assert "Show model, provider, conversation and context use" in result.text
     assert "/skill" in result.text
     assert "Use `/help <command>` for usage." in result.text
     assert result.display is not None
@@ -150,7 +151,7 @@ def test_router_exposes_command_descriptions() -> None:
     usages = {info.name: info.usage for info in infos}
 
     assert [info.name for info in infos] == sorted(descriptions)
-    assert descriptions["status"] == "Show config and assistant sampling"
+    assert descriptions["status"] == "Show model, provider, conversation and context use"
     assert descriptions["model"] == "Show or change the active model"
     assert "clear" not in descriptions
     assert "exit" not in descriptions
@@ -293,19 +294,22 @@ async def test_unknown_command_returns_friendly_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_status_shows_config_and_empty_assistant_sampling() -> None:
+async def test_status_groups_model_provider_conversation_and_empty_context() -> None:
     result = await SlashCommandRouter(build_command_infos()).execute("/status", _context())
 
-    assert "Config:" in result.text
+    assert "Status: model_a" in result.text
+    assert result.text.index("Model:") < result.text.index("Provider:") < result.text.index("Conversation:") < result.text.index("Context:")
     assert "session: session_1" in result.text
     assert "model: model_a" in result.text
-    assert "Assistant sampling:" in result.text
     assert "no completed sampling yet" in result.text
     assert result.display is not None
     assert result.display["type"] == "status"
-    assert [entry["label"] for entry in result.display["entries"]] == [
-        "session", "name", "settings", "connection", "endpoint", "key", "model", "reasoningEffort",
+    assert [(entry["group"], entry["label"]) for entry in result.display["entries"]] == [
+        ("model", "model"), ("model", "effort"),
+        ("provider", "provider"), ("provider", "auth"), ("provider", "endpoint"),
+        ("conversation", "session"), ("conversation", "name"), ("settings", "settings"),
     ]
+    assert result.display["selection"] == {"provider": "", "model": "model_a", "reasoning_effort": ""}
 
 
 @pytest.mark.asyncio
@@ -330,7 +334,7 @@ async def test_status_shows_latest_sampling_usage() -> None:
 
     result = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=UsageSession()))
 
-    assert "Assistant sampling:" in result.text
+    assert "Context:" in result.text
     assert "context: ▮▮▮▮▮▯▯▯▯▯ 46.9%" in result.text
     assert "input: 121.3k / 258.4k tokens" in result.text
     assert "cached: 98.7k · 81.4% hit" in result.text
@@ -365,7 +369,7 @@ async def test_status_ignores_compact_sampling_usage() -> None:
 
     result = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=UsageSession()))
 
-    assert "Assistant sampling:" in result.text
+    assert "Context:" in result.text
     assert "Latest request" not in result.text
     assert "input: 121.3k / 258.4k" in result.text
     assert len(result.display["usage"]) == 1
@@ -386,7 +390,7 @@ async def test_status_tolerates_invalid_sampling_usage() -> None:
 
     result = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=UsageSession()))
 
-    assert "Assistant sampling:" in result.text
+    assert "Context:" in result.text
     assert "input: 0" in result.text
     assert "cached: 0 · 0.0% hit" in result.text
     assert "output: 0" in result.text
@@ -420,7 +424,7 @@ async def test_status_does_not_show_recent_tools() -> None:
     result = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=session))
 
     assert session.tool_records_called is False
-    assert "Assistant sampling:" in result.text
+    assert "Context:" in result.text
     assert "Recent tools:" not in result.text
     assert "bash ok" not in result.text
 
@@ -437,7 +441,7 @@ async def test_status_does_not_leak_api_key(monkeypatch) -> None:
 
     result = await SlashCommandRouter(build_command_infos()).execute("/status", _context())
 
-    assert "key: stored login" in result.text, "the key's source is shown, never the key"
+    assert "auth: API key · saved login" in result.text, "the key's source is shown, never the key"
     assert "secret-value" not in result.text
     assert result.display is not None
     assert result.display["type"] == "status"
@@ -466,12 +470,16 @@ async def test_model_set_updates_session_selection_without_changing_settings(tmp
     result = await SlashCommandRouter(build_command_infos()).execute("/model set model_b", context)
     data = json.loads(path.read_text(encoding="utf-8"))
 
-    assert "Session model updated." in result.text
-    assert "session model: model_b" in result.text
-    assert "default model: model_a (unchanged)" in result.text
-    assert "applies from the next turn; a turn that is running keeps its model" in result.text
+    assert result.text == "Model changed to model_b (session only)"
     assert data["model"] == "model_a"
     assert (session.provider, session.model) == ("openai", "model_b")
+
+    running_context = SlashCommandContext(runtime=FakeRuntime(), session=session, debug=True)
+    running_result = await SlashCommandRouter(build_command_infos()).execute("/model set model_c", running_context)
+    assert running_result.text == (
+        "Model changed to model_c (session only) · applies from the next turn; this turn keeps its model"
+    )
+    assert (session.provider, session.model) == ("openai", "model_c")
 
 
 @pytest.mark.asyncio
@@ -616,7 +624,8 @@ class NamedSession(FakeSession):
 
 
 def _status_entries(result):
-    return {entry["label"]: entry["value"] for entry in result.display["entries"]}
+    """label -> "value · note", as the plain-text /status prints each entry."""
+    return {entry["label"]: " · ".join(filter(None, (entry["value"], entry.get("note")))) for entry in result.display["entries"]}
 
 
 @pytest.mark.asyncio
@@ -624,7 +633,7 @@ async def test_status_shows_the_conversation_name_and_provider() -> None:
     named = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=NamedSession({"name": "Release notes", "title": "write the notes"})))
     entries = _status_entries(named)
     assert entries["name"] == "Release notes"
-    assert entries["connection"] == "deepseek · DeepSeek"
+    assert entries["provider"] == "DeepSeek · built-in"
     assert "name: Release notes" in named.text
 
 
@@ -634,7 +643,7 @@ async def test_status_says_where_the_model_and_the_effort_came_from() -> None:
     session.selection_source = {"model": "folder", "effort": "main_repository"}
     entries = _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=session)))
     assert entries["model"].endswith("· folder default")
-    assert entries["reasoningEffort"].endswith("· main repository default")
+    assert entries["effort"].endswith("· main repository default")
 
 
 @pytest.mark.asyncio
@@ -645,8 +654,8 @@ async def test_status_names_a_connection_that_is_not_configured() -> None:
     context = _context(session=NamedSession({}))
     context.explain_selection = missing
     entries = _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", context))
-    assert entries["connection"] == "deepseek · not configured · /login or /model"
-    assert "endpoint" not in entries and "key" not in entries
+    assert entries["provider"] == "deepseek · not configured · /login or /model"
+    assert "endpoint" not in entries and "auth" not in entries
 
 
 @pytest.mark.asyncio
@@ -665,7 +674,7 @@ async def test_status_before_the_first_message_shows_the_window_choices() -> Non
     entries = _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", SlashCommandContext(runtime=None, session=session, draft=draft, explain_selection=_explain)))
     assert entries["session"] == "none · the first message starts it"
     assert entries["name"] == "Spike · applies when the conversation starts"
-    assert (entries["connection"], entries["model"], entries["reasoningEffort"]) == ("longcat · DeepSeek", "longcat-flash · this conversation", "low · this conversation")
+    assert (entries["provider"], entries["model"], entries["effort"]) == ("DeepSeek · built-in", "longcat-flash · this conversation", "low · this conversation")
     unnamed = SlashCommandContext(runtime=None, session=session, draft={}, explain_selection=_explain)
     assert _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", unnamed))["name"] == "unset · shown by its first message"
 

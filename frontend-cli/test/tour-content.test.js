@@ -11,7 +11,7 @@ const STEP_KINDS = new Set([
   "agents",
 ]);
 const MENU_KINDS = new Set([
-  "slash", "model", "theme", "sessions", "choice",
+  "slash", "model", "settings", "theme", "remote", "sessions", "choice",
   "monitor", "board", "choice-dialog", "auth-secret", "auth-input",
 ]);
 const CLOSING_KINDS = new Set(["turn-done", "result", "exit", "note", "assistant"]);
@@ -98,7 +98,24 @@ test("tour pages are well-formed and uniquely identified", () => {
   for (const page of tourPages()) {
     validatePage(page, seen);
   }
-  assert.ok(seen.size >= 16, `expected the full catalog, found ${seen.size} pages`);
+  assert.ok(seen.size >= 18, `expected the full catalog, found ${seen.size} pages`);
+});
+
+test("all tour pages standardize model to GPT-6-Astra and effort to xhigh", () => {
+  const serialized = JSON.stringify(tourPages());
+  assert.doesNotMatch(serialized, /glm-4\.[67]|gpt-5\.4|demo-model/i);
+  for (const page of tourPages()) {
+    for (const [index, step] of page.steps.entries()) {
+      if (step.kind === "startup") {
+        assert.equal(step.info.model, "GPT-6-Astra", `${page.id} step ${index}: startup model`);
+        assert.equal(step.info.reasoning_effort, "xhigh", `${page.id} step ${index}: startup effort`);
+      }
+      if (step.kind === "info" && step.info) {
+        if (step.info.model) assert.equal(step.info.model, "GPT-6-Astra", `${page.id} step ${index}: info model`);
+        if (step.info.reasoning_effort) assert.equal(step.info.reasoning_effort, "xhigh", `${page.id} step ${index}: info effort`);
+      }
+    }
+  }
 });
 
 test("background lesson uses managed shell tasks and no removed delegate monitor", () => {

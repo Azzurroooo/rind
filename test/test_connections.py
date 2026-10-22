@@ -205,3 +205,35 @@ async def test_a_model_change_for_a_queued_turn_also_changes_image_support(tmp_p
 async def _drain(events):
     return [event async for event in events]
 
+
+
+@pytest.mark.asyncio
+async def test_status_describes_whether_a_connection_is_built_in_custom_or_overridden_and_how_it_signs_in(service, tmp_path, monkeypatch):
+    assert service.describe_connection("removed") is None
+
+    # Built-ins read no environment variable unless providers.json names one; that alone keeps the endpoint built-in.
+    (tmp_path / "providers.json").write_text(json.dumps({"providers": {"deepseek": {"envKey": "DEEPSEEK_API_KEY"}}}), encoding="utf-8")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
+    builtin = service.describe_connection("deepseek", "deepseek-flash")
+    assert builtin == {
+        "name": "DeepSeek", "endpoint": "https://api.deepseek.com/v1", "api": "openai-chat", "kind": "builtin",
+        "auth": "api_key", "credential": "environment", "env_key": "DEEPSEEK_API_KEY", "account": "",
+    }
+    monkeypatch.delenv("DEEPSEEK_API_KEY")
+    assert (service.describe_connection("deepseek")["auth"], service.describe_connection("deepseek")["credential"]) == ("none", "none")
+
+    await service.login("", "connection", Answers("Client A", "openai-responses", "https://client-a.example/v1", "m", "client-key"))
+    custom = service.describe_connection("client-a")
+    assert (custom["kind"], custom["api"], custom["auth"], custom["credential"]) == ("custom", "openai-responses", "api_key", "stored")
+
+    (tmp_path / "providers.json").write_text(json.dumps({"providers": {"deepseek": {"baseUrl": "https://proxy.example/v1"}}}), encoding="utf-8")
+    overridden = service.describe_connection("deepseek")
+    assert (overridden["kind"], overridden["endpoint"]) == ("overridden", "https://proxy.example/v1")
+
+
+def test_status_names_the_account_behind_an_oauth_sign_in(service):
+    from agent.domain.models import Credential
+
+    service.credentials.set("openai", Credential(type="oauth", access="a", refresh="r", expires_at=1, client_id="c"))
+    described = service.describe_connection("openai", "gpt-5.5")
+    assert (described["auth"], described["credential"], described["account"], described["api"]) == ("oauth", "stored", "ChatGPT", "openai-responses")

@@ -409,3 +409,55 @@ test("a stale list cannot resurrect a synchronously completed command", async ()
   assert.equal(state.sessionInfo.background_count, 0);
   controller.stop();
 });
+
+test("task monitor emits system notices via notify with info and error levels", async () => {
+  const notices = [];
+  const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
+
+  // Non-TUI task_updated notice (info)
+  const nonTuiController = createTaskMonitorController({
+    state,
+    terminalUi: false,
+    notify: (text, opts) => notices.push({ text, level: opts?.level ?? "info" }),
+    request: async () => ({}),
+  });
+  nonTuiController.recordTask({
+    type: "task_updated",
+    session_id: "s1",
+    task: { task_id: "task_42", status: "running", notify: "on_exit" },
+  });
+  assert.deepEqual(notices, [{ text: "Task task_42: running (on_exit)", level: "info" }]);
+  nonTuiController.stop();
+
+  // Empty background tasks on enterMonitor -> info, and controlSelected failure -> error
+  notices.length = 0;
+  let listTasks = [];
+  const tuiController = createTaskMonitorController({
+    state,
+    terminalUi: true,
+    notify: (text, opts) => notices.push({ text, level: opts?.level ?? "info" }),
+    request: async (method) => {
+      if (method === "rind/task/list") return { tasks: listTasks };
+      if (method === "rind/task/cancel") throw new Error("cancel denied");
+      return {};
+    },
+  });
+  tuiController.enterMonitor();
+  await settled();
+  assert.deepEqual(notices, [
+    { text: "No background tasks. Press Left from an empty prompt for team tasks.", level: "info" },
+  ]);
+
+  notices.length = 0;
+  listTasks = [{ task_id: "bg-9", status: "running", handoff: true }];
+  tuiController.recordTask({ session_id: "s1", task: listTasks[0] });
+  tuiController.enterMonitor();
+  await settled();
+  tuiController.handleInput({ text: "c" });
+  await settled();
+  assert.deepEqual(notices, [
+    { text: "Task control failed: cancel denied", level: "error" },
+  ]);
+  tuiController.stop();
+});
+

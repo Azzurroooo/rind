@@ -5,7 +5,7 @@ import { createTourPlayer } from "../lib/tour/player.js";
 import { createTourStage } from "../lib/tour/stage.js";
 import { TOUR_TOPICS, tourPages } from "../lib/tour/pages/index.js";
 
-const INFO = { version: "0.8.0", model: "zai/glm-4.7", session_id: "s1", cwd: "~/demo" };
+const INFO = { version: "0.8.0", model: "GPT-6-Astra", reasoning_effort: "xhigh", session_id: "s1", cwd: "~/demo" };
 
 // start.hello timeline at 1×: startup holds for 400ms, type ticks at
 // 435/470, then submit and the explanation appear together without a hold.
@@ -528,5 +528,53 @@ test("automatic playback presents every management screen instead of skipping to
       assert.deepEqual([...seen], page.steps.flatMap((step, index) => step.kind === "agents" && step.screen ? [index] : []));
       assert.equal(clock.pendingCount, 0);
     } finally { player.dispose(); }
+  }
+});
+
+
+test("every authored step caption is either held for reading or preserved into the pause", () => {
+  for (const page of tourPages()) {
+    const stage = createTourStage();
+    const clock = fakeClock();
+    const heldAt = new Map();
+    const pausedCaptions = new Set();
+    const player = createTourPlayer({
+      topics: TOUR_TOPICS,
+      startPageId: page.id,
+      stage,
+      schedule: clock.schedule,
+      cancel: clock.cancel,
+      now: clock.now,
+      onRender: () => {
+        const state = player.state();
+        if (state.phase === "after") {
+          heldAt.set(state.stepIndex, Math.max(heldAt.get(state.stepIndex) || 0, state.remainingMs || 0));
+        }
+        if (state.phase === "waiting" || state.phase === "end") {
+          pausedCaptions.add(JSON.stringify(stage.snapshot().caption));
+        }
+      },
+    });
+    try {
+      player.start();
+      let transitions = 0;
+      while (player.state().phase !== "end") {
+        assert.ok(transitions++ < 2000, `${page.id} finishes`);
+        const state = player.state();
+        if (state.phase === "waiting") player.key(key("space"));
+        else clock.advance(state.remainingMs);
+      }
+      page.steps.forEach((step, index) => {
+        if (step.kind === "note" || !step.note) return;
+        const holdMs = heldAt.get(index) || 0;
+        const preservedInPause = pausedCaptions.has(JSON.stringify(step.note));
+        assert.ok(
+          holdMs >= 1500 || preservedInPause,
+          `${page.id} step ${index} (${step.kind}) caption must hold >=1500ms or persist into a pause (held ${holdMs}ms)`,
+        );
+      });
+    } finally {
+      player.dispose();
+    }
   }
 });

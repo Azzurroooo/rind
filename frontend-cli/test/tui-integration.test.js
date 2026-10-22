@@ -794,6 +794,89 @@ test("image system notices preserve the composer and cursor through repeat event
   } finally { h.tui.stop(); }
 });
 
+test("long system notices wrap with hanging indent, preserve composer and cursor across resize (60 -> 40 -> 80), and re-color on theme switch + replayAll", async (t) => {
+  const { paintRaw, resetTheme, setTheme } = await import("../lib/theme.js");
+  const { textWidth } = await import("../lib/text-width.js");
+  const ttyDesc = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+  const priorNoColor = process.env.NO_COLOR;
+  Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+  delete process.env.NO_COLOR;
+  resetTheme();
+  t.after(() => {
+    resetTheme();
+    if (ttyDesc) Object.defineProperty(process.stdout, "isTTY", ttyDesc);
+    else delete process.stdout.isTTY;
+    if (priorNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = priorNoColor;
+  });
+
+  const h = createHarness({ columns: 60, rows: 18 });
+  const editor = createLineEditor("");
+  editor.setInput("未发送 hello");
+  h.setSession({ mode: "prompt", editor });
+  h.tui.start();
+  try {
+    await settle(h.virtual);
+    const initialCursor = h.virtual.getCursorPosition();
+
+    const longNotice = "Images not sent: a.png, b.png. Select a vision model in /model before sending image attachments.";
+    h.output.notify(longNotice, { level: "warning" });
+    await settle(h.virtual);
+
+    // 1. At 60 columns: long notice wraps cleanly with 12-column hanging indent, no truncation
+    let lines = h.virtual.getViewport();
+    const firstIdx = lines.findIndex((line) => line.startsWith("  · System: "));
+    assert.ok(firstIdx >= 0, "first line has system notice prefix");
+    assert.ok(lines[firstIdx + 1]?.startsWith("            "), "continuation line has 12-space hanging indent");
+    assert.ok(lines.some((line) => line.includes("attachments.")), "tail of notice is wrapped, not truncated");
+    for (const line of lines) {
+      assert.ok(textWidth(line) <= 60, `line exceeds 60 cols: ${line}`);
+    }
+    let cursor = h.virtual.getCursorPosition();
+    assert.equal(cursor.x, initialCursor.x, "cursor x preserved after appending notice");
+    assert.ok(lines[cursor.y].includes("未发送 hello"), "composer line stays at cursor row");
+    assert.equal(editor.input(), "未发送 hello");
+
+    // 2. Resize 60 -> 40 -> 80: input buffer and cursor column stay intact, notice reflows cleanly
+    h.virtual.resize(40, 18);
+    await settle(h.virtual);
+    lines = h.virtual.getViewport();
+    assert.equal(lines.filter((line) => line.includes("System:")).length, 1, "only one notice header after resize to 40");
+    assert.ok(lines.some((line) => line.includes("attachments.")), "tail preserved at 40 cols");
+    for (const line of lines) {
+      assert.ok(textWidth(line) <= 40, `line exceeds 40 cols: ${line}`);
+    }
+    cursor = h.virtual.getCursorPosition();
+    assert.equal(cursor.x, initialCursor.x, "cursor x preserved at 40 cols");
+    assert.ok(lines[cursor.y].includes("未发送 hello"));
+    assert.equal(editor.input(), "未发送 hello");
+
+    h.virtual.resize(80, 18);
+    await settle(h.virtual);
+    lines = h.virtual.getViewport();
+    assert.equal(lines.filter((line) => line.includes("System:")).length, 1, "only one notice header after resize to 80");
+    assert.ok(lines.some((line) => line.includes("attachments.")), "tail preserved at 80 cols");
+    cursor = h.virtual.getCursorPosition();
+    assert.equal(cursor.x, initialCursor.x, "cursor x preserved at 80 cols");
+    assert.ok(lines[cursor.y].includes("未发送 hello"));
+
+    // 3. Switch theme and replayAll: notice re-colors with new theme palette without residual lines or overlap
+    setTheme("dracula");
+    const draculaWarningPrefix = paintRaw.warning("· System:");
+    h.output.replayAll();
+    await settle(h.virtual);
+    const renderedTranscript = h.transcriptContainer.render(80).join("\n");
+    assert.ok(renderedTranscript.includes(draculaWarningPrefix), "transcript re-colored with dracula warning prefix");
+    lines = h.virtual.getViewport();
+    assert.equal(lines.filter((line) => line.includes("System:")).length, 1, "no duplicate notice lines after replayAll");
+    cursor = h.virtual.getCursorPosition();
+    assert.equal(cursor.x, initialCursor.x, "cursor x preserved after replayAll");
+    assert.ok(lines[cursor.y].includes("未发送 hello"));
+  } finally {
+    h.tui.stop();
+  }
+});
+
 test("brief mode E2E in headless terminal keeps ◌ with verb trail until assistant content or turn completion settles to ◉", async (t) => {
   const { setBriefMode } = await import("../lib/cli-state-store.js");
   setBriefMode(true);
@@ -1001,7 +1084,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     refreshInputState: output.refreshInputState,
     updateGoalState() {},
     log: output.log,
-    writeError() {},
+    notify: output.notify,
     redraw: output.redraw,
   });
   commandController = createCommandController({
@@ -1019,7 +1102,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
       },
     },
     state: { slashCommands: [] },
-    output: { log: output.log },
+    output: { log: output.log, notify: output.notify },
   });
   inputActions = createCliInputActions({
     state,
@@ -1074,7 +1157,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     assert.equal(isBriefMode(), true);
     screen = virtual.getViewport().join("\n");
     assert.match(screen, /◉ read → read b\.js · 2 tools/, "existing tool group collapsed via live replay");
-    assert.match(screen, /Brief output enabled\./);
+    assert.match(screen, /· System: Brief output enabled/);
 
     // 3. Open /settings again, navigate to Skill imports, and press Enter to open Level 2 submenu
     const importDone = commandController.handle("/settings");
@@ -1110,7 +1193,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     // 6. Verify Skill imports applied
     assert.deepEqual(executedCommands, ["/import", "/import", "/import codex_user=on"]);
     screen = virtual.getViewport().join("\n");
-    assert.match(screen, /Skill imports updated\./);
+    assert.match(screen, /· System: Skill imports updated · the next request will not hit the prompt cache/);
 
     // 7. Open /settings theme directly, select Dracula (Down + Enter), and verify theme update
     const themeDone = commandController.handle("/settings theme");
@@ -1161,7 +1244,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     await concurrencyDone;
     await settle(virtual);
     assert.equal(getMaxConcurrentRuns(), 256);
-    assert.match(virtual.getViewport().join("\n"), /Max concurrent runs: 256\./);
+    assert.match(virtual.getViewport().join("\n"), /· System: Max concurrent runs: 256 · applies globally across managed agent runs/);
   } finally {
     tui.stop();
   }

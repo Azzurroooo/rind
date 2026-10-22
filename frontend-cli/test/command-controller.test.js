@@ -7,6 +7,7 @@ import { executeLocalSlashCommand } from "../lib/local-slash-commands.js";
 test("command controller separates text, goal, and slash commands", async () => {
   const calls = [];
   const logs = [];
+  const notices = [];
   const turn = {
     submit: (...args) => calls.push({ method: "turn.submit", args }),
   };
@@ -21,7 +22,10 @@ test("command controller separates text, goal, and slash commands", async () => 
       runGoalCommand: (goal) => calls.push({ method: "goal", goal }),
     },
     state: { slashCommands: [] },
-    output: { log: (text) => logs.push(typeof text === "function" ? text() : text) },
+    output: {
+      log: (text) => logs.push(typeof text === "function" ? text() : text),
+      notify: (text, opts) => notices.push({ text, level: opts?.level ?? "info" }),
+    },
   });
 
   assert.equal(await controller.handle("hello"), false);
@@ -36,7 +40,11 @@ test("command controller separates text, goal, and slash commands", async () => 
     method: "rind/command/execute",
     params: { input: "/steer use tests" },
   });
-  assert.equal(logs.length, 3);
+  assert.equal(logs.length, 1);
+  assert.deepEqual(notices, [
+    { text: "status", level: "info" },
+    { text: "status", level: "info" },
+  ]);
 });
 
 test("command normalization keeps aliases and ignores invalid names", () => {
@@ -101,7 +109,7 @@ test("exit remains a Surface-local command", async () => {
     },
     turn: { submit() {} },
     output: {
-      log: (text) => calls.push(typeof text === "function" ? text() : text),
+      notify: (text) => calls.push(text),
       shutdown: async () => calls.push("shutdown"),
       exit: () => calls.push("exit"),
     },
@@ -129,7 +137,7 @@ test("bare /fork routes to the fork selector on a terminal", async () => {
 });
 
 test("bare /fork without a terminal explains the requirement", async () => {
-  const logs = [];
+  const notices = [];
   const calls = [];
   const controller = createCommandController({
     request: async (method, params) => {
@@ -138,11 +146,11 @@ test("bare /fork without a terminal explains the requirement", async () => {
     },
     turn: { submit() {} },
     input: { isTerminal: false },
-    output: { log: (text) => logs.push(text) },
+    output: { notify: (text, opts) => notices.push({ text, level: opts?.level ?? "info" }) },
   });
 
   assert.equal(await controller.handle("/fork"), true);
-  assert.deepEqual(logs, ["/fork requires an interactive terminal."]);
+  assert.deepEqual(notices, [{ text: "/fork requires an interactive terminal.", level: "warning" }]);
   assert.deepEqual(calls, []);
 });
 
@@ -156,7 +164,7 @@ test("local slash results do not call Runtime", async () => {
     input: {
       runLocalCommand: async (text) => text === "/status" ? { text: "local status" } : null,
     },
-    output: { log: (text) => calls.push(typeof text === "function" ? text() : text) },
+    output: { notify: (text) => calls.push(text) },
   });
 
   await controller.handle("/status");
@@ -224,16 +232,16 @@ test("/tour routes to the tour runner with its page argument", async () => {
 });
 
 test("/tour without a terminal explains the requirement", async () => {
-  const logs = [];
+  const notices = [];
   const controller = createCommandController({
     request: async () => ({}),
     turn: { submit() {} },
     input: { isTerminal: false },
-    output: { log: (text) => logs.push(text) },
+    output: { notify: (text, opts) => notices.push({ text, level: opts?.level ?? "info" }) },
   });
 
   assert.equal(await controller.handle("/tour"), true);
-  assert.deepEqual(logs, ["/tour requires an interactive terminal."]);
+  assert.deepEqual(notices, [{ text: "/tour requires an interactive terminal.", level: "warning" }]);
 });
 
 test("/rename goes to the conversation, with the name taken as typed", async () => {
@@ -252,7 +260,8 @@ test("/rename goes to the conversation, with the name taken as typed", async () 
 test("/settings routes to selector on a terminal, forwards /settings import args to runtime, and rejects legacy /brief, /import, and /theme", async () => {
   const selectorCalls = [];
   const runtimeCalls = [];
-  const logs = [];
+  const notices = [];
+  const levels = [];
   const controller = createCommandController({
     request: async (method, params) => {
       runtimeCalls.push({ method, params });
@@ -264,7 +273,12 @@ test("/settings routes to selector on a terminal, forwards /settings import args
       runSettingsSelector: async (level = "root") => selectorCalls.push(level),
       runLocalCommand: (text) => executeLocalSlashCommand(text, {}),
     },
-    output: { log: (text) => logs.push(typeof text === "function" ? text() : text) },
+    output: {
+      notify: (text, opts) => {
+        notices.push(text);
+        levels.push(opts?.level ?? "info");
+      },
+    },
   });
 
   await controller.handle("/settings");
@@ -282,7 +296,8 @@ test("/settings routes to selector on a terminal, forwards /settings import args
   assert.deepEqual(runtimeCalls, [
     { method: "rind/command/execute", params: { input: "/import claude_user=on" } },
   ]);
-  assert.match(logs.at(-3), /Unknown command: \/brief/);
-  assert.match(logs.at(-2), /Unknown command: \/import/);
-  assert.match(logs.at(-1), /Unknown command: \/theme/);
+  assert.match(notices.at(-3), /Unknown command: \/brief/);
+  assert.match(notices.at(-2), /Unknown command: \/import/);
+  assert.match(notices.at(-1), /Unknown command: \/theme/);
+  assert.deepEqual(levels.slice(-3), ["warning", "warning", "warning"]);
 });

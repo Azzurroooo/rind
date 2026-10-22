@@ -10,10 +10,9 @@ from agent.runtime.server.commands.formatting import display_value
 
 
 async def handle_model(context: SlashCommandContext, args: list[str]) -> str:
-    configured = _default_model(context.session)
     if not args:
         active = display_value(getattr(context.session, "model", None))
-        configured = display_value(configured)
+        configured = display_value(_default_model(context.session))
         if active == configured:
             return f"Model: {active}"
         return f"Model:\n- active: {active}\n- default: {configured}"
@@ -32,13 +31,9 @@ async def handle_model(context: SlashCommandContext, args: list[str]) -> str:
         return f"Command failed: {exc}"
 
     session_model = display_value(model)
-    default_model = display_value(configured or DEFAULT_MODEL)
-    return "\n".join([
-        "Session model updated.",
-        f"- session model: {session_model}",
-        f"- default model: {default_model} (unchanged)",
-        "- applies from the next turn; a turn that is running keeps its model",
-    ])
+    if context.runtime is not None:
+        return f"Model changed to {session_model} (session only) · applies from the next turn; this turn keeps its model"
+    return f"Model changed to {session_model} (session only)"
 
 
 COMMAND = SlashCommandInfo(

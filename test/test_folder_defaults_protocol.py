@@ -43,7 +43,7 @@ def _server(worker):
 
 
 def _entries(result):
-    return {entry["label"]: entry["value"] for entry in result["display"]["entries"]}
+    return {entry["label"]: " · ".join(filter(None, (entry["value"], entry.get("note")))) for entry in result["display"]["entries"]}
 
 
 @pytest.mark.asyncio
@@ -61,12 +61,12 @@ async def test_a_new_conversation_starts_with_its_folder_defaults_and_says_so(wo
         session_id = (await request("session/create"))["session_id"]
         status = _entries(await request("rind/command/execute", session_id=session_id, input="/status"))
         assert status["model"] == "deepseek-flash · folder default"
-        assert status["reasoningEffort"] == "high · folder default"
-        assert status["connection"] == "deepseek · DeepSeek" and status["key"] == "stored login"
+        assert status["effort"] == "high · folder default"
+        assert status["provider"] == "DeepSeek · built-in" and status["auth"] == "API key · saved login"
 
         await request("model/effort", session_id=session_id, reasoning_effort="low")
         status = _entries(await request("rind/command/execute", session_id=session_id, input="/status"))
-        assert status["reasoningEffort"] == "low · this conversation"
+        assert status["effort"] == "low · this conversation"
     finally:
         await worker.close()
 

@@ -1,4 +1,4 @@
-"""Status slash command."""
+"""Status slash command: the model, the provider behind it, the conversation and its context use."""
 
 from __future__ import annotations
 
@@ -17,25 +17,16 @@ async def handle_status(context: SlashCommandContext, args: list[str]) -> str | 
 
 COMMAND = SlashCommandInfo(
     name="status",
-    description="Show config and assistant sampling",
+    description="Show model, provider, conversation and context use",
     usage="/status",
     handler=handle_status,
 )
 
 
-def render_status_display(display: dict) -> str:
-    lines = ["```text", "Config:"]
-    lines.extend(_config_lines(display.get("entries")))
-    lines.extend(["", "Assistant sampling:"])
-    usage_items = display.get("usage")
-    usage = usage_items[0] if isinstance(usage_items, list) and usage_items else None
-    if isinstance(usage, dict):
-        lines.extend(_usage_lines(usage))
-    else:
-        lines.append("no completed sampling yet")
-    lines.append("```")
-    return "\n".join(lines)
-
+# Each entry is {group, label, value} with optional `note` (shown dimmer, after
+# the value), `tone: "warning"` for something to fix, `note_tone: "accent"` for a
+# setup that is not the default, and `actions`: commands named in the note.
+GROUP_TITLES = {"model": "Model", "provider": "Provider", "conversation": "Conversation"}
 
 # Where a conversation's model or effort came from (see /model, /effort and folder defaults).
 SOURCE_LABELS = {
@@ -44,25 +35,86 @@ SOURCE_LABELS = {
     "main_repository": "main repository default",
     "settings": "settings.json",
 }
-KEY_LABELS = {"stored": "stored login", "environment": "environment variable", "none": "not set · /login"}
+KIND_NOTES = {
+    "builtin": "built-in",
+    "custom": "custom · providers.json",
+    "overridden": "built-in · endpoint from providers.json",
+}
+
+
+def render_status_display(display: dict) -> str:
+    """The plain-text form, for clients that do not draw the structured display."""
+    lines = ["```text"]
+    selection = display.get("selection")
+    if isinstance(selection, dict) and selection.get("model"):
+        lines.extend([f"Status: {selection_summary(selection)}", ""])
+    entries = [entry for entry in display.get("entries") or [] if isinstance(entry, dict)]
+    for group, title in GROUP_TITLES.items():
+        grouped = [entry for entry in entries if entry.get("group") == group]
+        if grouped:
+            lines.append(f"{title}:")
+            lines.extend(f"  {_entry_line(entry)}" for entry in grouped)
+            lines.append("")
+    lines.append("Context:")
+    usage_items = display.get("usage")
+    usage = usage_items[0] if isinstance(usage_items, list) and usage_items else None
+    lines.extend(f"  {line}" for line in (_usage_lines(usage) if isinstance(usage, dict) else ["no completed sampling yet"]))
+    footer = [_entry_line(entry) for entry in entries if entry.get("group") not in GROUP_TITLES]
+    if footer:
+        lines.extend(["", *footer])
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def selection_summary(selection: dict) -> str:
+    model = " / ".join(str(selection.get(key) or "") for key in ("provider", "model") if selection.get(key))
+    effort = str(selection.get("reasoning_effort") or "")
+    return f"{model} · {effort}" if effort else model
+
+
+def _entry_line(entry: dict) -> str:
+    note = str(entry.get("note") or "")
+    return f"{entry.get('label', '')}: {entry.get('value', '')}" + (f" · {note}" if note else "")
 
 
 async def build_status_display(context: SlashCommandContext) -> dict:
     session = context.session
     session_id = getattr(session, "session_id", None)
-    entries = [
-        {"label": "session", "value": display_value(session_id) if session_id else "none · the first message starts it"},
-        {"label": "name", "value": await _name_value(session, session_id, context.draft)},
-    ]
+    entries: list[dict] = []
+    selection: dict[str, str] = {}
+    if context.explain_selection is not None:
+        try:
+            explained = await _explained(context, session, session_id)
+        except (OSError, ValueError) as exc:
+            entries.append(_entry("provider", "provider", "unavailable", str(exc), tone="warning"))
+        else:
+            selection = {key: str(explained.get(key) or "") for key in ("provider", "model", "reasoning_effort")}
+            entries.extend(_model_entries(explained))
+            entries.extend(_provider_entries(explained))
+    entries.extend([
+        _entry("conversation", "session", display_value(session_id), "") if session_id
+        else _entry("conversation", "session", "none", "the first message starts it"),
+        _entry("conversation", "name", *await _name_value(session, session_id, context.draft)),
+        _settings_entry(),
+    ])
+    usage = await _latest_assistant_sampling_usage(session)
+    return {"type": "status", "selection": selection, "entries": entries, "usage": [_usage_display(usage)] if usage else []}
+
+
+def _entry(group: str, label: str, value: str, note: str = "", **extra) -> dict:
+    entry = {"group": group, "label": label, "value": value}
+    if note:
+        entry["note"] = note
+    entry.update({key: item for key, item in extra.items() if item})
+    return entry
+
+
+def _settings_entry() -> dict:
     try:
         settings = load_settings()
-        entries.append({"label": "settings", "value": str(settings.settings_path), "state": "found" if settings.settings_exists else "missing"})
-        if context.explain_selection is not None:
-            entries.extend(_selection_entries(await _explained(context, session, session_id)))
     except (OSError, ValueError) as exc:
-        entries.append({"label": "settings", "value": f"unavailable: {exc}"})
-    usage = await _latest_assistant_sampling_usage(session)
-    return {"type": "status", "entries": entries, "usage": [_usage_display(usage)] if usage else []}
+        return _entry("settings", "settings", "unavailable", str(exc), tone="warning")
+    return _entry("settings", "settings", str(settings.settings_path), "" if settings.settings_exists else "not created · defaults apply")
 
 
 async def _explained(context: SlashCommandContext, session, session_id) -> dict:
@@ -74,39 +126,56 @@ async def _explained(context: SlashCommandContext, session, session_id) -> dict:
     return await context.explain_selection(selection, getattr(session, "selection_source", None) or {})
 
 
-def _selection_entries(explained: dict) -> list[dict]:
+def _model_entries(explained: dict) -> list[dict]:
+    return [
+        _entry("model", "model", display_value(explained.get("model")), SOURCE_LABELS.get(str(explained.get("model_source") or ""), "")),
+        _entry("model", "effort", display_value(explained.get("reasoning_effort") or "unset"),
+               SOURCE_LABELS.get(str(explained.get("effort_source") or ""), "")),
+    ]
+
+
+def _provider_entries(explained: dict) -> list[dict]:
     connection = explained.get("connection")
-    provider = display_value(explained.get("provider"))
-    entries = [{"label": "connection", "value": f"{provider} · {connection['name']}" if connection else f"{provider} · not configured · /login or /model"}]
-    if connection:
-        entries.extend([
-            {"label": "endpoint", "value": display_value(connection.get("endpoint"))},
-            {"label": "key", "value": KEY_LABELS.get(str(connection.get("credential")), "not set · /login")},
-        ])
-    entries.extend([
-        {"label": "model", "value": _with_source(display_value(explained.get("model")), explained.get("model_source"))},
-        {"label": "reasoningEffort", "value": _with_source(display_value(explained.get("reasoning_effort") or "unset"), explained.get("effort_source"))},
-    ])
-    return entries
+    if not connection:
+        return [_entry("provider", "provider", display_value(explained.get("provider")), "not configured · /login or /model",
+                       tone="warning", actions=["/login", "/model"])]
+    kind = str(connection.get("kind") or "builtin")
+    return [
+        _entry("provider", "provider", display_value(connection.get("name")), KIND_NOTES.get(kind, ""),
+               note_tone="accent" if kind != "builtin" else ""),
+        _auth_entry(connection),
+        _entry("provider", "endpoint", display_value(connection.get("endpoint")), str(connection.get("api") or "")),
+    ]
 
 
-def _with_source(value: str, source: object) -> str:
-    label = SOURCE_LABELS.get(str(source or ""))
-    return f"{value} · {label}" if label else value
+def _auth_entry(connection: dict) -> dict:
+    """How requests sign in; the key itself is never shown."""
+    auth = str(connection.get("auth") or "")
+    credential = str(connection.get("credential") or "")
+    env_key = str(connection.get("env_key") or "")
+    if auth == "oauth":
+        account = str(connection.get("account") or "account")
+        return _entry("provider", "auth", f"{account} sign-in", "OAuth", note_tone="accent")
+    if credential == "stored":
+        return _entry("provider", "auth", "API key", "saved login")
+    if credential == "environment":
+        return _entry("provider", "auth", "API key", f"env {env_key}" if env_key else "environment variable")
+    return _entry("provider", "auth", "not signed in", f"/login or set {env_key}" if env_key else "/login",
+                  tone="warning", actions=["/login"])
 
 
-async def _name_value(session, session_id, draft: dict | None) -> str:
-    """The name, or what the conversation is shown as without one (see /rename)."""
+async def _name_value(session, session_id, draft: dict | None) -> tuple[str, str]:
+    """The name and a note: what the conversation is shown as without one (see /rename)."""
     if not session_id:
         pending = str((draft or {}).get("name") or "").strip()
-        return f"{pending} · applies when the conversation starts" if pending else "unset · shown by its first message"
+        return (pending, "applies when the conversation starts") if pending else ("unset", "shown by its first message")
     get_metadata = getattr(session, "get_metadata", None)
     meta = await get_metadata() if callable(get_metadata) else {}
     name = meta.get("name") if isinstance(meta, dict) else None
     if isinstance(name, str) and name.strip():
-        return name
+        return name, ""
     title = display_title(meta) if isinstance(meta, dict) else ""
-    return f'unset · shown as "{title}"' if title else "unset · shown by its first message"
+    return ("unset", f'shown as "{title}"') if title else ("unset", "shown by its first message")
 
 
 async def _latest_assistant_sampling_usage(session) -> dict | None:
@@ -118,20 +187,6 @@ async def _latest_assistant_sampling_usage(session) -> dict | None:
         return dict(usage) if isinstance(usage, dict) else None
     except Exception:
         return None
-
-
-def _config_lines(entries: object) -> list[str]:
-    if not isinstance(entries, list):
-        return ["settings           unavailable"]
-    lines: list[str] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        label = str(entry.get("label") or "")
-        value = str(entry.get("value") or "")
-        state = f" ({entry['state']})" if entry.get("state") else ""
-        lines.append(f"{label}: {value}{state}")
-    return lines or ["settings           unavailable"]
 
 
 def _usage_lines(usage: dict) -> list[str]:

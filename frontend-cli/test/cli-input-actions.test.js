@@ -193,14 +193,15 @@ test("Esc on a question leaves custom editing first and skips the question witho
   assert.deepEqual(finished, [""]);
 });
 
-test("prompt input restores persisted history and saves natural prompts only", async () => {
+test("prompt input restores persisted history, saves natural prompts only, and omits user echo for slash commands", async () => {
   const state = createCliState();
   state.runtime.status = "ready";
   state.session.commands = [];
   const saved = [];
+  const echoed = [];
   const output = {
     terminalUi: {},
-    writeUserInput() {},
+    writeUserInput: (text) => echoed.push(text),
     redraw() {},
     writeError() {},
   };
@@ -226,6 +227,7 @@ test("prompt input restores persisted history and saves natural prompts only", a
   actions.handleTerminalInput("\r");
   assert.equal(await prompt, "new prompt");
   assert.deepEqual(saved, [["new prompt", "previous prompt"]]);
+  assert.deepEqual(echoed, ["new prompt"]);
 
   const command = actions.ask("", "Ask Rind to do anything");
   await Promise.resolve();
@@ -233,6 +235,15 @@ test("prompt input restores persisted history and saves natural prompts only", a
   actions.handleTerminalInput("\r");
   assert.equal(await command, "/help");
   assert.deepEqual(saved, [["new prompt", "previous prompt"]]);
+  assert.deepEqual(echoed, ["new prompt"], "slash commands must not echo as user prompt bubbles");
+
+  const shortcutHelp = actions.ask("", "Ask Rind to do anything");
+  await Promise.resolve();
+  actions.handleTerminalInput("?");
+  actions.handleTerminalInput("\r");
+  assert.equal(await shortcutHelp, "?");
+  assert.deepEqual(saved, [["new prompt", "previous prompt"]]);
+  assert.deepEqual(echoed, ["new prompt"], "? help shortcut must not echo as user prompt bubble");
 });
 
 test("alt+right promotes a queued follow-up to steering", async () => {
@@ -292,7 +303,7 @@ test("the Runtime closes a sign-in prompt it no longer waits for, and only that 
   actions.closeAuthPrompt("auth-1");
 });
 
-test("askEffortMenu resolves the selected effort string and echoes /effort <level>", async () => {
+test("askEffortMenu and askModelMenu resolve selections without echoing duplicate user bubbles", async () => {
   const state = createCliState();
   const echoed = [];
   const actions = createCliInputActions({
@@ -311,7 +322,23 @@ test("askEffortMenu resolves the selected effort string and echoes /effort <leve
   actions.handleTerminalInput("\x1b[B");
   actions.handleTerminalInput("\r");
   assert.equal(await selected, "high");
-  assert.deepEqual(echoed, ["/effort high"]);
+  assert.deepEqual(echoed, []);
+
+  const modelSelected = actions.askModelMenu(
+    [{ provider_id: "deepseek", id: "deepseek-flash" }, { provider_id: "deepseek", id: "deepseek-v4-pro" }],
+    "deepseek-flash",
+  );
+  await Promise.resolve();
+  actions.handleTerminalInput("\x1b[B");
+  actions.handleTerminalInput("\r");
+  assert.deepEqual(await modelSelected, {
+    providerId: "deepseek",
+    modelId: "deepseek-v4-pro",
+    current: false,
+    image_input: null,
+    scope: "session",
+  });
+  assert.deepEqual(echoed, []);
 });
 
 test("askModelMenu and askEffortMenu resolve scope when f or g is pressed", async () => {
@@ -344,4 +371,68 @@ test("askModelMenu and askEffortMenu resolve scope when f or g is pressed", asyn
   actions.handleTerminalInput("g");
   assert.deepEqual(await effortSelected, { effort: "medium", scope: "global" });
 });
+
+test("cycleReasoningEffort and error paths emit system notices with appropriate levels", async () => {
+  const state = createCliState();
+  state.runtime.status = "ready";
+  state.session.info = { session_id: "sess-1", reasoning_effort: "low" };
+  const notices = [];
+  let effortLevels = [];
+  let shouldFailSet = false;
+  const actions = createCliInputActions({
+    state,
+    request: async () => {
+      if (shouldFailSet) throw new Error("effort set failed");
+      return {};
+    },
+    output: {
+      terminalUi: {},
+      writeUserInput() {},
+      redraw() {},
+      notify: (text, opts) => notices.push({ text, level: opts?.level ?? "info" }),
+    },
+    getEffortLevels: async () => effortLevels,
+    getCommandController: () => ({ handle: async () => { throw new Error("dispatch failed"); } }),
+    getTurnController: () => ({}),
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    pausePrompt() {},
+    resumePrompt() {},
+    handleSigint() {},
+  });
+
+  // Ctrl+T with empty levels -> warning
+  actions.handleTerminalInput("\x14");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(notices, [
+    { text: "The current model does not declare reasoning effort levels.", level: "warning" },
+  ]);
+
+  // Ctrl+T with valid levels -> info
+  notices.length = 0;
+  effortLevels = ["low", "medium", "high"];
+  actions.handleTerminalInput("\x14");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(notices, [
+    { text: "Reasoning effort: medium", level: "info" },
+  ]);
+
+  // Ctrl+T when request fails -> error
+  notices.length = 0;
+  shouldFailSet = true;
+  actions.handleTerminalInput("\x14");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(notices, [
+    { text: "effort set failed", level: "error" },
+  ]);
+
+  // dispatchExternal error -> error
+  notices.length = 0;
+  actions.dispatchExternal("/boom");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(notices, [
+    { text: "dispatch failed", level: "error" },
+  ]);
+});
+
 
