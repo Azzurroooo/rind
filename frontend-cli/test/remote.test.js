@@ -152,7 +152,10 @@ test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Es
       runRemote: () => remoteController.handleCommand(),
     },
     state: { slashCommands: LOCAL_SLASH_COMMANDS },
-    output: { log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)) },
+    output: {
+      log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)),
+      notify: (msg) => logs.push(String(msg)),
+    },
   });
 
   const flushAsyncKey = () => new Promise((resolve) => setTimeout(resolve, 25));
@@ -384,8 +387,11 @@ test("interactive /remote menu: scope switching, address submenu with Esc back, 
 test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTTP/WS, prompts session, and syncs live to CLI", { timeout: 30000 }, async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-cli-remote-e2e-"));
   const workspace = path.join(home, "workspace");
+  const webDir = path.join(home, "web-dist");
   await mkdir(workspace, { recursive: true });
+  await mkdir(webDir, { recursive: true });
   await writeFile(path.join(workspace, "HELLO.md"), "Workspace file for remote E2E test", "utf8");
+  await writeFile(path.join(webDir, "index.html"), "<!doctype html><title>Rind Remote</title>", "utf8");
 
   // Local fake OpenAI-compatible provider so the real Python runtime and CLI run end-to-end
   const provider = http.createServer((req, res) => {
@@ -454,6 +460,7 @@ test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTT
     env: {
       ...process.env,
       RIND_HOME: home,
+      RIND_WEB_ROOT: webDir,
       NO_COLOR: "1",
     },
     stdio: ["pipe", "pipe", "pipe"],

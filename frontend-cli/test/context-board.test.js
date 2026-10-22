@@ -375,7 +375,10 @@ test("/context routes to the board on a TTY and to the report otherwise", async 
     request: async () => ({}),
     turn: { submit() {} },
     input,
-    output: { log: (text) => calls.push(["log", typeof text === "function" ? text() : text]) },
+    output: {
+      log: (text) => calls.push(["log", typeof text === "function" ? text() : text]),
+      notify: (text, opts) => calls.push(["notify", text, opts?.level ?? "info"]),
+    },
   });
 
   await makeController({
@@ -390,7 +393,7 @@ test("/context routes to the board on a TTY and to the report otherwise", async 
   }).handle("/context");
   await makeController({ isTerminal: false }).handle("/context");
 
-  assert.deepEqual(calls, [["board"], ["report"], ["log", "/context requires a connected runtime."]]);
+  assert.deepEqual(calls, [["board"], ["report"], ["notify", "/context requires a connected runtime.", "warning"]]);
 });
 
 test("/context with a custom range explains the fallback and still opens the board", async () => {
@@ -403,13 +406,16 @@ test("/context with a custom range explains the fallback and still opens the boa
       runContextBoard: () => calls.push(["board"]),
       printContextReport: () => calls.push(["report"]),
     },
-    output: { log: (text) => calls.push(["log", typeof text === "function" ? text() : text]) },
+    output: {
+      log: (text) => calls.push(["log", typeof text === "function" ? text() : text]),
+      notify: (text, opts) => calls.push(["notify", text, opts?.level ?? "info"]),
+    },
   });
 
   await controller.handle("/context 30");
 
   assert.deepEqual(calls, [
-    ["log", "Custom ranges are not supported yet; showing the last 5 days."],
+    ["notify", "Custom ranges are not supported yet; showing the last 5 days.", "warning"],
     ["board"],
   ]);
 });

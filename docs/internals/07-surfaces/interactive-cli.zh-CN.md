@@ -22,6 +22,10 @@ TUI 的 render(width) 生成逻辑行，根组件负责 diff；默认最小绘�
 
 非 TTY 不启动光标控制和菜单，`rind run` 将最终回答写 stdout，进度与诊断写 stderr。这样管道可以消费干净答案，交互显示仍可展示工具和任务状态。
 
+## 系统提示（System notices）
+
+CLI 与系统的状态反馈（命令确认、状态切换、警告和错误）统一使用 `  · System: <text>` 样式（`outputController.notify(text, { level })` / `systemNoticeLines`），在视觉层级上退居对话主体（`▷ You`、`◁ Assistant`、工具块与结构化 `── Title ──` 面板）之后。多行提示和按终端宽度折行的续行采用 12 列悬挂缩进，与首行正文首字符对齐（终端宽度不足 28 列时退化为 4 列缩进）。共分三个级别：`info`（前缀与正文均 dim）、`warning`（前缀为主题 `warning` 色、正文 dim）、`error`（前缀为主题 `danger` 色、正文保持默认前景色以保证可读性）。在交互式 TUI 中，三级提示都会先结算当前工具组再作为 `DynamicBlock` 追加到历史区；在非 TUI 或 TUI 未运行阶段，`info` 与 `warning` 写 `stdout`，`error` 写 `stderr`。
+
 ## Tour：真实渲染器，模拟执行
 
 `rind tour` 和会话内 `/tour` 演示 CLI 布局，但不启动 Worker，不调用模型。pages 保存步骤数据，player 管播放，stage 管模拟状态，render 生成画面，run-tour 才持有 TUI。虚构事件通过现有 transcript/output controller，因此示例和真实会话能复用工具块、流式 Markdown 与菜单排版。

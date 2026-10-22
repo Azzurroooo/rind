@@ -22,6 +22,10 @@ The TUI's render(width) produces logical lines, and the root component owns the 
 
 Without a TTY, cursor control and menus are not started: `rind run` writes the final answer to stdout, and progress and diagnostics to stderr. Pipelines therefore consume a clean answer, while the interactive display can still show tool and task status.
 
+## System notices
+
+CLI and system feedback (command acknowledgments, state changes, warnings, and errors) use a single `  · System: <text>` format (`outputController.notify(text, { level })` / `systemNoticeLines`), keeping them visually subordinate to conversation content (`▷ You`, `◁ Assistant`, tool blocks, and structured `── Title ──` panels). Multi-line notices and lines wrapped to the terminal width use a 12-column hanging indent aligned with the first body character (degrading to 4 spaces on terminals narrower than 28 columns). Three levels are supported: `info` (dim prefix and body), `warning` (theme `warning` prefix and dim body), and `error` (theme `danger` prefix and default foreground body). In the interactive TUI, all three levels append a `DynamicBlock` to the transcript after settling any active tool group; outside an active TUI, `info` and `warning` write to `stdout` while `error` writes to `stderr`.
+
 ## Tour: a real renderer, simulated execution
 
 `rind tour` and the in-session `/tour` demonstrate the CLI layout, but neither starts a Worker nor calls a model. Pages store step data, the player manages playback, the stage manages simulated state, render produces the picture, and only run-tour holds the TUI. Fictional events travel through the existing transcript/output controllers, so examples and real sessions can reuse the same tool blocks, streaming Markdown, and menu layout.
