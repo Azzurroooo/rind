@@ -489,7 +489,6 @@ taskMonitorController = createTaskMonitorController({
     },
   },
   redraw: redrawInput,
-  log: logOutput,
   notify: notifyOutput,
 });
 const eventController = createEventController({
