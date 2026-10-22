@@ -30,6 +30,6 @@ export function overviewText(snapshot) {
     for (const task of snapshot.tasks.filter(t => t.teamId === team.id)) lines.push("  " + task.status + ": " + task.brief.slice(0, 100) + (task.blockedOn ? " → " + task.blockedOn.action : ""));
     lines.push("");
   }
-  if (!snapshot.teams.length) lines.push("Create your first team: rind agents team create <name>");
+  if (!snapshot.teams.length) lines.push("No teams yet. Create one on the Agents page: run rind agents in an interactive terminal.");
   return lines.join("\n");
 }

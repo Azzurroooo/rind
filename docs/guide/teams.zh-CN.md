@@ -6,22 +6,15 @@ English | [简体中文](teams.zh-CN.md)
 
 ## 打开管理页
 
-输入框为空时按 **←**，进入 Agents Management。Manager 也在这一页，可以用自然语言让它帮你组队、派活。
+输入框为空时按 **←**，进入 Agents Management（或在终端运行 `rind agents`）。`n` 建团队，`a` 加成员，`t` 给成员派任务。Manager 也在这一页，可以用自然语言让它帮你组队、派活。
 
-终端另一条路是 `rind agents` 命令：
-
-```bash
-rind agents team create product
-rind agents team add product /work/project --position Builder
-rind agents team add product /work/reviewer --position Reviewer
-rind agents task product reviewer "Review the current change and report evidence."
-```
+团队和任务只能在这里或由 Manager 创建，命令行和 agent 的 shell 都不能，所以每个任务都有人在等它的回执。
 
 ## 心智模型
 
-- **每个成员就是一个普通文件夹**：文件夹的 basename 是初始名字，`--position` 只是展示标签。
-- **Team 是注册关系**：同一目录可以加入多个团队；跨团队复用目录时会建议先建副本，`--share` 是显式共享。
-- **共享目录串行写， worktree 可并行**：`rind agents team worktree product <name> <repo> <branch>` 为并行开发开一份独立成员。
+- **每个成员就是一个普通文件夹**：文件夹的 basename 是初始名字，角色只是展示标签。
+- **Team 是注册关系**：同一目录可以加入多个团队；跨团队复用目录时会建议先建副本，共享需要显式选择。
+- **共享目录串行写， worktree 可并行**：**Add member › New Git worktree** 为并行开发开一份独立成员。
 - **首个成员只是首任 leader**，不会因此多出任何文件权限。
 
 ## 派活与回收

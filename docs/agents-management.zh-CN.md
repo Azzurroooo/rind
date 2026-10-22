@@ -20,24 +20,23 @@ The service starts on demand under `RIND_HOME/agents-management`. Its state is a
 
 ## Team workflow
 
-```sh
-rind agents team create product
-rind agents team add product /work/project --position Builder
-rind agents team add product /work/reviewer --position Reviewer
-rind agents team leader product project
-rind agents task product reviewer "Review the current change and report evidence."
-rind agents list --json
-```
-
-Every member is an existing canonical folder. Teams are registry relationships, so a folder can join several teams. If it already belongs to another team, the interactive page recommends a copy; `--share` is the explicit shared-folder choice. Shared workspaces serialize writes. A Git worktree gets a separate registered member and can run in parallel:
+Teams and tasks are managed on the Agents page (`rind agents`, or Left on an empty chat input) or by the Manager. Only the user and the Manager create tasks, so every task has an owner who expects its delivery report. The command line observes and recovers:
 
 ```sh
-rind agents team worktree product feature-search /work/project feature/search
+rind agents list --json                         # the full state, for scripts and diagnostics
+rind agents stop <run>                          # stop one run
+rind agents resolve <run> --confirm-stopped     # release a run whose process has stopped
+rind agents stop [--all]                        # stop the background services
+rind agents import <legacy-root> [--confirm]    # bring in an old .aiteam team
 ```
+
+`rind agents` refuses to run inside a Rind session: a session's shell would otherwise act as the user. Members work through `delegate` and `report`, the Manager through `agent_management`.
+
+Every member is an existing canonical folder. Teams are registry relationships, so a folder can join several teams. If it already belongs to another team, the Agents page recommends an independent copy and offers sharing as an explicit choice. Shared workspaces serialize writes. A Git worktree (**Add member › New Git worktree**) gets a separate registered member and can run in parallel.
 
 The first member is not silently granted extra file access: it is simply the initial leader. Each configured team has one main agent and a tree of reporting relationships. Members delegate to their direct reports and see tasks in their subtree. Every member can create and register a new direct report below the team creation root. User and Manager can arrange the entire tree. Cycles are rejected, and direct reports must be reassigned before removing their supervisor. A task is `done` only after a valid report and confirmed execution completion. A blocker must name `user` or a current member and state the action needed. Reports wake the original delegating task, recursively through all levels; waiting for grandchildren does not complete the intermediate task. Moving a member does not rewrite existing task ownership or parent tasks. Existing flat teams remain valid: an omitted supervisor means the main agent.
 
-The folder basename is its initial agent name; position is a separate display label. Use IDs when names are ambiguous. `team create <name> --root <existing-directory>` sets the boundary for new workspaces. Agent hints and Skill references can be supplied through `registerAgent`; a reference is a normal project/user Skill name or an absolute `SKILL.md` path. Imported local legacy Skills retain their original reference directories.
+The folder basename is its initial agent name; position is a separate display label. New workspaces and worktrees are created in the team's creation root: the open project's folder in Desktop, otherwise `RIND_HOME/agents-management/workspaces/<team>`; the Manager can create a team with another existing folder (`createRoot`). Agent hints and Skill references can be supplied through `registerAgent`; a reference is a normal project/user Skill name or an absolute `SKILL.md` path. Imported local legacy Skills retain their original reference directories.
 
 ## CLI surface
 
@@ -107,9 +106,9 @@ Any number of Rind windows can show the same conversation; the shared Runtime ke
 
 **Left always moves up one level** — from a conversation to its member, from a member to the sidebar — and never collapses anything, so leaving the tree takes at most two presses. Right expands a collapsed member or opens it. `z` folds the selected branch and `Z` folds or unfolds all; a folded member shows `▸`, the number of hidden rows and the most urgent status hidden inside. Lists keep two rows of context around the selection while scrolling. `/` searches and `f` filters by status; matches keep their ancestors visible, and Esc clears them.
 
-Only conversations attached to the team are listed; a member folder's other conversations are on the Independent page. The service enforces this through `listSessions { teamId }`, so `rind agents sessions <team>` returns the same set.
+Only conversations attached to the team are listed; a member folder's other conversations are on the Independent page. The service enforces this through `listSessions { teamId }`.
 
-Enter on a member opens its page: every conversation it has in this team, newest and most urgent first, with **New conversation** on top. Enter on a conversation joins it in the member's workspace. Contextual keys act on the selected member: `c` new conversation, `t` assign a task, `a` add a member below it, `e` edit role and responsibility, Space for all actions (change supervisor, make leader, resolve an unconfirmed run, remove from team).
+Enter on a member opens its page: every conversation it has in this team, newest and most urgent first, with **New conversation** on top. Enter on a conversation joins it in the member's workspace. Contextual keys act on the selected member: `c` new conversation, `t` assign a task, `a` add a member below it, `e` edit role and responsibility, Space for all actions (change supervisor, resolve an unconfirmed run, remove from team). The Manager changes the team leader.
 
 ### Tasks
 
@@ -221,7 +220,7 @@ A member runs on its folder's defaults for new conversations: a model (connectio
 
 Only you and the Manager choose them. On the Agents page, Space on a member opens **Model and effort**; only connections you are logged in to are offered. The Manager uses `setMemberModel` and `clearMemberModel`; each change it makes appears in your Inbox under *Changed by the Manager* until you dismiss it. Leaders and members cannot change any model, including their own, and a task cannot carry a model of its own. A change applies from the member's next task: a new task's conversation starts with it, and a retried or resumed task's conversation is brought to it before it runs. Running work keeps its model.
 
-Non-TTY commands support `--json`. Use `rind agents priority <task> high|normal|low`, `cancel <task>`, `show <task>`, `note <task> <text> --answer`, `start <task>`, `stop <run>` and `resolve <run> --confirm-stopped`. `rind agents import <legacy-root>` previews old `.aiteam` files; add `--confirm` after reviewing the preview. Import never edits legacy files.
+`rind agents list --json` gives the full state. A run that holds a folder is stopped with `rind agents stop <run>`, or released with `rind agents resolve <run> --confirm-stopped` once its status is unknown and its process has stopped. `rind agents import <legacy-root>` previews old `.aiteam` files; add `--confirm` after reviewing the preview. Import never edits legacy files.
 
 When a workspace belongs to multiple teams, a TTY asks which scope to attach. Non-TTY requires `--team <id>` or `--standalone`. Direct conversations are observed as runs, but their private messages are not broadcast. If the management service disconnects, it reconciles with the Runtime replay before restoring activity; an unconfirmed run remains reserved until a human confirms it stopped.
 
@@ -239,8 +238,6 @@ A member never reads or changes the organization. It is told who it is, its supe
 A task run cannot ask the user a question; it reports a blocker instead. Everything else, models included, belongs to the user and the Manager (`agent_management`); the service refuses it from members, and members cannot subscribe to snapshots. An empty-workspace member starts with the model chosen for its creator's folder; a worktree member follows its repository's.
 
 Nobody polls. Whoever delegated hears back once all of its delegated work has settled (delivered, blocked, failed): a parent task runs again and is told the results instead of its brief, and a conversation — a member's or the Manager's — gets them as its next turn through the Runtime's `rind/session/deliver`. A result for a conversation the Runtime does not host waits in the service and arrives when it is hosted again. Delivered files are copied to `state/artifacts/<team>/<recipient>/<task>/<id>/<name>` and named by path in the results; the recipient reads them with `read_file`. The path is guidance, not a sandbox: Rind's file tools have no directory boundary.
-
-A conversation that handed work out says so while nothing in it runs: after the delegate call the window shows `─ Waiting for <member>` until the delivery arrives, and the delivery turn is marked (`turn_started` with `delivery` and `delivery_text`), rendered as a `Delivery` report, and stored as a user message with `meta.kind = "team_delivery"` so a later replay shows the same report instead of a message the user typed. The report names the member, the task, `delivered:` outcome, summary, evidence, file paths and the next action.
 
 A conversation that handed work out says so while nothing in it runs: after the delegate call the window shows `─ Waiting for <member>` until the delivery arrives, and the delivery turn is marked (`turn_started` with `delivery` and `delivery_text`), rendered as a `Delivery` report, and stored as a user message with `meta.kind = "team_delivery"` so a later replay shows the same report instead of a message the user typed. The report names the member, the task, `delivered:` outcome, summary, evidence, file paths and the next action.
 
@@ -266,7 +263,8 @@ The destination must not exist. The script builds TypeScript, copies the CLI, se
 
 History is bounded so writes stay fast: the newest 512 request receipts (used only for retries), the latest finished run of each conversation and the last 10 runs of each task are kept; active and unconfirmed runs are never pruned. The service refuses to silently rebuild a corrupt journal. An incomplete final line is discarded; an earlier malformed record or sequence gap stops startup and leaves the files for repair. On management restart, active runs first become `unknown`; shared Sessions are reconciled against the still-running Runtime. Queued dispatch markers are cleared. A crashed Runtime is never automatically replayed as a new execution. Resolve an unknown run only after confirming its old process has stopped, then explicitly retry the task. Published artifacts are copied into the user-private Team/Task delivery directory and checked against the task owner workspace.
 
-If a process dies between creating a folder/worktree and registering it, an existing target is never overwritten on retry. Inspect and register the resulting folder through `team add`, or choose a different name. Repository changes and registry commits are separate local operations, not a filesystem transaction.
+If a process dies between creating a folder/worktree and registering it, an existing target is never overwritten on retry. Add the resulting folder on the Agents page (**Add member › Existing folder**), or choose a different name. Repository changes and registry commits are separate local operations, not a filesystem transaction.
+
 
 ## Interaction and scheduling references
 
@@ -291,12 +289,4 @@ The `rind-runtime-client` package owns transport and hosting; it has no Team dep
 
 One Session has one active prompt request. Additional windows can observe it, steer/queue input through the existing Runtime controls, or answer a pending question once. Detaching a CLI does not stop the execution. Returning to it restores history and the live turn without creating a second run. A lost host produces Unconfirmed state; reopen the session to reconnect and inspect before retrying uncertain work. The Runtime itself remains a persistent background service; stopping management does not shut down unrelated direct sessions.
 
-Examples:
-
-```sh
-rind agents team reports-to product frontend engineering
-rind agents sessions product/frontend --json
-rind agents open product/frontend --session <runtime-session-id>
-```
-
-`rind agents sessions <team>[/<agent>]` lists conversations registered to that team (up to 100 saved conversations per workspace plus registered live Sessions); `rind agents sessions manager` lists Manager history. A conversation keeps the scope it was created with; opening a team never adopts independent or other-team history. LLM tracing is host-wide: set `RIND_TRACE_LLM=1` before starting the host; per-window `--trace-llm` is rejected rather than silently ignored. Shared history is stored in `RIND_HOME/sessions`; use `RIND_HOME` to select another installation rather than a custom `--session-dir`. The first adapter remains Rind.
+A member's page lists the conversations registered to that team (up to 100 saved conversations per workspace plus registered live Sessions); the Manager's page lists Manager history. A conversation keeps the scope it was created with; opening a team never adopts independent or other-team history. LLM tracing is host-wide: set `RIND_TRACE_LLM=1` before starting the host; per-window `--trace-llm` is rejected rather than silently ignored. Shared history is stored in `RIND_HOME/sessions`; use `RIND_HOME` to select another installation rather than a custom `--session-dir`. The first adapter remains Rind.

@@ -6,22 +6,15 @@ Goal: when multiple projects / roles need to advance in parallel, let the Rind T
 
 ## Open the management page
 
-With the input box empty, press **←** to enter Agents Management. The Manager is on this page too, and you can use natural language to have it help you put a team together and hand out work.
+With the input box empty, press **←** to enter Agents Management (or run `rind agents` in a terminal). Create a team with `n`, add members with `a`, and assign a task to a member with `t`. The Manager is on this page too, and you can use natural language to have it help you put a team together and hand out work.
 
-The other route is the `rind agents` command in a terminal:
-
-```bash
-rind agents team create product
-rind agents team add product /work/project --position Builder
-rind agents team add product /work/reviewer --position Reviewer
-rind agents task product reviewer "Review the current change and report evidence."
-```
+Teams and tasks are created only here or by the Manager, never by a command or an agent's shell, so every task has someone waiting for its receipt.
 
 ## Mental model
 
-- **Every member is an ordinary folder**: the folder's basename is its initial name, and `--position` is only a display label.
-- **A Team is a registration relationship**: the same directory can join multiple teams; when reusing a directory across teams you will be advised to make a copy first, and `--share` is the explicit shared option.
-- **Shared directories write serially; worktrees can run in parallel**: `rind agents team worktree product <name> <repo> <branch>` opens a separate member for parallel development.
+- **Every member is an ordinary folder**: the folder's basename is its initial name, and its role is only a display label.
+- **A Team is a registration relationship**: the same directory can join multiple teams; when reusing a directory across teams you will be advised to make a copy first, and sharing is an explicit choice.
+- **Shared directories write serially; worktrees can run in parallel**: **Add member › New Git worktree** opens a separate member for parallel development.
 - **The first member is only the initial leader**, and it gains no extra file permissions for that.
 
 ## Handing out work and getting it back

@@ -8,6 +8,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { removeRindHome } from "./helpers/rind-home.js";
+import { connectManagement } from "../../agent-management/dist/client.js";
 
 const rindBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));
 const sse = text => "data: " + JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: null }] }) + "\n\n"
@@ -49,8 +50,11 @@ test("a second rind run in a busy member folder names the run that holds it, and
     await removeRindHome(root);
   });
 
-  assert.equal((await rind("agents", "team", "create", "desk")).code, 0);
-  assert.equal((await rind("agents", "team", "add", "desk", work)).code, 0);
+  // Registered as the Agents page does, through the management service.
+  const management = await connectManagement({ home, python: env.RIND_PYTHON, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) });
+  const team = await management.request("createTeam", { name: "desk" });
+  await management.request("addMember", { teamId: team.id, workspace: work });
+  management.close();
 
   const first = spawn(process.execPath, [rindBin, "run", "--dir", work, "--prompt", "first"], { cwd: root, env, windowsHide: true });
   const firstExit = new Promise(resolve => first.once("close", resolve));
