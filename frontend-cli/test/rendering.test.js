@@ -12,7 +12,6 @@ import {
   answerPlaceholderText,
   backgroundMonitorText,
   cancelledText,
-  commandResultText,
   contextBuiltLine,
   systemNoticeLine,
   systemNoticeLines,
@@ -40,7 +39,6 @@ import {
   slashDisplayText,
   slashMenuText,
   slashResultNotice,
-  slashResultText,
   startupText,
   welcomeText,
   resumeLineText,
@@ -137,8 +135,8 @@ test("prompt and turn status copy match the compact terminal UI", () => {
   assert.equal(answerPromptText(), "\n  ▷ ");
   assert.equal(answerPlaceholderText(), "Type your answer");
   assert.equal(inputHintText("Ask Rind to do anything"), "Ask Rind to do anything");
-  assert.equal(interruptText(), "◆ Interrupt requested\n    ctrl+c again to quit");
-  assert.equal(cancelledText(), "◆ Interrupted\n    session preserved; resume with -c");
+  assert.equal(interruptText(), "Interrupt requested · ctrl+c again to quit");
+  assert.equal(cancelledText(), "Interrupted · session preserved; resume with -c");
   assert.equal(userInputText("hello"), "▷ You\n  hello");
   assert.equal(userInputText("first\r\nsecond"), "▷ You\n  first\n  second");
   const originalColumns = process.stdout.columns;
@@ -526,27 +524,17 @@ test("modelListErrorText renders current model and fallback command", () => {
   assert.equal(
     modelListErrorText("request failed", "model-a"),
     [
-      "◆ Model list unavailable",
-      "    current: model-a",
-      "    request failed",
-      "    use /model set <name> to switch manually",
+      "Model list unavailable: request failed",
+      "current: model-a",
+      "use /model set <name> to switch manually",
     ].join("\n"),
   );
-});
-
-
-
-
-
-test("commandResultText renders a compact success line", () => {
-  assert.equal(commandResultText("Model updated: glm-5.1"), "✓ Model updated: glm-5.1");
   assert.equal(
-    commandResultText("Compact complete", "id abc123"),
-    "✓ Compact complete — id abc123",
-  );
-  assert.match(
-    commandResultText("x".repeat(120), "y".repeat(120)),
-    /^✓ x{93}\.\.\. — y{93}\.\.\.$/,
+    modelListErrorText("", ""),
+    [
+      "Model list unavailable",
+      "use /model set <name> to switch manually",
+    ].join("\n"),
   );
 });
 
@@ -709,12 +697,9 @@ test("skill paths collapse the home directory, clip long descriptions, and apply
   }
 });
 
-test("slashResultText prefers structured display and falls back to raw text", () => {
+test("slashDisplayText and slashResultNotice split structured displays from system notices", () => {
   assert.equal(
-    slashResultText({
-      text: "Raw status",
-      display: { type: "status", entries: [{ label: "apiKey", value: "unset" }], usage: [] },
-    }),
+    slashDisplayText({ type: "status", entries: [{ label: "apiKey", value: "unset" }], usage: [] }),
     [
       `  ── Config ${"─".repeat(84)}`,
       "  apiKey            unset",
@@ -723,8 +708,18 @@ test("slashResultText prefers structured display and falls back to raw text", ()
       "  no completed sampling yet",
     ].join("\n"),
   );
-  assert.equal(slashResultText({ text: "Raw text", display: { type: "unknown" } }), "Raw text");
-  assert.equal(slashResultText(null), "");
+  assert.equal(
+    slashResultNotice({
+      text: "Raw status",
+      display: { type: "status", entries: [{ label: "apiKey", value: "unset" }], usage: [] },
+    }),
+    null,
+  );
+  assert.deepEqual(
+    slashResultNotice({ text: "Raw text", display: { type: "unknown" } }),
+    { text: "Raw text", level: "info" },
+  );
+  assert.equal(slashResultNotice(null), null);
 });
 
 test("contextBuiltLine warns only when Rind docs are truncated", () => {
@@ -736,7 +731,7 @@ test("contextBuiltLine warns only when Rind docs are truncated", () => {
         rind_docs_truncated_scopes: ["user", "project"],
       },
     }),
-    "◆ Context trimmed\n    RIND.md: user, project",
+    "Context trimmed · RIND.md: user, project",
   );
   assert.match(
     contextBuiltLine({
@@ -745,7 +740,7 @@ test("contextBuiltLine warns only when Rind docs are truncated", () => {
         rind_docs_truncated_scopes: ["x".repeat(120)],
       },
     }),
-    /\n    RIND\.md: x{93}\.\.\.$/,
+    /^Context trimmed · RIND\.md: x{93}\.\.\.$/,
   );
 });
 
@@ -1314,8 +1309,8 @@ test("sessionSwitchedText renders target context and model", () => {
 
 test("goal rendering keeps status and objective visible", () => {
   assert.match(goalText({ objective: "ship it", status: "complete" }), /Goal · complete/);
-  assert.match(goalCommandText({ objective: "ship it", status: "paused" }, "pause"), /Goal paused/);
-  assert.match(goalCommandText(null, "clear"), /No active goal/);
+  assert.equal(goalCommandText({ objective: "ship it", status: "paused" }, "pause"), "Goal paused · paused · ship it");
+  assert.equal(goalCommandText(null, "clear"), "Goal cleared · No active goal");
 });
 
 test("AssistantMessage restyles history when the theme changes", () => {

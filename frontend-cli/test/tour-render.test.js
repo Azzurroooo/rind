@@ -129,8 +129,7 @@ test("page frame titles the page and wraps every content line", () => {
     assert.ok(text.includes("zai/glm-4.7"), "model shown in banner");
     assert.ok(text.includes("You"), "user echo rendered");
     assert.ok(text.includes("/status"), "submitted text rendered");
-    assert.ok(text.includes("✓ Status ready"), "result line rendered with the check prefix");
-    assert.ok(text.includes("— session loaded"), "result detail rendered");
+    assert.ok(text.includes("· System: Status ready · session loaded"), "result line rendered as system notice");
     assert.ok(!text.includes("Working"), "a slash command never shows the activity line");
   }
 });
@@ -240,7 +239,7 @@ test("plain runtime outputs stay verbatim while check results get the prefix", (
   ]);
   const text = view.render().lines.map(stripAnsi).join("\n");
   assert.ok(text.includes("Team Agents:"), "multi-line runtime output keeps its own lines");
-  assert.ok(text.includes("✓ Status ready — session loaded"), "check result carries prefix and detail");
+  assert.ok(text.includes("· System: Status ready · session loaded"), "result carries system notice prefix and detail");
 });
 
 test("pending queue and steering entries appear in the composer", () => {
@@ -276,7 +275,7 @@ test("goodbye closes the session back to the shell prompt", () => {
     { kind: "shell", command: "ls" },
   ]);
   const text = view.render().lines.map(stripAnsi).join("\n");
-  assert.ok(text.includes("Goodbye."), "goodbye line shown");
+  assert.ok(text.includes("· System: Goodbye."), "goodbye line shown as system notice");
   assert.ok(text.includes("~/demo $ ls"), "shell prompt returned");
   assert.ok(!text.includes("Ask Rind to do anything"), "composer hidden after exit");
 });
@@ -490,7 +489,7 @@ test("introduction layout depends on visible content rather than step position",
   history.shell = { blocks: [], typing: null };
   const retained = plainLines(renderTourPage(history, state, 80, 24).lines).join("\n");
   assert.match(retained, /Demo ·/);
-  assert.match(retained, /Goodbye/);
+  assert.match(retained, /· System: Goodbye\./);
   assert.match(retained, /PAUSED · Read this explanation/);
 });
 

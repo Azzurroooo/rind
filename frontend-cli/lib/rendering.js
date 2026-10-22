@@ -630,13 +630,6 @@ export function slashResultNotice(result) {
   };
 }
 
-export function slashResultText(result, commands = []) {
-  if (!result || typeof result !== "object") {
-    return "";
-  }
-  return slashDisplayText(result.display, commands) || slashResultNotice(result)?.text || "";
-}
-
 export function answerPromptText() {
   return `\n  ${accent("▷")} `;
 }
@@ -1254,20 +1247,19 @@ export function goalCommandText(goal, action = "get") {
   };
   const label = labels[action] || "Goal updated";
   if (!goal) {
-    return commandResultText(label, "No active goal");
+    return `${label} · No active goal`;
   }
-  return commandResultText(label, `${goal.status} · ${clipSingleLine(goal.objective, 80)}`);
+  return `${label} · ${goal.status} · ${clipSingleLine(goal.objective, 80)}`;
 }
 
 export function modelListErrorText(error, currentModel = "") {
   const current = clipSingleLine(currentModel, 96);
   const detail = clipSingleLine(error, 96);
-  return notice(
-    "Model list unavailable",
+  return [
+    detail ? `Model list unavailable: ${detail}` : "Model list unavailable",
     current ? `current: ${current}` : "",
-    detail,
     "use /model set <name> to switch manually",
-  );
+  ].filter(Boolean).join("\n");
 }
 
 export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }) {
@@ -1279,16 +1271,11 @@ export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }) {
 }
 
 export function interruptText() {
-  return notice("Interrupt requested", "ctrl+c again to quit");
+  return "Interrupt requested · ctrl+c again to quit";
 }
 
 export function cancelledText() {
-  return notice("Interrupted", "session preserved; resume with -c");
-}
-
-export function commandResultText(text, detail = "") {
-  const extra = clipSingleLine(detail, 96);
-  return `${green("✓")} ${bold(clipSingleLine(text, 96))}${extra ? dim(` — ${extra}`) : ""}`;
+  return "Interrupted · session preserved; resume with -c";
 }
 
 const SYSTEM_NOTICE_PREFIX = "· System:";
@@ -1395,17 +1382,7 @@ export function contextBuiltLine(event) {
   const scopes = Array.isArray(decisions.rind_docs_truncated_scopes)
     ? decisions.rind_docs_truncated_scopes.join(", ")
     : "unknown";
-  return notice("Context trimmed", `RIND.md: ${clipSingleLine(scopes, 96)}`);
-}
-
-function notice(label, ...details) {
-  const lines = [`${accent("◆")} ${bold(label)}`];
-  for (const detail of details.flat()) {
-    if (detail) {
-      lines.push(dim(`    ${detail}`));
-    }
-  }
-  return lines.join("\n");
+  return `Context trimmed · RIND.md: ${clipSingleLine(scopes, 96)}`;
 }
 
 export function toolRequestedLine(event) {
