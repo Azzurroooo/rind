@@ -1271,11 +1271,20 @@ test("/remote transient dropdown menu E2E in headless virtual terminal: toggle s
     assert.match(screen, /› Remote access\s+Off/);
     assert.match(screen, /· Network scope\s+Local network ›/);
 
-    // 2. Toggle Remote access On with Space -> transitions to transient QR view in composer
+    // 2. Toggle Remote access On with Space -> switches On in-place on root menu and reveals QR submenu item
     inputActions.handleTerminalInput(" ");
     await settle(virtual);
     screen = virtual.getViewport().join("\n");
     assert.match(screen, /gpt-5\.4 · medium · \/workspace\/proj · ⚯/);
+    assert.match(screen, /› Remote access\s+On · 0 connected devices/);
+    assert.match(screen, /· QR code & sign-in link\s+http:\/\/192\.168\.1\.88:8766 ›/);
+    assert.doesNotMatch(screen, /[█▀▄]/, "toggling switch On must not immediately dump QR code");
+
+    // 3. Select "QR code & sign-in link" in the dropdown menu and press Enter -> displays QR code inside dropdown
+    inputActions.handleTerminalInput("\x1b[B"); // Down to "QR code & sign-in link"
+    inputActions.handleTerminalInput("\r"); // Open QR submenu
+    await settle(virtual);
+    screen = virtual.getViewport().join("\n");
     assert.match(screen, /Remote access · QR code \(Local network · 0 connected devices\)/);
     assert.equal(
       decodeTerminalQr(screen),
@@ -1283,7 +1292,15 @@ test("/remote transient dropdown menu E2E in headless virtual terminal: toggle s
       "QR code in virtual terminal viewport must decode to exact pairing URL",
     );
 
-    // 3. Press Esc to dismiss the QR display -> QR code and menu must be completely erased from viewport and scrollback!
+    // 4. Press Esc in the QR code view -> cancels QR display and returns to the /remote root dropdown menu
+    inputActions.handleTerminalInput("\x1b");
+    await settle(virtual);
+    screen = virtual.getViewport().join("\n");
+    assert.doesNotMatch(screen, /[█▀▄]/, "QR code blocks must be erased from viewport immediately when Esc exits QR submenu");
+    assert.doesNotMatch(screen, /Sign-in URL:/, "Sign-in URL must be erased when Esc exits QR submenu");
+    assert.match(screen, /› QR code & sign-in link\s+http:\/\/192\.168\.1\.88:8766 ›/);
+
+    // 5. Press Esc in root menu to dismiss /remote completely -> zero residue in viewport or scrollback
     const nextPromptPromise = remoteDone.then(() =>
       inputActions.ask(output.mainPromptText, promptPlaceholderText()),
     );
@@ -1293,7 +1310,7 @@ test("/remote transient dropdown menu E2E in headless virtual terminal: toggle s
     const scrollback = virtual.getScrollBuffer().join("\n");
     assert.doesNotMatch(screen, /[█▀▄]/, "QR code blocks must be erased from viewport after Esc");
     assert.doesNotMatch(scrollback, /[█▀▄]/, "QR code blocks must not remain in terminal scrollback after Esc");
-    assert.doesNotMatch(screen, /Sign-in URL:/, "Sign-in URL must be erased after Esc");
+    assert.doesNotMatch(screen, /QR code & sign-in link/, "menu items must be erased after Esc");
     assert.match(screen, /gpt-5\.4 · medium · \/workspace\/proj · ⚯/, "⚯ indicator remains in prompt header while remote is on");
     assert.match(screen, /Check remote menu/, "prior conversation transcript remains intact");
     inputActions.cancel();
@@ -1302,4 +1319,5 @@ test("/remote transient dropdown menu E2E in headless virtual terminal: toggle s
     tui.stop();
   }
 });
+
 

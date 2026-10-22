@@ -801,7 +801,7 @@ export function remoteMenuText(remoteState, width = process.stdout.columns) {
       lines.push(`  ${dim("Alternates:")}  ${dim(qrView.alternates.join(", "))}`);
     }
     lines.push(`  ${dim("Access code:")} ${bold(qrView.accessCode)}`);
-    lines.push(dim("    r rotate code · ← back · esc close"));
+    lines.push(dim("    r rotate code · esc back"));
     return `${lines.join("\n")}\n`;
   }
   const items = remoteState.items();

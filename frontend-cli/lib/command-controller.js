@@ -61,12 +61,10 @@ export function createCommandController({
     if (name === "remote") {
       if (arg) {
         output.log?.("Usage: /remote");
-        return true;
-      }
-      if (input.runRemote) {
+      } else if (input.isTerminal && input.runRemote) {
         await input.runRemote();
       } else {
-        output.log?.("/remote is unavailable.");
+        output.log?.("/remote requires an interactive terminal.");
       }
       return true;
     }

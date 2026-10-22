@@ -16,7 +16,6 @@ import {
   decodeQrMatrix,
   decodeTerminalQr,
   encodeQrMatrix,
-  formatRemoteOutput,
   parseTerminalQrMatrix,
   RemoteWebSocket,
   renderSvgQrDataUrl,
@@ -25,13 +24,68 @@ import {
 import { promptText, remoteMenuText } from "../lib/rendering.js";
 import { createCliInputActions } from "../lib/cli-input-actions.js";
 import { createCliState } from "../lib/cli-state.js";
+import { createVirtualOutput } from "./helpers/virtual-terminal.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 import { registerSharedWorkspace, samePath } from "../../rind-runtime-client/remote/workspaces.js";
 import { connectManagement } from "../../agent-management/dist/client.js";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-const cliBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));
+const cliImplHref = new URL("../lib/frontend-cli-implementation.js", import.meta.url).href;
+
+function spawnTtyCli({ home, workspace, args = [] }) {
+  const script = `
+    Object.defineProperty(process.stdin, 'isTTY', { value: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true });
+    process.stdin.setRawMode = value => { process.stdin.isRaw = value; };
+    process.stdout.columns = 100;
+    process.stdout.rows = 38;
+    const { runFrontendCliApp } = await import(${JSON.stringify(cliImplHref)});
+    await runFrontendCliApp(${JSON.stringify(["--cwd", workspace, ...args])});
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: workspace,
+    env: {
+      ...process.env,
+      RIND_HOME: home,
+      RIND_PYTHON: process.env.RIND_PYTHON || "python",
+      NO_COLOR: "1",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  const virtual = createVirtualOutput({ columns: 100, rows: 38 });
+  child.stdout.on("data", (chunk) => virtual.output.write(chunk));
+  let stderrText = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderrText += chunk;
+  });
+  const screen = async () => (await virtual.flushAndGetViewport()).join("\n");
+  const waitForScreen = async (predicate, timeoutMs = 15000, description = "screen condition") => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const current = await screen();
+      if (predicate(current)) return current;
+      if (child.exitCode !== null) {
+        throw new Error(
+          `CLI exited early (${child.exitCode}) while waiting for ${description}.\nSCREEN:\n${current}\nSTDERR:\n${stderrText}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    }
+    throw new Error(
+      `Timed out waiting for ${description}.\nSCREEN:\n${await screen()}\nSTDERR:\n${stderrText}`,
+    );
+  };
+  return {
+    child,
+    virtual,
+    screen,
+    waitForScreen,
+    sendKey: (value) => child.stdin.write(value),
+  };
+}
 
 test("QR matrix encoder and terminal half-block renderer round-trip pairing URLs accurately", () => {
   const urls = [
@@ -127,7 +181,6 @@ test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Es
       request: async (method, params) => ({ method, params, session_id: "s-unit", workspace_root: webDir }),
     },
     sessionState,
-    log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)),
     redraw: () => renderCurrentFrame(),
     askRemoteMenu: async (menuState) => {
       const res = await inputActions.askRemoteMenu(menuState);
@@ -157,10 +210,22 @@ test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Es
 
   const flushAsyncKey = () => new Promise((resolve) => setTimeout(resolve, 25));
 
-  // 1. Subcommands are rejected cleanly with Usage: /remote
+  // 1. Subcommands are rejected cleanly with Usage: /remote, and non-TTY reports interactive terminal required
   await commandController.handle("/remote status");
   assert.equal(logs.at(-1), "Usage: /remote");
   logs.length = 0;
+
+  const nonTtyController = createCommandController({
+    request: async () => ({}),
+    turn: {},
+    input: { isTerminal: false, runRemote: () => remoteController.handleCommand() },
+    state: { slashCommands: LOCAL_SLASH_COMMANDS },
+    output: { log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)) },
+  });
+  await nonTtyController.handle("/remote");
+  assert.equal(logs.at(-1), "/remote requires an interactive terminal.");
+  logs.length = 0;
+
   assert.equal(remoteController.state().running, false);
   assert.equal(Boolean(sessionState.info.remote_running), false);
   assert.equal(promptText(sessionState.info).includes("⚯"), false, "⚯ must not appear when remote is off");
@@ -179,7 +244,7 @@ test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Es
   assert.equal(remoteController.state().running, false);
   assert.deepEqual(logs, [], "interactive /remote must not log anything to transcript");
 
-  // 3. Pre-select "This computer" scope in the dropdown menu, then toggle Remote access On -> opens transient QR view!
+  // 3. Pre-select "This computer" scope in the dropdown menu, then toggle Remote access On in-place on root menu
   const toggleOnPromise = commandController.handle("/remote");
   await flushAsyncKey();
   inputActions.handleTerminalInput("\x1b[B"); // Down to "Network scope"
@@ -192,15 +257,22 @@ test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Es
   await flushAsyncKey();
   assert.equal(cliState.input.session.remoteState.level(), "root");
   inputActions.handleTerminalInput("\x1b[A"); // Up to "Remote access" switch
-  inputActions.handleTerminalInput(" "); // Space toggles Remote access ON and opens transient QR view
+  inputActions.handleTerminalInput(" "); // Space toggles Remote access ON in-place on root menu
   await flushAsyncKey();
 
   assert.equal(remoteController.state().running, true);
   assert.equal(remoteController.state().scope, "loopback");
   assert.equal(sessionState.info.remote_running, true);
   assert.match(promptText(sessionState.info).split("\n")[1], /gpt-test · medium · .* · ⚯$/);
+  assert.equal(cliState.input.session.remoteState.level(), "root", "toggling switch keeps user on root menu");
+  assert.match(currentMenuFrame, /On · 0 connected devices/);
+  assert.match(currentMenuFrame, /QR code & sign-in link/);
+  assert.doesNotMatch(currentMenuFrame, /[█▀▄]/, "QR code must only appear when opening the QR submenu");
 
-  // Verify the QR code is rendered inside the transient dropdown menu (NOT in transcript logs!)
+  // 4. Select "QR code & sign-in link" submenu -> displays QR code inside dropdown
+  inputActions.handleTerminalInput("\x1b[B"); // Down to "QR code & sign-in link"
+  inputActions.handleTerminalInput("\r"); // Open QR submenu
+  await flushAsyncKey();
   assert.equal(cliState.input.session.remoteState.level(), "qr");
   const expectedUrl = buildPairingUrl(remoteController.state());
   assert.equal(decodeTerminalQr(currentMenuFrame), expectedUrl, "transient QR submenu must contain valid QR code");
@@ -214,7 +286,7 @@ test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Es
   });
   assert.match(currentMenuFrame, /2 connected devices/, "active QR submenu must update connected device count live");
 
-  // 4. Pressing 'r' inside the transient QR view rotates the access code in-place
+  // 5. Pressing 'r' inside the transient QR view rotates the access code in-place
   const oldCode = remoteController.state().accessCode;
   inputActions.handleTerminalInput("r");
   await flushAsyncKey();
@@ -222,29 +294,36 @@ test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Es
   assert.equal(decodeTerminalQr(currentMenuFrame), buildPairingUrl(remoteController.state()));
   assert.match(currentMenuFrame, /Access code rotated/);
 
-  // 5. Pressing Esc inside the QR view closes the QR display and /remote menu completely while keeping remote running
-  inputActions.handleTerminalInput("\x1b"); // Esc
+  // 6. Pressing Esc inside the QR view cancels the QR code display and returns to the /remote root menu
+  inputActions.handleTerminalInput("\x1b"); // Esc exits QR view -> returns to root menu
+  await flushAsyncKey();
+  assert.equal(cliState.input.session.remoteState.level(), "root");
+  assert.doesNotMatch(currentMenuFrame, /[█▀▄]/, "QR code must disappear immediately when Esc is pressed");
+  assert.match(currentMenuFrame, /QR code & sign-in link/);
+
+  // Pressing Esc again in the root menu closes /remote completely while keeping remote running
+  inputActions.handleTerminalInput("\x1b"); // Esc closes /remote
   await toggleOnPromise;
   assert.equal(cliState.input.session, null);
-  assert.equal(currentMenuFrame, "", "QR code display must disappear when Esc is pressed");
-  assert.equal(remoteController.state().running, true, "remote stays running after closing QR view with Esc");
+  assert.equal(currentMenuFrame, "", "/remote menu must disappear when Esc is pressed at root");
+  assert.equal(remoteController.state().running, true, "remote stays running after closing /remote with Esc");
   assert.equal(sessionState.info.remote_running, true);
   assert.deepEqual(logs, [], "closing QR view must leave zero clutter in transcript logs");
 
-  // 6. Re-opening /remote when On shows "Remote access  On", "QR code & sign-in link", "Network scope", "Rotate access code"
+  // 7. Re-opening /remote when On shows "Remote access  On", "QR code & sign-in link", "Network scope", "Rotate access code"
   const manageOnPromise = commandController.handle("/remote");
   await flushAsyncKey();
   assert.equal(cliState.input.session.remoteState.level(), "root");
   assert.match(currentMenuFrame, /On · 0 connected devices/);
   assert.match(currentMenuFrame, /QR code & sign-in link/);
 
-  // Navigate to "QR code & sign-in link", open it, press Left arrow to return to root menu
+  // Navigate to "QR code & sign-in link", open it, press Esc to return to root menu
   inputActions.handleTerminalInput("\x1b[B"); // Down to "QR code & sign-in link"
   inputActions.handleTerminalInput("\r");
   await flushAsyncKey();
   assert.equal(cliState.input.session.remoteState.level(), "qr");
   assert.equal(decodeTerminalQr(currentMenuFrame), buildPairingUrl(remoteController.state()));
-  inputActions.handleTerminalInput("\x1b[D"); // Left arrow returns to root
+  inputActions.handleTerminalInput("\x1b"); // Esc returns to root
   await flushAsyncKey();
   assert.equal(cliState.input.session.remoteState.level(), "root");
 
@@ -310,16 +389,21 @@ test("interactive /remote menu: scope switching, address submenu with Esc back, 
 
   // 1. Start controllerA via menu even when webRoot directory does not exist (allowMissingWebRoot: true)
   menuScript = async (menuState) => {
-    // Select loopback scope then toggle on
+    // Select loopback scope then toggle on in-place, then open QR submenu and Esc back + close
     await menuState.handleKey({ name: "down" });
     await menuState.handleKey({ name: "enter" });
     await menuState.handleKey({ name: "down" });
     await menuState.handleKey({ name: "enter" });
     await menuState.handleKey({ name: "up" });
     await menuState.handleKey({ text: " " });
+    assert.equal(menuState.level(), "root");
+    await menuState.handleKey({ name: "down" }); // Down to QR code & sign-in link
+    await menuState.handleKey({ name: "enter" });
     assert.equal(menuState.level(), "qr");
     assert.equal(decodeTerminalQr(remoteMenuText(menuState)), buildPairingUrl(controllerA.state()));
-    await menuState.handleKey({ name: "escape" });
+    await menuState.handleKey({ name: "escape" }); // Exit QR view to root
+    assert.equal(menuState.level(), "root");
+    await menuState.handleKey({ name: "escape" }); // Close /remote
   };
   const stateA = await controllerA.handleCommand();
   assert.equal(stateA.running, true);
@@ -366,7 +450,7 @@ test("interactive /remote menu: scope switching, address submenu with Esc back, 
     assert.equal(menuState.level(), "qr");
     await menuState.handleKey({ name: "r", text: "r" });
     assert.notEqual(controllerA.state().accessCode, prevCode);
-    await menuState.handleKey({ name: "left" });
+    await menuState.handleKey({ name: "escape" });
     assert.equal(menuState.level(), "root");
 
     // Navigate to toggle (index 0) and turn off
@@ -381,7 +465,7 @@ test("interactive /remote menu: scope switching, address submenu with Esc back, 
   assert.equal(sessionState.info.remote_running, false);
 });
 
-test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTTP/WS, prompts session, and syncs live to CLI", { timeout: 30000 }, async (t) => {
+test("E2E CLI /remote: user runs /remote, toggles switch On, opens QR submenu, pairs over HTTP/WS, prompts session, and syncs live to CLI", { timeout: 30000 }, async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-cli-remote-e2e-"));
   const workspace = path.join(home, "workspace");
   await mkdir(workspace, { recursive: true });
@@ -449,26 +533,8 @@ test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTT
     "utf8",
   );
 
-  const cliChild = spawn(process.execPath, [cliBin, "--cwd", workspace], {
-    cwd: workspace,
-    env: {
-      ...process.env,
-      RIND_HOME: home,
-      NO_COLOR: "1",
-    },
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-
-  let stdoutText = "";
-  let stderrText = "";
-  cliChild.stdout.setEncoding("utf8");
-  cliChild.stderr.setEncoding("utf8");
-  cliChild.stdout.on("data", (chunk) => {
-    stdoutText += chunk;
-  });
-  cliChild.stderr.on("data", (chunk) => {
-    stderrText += chunk;
-  });
+  const tty = spawnTtyCli({ home, workspace });
+  const { child: cliChild, waitForScreen, sendKey } = tty;
 
   t.after(async () => {
     try {
@@ -480,36 +546,40 @@ test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTT
     await removeRindHome(home);
   });
 
-  async function waitForStdout(predicate, timeoutMs = 15000, description = "stdout condition") {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (predicate(stdoutText)) return stdoutText;
-      if (cliChild.exitCode !== null) {
-        throw new Error(`CLI exited early (${cliChild.exitCode}) while waiting for ${description}.\nSTDOUT:\n${stdoutText}\nSTDERR:\n${stderrText}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    }
-    throw new Error(`Timed out waiting for ${description}.\nSTDOUT:\n${stdoutText}\nSTDERR:\n${stderrText}`);
-  }
-
   // Wait for CLI startup banner
-  await waitForStdout((out) => out.includes("remote-e2e-model"), 15000, "startup banner");
+  await waitForScreen((s) => s.includes("remote-e2e-model"), 15000, "startup banner");
 
-  // 1. User runs `/remote` in CLI and selects "Turn on (This computer)" from the interactive menu
-  cliChild.stdin.write("/remote\n");
-  await waitForStdout((out) => out.includes("Remote access · Off ["), 15000, "/remote Off menu");
-  cliChild.stdin.write("Turn on (This computer)\n");
-  await waitForStdout((out) => out.includes("Access code:") && out.includes(" · ⚯"), 15000, "/remote QR output and ⚯ indicator");
+  // 1. User runs `/remote` in CLI, switches scope to "This computer", toggles "Remote access" On, then opens "QR code & sign-in link"
+  sendKey("/remote\r");
+  await waitForScreen((s) => s.includes("› Remote access") && s.includes("Off"), 15000, "/remote Off menu");
+  sendKey("\x1b[B\r"); // Down to Network scope, Enter
+  await waitForScreen((s) => s.includes("Remote access · Network scope"), 10000, "Network scope submenu");
+  sendKey("\x1b[B\r"); // Down to This computer, Enter
+  await waitForScreen((s) => s.includes("This computer ›"), 10000, "Scope updated to This computer");
+  sendKey("\x1b[A "); // Up to Remote access, Space to toggle On
+  await waitForScreen((s) => s.includes("On · 0 connected devices") && s.includes(" · ⚯"), 15000, "Remote access toggled On");
+  sendKey("\x1b[B\r"); // Down to QR code & sign-in link, Enter to open QR submenu
+  const qrScreen = await waitForScreen(
+    (s) => s.includes("Remote access · QR code") && s.includes("Access code:"),
+    15000,
+    "/remote QR submenu",
+  );
 
-  // 2. Scan/decode the terminal QR code directly from CLI stdout
-  const qrDecodedUrl = decodeTerminalQr(stdoutText);
+  // 2. Scan/decode the terminal QR code directly from the virtual terminal viewport
+  const qrDecodedUrl = decodeTerminalQr(qrScreen);
   const parsedUrl = new URL(qrDecodedUrl);
   const origin = parsedUrl.origin;
   const hashParams = new URLSearchParams(parsedUrl.hash.replace(/^#/, ""));
   const accessCode = hashParams.get("connect");
   assert.ok(accessCode && accessCode.length >= 32, "QR code must contain a valid access code in #connect=");
-  assert.equal(stdoutText.includes(`Sign-in URL: ${qrDecodedUrl}`), true);
-  assert.equal(stdoutText.includes(`Access code: ${accessCode}`), true);
+  assert.equal(qrScreen.includes(`Sign-in URL: ${qrDecodedUrl}`), true);
+  assert.equal(qrScreen.includes(`Access code: ${accessCode}`), true);
+
+  // Press Esc once to exit QR display back to /remote menu, and Esc again to close /remote menu completely
+  sendKey("\x1b");
+  await waitForScreen((s) => !/[█▀▄]/.test(s) && s.includes("› QR code & sign-in link"), 10000, "Esc exits QR submenu to root");
+  sendKey("\x1b");
+  await waitForScreen((s) => !s.includes("QR code & sign-in link"), 10000, "Esc closes /remote menu");
 
   // 3. Verify HTTP web UI is served at the QR origin
   const webRes = await fetch(origin);
@@ -588,12 +658,12 @@ test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTT
     "remote client must receive turn_completed",
   );
 
-  // Verify the CLI terminal stdout ALSO rendered the remote user input and assistant response!
-  await waitForStdout(
-    (out) =>
-      out.includes("Hello from phone QR scan") && out.includes("Remote reply to: Hello from phone QR scan"),
+  // Verify the CLI terminal screen ALSO rendered the remote user input and assistant response!
+  await waitForScreen(
+    (s) =>
+      s.includes("Hello from phone QR scan") && s.includes("Remote reply to: Hello from phone QR scan"),
     10000,
-    "remote prompt and assistant response in CLI stdout",
+    "remote prompt and assistant response in CLI screen",
   );
 
   // 7. Test remote file listing, reading, and uploading in the session workspace
@@ -616,20 +686,19 @@ test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTT
   assert.equal(fileWriteResp.result.path, "uploads/mobile-note.txt");
 
   // 8. Rotate access code from CLI (`/remote` -> "Rotate access code") and verify old WS closes with 4401
-  const beforeRotateLen = stdoutText.length;
   const wsClosed = once(ws, "close");
-  cliChild.stdin.write("/remote\n");
-  await waitForStdout((out) => out.slice(beforeRotateLen).includes("Remote access · On ["), 10000, "/remote On menu for rotate");
-  cliChild.stdin.write("Rotate access code\n");
+  sendKey("/remote\r");
+  await waitForScreen((s) => s.includes("› Remote access") && s.includes("Rotate access code"), 10000, "/remote On menu for rotate");
+  sendKey("\x1b[A\r"); // Up wraps to last item ("Rotate access code"), Enter rotates and opens QR view
   const [closeCode] = await wsClosed;
   assert.equal(closeCode, 4401, "rotating access code must disconnect existing WebSocket with 4401");
 
-  await waitForStdout(
-    (out) => out.slice(beforeRotateLen).includes("Access code rotated.") && out.slice(beforeRotateLen).includes("Access code:"),
+  const rotatedScreen = await waitForScreen(
+    (s) => s.includes("Access code rotated.") && s.includes("Access code:"),
     10000,
-    "rotated QR output",
+    "rotated QR submenu",
   );
-  const rotatedQrUrl = decodeTerminalQr(stdoutText.slice(beforeRotateLen));
+  const rotatedQrUrl = decodeTerminalQr(rotatedScreen);
   const rotatedCode = new URLSearchParams(new URL(rotatedQrUrl).hash.replace(/^#/, "")).get("connect");
   assert.notEqual(rotatedCode, accessCode);
 
@@ -643,20 +712,15 @@ test("E2E CLI /remote: user runs /remote, scans terminal QR code, pairs over HTT
   });
   assert.equal(newTicketAttempt.status, 200);
 
-  // 9. Turn off remote access (`/remote` -> "Turn off") and verify ⚯ is removed from prompt header
-  const beforeOffLen = stdoutText.length;
-  cliChild.stdin.write("/remote\n");
-  await waitForStdout((out) => out.slice(beforeOffLen).includes("Remote access · On ["), 10000, "/remote On menu for stop");
-  cliChild.stdin.write("Turn off\n");
-  await waitForStdout(
-    (out) => out.slice(beforeOffLen).includes("Remote access turned off.") && out.slice(beforeOffLen).includes("  ▷ "),
-    10000,
-    "/remote off confirmation and next prompt",
-  );
-  const afterOffPrompt = stdoutText.slice(stdoutText.lastIndexOf("Remote access turned off."));
-  assert.equal(afterOffPrompt.includes("⚯"), false, "prompt after turning off remote must not show ⚯");
+  // 9. Press Esc to exit QR view back to root, then turn off remote access and verify ⚯ is removed from prompt header
+  sendKey("\x1b"); // Esc from QR view back to root (selection is on QR code & sign-in link)
+  await waitForScreen((s) => !/[█▀▄]/.test(s) && s.includes("› QR code & sign-in link"), 10000, "back to root menu");
+  sendKey("\x1b[A "); // Up to Remote access, Space to toggle Off
+  await waitForScreen((s) => s.includes("› Remote access") && s.includes("Off") && !s.includes(" · ⚯"), 10000, "Remote access toggled Off");
+  sendKey("\x1b"); // Esc to close /remote menu
+  await waitForScreen((s) => !s.includes("Network scope"), 10000, "/remote menu closed");
 
-  cliChild.stdin.write("/exit\n");
+  sendKey("/exit\r");
   await once(cliChild, "exit");
   await removeRindHome(home);
 });
@@ -683,26 +747,8 @@ test("E2E multi-surface unification: CLI and Desktop share Remote gateway, Works
   mgmt.close();
 
   // 2. Start CLI in cliWorkspace
-  const cliChild = spawn(process.execPath, [cliBin, "--cwd", cliWorkspace], {
-    cwd: cliWorkspace,
-    env: {
-      ...process.env,
-      RIND_HOME: home,
-      NO_COLOR: "1",
-    },
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-
-  let stdoutText = "";
-  let stderrText = "";
-  cliChild.stdout.setEncoding("utf8");
-  cliChild.stderr.setEncoding("utf8");
-  cliChild.stdout.on("data", (chunk) => {
-    stdoutText += chunk;
-  });
-  cliChild.stderr.on("data", (chunk) => {
-    stderrText += chunk;
-  });
+  const tty = spawnTtyCli({ home, workspace: cliWorkspace });
+  const { child: cliChild, waitForScreen, sendKey } = tty;
 
   const desktopRemoteEvents = [];
   let desktopPeer = null;
@@ -721,19 +767,7 @@ test("E2E multi-surface unification: CLI and Desktop share Remote gateway, Works
     await removeRindHome(home);
   });
 
-  async function waitForStdout(predicate, timeoutMs = 15000, description = "stdout condition") {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (predicate(stdoutText)) return stdoutText;
-      if (cliChild.exitCode !== null) {
-        throw new Error(`CLI exited early (${cliChild.exitCode}) while waiting for ${description}.\nSTDOUT:\n${stdoutText}\nSTDERR:\n${stderrText}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    }
-    throw new Error(`Timed out waiting for ${description}.\nSTDOUT:\n${stdoutText}\nSTDERR:\n${stderrText}`);
-  }
-
-  await waitForStdout((out) => out.includes("gpt-4o"), 15000, "CLI startup banner");
+  await waitForScreen((s) => s.includes("gpt-4o"), 15000, "CLI startup banner");
 
   // 3. Connect Desktop peer to the same shared runtime (initialize + runtime/observe, matching desktop/src/main/runtime.ts)
   desktopPeer = await connectSharedRuntime({
@@ -751,16 +785,32 @@ test("E2E multi-surface unification: CLI and Desktop share Remote gateway, Works
   const initialDesktopRemote = await desktopPeer.request("remote/get");
   assert.equal(initialDesktopRemote.running, false);
 
-  // 4. Enable /remote in CLI via interactive menu -> verify Desktop immediately receives the running state and matches QR/code/port
-  cliChild.stdin.write("/remote\n");
-  await waitForStdout((out) => out.includes("Remote access · Off ["), 15000, "CLI /remote Off menu");
-  cliChild.stdin.write("Turn on (This computer)\n");
-  await waitForStdout((out) => out.includes("Access code:") && out.includes(" · ⚯"), 15000, "CLI /remote QR output and ⚯ indicator");
+  // 4. Enable /remote in CLI via interactive menu and open QR submenu -> verify Desktop immediately receives the running state and matches QR/code/port
+  sendKey("/remote\r");
+  await waitForScreen((s) => s.includes("› Remote access") && s.includes("Off"), 15000, "CLI /remote Off menu");
+  sendKey("\x1b[B\r"); // Down to Network scope, Enter
+  await waitForScreen((s) => s.includes("Remote access · Network scope"), 10000, "Network scope submenu");
+  sendKey("\x1b[B\r"); // Select This computer, Enter
+  await waitForScreen((s) => s.includes("This computer ›"), 10000, "Scope updated to This computer");
+  sendKey("\x1b[A "); // Up to Remote access, Space to toggle On
+  await waitForScreen((s) => s.includes("On · 0 connected devices") && s.includes(" · ⚯"), 15000, "CLI /remote toggled On");
+  sendKey("\x1b[B\r"); // Down to QR code & sign-in link, Enter
+  const qrScreen = await waitForScreen(
+    (s) => s.includes("Remote access · QR code") && s.includes("Access code:"),
+    15000,
+    "CLI /remote QR submenu",
+  );
 
-  const cliQrUrl = decodeTerminalQr(stdoutText);
+  const cliQrUrl = decodeTerminalQr(qrScreen);
   const parsedUrl = new URL(cliQrUrl);
   const origin = parsedUrl.origin;
   const cliAccessCode = new URLSearchParams(parsedUrl.hash.replace(/^#/, "")).get("connect");
+
+  // Close QR submenu and /remote menu with Esc
+  sendKey("\x1b");
+  await waitForScreen((s) => !/[█▀▄]/.test(s) && s.includes("› QR code & sign-in link"), 10000, "Esc exits QR submenu");
+  sendKey("\x1b");
+  await waitForScreen((s) => !s.includes("QR code & sign-in link"), 10000, "Esc closes /remote menu");
 
   const syncedDesktopRemote = await desktopPeer.request("remote/get");
   assert.equal(syncedDesktopRemote.running, true, "Desktop must see Remote running when enabled from CLI");
@@ -865,7 +915,7 @@ test("E2E multi-surface unification: CLI and Desktop share Remote gateway, Works
   ws.terminate();
 
   // 6. Lifecycle test: exit CLI while Desktop is still open -> Remote MUST stay running!
-  cliChild.stdin.write("/exit\n");
+  sendKey("/exit\r");
   await once(cliChild, "exit");
 
   const afterCliExitState = await desktopPeer.request("remote/get");
@@ -901,3 +951,4 @@ test("E2E multi-surface unification: CLI and Desktop share Remote gateway, Works
 
   await removeRindHome(home);
 });
+
