@@ -290,7 +290,7 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 
 - Agents 页面任何位置只展示 `teamId` 已登记的 Team 会话；独立会话和其他 Team 的会话一律不展示。
 - 数据来源：服务 `listSessions { teamId }`（`agent-management/src/history.ts`）提供标题/时间，snapshot 提供实时状态，二者在 `agents-model.js#teamSessions` 合并且再次按 `teamId` 过滤。
-- `rind agents sessions <team>[/<agent>]` 与页面使用同一服务接口；`rind agents sessions manager` 列出 Manager 历史。
+- 会话列表只在交互页查看，经同一服务接口 `listSessions`。
 - Team 页打开时会请求历史，这会按需拉起共享 Runtime 宿主；宿主不可用时页面仍显示 live 会话并给出错误提示。
 
 ## 9. 代码地图
@@ -318,7 +318,7 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 ### 9.3 CLI 管理页
 
 - `frontend-cli/lib/agents-client.js`：管理客户端和状态读取。
-- `frontend-cli/lib/agents-commands.js`：Manager/成员会话打开以及非 TTY `rind agents` 命令。
+- `frontend-cli/lib/agents-commands.js`：Manager/成员会话打开以及 `rind agents` 观察与恢复命令。
 - `frontend-cli/lib/agents-session.js`：管理作用域参数、服务准备和 Runtime 观察。
 - `frontend-cli/lib/agents-model.js`：纯投影：状态表、相对时间、组织树（引导线/roll-up/过滤）、Team 会话合并、任务分组、Inbox、Sidebar。
 - `frontend-cli/lib/agents-keys.js`：唯一动作表（ACTIONS/available/actionFor），按键分发、footer 提示与帮助分组同源。

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { managementClient, overviewText, selectRecord } from "./agents-client.js";
+import { managementClient, overviewText } from "./agents-client.js";
 import { createHandoff, HANDOFF_ENV } from "./agents-handoff.js";
 import { applySavedTheme } from "./cli-state-store.js";
 import { terminalKeyboard, TERMINAL_KEYBOARD_ENV } from "./tui/tui.js";
@@ -9,24 +9,14 @@ import { releaseInput, takeInput } from "./tui/console-input.js";
 import { privateDirectory, resolveRindHome } from "../../rind-runtime-client/local-files.js";
 
 export const agentsHelp = [
-  "Usage: rind agents [list | team | task | open | manager | import] [--json]",
-  "  team create <name> [--root <existing-directory>] | team rename <team> <name>",
-  "  team add <team> <workspace> [--share] [--position <name>] [--responsibility <text>]",
-  "  team leader <team> <agent> | team remove <team> <agent>",
-  "  team reports-to <team> <agent> <supervisor>",
-  "  sessions <team>[/<agent>] | sessions manager",
-  "  team workspace <team> <name>",
-  "  team worktree <team> <name> <repository> <branch> [base]",
-  "  team copy <team> <name> <source> [--confirm <preview-fingerprint>]",
-  "  task <team> <agent> <brief>",
-  "  show <task> | start <task> | cancel <task> | priority <task> high|normal|low",
-  "  note <task> <text> [--answer]",
-  "  stop <run> | resolve <run> --confirm-stopped",
-  "  artifact <artifact-id>",
-  "  open <team>/<agent> | manager",
+  "Usage: rind agents [list | stop | resolve | import] [--json]",
+  "  (none)                            open the Agents page; without a terminal, same as list",
+  "  list                              teams, members and tasks; --json gives the full state",
+  "  stop [--all]                      stop background services when idle; --all also stops running agents",
+  "  stop <run>                        stop one run",
+  "  resolve <run> --confirm-stopped   release a run whose process has stopped",
   "  import <legacy-team-root> [--confirm] [--share]",
-  "  stop [--all]   stop background services when idle; --all also stops running agents",
-  "Names and unique ID prefixes are accepted. Shared directories require an explicit choice.",
+  "Teams and tasks are managed on the Agents page or by the Manager.",
 ].join("\n");
 
 export const managerWorkspace = launch => path.join(resolveRindHome(launch?.home), "agents-management", "manager");
@@ -103,83 +93,44 @@ export function returnTarget(next) {
   if (!runtimeSessionId && !workspace && !manager) return null;
   return { agentId: agent?.id, teamId, manager: Boolean(manager), workspace, runtimeSessionId };
 }
-// The service runs in its own folder, so a relative folder is resolved here,
-// where the user typed it.
-const folder = value => (value ? path.resolve(value) : value);
+
+// The command line only observes and recovers: teams and tasks change on the
+// Agents page or through the Manager, never from a script acting as the user.
 export async function runAgentsCommand(args, launch) {
   const json = args.includes("--json");
   args = args.filter(arg => arg !== "--json");
   if (args.includes("--help") || args.includes("-h")) { console.log(agentsHelp); return; }
+  // A session's shell would act as the user and bypass delegate, report and agent_management.
+  if (process.env.RIND_SHARED_HOST_PID) throw new Error("`rind agents` acts as the user and cannot run inside a Rind session. Run it in a terminal outside Rind.");
   if (!args.length && process.stdin.isTTY && process.stdout.isTTY) {
     const { runAgentsPage } = await import("./agents-page.js");
     const result = await runAgentsPage({ launch, standalone: true });
     if (result.leave) console.log(leaveSummary(result));
     exitInteractive();
   }
-  if (args[0] === "stop" && (!args[1] || args[1] === "--all")) { await stopBackground(args.includes("--all"), launch, json); return; }
+  const [command = "list", target, ...rest] = args;
+  if (command === "stop" && (!target || target === "--all")) { await stopBackground(target === "--all", launch, json); return; }
+  if (!["list", "stop", "resolve", "import"].includes(command) || (command !== "list" && !target)) throw new Error(agentsHelp);
   const client = await managementClient(launch);
   try {
-    const snapshot = await client.request("snapshot");
-    const team = value => selectRecord(snapshot.teams, value, "Team");
-    const agent = (value, teamId) => selectRecord(snapshot.agents.filter(a => !teamId || snapshot.memberships.some(m => m.teamId === teamId && m.agentId === a.id)), value, "Agent");
     let result;
-    const [command, sub, ...rest] = args;
-    if (!command || command === "list") { result = snapshot; if (!json) { console.log(overviewText(snapshot)); return; } }
-    else if (command === "manager") { await showConversation({ manager: true }, launch); return; }
-    else if (command === "sessions") {
-      const [teamValue, agentValue] = (sub || "").split("/");
-      if (teamValue === "manager" && !agentValue) result = await client.request("listSessions", { manager: true });
-      else {
-        const selectedTeam = team(teamValue);
-        result = await client.request("listSessions", { teamId: selectedTeam.id, ...(agentValue ? { agentId: agent(agentValue, selectedTeam.id).id } : {}) });
-      }
-    }
-    else if (command === "open") {
-      const [teamValue, agentValue] = (sub || "").split("/");
-      const selectedTeam = team(teamValue);
-      await showConversation({ agent: agent(agentValue, selectedTeam.id), teamId: selectedTeam.id, runtimeSessionId: option(rest, "--session") }, launch); return;
-    } else if (command === "team") {
-      if (sub === "create") result = await client.request("createTeam", { name: rest.slice(0, rest.includes("--root") ? rest.indexOf("--root") : rest.length).join(" "), createRoot: folder(option(rest, "--root")) });
-      else {
-        const selected = team(rest[0]);
-        if (sub === "rename") result = await client.request("renameTeam", { teamId: selected.id, name: rest.slice(1).join(" ") });
-        else if (sub === "add") {
-          result = await client.request("addMember", { teamId: selected.id, workspace: folder(rest[1]), share: rest.includes("--share"), position: option(rest, "--position"), responsibility: option(rest, "--responsibility") });
-        }
-        else if (sub === "leader" || sub === "remove") result = await client.request(sub === "leader" ? "setLeader" : "removeMember", { teamId: selected.id, agentId: agent(rest[1], selected.id).id });
-        else if (sub === "reports-to") result = await client.request("setSupervisor", { teamId: selected.id, agentId: agent(rest[1], selected.id).id, reportsToAgentId: agent(rest[2], selected.id).id });
-        else if (sub === "workspace") result = await client.request("createWorkspace", { teamId: selected.id, name: rest[1] });
-        else if (sub === "worktree") result = await client.request("createWorktree", { teamId: selected.id, name: rest[1], repository: folder(rest[2]), branch: rest[3], base: rest[4] });
-        else if (sub === "copy") {
-          const preview = await client.request("previewCopy", { source: folder(rest[2]) });
-          const confirmation = option(rest, "--confirm");
-          result = confirmation ? await client.request("copyWorkspace", { teamId: selected.id, name: rest[1], source: folder(rest[2]), confirmation }) : preview;
-        } else throw new Error(agentsHelp);
-      }
-    } else if (command === "task") {
-      const selected = team(sub);
-      result = await client.request("assignTask", { teamId: selected.id, assigneeAgentId: agent(rest[0], selected.id).id, brief: rest.slice(1).join(" ") });
-    } else if (["show", "start", "note", "cancel", "priority"].includes(command)) {
-      const task = selectRecord(snapshot.tasks, sub, "Task");
-      result = await client.request({ show: "getTask", start: "startTask", note: "postTaskNote", cancel: "cancelTask", priority: "setTaskPriority" }[command], { taskId: task.id, ...(command === "note" ? { text: rest.filter(s => s !== "--answer").join(" "), answer: rest.includes("--answer") } : {}), ...(command === "priority" ? { priority: rest[0] } : {}) });
-    } else if (command === "stop") result = await client.request("cancelRun", { runId: sub });
-    else if (command === "resolve") result = await client.request("resolveRun", { runId: sub, confirmStopped: rest.includes("--confirm-stopped") });
-    else if (command === "artifact") result = await client.request("readArtifact", { artifactId: sub });
-    else if (command === "import") {
-      const root = folder(sub);
+    if (command === "list") {
+      result = await client.request("snapshot");
+      if (!json) { console.log(overviewText(result)); return; }
+    } else if (command === "stop") result = await client.request("cancelRun", { runId: target });
+    else if (command === "resolve") result = await client.request("resolveRun", { runId: target, confirmStopped: rest.includes("--confirm-stopped") });
+    else {
+      // The service runs in its own folder, so the folder is resolved here, where the user typed it.
+      const root = path.resolve(target);
       const preview = await client.request("previewImport", { root });
-      result = rest.includes("--confirm")
-        ? await client.request("importTeam", { root, confirmation: preview.fingerprint, share: rest.includes("--share") })
-        : preview;
-    } else throw new Error(agentsHelp);
+      result = rest.includes("--confirm") ? await client.request("importTeam", { root, confirmation: preview.fingerprint, share: rest.includes("--share") }) : preview;
+    }
     console.log(JSON.stringify(result, null, 2));
   } finally { client.close(); }
 }
 // Stopping is explicit and separate from leaving Rind. Without --all it only
 // stops services that have nothing running, so no work is lost by accident.
 async function stopBackground(all, launch, json) {
-  // A Rind session's shell descends from the shared Runtime that --all stops.
-  if (all && process.env.RIND_SHARED_HOST_PID) throw new Error("`rind agents stop --all` would stop the Rind session running it. Run it in a terminal outside Rind.");
   let client;
   try { client = await managementClient({ ...launch, start: false }); }
   catch { await stopRuntimeAlone(all, launch, json); return; }
@@ -248,17 +199,7 @@ async function stopLegacy(client, all, launch) {
   return { stopping: true, working: result.working };
 }
 
-// `rind agents open|manager`: going back from the conversation shows Agents.
-async function showConversation(chat, launch) {
-  const next = await followConversation(chat, { launch, input: process.stdin });
-  if (next.action !== "agents") exitInteractive();
-  const { runAgentsPage } = await import("./agents-page.js");
-  const result = await runAgentsPage({ launch, standalone: true, initialTeamId: chat.teamId, returnTo: returnTarget(next) });
-  if (result.leave) console.log(leaveSummary(result));
-  exitInteractive();
-}
 // Like a chat window, an interactive page ends the process itself: on Windows,
 // once a conversation window has used the same console, waiting for the
 // console input to close on its own can block until another key arrives.
 function exitInteractive() { process.exit(process.exitCode ?? 0); }
-function option(args, flag) { const index = args.indexOf(flag); return index === -1 ? undefined : args[index + 1]; }

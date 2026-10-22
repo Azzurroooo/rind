@@ -122,7 +122,7 @@ Rind 现无通用外部管理工具入口。实施时在 Worker 组合根注入�
 
 - 空聊天输入时按 ← 打开专页；从普通会话进入时保留输入草稿和当前 Session。首页是所有 Team 的名称、Leader、成员数、运行/阻塞/待确认数；选中 Team 后看岗位、Workspace、任务与最新状态。搜索、状态筛选、打开成员、组装 Team、创建 worktree、派任务、进入 Manager 都在此完成。关键操作只显示「选择 Team → 选择目录/成员 → 确认职责/任务」；不要先要求用户理解 Capsule/Blueprint/注册清单。
 - 页面中的 Manager 导航项打开受控 Manager 会话，不注册 `/manager` 或 `/agents` 命令。返回普通会话时不切换它的 Workspace 或历史。Manager 给出的全局建议可跳到具体 Team/Task，敏感选择在 UI 中确认。
-- 非 TTY 提供对应文本命令，如 `rind agents list`、`rind agents team create <name>`、`rind agents team add <team> <path>`、`rind agents task <team> <agent> <brief>`、`rind agents open <team>/<agent>`，并提供 `--json` 供脚本使用。交互页与文本命令只调用同一服务；非 TTY 遇到共享目录等需用户选择的情况须报明确错误与选项，不偷偷选择。
+- 文本命令只做观察与恢复：`rind agents list [--json]`、`stop [--all]`、`stop <run>`、`resolve <run> --confirm-stopped` 与旧团队 `import`。团队与任务只在交互页或经 Manager 变更，任务因此只由用户或 Manager 创建；`rind agents` 在 Rind 会话的 shell 内（`RIND_SHARED_HOST_PID`）拒绝运行，避免 agent 冒充用户。
 - 独立打开已注册 Agent 时继续呈现普通 Rind 聊天界面，只在状态栏标出当前 Team/独立归属与运行状态。工作中、需输入、空闲、离线/未知使用不同文字，不能只靠颜色。所有页面宽度与终端模式沿用现有 CLI TUI 组件树。
 
 ## 8. 迁移、实施顺序与验收
