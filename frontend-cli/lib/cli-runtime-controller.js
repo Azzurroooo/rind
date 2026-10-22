@@ -547,12 +547,12 @@ export function createCliRuntimeController({
     if (!hasConversation()) {
       // Kept with the window and used when its first message creates the conversation.
       state.session.info = { ...state.session.info, provider: selected.providerId || state.session.info.provider, model: selected.modelId };
-      notify(modelSetResultText({ provider_id: state.session.info.provider, model_id: selected.modelId }, selected.modelId));
+      notify(modelSetResultText({ provider_id: state.session.info.provider, model_id: selected.modelId }, selected.modelId, selected.scope));
     } else {
       try {
         const update = await request(methods.modelSet, { provider_id: selected.providerId || undefined, model_id: selected.modelId });
         state.session.info = { ...state.session.info, provider: update?.provider_id || selected.providerId, model: update?.model_id || selected.modelId };
-        notify(modelSetResultText(update, selected.modelId));
+        notify(modelSetResultText(update, selected.modelId, selected.scope));
       } catch (error) {
         notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
         return;
@@ -566,12 +566,15 @@ export function createCliRuntimeController({
   }
 
   async function runModelCommand(argument = "") {
+    const parts = String(argument || "").trim().split(/\s+/).filter(Boolean);
     if (hasConversation()) {
       const result = await request(methods.commandExecute, { input: argument ? `/model ${argument}` : "/model" });
+      if (parts.length === 2 && parts[0].toLowerCase() === "set" && String(result?.text || "").startsWith("Model changed to ")) {
+        state.session.info = { ...state.session.info, model: parts[1] };
+      }
       await getCommands().applyResult(result);
       return;
     }
-    const parts = String(argument || "").trim().split(/\s+/).filter(Boolean);
     if (!parts.length) {
       notify(`Model: ${state.session.info.model || "unknown"}`);
       return;
@@ -712,12 +715,12 @@ export function createCliRuntimeController({
   async function applyReasoningEffort(effort, scope = "session") {
     if (!hasConversation()) {
       state.session.info = { ...state.session.info, reasoning_effort: effort };
-      notify(`Reasoning effort updated · session effort: ${effort}`);
+      notify(effortSetResultText({ reasoning_effort: effort }, effort, scope));
     } else {
       try {
         const update = await request(methods.modelEffortSet, { reasoning_effort: effort });
         state.session.info = { ...state.session.info, reasoning_effort: effort };
-        notify(`Reasoning effort updated · session effort: ${effort} · ${appliesNote(update)}`);
+        notify(effortSetResultText(update, effort, scope));
       } catch (error) {
         notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
         return;
@@ -788,17 +791,25 @@ function sessionMenuOption(session) {
 
 // A turn that is running keeps its model; the change applies from the next turn.
 export function appliesNote(result) {
-  return result?.applies === "next_turn" ? "applies from the next turn; this turn keeps its model" : "applies to your next message";
+  return result?.applies === "next_turn" ? "applies from the next turn; this turn keeps its model" : "";
 }
 
-function modelSetResultText(result, model) {
-  const sessionModel = singleLineText(result?.session_model || result?.model || model);
-  const defaultModel = singleLineText(result?.default_model);
-  const lines = ["Session model updated."];
-  if (sessionModel) lines.push(`- session model: ${sessionModel}`);
-  if (defaultModel) lines.push(`- default model: ${defaultModel} (unchanged)`);
-  lines.push(`- ${appliesNote(result)}`);
-  return lines.join("\n");
+function scopeSuffix(scope) {
+  return scope === "folder" || scope === "global" ? "" : " (session only)";
+}
+
+export function modelSetResultText(result, model, scope = "session") {
+  const sessionModel = singleLineText(result?.session_model || result?.model_id || result?.model || model);
+  const head = `Model changed to ${sessionModel}${scopeSuffix(scope)}`;
+  const note = appliesNote(result);
+  return note ? `${head} · ${note}` : head;
+}
+
+export function effortSetResultText(result, effort, scope = "session") {
+  const sessionEffort = singleLineText(result?.reasoning_effort || effort);
+  const head = `Reasoning effort set to ${sessionEffort}${scopeSuffix(scope)}`;
+  const note = appliesNote(result);
+  return note ? `${head} · ${note}` : head;
 }
 
 function singleLineText(value) {

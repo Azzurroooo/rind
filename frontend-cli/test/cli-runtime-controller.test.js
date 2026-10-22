@@ -609,11 +609,25 @@ test("commands sent before the first message carry what the window has chosen", 
   assert.equal(harness.requests.filter(item => item.method === methods.commandExecute).at(-1).params.draft, undefined);
 });
 
-test("model and effort results say when the change applies", async () => {
-  const { appliesNote } = await import("../lib/cli-runtime-controller.js");
+test("model and effort results format concise single-line notices and say when a running turn keeps its model", async () => {
+  const { appliesNote, effortSetResultText, modelSetResultText } = await import("../lib/cli-runtime-controller.js");
   assert.equal(appliesNote({ applies: "next_turn" }), "applies from the next turn; this turn keeps its model");
-  assert.equal(appliesNote({ applies: "now" }), "applies to your next message");
-  assert.equal(appliesNote({}), "applies to your next message", "older hosts do not say; nothing runs then");
+  assert.equal(appliesNote({ applies: "now" }), "");
+  assert.equal(appliesNote({}), "", "older hosts do not say; nothing runs then");
+
+  assert.equal(modelSetResultText({ applies: "now" }, "deepseek-v4-pro"), "Model changed to deepseek-v4-pro (session only)");
+  assert.equal(modelSetResultText({ applies: "now" }, "deepseek-v4-pro", "folder"), "Model changed to deepseek-v4-pro");
+  assert.equal(
+    modelSetResultText({ applies: "next_turn" }, "deepseek-v4-pro"),
+    "Model changed to deepseek-v4-pro (session only) · applies from the next turn; this turn keeps its model",
+  );
+
+  assert.equal(effortSetResultText({ applies: "now" }, "max"), "Reasoning effort set to max (session only)");
+  assert.equal(effortSetResultText({ applies: "now" }, "max", "global"), "Reasoning effort set to max");
+  assert.equal(
+    effortSetResultText({ applies: "next_turn" }, "max"),
+    "Reasoning effort set to max (session only) · applies from the next turn; this turn keeps its model",
+  );
 });
 
 test("switching sessions replaces the conversation on screen; the first restore keeps the startup banner", async () => {
@@ -649,7 +663,7 @@ test("/model set before the first message updates the window model and carries i
 
   await harness.controller.runModelCommand("set model-b");
   assert.equal(harness.state.session.info.model, "model-b");
-  assert.match(harness.logs.at(-1), /Session model updated/);
+  assert.equal(harness.logs.at(-1), "Model changed to model-b (session only)");
   assert.equal(harness.levels.at(-1), "info");
 });
 

@@ -162,7 +162,7 @@ test("interactive CLI journey: empty startup, login, send, chat, logout", async 
     // Refreshed /models entries carry no effort metadata, so the dialect default
     // applies and /effort max is accepted and sent with the next request.
     cli.send("/effort max");
-    await cli.waitFor("session effort: max");
+    await cli.waitFor("Reasoning effort set to max (session only)");
     // Turn state settles asynchronously after the completion event; input sent
     // inside that window is misrouted as steering, so pace like a real user.
     await new Promise((resolve) => setTimeout(resolve, 2000));

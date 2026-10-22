@@ -466,12 +466,16 @@ async def test_model_set_updates_session_selection_without_changing_settings(tmp
     result = await SlashCommandRouter(build_command_infos()).execute("/model set model_b", context)
     data = json.loads(path.read_text(encoding="utf-8"))
 
-    assert "Session model updated." in result.text
-    assert "session model: model_b" in result.text
-    assert "default model: model_a (unchanged)" in result.text
-    assert "applies from the next turn; a turn that is running keeps its model" in result.text
+    assert result.text == "Model changed to model_b (session only)"
     assert data["model"] == "model_a"
     assert (session.provider, session.model) == ("openai", "model_b")
+
+    running_context = SlashCommandContext(runtime=FakeRuntime(), session=session, debug=True)
+    running_result = await SlashCommandRouter(build_command_infos()).execute("/model set model_c", running_context)
+    assert running_result.text == (
+        "Model changed to model_c (session only) · applies from the next turn; this turn keeps its model"
+    )
+    assert (session.provider, session.model) == ("openai", "model_c")
 
 
 @pytest.mark.asyncio
