@@ -665,15 +665,18 @@ export function slashMenuText(items, selectedIndex = 0) {
   return `${lines.join("\n")}\n`;
 }
 
-export function modelMenuText(items, selectedIndex = 0) {
+export function modelMenuText(items, selectedIndex = 0, { kind = "model" } = {}) {
   const visible = menuWindow(items, selectedIndex);
   if (!visible.items.length) {
     return "";
   }
-  const lines = [dim(modelMenuTitle(visible))];
-  const selected = visible.items[visible.activeIndex];
-  const vision = selected?.image_input === true ? "supported" : selected?.image_input === false ? "unsupported" : "unknown";
-  lines.push(dim(`  Image input: ${vision}`));
+  const isEffort = kind === "effort";
+  const lines = [dim(isEffort ? choiceMenuTitle(visible, "Reasoning effort") : modelMenuTitle(visible))];
+  if (!isEffort) {
+    const selected = visible.items[visible.activeIndex];
+    const vision = selected?.image_input === true ? "supported" : selected?.image_input === false ? "unsupported" : "unknown";
+    lines.push(dim(`  Image input: ${vision}`));
+  }
   for (const [index, item] of visible.items.entries()) {
     if (item.header) {
       lines.push(dim(`  ${item.name}`));

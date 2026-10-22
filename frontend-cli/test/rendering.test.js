@@ -520,6 +520,24 @@ test("modelMenuText keeps the selected model visible", () => {
   );
 });
 
+test("modelMenuText with effort kind renders Reasoning effort title without Image input line", () => {
+  assert.equal(
+    modelMenuText([
+      { modelId: "low", current: false },
+      { modelId: "medium", current: true },
+      { modelId: "max", current: false },
+    ], 2, { kind: "effort" }),
+    [
+      "  Reasoning effort",
+      "    · low",
+      "    · medium                             current",
+      "    › max",
+      "    ↑↓ select · enter use · f folder default · g global default · esc cancel",
+      "",
+    ].join("\n"),
+  );
+});
+
 test("modelListErrorText renders current model and fallback command", () => {
   assert.equal(
     modelListErrorText("request failed", "model-a"),

@@ -434,8 +434,7 @@ export function createCliInputActions({
       const item = session.modelState.selectedModel();
       const model = item?.modelId || "";
       const scope = rawKey === "f" ? "folder" : rawKey === "g" ? "global" : "session";
-      const echo = model ? (session.inputText === "/effort" ? `/effort ${model}` : `/model set ${model}`) : "";
-      completeTtyInput(session, item ? { ...item, scope } : "", Boolean(model), "", echo);
+      completeTtyInput(session, item && model ? { ...item, scope } : "", false);
       return;
     }
     if (!modified && key.name === "escape") {
@@ -466,9 +465,7 @@ export function createCliInputActions({
       completeTtyInput(
         session,
         changed ? session.settingsState.value() : null,
-        changed,
-        "",
-        session.inputText,
+        false,
       );
       return;
     }
@@ -515,7 +512,11 @@ export function createCliInputActions({
     const command = session.menuState?.selectedCommand();
     const value = command ? `/${command.name}` : session.editor.input();
     if (session.mode === "prompt") recordPromptHistory(session.editor, value);
-    completeTtyInput(session, value, session.mode === "prompt" && !state.turn.active && !state.display.activeCompact, session.mode === "line" ? "\n" : "");
+    const shouldEchoUser = session.mode === "prompt"
+      && !state.turn.active
+      && !state.display.activeCompact
+      && !isSlashCommandInput(value);
+    completeTtyInput(session, value, shouldEchoUser, session.mode === "line" ? "\n" : "");
   }
 
   function queueTtyInput(session) {
@@ -526,9 +527,14 @@ export function createCliInputActions({
     getTurnController().submitFollowUp(value);
   }
 
+  function isSlashCommandInput(value) {
+    const text = String(value || "").trim();
+    return text.startsWith("/") || text === "?";
+  }
+
   function recordPromptHistory(editor, value) {
     const text = String(value || "").trim();
-    if (!text || text.startsWith("/")) {
+    if (!text || isSlashCommandInput(text)) {
       editor.addToHistory("");
       return;
     }
@@ -537,13 +543,13 @@ export function createCliInputActions({
     }
   }
 
-  function completeTtyInput(session, value, writeUser, lineText = "", displayValue = value) {
+  function completeTtyInput(session, value, writeUser, lineText = "") {
     if (state.input.session !== session) return;
     state.input.session = null;
     state.input.active = false;
     cancelActiveInput = null;
     if (writeUser) {
-      output.writeUserInput(displayValue);
+      output.writeUserInput(value);
     } else if (!output.terminalUi && lineText && String(value || "").trim()) {
       process.stdout.write("\n");
     }
@@ -779,7 +785,7 @@ export function createCliInputActions({
     if (!value.trim()) {
       return;
     }
-    if (!state.turn.active && !state.display.activeCompact && !value.startsWith("/")) {
+    if (!state.turn.active && !state.display.activeCompact && !isSlashCommandInput(value)) {
       output.writeUserInput(value, "send");
     }
     void getCommandController().handle(value)

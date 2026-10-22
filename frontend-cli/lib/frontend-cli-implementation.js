@@ -922,7 +922,11 @@ function composeFrame(width = process.stdout.columns || 80) {
       prompt: mainPromptText(width),
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
-      menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
+      menuText: modelMenuText(
+        session.modelState.items(),
+        session.modelState.selectedIndex(),
+        { kind: session.inputText === "/effort" ? "effort" : "model" },
+      ).trimEnd(),
     };
   }
   if (session.mode === "choice-dialog") {

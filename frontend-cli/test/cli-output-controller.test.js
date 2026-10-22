@@ -203,7 +203,7 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
     spinnerChanged: false,
     importChoices: {},
   });
-  assert.deepEqual(transcript.render(90).map(stripAnsi), ["▷ You", "  /settings"]);
+  assert.deepEqual(transcript.render(90).map(stripAnsi), []);
   output.clearTranscript();
 
   // 2. /settings brief command persists globally and updates active brief mode.
