@@ -16,8 +16,8 @@ export function shell(command, note = null, cwd = null) {
   return { kind: "shell", command: String(command), note: noteLines(note), ...(cwd ? { cwd } : {}) };
 }
 
-export function shellOut(lines) {
-  return { kind: "shell-out", lines: textLines(lines) };
+export function shellOut(lines, note = null) {
+  return { kind: "shell-out", lines: textLines(lines), ...(note ? { note: noteLines(note) } : {}) };
 }
 
 export function startup(info, note = null) {
@@ -32,21 +32,22 @@ export function submit(mode = "send") {
   return { kind: "submit", mode };
 }
 
-export function result(text, detail = "") {
-  return { kind: "result", text: String(text), detail: String(detail || "") };
+export function result(text, detail = "", note = null) {
+  return { kind: "result", text: String(text), detail: String(detail || ""), ...(note ? { note: noteLines(note) } : {}) };
 }
 
-export function slashResult(displayResult) {
+export function slashResult(displayResult, note = null) {
   return {
     kind: "slash-result",
     text: String(displayResult?.text || ""),
     detail: "",
     display: displayResult?.display || null,
+    ...(note ? { note: noteLines(note) } : {}),
   };
 }
 
-export function tool(name, detail, outcome, args = null) {
-  return { kind: "tool", name: String(name), detail: String(detail || ""), outcome, ...(args ? { arguments: args } : {}) };
+export function tool(name, detail, outcome, args = null, note = null) {
+  return { kind: "tool", name: String(name), detail: String(detail || ""), outcome, ...(args ? { arguments: args } : {}), ...(note ? { note: noteLines(note) } : {}) };
 }
 
 export function assistant(text, note = null) {
@@ -76,7 +77,7 @@ export function agents(screen, note = null) {
 
 export const info = (value, clear = false) => ({ kind: "info", info: value, clear });
 export const closeMenu = (key = "Esc") => ({ kind: "close-menu", key });
-export const consume = (mode) => ({ kind: "consume", mode });
+export const consume = (mode, note = null) => ({ kind: "consume", mode, ...(note ? { note: noteLines(note) } : {}) });
 export const turnStart = (input = "") => ({ kind: "turn-start", input });
-export const expandTools = (expanded = true) => ({ kind: "expand-tools", expanded });
-export const prefill = (text) => ({ kind: "prefill", text });
+export const expandTools = (expanded = true, note = null) => ({ kind: "expand-tools", expanded, ...(note ? { note: noteLines(note) } : {}) });
+export const prefill = (text, note = null) => ({ kind: "prefill", text, ...(note ? { note: noteLines(note) } : {}) });

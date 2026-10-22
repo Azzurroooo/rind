@@ -1,21 +1,77 @@
 // Shared demo fixtures for tour pages: one coherent fake project so every
-// page tells the same story (workspace ~/demo, provider zai, model glm-4.7).
+// page tells the same story (workspace ~/demo, model GPT-6-Astra, effort xhigh).
 
-export function demoInfo({ cwd = "~/demo", session, model = "zai/glm-4.7" }) {
+export function demoInfo({ cwd = "~/demo", session, model = "GPT-6-Astra", reasoning_effort = "xhigh" }) {
   return {
     model,
     session_id: session,
     cwd,
-    reasoning_effort: "high",
+    reasoning_effort,
   };
 }
 
 export const MODELS = [
-  { header: true, name: "zai" },
-  { modelId: "glm-4.7", current: true },
-  { modelId: "glm-4.6" },
+  { header: true, name: "openai" },
+  { modelId: "GPT-6-Astra", current: true, image_input: true },
   { header: true, name: "demo-endpoint" },
-  { modelId: "demo-model" },
+  { modelId: "GPT-6-Astra", image_input: true },
+];
+
+export const EFFORTS = [
+  { modelId: "low" },
+  { modelId: "medium" },
+  { modelId: "high" },
+  { modelId: "xhigh", current: true },
+  { modelId: "max" },
+];
+
+export const SETTINGS_ROOT_ITEMS = [
+  { label: "Brief output", value: "Off", description: "Compact tool results and assistant summaries" },
+  { label: "Theme", value: "Mocha ›", description: "Terminal color palette for transcript and menus" },
+  { label: "Working spinner", value: "Braille ›", description: "Activity indicator shown during live turns" },
+  { label: "Import skills", value: "1 source ›", description: "Include skills from ~/.claude or ~/.codex" },
+];
+
+export const REMOTE_ITEMS_OFF = [
+  {
+    id: "toggle",
+    label: "Remote access",
+    value: "Off",
+    description: "Press space or enter to turn on (Local network) and show QR code",
+  },
+  {
+    id: "scope",
+    label: "Network scope",
+    value: "Local network ›",
+    description: "Wi-Fi / LAN devices and this computer",
+  },
+];
+
+export const REMOTE_ITEMS_ON = [
+  {
+    id: "toggle",
+    label: "Remote access",
+    value: "On · 1 connected device",
+    description: "Press space or enter to turn off remote access",
+  },
+  {
+    id: "qr",
+    label: "QR code & sign-in link",
+    value: "http://192.168.1.24:8766 ›",
+    description: "Display pairing QR code and connection details (Esc to close)",
+  },
+  {
+    id: "scope",
+    label: "Network scope",
+    value: "Local network ›",
+    description: "Wi-Fi / LAN devices and this computer",
+  },
+  {
+    id: "rotate",
+    label: "Rotate access code",
+    value: "rotate ›",
+    description: "Generate a new code and disconnect connected devices",
+  },
 ];
 
 export const SESSIONS = [
@@ -73,7 +129,7 @@ export const BOARD_PAGES = [
         { day: "2026-09-16", tokens: 42000 },
         { day: "2026-09-17", tokens: 31000 },
       ],
-      by_model: [{ model: "zai/glm-4.7", tokens: 102000 }],
+      by_model: [{ model: "GPT-6-Astra", tokens: 102000 }],
       recent_sessions: [{ session_id: "eff01a23", updated_at: "2026-09-17T10:31:22Z", tokens: 31000 }],
     },
   },

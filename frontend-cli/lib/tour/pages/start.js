@@ -7,7 +7,7 @@ import {
   menu,
   note,
   shell,
-  shellOut,
+  slashResult,
   startup,
   submit,
   tool,
@@ -39,22 +39,30 @@ export const startPages = [
         "For this demo, press Space to watch Rind read, edit and test the code.",
       ]),
       submit(),
-      tool("read_file", "src/parser/tokenizer.js", { status: "ok", output: 'const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });\nexport const tokenize = (text) => [...segmenter.segment(text)];', durationMs: 320 }),
+      tool("read_file", "src/parser/tokenizer.js", { status: "ok", output: 'const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });\nexport const tokenize = (text) => [...segmenter.segment(text)];', durationMs: 320 }, null, [
+        "Rind reads the relevant source and test files first. Tool blocks stay compact by default.",
+      ]),
       tool("read_file", "test/tokenizer.test.js", { status: "ok", output: 'test("ASCII", () => assert.equal(tokenize("abc").length, 3));', durationMs: 210 }),
       expandTools(),
       note([
         "The demo pressed Ctrl+O to expand tool output. In Rind, use it to inspect",
         "what was read or changed; press it again to collapse the output.",
       ]),
-      expandTools(false),
+      expandTools(false, [
+        "Ctrl+O collapses the tool output again so the transcript stays easy to scan.",
+      ]),
       tool("edit_file", "test/tokenizer.test.js", { status: "ok", output: "Added emoji, combining-mark and CJK tests", durationMs: 400,
         fileChange: { lines: [
           { kind: "added", text: 'test("emoji", () => assert.equal(tokenize("a😀b").length, 3));' },
           { kind: "added", text: 'test("combining", () => assert.equal(tokenize("é").length, 1));' },
           { kind: "added", text: 'test("CJK", () => assert.equal(tokenize("中文").length, 2));' },
         ] },
-      }),
-      tool("bash", "npm test", { status: "ok", output: "4 tests passed", durationMs: 820 }),
+      }, null, [
+        "File edits show an inline diff (+ / -) right in the transcript.",
+      ]),
+      tool("bash", "npm test", { status: "ok", output: "4 tests passed", durationMs: 820 }, null, [
+        "Rind runs the test command to verify its edit before replying.",
+      ]),
       assistant([
         "The tokenizer walks the input by grapheme clusters, so emoji and CJK",
         "count as single characters:",
@@ -67,7 +75,9 @@ export const startPages = [
         "",
         "Added three cases to `test/tokenizer.test.js` covering emoji,",
         "combining marks and wide CJK.",
-      ].join("\n")),
+      ].join("\n"), [
+        "The final reply streams Markdown and tables, followed by the turn duration and tool count.",
+      ]),
       turnDone(18400, 4, 0),
       note([
         "Try it: exit this tour and ask Rind to explain a file in your project.",
@@ -86,32 +96,35 @@ export const startPages = [
       ]),
       shell("rind"),
       startup(demoInfo({ session: "20260917_102212_77aa01bc" })),
-      type("Plan how to refactor the session store to stream appends"),
-      submit(),
-      type("Then check whether the existing index tests pass"),
-      submit("queue"),
-      note([
-        "The demo used Tab to queue a separate turn. It will run after this one.",
-        "In Rind, Alt+↑/↓ recalls pending input; Alt+→ promotes a follow-up to steering.",
+      type("Plan how to refactor the session store to stream appends", [
+        "Start a normal turn first. While Rind is working, the composer stays open.",
       ]),
-      type("Focus on the streaming path first; keep the plan brief"),
+      submit(),
+      type("Then check whether the existing index tests pass", [
+        "Type a follow-up task while the turn is running, then press Tab to park it for the next turn.",
+      ]),
+      submit("queue"),
+      type("Focus on the streaming path first; keep the plan brief", [
+        "Enter during a turn adds steering for the active turn, while Tab queues a follow-up.",
+        "In Rind, Alt+↑/↓ recalls pending input, Alt+→ promotes to steering, and Ctrl+C interrupts.",
+      ]),
       submit("steer"),
       note([
-        "Enter during a turn adds steering for the next opportunity to process it.",
-        "It does not cancel an already running command; Ctrl+C interrupts the turn.",
+        "Enter during a turn adds steering for the active turn, while Tab queues a follow-up.",
+        "In Rind, Alt+↑/↓ recalls pending input, Alt+→ promotes to steering, and Ctrl+C interrupts.",
       ]),
-      consume("steering"),
+      consume("steering", [
+        "Rind consumes the steering note (via steering) and adjusts the active turn.",
+      ]),
       assistant([
         "Start with the append path: write one JSONL record at a time, flush",
         "before acknowledging it, and rebuild the old index on open.",
         "The queued test check runs as a separate turn next.",
       ]),
       turnDone(4200, 0, 0),
-      note([
-        "The first turn is done. The follow-up is still queued below.",
-        "Continue to watch it become the next user message automatically.",
+      consume("follow_up", [
+        "When the first turn finishes, the queued follow-up (via follow_up) starts the next turn automatically.",
       ]),
-      consume("follow_up"),
       tool("bash", "npm test", { status: "ok", output: "Index compatibility: 12 tests passed", durationMs: 1800 }),
       assistant("All 12 existing index tests pass. No files were changed."),
       turnDone(2500, 1, 0),
@@ -129,19 +142,24 @@ export const startPages = [
       ]),
       shell("rind"),
       startup(demoInfo({ session: "20260917_104512_31cc09de" })),
-      type("Run the whole test suite, then audit production dependencies"),
+      type("Run the whole test suite, then audit production dependencies", [
+        "Ask Rind to run a long test suite. When the command exceeds its wait window, it moves to the background.",
+      ]),
       submit(),
       tool("bash", "npm test", { status: "ok", output: "Tests started", durationMs: 1000, data: { status: "running", task_id: "task-demo", notify: "on_exit" } },
-        { command: "npm test", yield_time_ms: 1000, notify: "on_exit" }),
+        { command: "npm test", yield_time_ms: 1000, notify: "on_exit" }, [
+          "The shell command is still running after 1s, so Rind keeps it as background job task-demo (notify=on_exit).",
+        ]),
       menu({
         kind: "monitor",
         tasks: [TEST_TASK],
         task: TEST_TASK,
       }, [
-        "The Background monitor shows live shell output. ↑↓ selects a job; c cancels it; r releases its current wait without killing it.",
+        "Background monitor: ↑↓ selects a job, c cancels, r releases wait, Esc hides.",
+        "These shell jobs are separate from the team tasks and reports in Agents.",
       ]),
       note([
-        "In Rind, Esc closes this monitor without stopping the command.",
+        "Background monitor: ↑↓ selects a job, c cancels, r releases wait, Esc hides.",
         "These shell jobs are separate from the team tasks and reports in Agents.",
       ]),
       closeMenu(),
@@ -149,12 +167,52 @@ export const startPages = [
       turnDone(2500, 1, 0),
       note(["notify=on_exit lets an idle session continue when the job finishes, without repeated polling.", "Use notify=manual for services or watchers; inspect them explicitly with task_control."]),
       turnStart(),
-      tool("task_control", "read task-demo", { status: "ok", output: "312 tests passed", durationMs: 120 }, { action: "read", task_id: "task-demo" }),
+      tool("task_control", "read task-demo", { status: "ok", output: "312 tests passed", durationMs: 120 }, { action: "read", task_id: "task-demo" }, [
+        "When task-demo exits, Rind wakes up and reads the completed output with task_control.",
+      ]),
       assistant("All 312 tests passed. I can now audit the production dependencies."),
       turnDone(1800, 1, 0),
       note([
         "Try Ctrl+B during a real shell job. task_control supports list, read, bounded wait and cancel.",
         "Closing the monitor only hides it; it does not stop background work.",
+      ]),
+    ],
+  },
+  {
+    id: "start.goal",
+    feature: "/goal",
+    title: "Autonomous goals",
+    steps: [
+      note([
+        "/goal sets an objective that Rind pursues across turns until it is met.",
+        "Pause, resume or clear the goal at any time between turns.",
+      ]),
+      shell("rind"),
+      startup(demoInfo({ session: "20260917_105000_99ff12aa" })),
+      type("/goal Pass all unicode parser tests and document edge cases", [
+        "Start a goal with /goal <objective>. Rind tracks the objective across turns.",
+      ]),
+      submit(),
+      slashResult({ text: "Goal started · active · Pass all unicode parser tests and document edge cases" }),
+      turnStart("Continue toward goal: Pass all unicode parser tests and document edge cases"),
+      tool("bash", "npm test", { status: "ok", output: "4 unicode tests passed", durationMs: 640 }, null, [
+        "Each goal turn inspects progress, runs checks and verifies whether the objective is met.",
+      ]),
+      tool("edit_file", "README.md", { status: "ok", output: "Documented grapheme cluster edge cases", durationMs: 310,
+        fileChange: { lines: [
+          { kind: "added", text: "Tokenizer splits on grapheme clusters (emoji, combining marks, CJK)." },
+        ] },
+      }),
+      assistant("All 4 unicode tests pass and the edge cases are documented in `README.md`. The goal is complete."),
+      turnDone(3900, 2, 0),
+      type("/goal clear", [
+        "Use /goal pause to pause between turns, /goal resume to continue, or /goal clear when done.",
+      ]),
+      submit(),
+      slashResult({ text: "Goal cleared · No active goal" }),
+      note([
+        "Try /goal <objective> for multi-step refactors or test fixes.",
+        "Resumed sessions show active goals in the startup banner so you can pick up with /goal resume.",
       ]),
     ],
   },

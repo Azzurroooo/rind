@@ -19,6 +19,20 @@ test("account lesson selects OAuth, explains callback and does not simulate API-
   assert.match(text, /simulation opens no browser/);
 });
 
+test("provider lesson renders grouped /status with Model, Provider, Conversation and Context", () => {
+  const page = findTourPage("login.provider");
+  const statusStepIndex = page.steps.findIndex(step => step.display?.type === "status");
+  assert.ok(statusStepIndex >= 0);
+  const stage = createTourStage();
+  stage.rebuildTo(page.steps, statusStepIndex);
+  const state = { page, pageIndex: 0, pageCount: 18, stepIndex: statusStepIndex, stepCount: page.steps.length, phase: "waiting", speed: 1 };
+  const text = renderTourPage(stage.snapshot(), state, 100, 30).lines.map(stripAnsi).join("\n");
+  assert.match(text, /Status · Z\.ai \/ GPT-6-Astra · xhigh/);
+  assert.match(text, /Model[\s\S]*model\s+GPT-6-Astra\s+session[\s\S]*effort\s+xhigh\s+session/);
+  assert.match(text, /Provider[\s\S]*provider\s+Z\.ai · zai\s+built-in · openai-chat[\s\S]*sign-in\s+API key\s+saved login \(auth\.json\)/);
+  assert.match(text, /Conversation[\s\S]*session\s+20260917_101530_ab12cd34/);
+});
+
 test("named endpoint teaches the real ordered fields with readable text and masked key", () => {
   const page = findTourPage("login.endpoint");
   const fields = page.steps.filter(step => ["auth-input", "auth-secret"].includes(step.menu?.kind));
@@ -27,8 +41,9 @@ test("named endpoint teaches the real ordered fields with readable text and mask
     "Model id (empty: use the endpoint model list)", "Demo endpoint API key"]);
   for (const [index, step] of page.steps.entries()) {
     if (!fields.includes(step)) continue;
+    assert.ok(Array.isArray(step.note) && step.note.length > 0, `${step.menu.title} has a guiding caption`);
     const stage = createTourStage(); stage.rebuildTo(page.steps, index);
-    const state = { page, pageIndex: 0, pageCount: 20, stepIndex: index,
+    const state = { page, pageIndex: 0, pageCount: 18, stepIndex: index,
       stepCount: page.steps.length, phase: "waiting", speed: 1 };
     const text = renderTourPage(stage.snapshot(), state, 100, 30).lines.map(stripAnsi).join("\n");
     if (step.menu.kind === "auth-secret") {
@@ -59,6 +74,8 @@ test("folder defaults teach valid CLI commands and separate user storage from pr
     ["set", "model"], ["set", "reasoning_effort"], ["unset", "model"], ["unset", "reasoning_effort"],
   ]);
   assert.equal(commands[0].connection, "zai");
+  assert.equal(commands[0].value, "GPT-6-Astra");
+  assert.equal(commands[1].value, "xhigh");
   assert.equal(commands[0].folder, process.cwd());
   assert.match(JSON.stringify(page), /RIND_HOME\/workspaces\.json/);
   assert.doesNotMatch(JSON.stringify(page), /\.rind\/settings\.json/);

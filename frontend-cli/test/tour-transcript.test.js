@@ -8,7 +8,7 @@ import { createTourStage } from "../lib/tour/stage.js";
 import { renderTourTranscript } from "../lib/tour/transcript.js";
 import { graphemes, stripAnsi } from "../lib/text-width.js";
 
-const INFO = { version: "0.8.0", model: "demo", session_id: "s1", cwd: "~/demo" };
+const INFO = { version: "0.8.0", model: "GPT-6-Astra", reasoning_effort: "xhigh", session_id: "s1", cwd: "~/demo" };
 const plain = (lines) => lines.map(stripAnsi);
 
 function liveSession() {

@@ -59,7 +59,7 @@ test("in-session recovery: stop main tui, run tour, replay main tui", async () =
   const main = createTui({ input, output: output.output });
   const transcript = [
     "Rind v0.8.0",
-    "model deepseek-flash · session 20260917_024116_91240551",
+    "model GPT-6-Astra · effort xhigh · session 20260917_024116_91240551",
     "▷ You",
     "  /tour agents.tasks",
   ];
