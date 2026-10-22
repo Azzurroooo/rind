@@ -778,15 +778,18 @@ export function settingsMenuText(items, selectedIndex = 0, level = "root") {
 
 export function remoteMenuText(remoteState, width = process.stdout.columns) {
   if (!remoteState) return "";
+  const columns = Number(width);
+  const lineWidth = Number.isFinite(columns) && columns > 0 ? Math.max(20, Math.floor(columns) - 2) : 96;
   const level = remoteState.level();
   if (level === "qr") {
-    const qrView = remoteState.qrView();
+    const qrView = remoteState.qrView(columns);
     if (!qrView) return "";
+    const fit = (text) => clipCells(text, lineWidth);
     const lines = [
-      dim(`  Remote access · QR code (${qrView.scopeLabel} · ${qrView.clientLabel})`),
+      fit(dim(`  Remote access · QR code (${qrView.scopeLabel} · ${qrView.clientLabel})`)),
     ];
     if (qrView.notice) {
-      lines.push(`  ${accent(qrView.notice)}`);
+      lines.push(fit(`  ${accent(qrView.notice)}`));
     }
     if (qrView.qrBlock) {
       lines.push("");
@@ -795,13 +798,13 @@ export function remoteMenuText(remoteState, width = process.stdout.columns) {
       }
       lines.push("");
     }
-    lines.push(`  ${dim("Sign-in URL:")} ${accent(qrView.pairingUrl)}`);
-    lines.push(`  ${dim("Address:")}     ${qrView.primaryAddress}`);
+    lines.push(fit(`  ${dim("Sign-in URL:")} ${accent(qrView.pairingUrl)}`));
+    lines.push(fit(`  ${dim("Address:")}     ${qrView.primaryAddress}`));
     if (qrView.alternates.length > 0) {
-      lines.push(`  ${dim("Alternates:")}  ${dim(qrView.alternates.join(", "))}`);
+      lines.push(fit(`  ${dim("Alternates:")}  ${dim(qrView.alternates.join(", "))}`));
     }
-    lines.push(`  ${dim("Access code:")} ${bold(qrView.accessCode)}`);
-    lines.push(dim("    r rotate code · esc back"));
+    lines.push(fit(`  ${dim("Access code:")} ${bold(qrView.accessCode)}`));
+    lines.push(fit(dim("    r rotate code · esc back")));
     return `${lines.join("\n")}\n`;
   }
   const items = remoteState.items();
@@ -830,7 +833,6 @@ export function remoteMenuText(remoteState, width = process.stdout.columns) {
   const labelWidth = Math.max(18, ...items.map((item) => visibleLength(item.label)));
   const valueWidth = Math.max(11, ...items.map((item) => visibleLength(item.value || "")));
   const lines = [dim("  Remote access")];
-  const columns = Number(width);
   const contentWidth = Number.isFinite(columns) && columns > 0 ? Math.max(28, Math.min(96, columns - 6)) : slashContentWidth();
   const descWidth = Math.max(18, contentWidth - labelWidth - valueWidth - 10);
   for (const [index, item] of items.entries()) {

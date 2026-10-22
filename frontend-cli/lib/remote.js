@@ -42,14 +42,26 @@ export function buildPairingUrl(state, selectedAddress = "") {
   return `${primary}/#connect=${encodeURIComponent(state.accessCode)}`;
 }
 
-function buildQrView(state, selectedAddress = "", notice = "") {
+function buildQrView(state, selectedAddress = "", notice = "", width = process.stdout.columns) {
   if (!state?.running) return null;
   const primaryAddress =
     selectedAddress && state.addresses?.includes(selectedAddress)
       ? selectedAddress
       : state.addresses?.[0] || `http://127.0.0.1:${state.port}`;
   const pairingUrl = buildPairingUrl(state, primaryAddress);
-  const qrBlock = pairingUrl ? renderTerminalQr(pairingUrl, { margin: 2 }) : "";
+  let qrBlock = "";
+  if (pairingUrl) {
+    const matrix = encodeQrMatrix(pairingUrl);
+    const cols = Number(width);
+    const available = Number.isFinite(cols) && cols > 0 ? Math.floor(cols) - 2 : Infinity;
+    if (available >= matrix.length + 4) {
+      qrBlock = renderTerminalQr(matrix, { margin: 2 });
+    } else if (available >= matrix.length + 2) {
+      qrBlock = renderTerminalQr(matrix, { margin: 1 });
+    } else if (available >= matrix.length) {
+      qrBlock = renderTerminalQr(matrix, { margin: 0 });
+    }
+  }
   const scopeLabel = state.scope === "lan" ? "Local network" : "This computer";
   const clientLabel = `${state.clients} connected ${state.clients === 1 ? "device" : "devices"}`;
   const alternates = (state.addresses || []).filter((addr) => addr !== primaryAddress);
@@ -364,7 +376,7 @@ export function createRemoteMenuState({
       if (level === "scope" || level === "address") return subIndex;
       return rootIndex;
     },
-    qrView: () => buildQrView(state, selectedAddress, qrNotice),
+    qrView: (width) => buildQrView(state, selectedAddress, qrNotice, width),
     state: () => state,
     selectedAddress: () => selectedAddress,
     updateState: (next) => syncState(next),

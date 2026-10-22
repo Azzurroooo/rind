@@ -87,7 +87,7 @@ function spawnTtyCli({ home, workspace, args = [] }) {
   };
 }
 
-test("QR matrix encoder and terminal half-block renderer round-trip pairing URLs accurately", () => {
+test("QR matrix encoder and terminal half-block renderer round-trip pairing URLs accurately", async () => {
   const urls = [
     "http://127.0.0.1:8766/#connect=test-code-123",
     "http://192.168.1.44:54321/#connect=abCD1234_-efGH567890ijklMNOPqrst",
@@ -129,6 +129,30 @@ test("QR matrix encoder and terminal half-block renderer round-trip pairing URLs
       globalThis.Buffer = savedBuffer;
     }
   }
+
+  // Verify narrow terminal widths (e.g., columns=42 and columns=32) keep QR scannable or degrade cleanly without line wrapping
+  const narrowMenu = createRemoteMenuState({
+    initialState: {
+      running: true,
+      scope: "lan",
+      port: 8766,
+      addresses: ["http://192.168.1.44:8766"],
+      accessCode: "abCD1234_-efGH567890ijklMNOPqrst",
+      clients: 0,
+    },
+  });
+  await narrowMenu.handleKey({ name: "down" });
+  await narrowMenu.handleKey({ name: "enter" });
+  assert.equal(narrowMenu.level(), "qr");
+  const rendered42 = remoteMenuText(narrowMenu, 42);
+  for (const line of rendered42.trimEnd().split("\n")) {
+    assert.ok(line.replace(/\x1b\[[0-9;]*m/g, "").length <= 42, `line exceeds 42 columns: ${line}`);
+  }
+  assert.equal(decodeTerminalQr(rendered42), buildPairingUrl(narrowMenu.state()), "QR code at 42 columns must still decode accurately");
+
+  const rendered32 = remoteMenuText(narrowMenu, 32);
+  assert.doesNotMatch(rendered32, /[█▀▄]/, "ultra-narrow 32-column terminal omits unbroken 37-col QR matrix instead of corrupting it by wrapping");
+  assert.match(rendered32, /Access code:/);
 });
 
 test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Esc dismissal without transcript log, and ⚯ indicator", async (t) => {
