@@ -9,6 +9,8 @@ let cachedState = null;
 let briefMode = false;
 
 export const DEFAULT_SPINNER = "orbit";
+export const DEFAULT_MAX_CONCURRENT_RUNS = 128;
+export const CONCURRENT_RUN_OPTIONS = Object.freeze([4, 8, 16, 32, 64, 128, 256, 512]);
 
 const SPINNERS = Object.freeze([
   {
@@ -34,6 +36,39 @@ const SPINNERS = Object.freeze([
 ]);
 
 let activeSpinner = SPINNERS[3];
+let maxConcurrentRuns = DEFAULT_MAX_CONCURRENT_RUNS;
+
+export function getMaxConcurrentRuns() {
+  return maxConcurrentRuns;
+}
+
+export function normalizeMaxConcurrentRuns(value) {
+  const parsed = Number(String(value ?? "").trim());
+  return CONCURRENT_RUN_OPTIONS.includes(parsed) ? parsed : null;
+}
+
+export function setMaxConcurrentRuns(value) {
+  const normalized = normalizeMaxConcurrentRuns(value);
+  if (!normalized) return null;
+  maxConcurrentRuns = normalized;
+  return maxConcurrentRuns;
+}
+
+export function resetMaxConcurrentRuns() {
+  maxConcurrentRuns = DEFAULT_MAX_CONCURRENT_RUNS;
+  return maxConcurrentRuns;
+}
+
+export function concurrentRunOptions() {
+  return CONCURRENT_RUN_OPTIONS.map((limit) => ({
+    name: String(limit),
+    label: String(limit),
+    description: limit === DEFAULT_MAX_CONCURRENT_RUNS
+      ? `${limit} concurrent agent runs (default)`
+      : `${limit} concurrent agent runs`,
+    current: limit === maxConcurrentRuns,
+  }));
+}
 
 export function isBriefMode() {
   return briefMode;
@@ -117,6 +152,7 @@ export function saveCliState(patch, rindHome) {
   if (patch && typeof patch === "object") {
     if ("brief" in patch) setBriefMode(patch.brief);
     if ("spinner" in patch && patch.spinner) setSpinner(patch.spinner);
+    if ("maxConcurrentRuns" in patch) setMaxConcurrentRuns(patch.maxConcurrentRuns);
   }
   try {
     const next = { ...loadCliState(rindHome), ...patch };
@@ -135,8 +171,9 @@ export function saveCliState(patch, rindHome) {
 
 // Every surface (chat and `rind agents`) draws with the preferences chosen in cli-state.json.
 export function applySavedTheme(rindHome) {
-  const { theme, brief, spinner } = loadCliState(rindHome);
+  const { theme, brief, spinner, maxConcurrentRuns: savedRuns } = loadCliState(rindHome);
   if (theme) setTheme(theme);
   setBriefMode(brief === true);
   setSpinner(spinner || DEFAULT_SPINNER);
+  if (!setMaxConcurrentRuns(savedRuns)) resetMaxConcurrentRuns();
 }

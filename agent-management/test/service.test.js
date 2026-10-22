@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { createService } from "../dist/service.js";
+import { createService, DEFAULT_MAX_CONCURRENT_RUNS } from "../dist/service.js";
 import { openStore } from "../dist/store.js";
 import { managementPaths } from "../dist/paths.js";
 import { retain, DELEGATION_LIMIT, COMPLETED_TASK_LIMIT, UNBOUND_SESSION_LIMIT } from "../dist/retention.js";
@@ -644,17 +644,24 @@ test("renameTeam enforces uniqueness and authority, updates member instructions,
   await eventually(() => Object.values(f.store.state.runs).find(r => r.delegationId === child.taskId)?.status === "cancelled");
 });
 
-test("scheduler caps concurrent active runs at MAX_CONCURRENT_RUNS and yields slots when parents wait on children", async t => {
-  const f = await fixture(t);
-  const m1 = await f.member("m1"), m2 = await f.member("m2"), m3 = await f.member("m3"), m4 = await f.member("m4"), m5 = await f.member("m5");
-  for (const m of [m1, m2, m3, m4, m5]) {
-    await f.call("delegate", { to: m.id, brief: "work " + m.name }, { kind: "agent", sessionId: (await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id })).id });
+test("scheduler caps concurrent active runs at runLimit, reads cli-state.json on startup, and dispatches queued runs when setMaxConcurrentRuns raises the limit", async t => {
+  assert.equal(DEFAULT_MAX_CONCURRENT_RUNS, 128);
+  const f = await fixture(t, { cliState: { maxConcurrentRuns: 4 } });
+  const m1 = await f.member("m1"), m2 = await f.member("m2"), m3 = await f.member("m3"), m4 = await f.member("m4"), m5 = await f.member("m5"), m6 = await f.member("m6");
+  const leaderSession = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id });
+  for (const m of [m1, m2, m3, m4, m5, m6]) {
+    await f.call("delegate", { to: m.id, brief: "work " + m.name }, { kind: "agent", sessionId: leaderSession.id });
   }
   await eventually(() => f.starts.length === 4);
   await new Promise(resolve => setTimeout(resolve, 40));
-  assert.equal(f.starts.length, 4, "5th delegation stays queued while 4 runs are active");
+  assert.equal(f.starts.length, 4, "5th and 6th delegations stay queued while 4 runs are active");
   f.starts[0].finish({ content: "done 1" });
-  await eventually(() => f.starts.length === 5);
+  await eventually(() => f.starts.length === 5, "finishing a run frees a slot for the 5th delegation");
+
+  await assert.rejects(f.call("setMaxConcurrentRuns", { maxConcurrentRuns: 5 }), { code: "INVALID_INPUT" });
+  await assert.rejects(f.call("setMaxConcurrentRuns", { maxConcurrentRuns: 8 }, { kind: "agent", sessionId: leaderSession.id }), { code: "FORBIDDEN" });
+  assert.deepEqual(await f.call("setMaxConcurrentRuns", { maxConcurrentRuns: 8 }), { maxConcurrentRuns: 8 });
+  await eventually(() => f.starts.length === 6, "raising runLimit in memory immediately dispatches the remaining queued delegation");
   for (const s of f.starts.slice(1)) s.finish({ content: "done" });
 });
 

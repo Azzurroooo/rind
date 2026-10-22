@@ -13,6 +13,7 @@ import {
   updateHelp,
 } from "./update.js";
 import { runAgentsCommand, followConversation, leaveSummary, returnTarget } from "./agents-commands.js";
+import { managementClient } from "./agents-client.js";
 import { takeHandoffPath, writeHandoff, writeHandoffSync } from "./agents-handoff.js";
 import { runAgentsPage } from "./agents-page.js";
 import { prepareManagement, observeRuntime } from "./agents-session.js";
@@ -358,9 +359,6 @@ const runtimeController = createCliRuntimeController({
   askModelMenu: (...args) => inputActions.askModelMenu(...args),
   askSettingsMenu: (...args) => inputActions.askSettingsMenu(...args),
   getBriefMode: () => isBriefMode(),
-  onBriefChange: (enabled) => commandController.handle(`/settings brief ${enabled ? "on" : "off"}`),
-  onThemeChange: (name) => commandController.handle(`/settings theme ${name}`),
-  onSpinnerChange: (name) => commandController.handle(`/settings spinner ${name}`),
   askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
   askChoice: tui ? (...args) => inputActions.askChoice(...args) : null,
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
@@ -442,6 +440,14 @@ commandController = createCommandController({
         persistTheme: (name) => saveCliState({ theme: name }),
         persistBrief: (enabled) => saveCliState({ brief: enabled }),
         persistSpinner: (name) => saveCliState({ spinner: name }),
+        persistMaxConcurrentRuns: async (maxConcurrentRuns) => {
+          saveCliState({ maxConcurrentRuns });
+          const client = await managementClient({ ...managementLaunch, start: false }).catch(() => null);
+          if (client) {
+            try { await client.request("setMaxConcurrentRuns", { maxConcurrentRuns }); } catch {}
+            finally { client.close(); }
+          }
+        },
       });
       if ((result?.display?.type === "theme" || result?.display?.type === "brief") && result.display.changed) {
         outputController.replayAll();

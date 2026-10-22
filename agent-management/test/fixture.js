@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -8,8 +8,9 @@ import { openStore } from "../dist/store.js";
 import { managementPaths } from "../dist/paths.js";
 
 export const user = { kind: "user" };
-export async function fixture(t) {
+export async function fixture(t, { maxConcurrentRuns, cliState } = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-management-"));
+  if (cliState) await writeFile(path.join(home, "cli-state.json"), JSON.stringify(cliState), "utf8");
   const paths = managementPaths(home);
   const store = await openStore(paths.state, 5);
   const starts = [];
@@ -51,7 +52,7 @@ export async function fixture(t) {
   // Stands in for the Runtime taking a delivery into a conversation.
   const delivered = [];
   const deliver = async (runtimeSessionId, text) => { delivered.push({ runtimeSessionId, text }); };
-  const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}), folderDefaults, deliver });
+  const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}), folderDefaults, deliver, maxConcurrentRuns });
   t.after(async () => { await service.stop(); await store.close(); await rm(home, { recursive: true, force: true }); });
   const call = (method, params = {}, actor = user) => service.request(actor, method, { requestId: randomUUID(), ...params });
   const team = await call("createTeam", { name: "Product" });

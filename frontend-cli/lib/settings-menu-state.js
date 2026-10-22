@@ -1,7 +1,7 @@
 import { themeOptions } from "./theme.js";
-import { spinnerOptions } from "./cli-state-store.js";
+import { concurrentRunOptions, spinnerOptions } from "./cli-state-store.js";
 
-const ROOT_LEVELS = ["brief", "theme", "spinner", "import"];
+const ROOT_LEVELS = ["brief", "theme", "spinner", "concurrency", "import"];
 
 function briefOptions(enabled) {
   const active = Boolean(enabled);
@@ -54,14 +54,15 @@ function createChoiceSubmenu(rawItems) {
 }
 
 // Two-level /settings menu state:
-// - Root level: "Brief output", "Theme", "Working spinner", and "Skill imports" (all open a Level 2 submenu).
-// - "brief", "theme", and "spinner" submenus: single-choice selectors (Enter applies, Esc returns to root).
+// - Root level: "Brief output", "Theme", "Working spinner", "Max concurrent runs", and "Skill imports".
+// - Single-choice submenus: Enter applies, Esc returns to root.
 // - "import" submenu: multi-select checklist (Space toggles, Enter applies, Esc reverts & returns to root).
 export function createSettingsMenuState({ brief = false, sources = [], initialLevel = "root" } = {}) {
   const submenus = {
     brief: createChoiceSubmenu(briefOptions(brief)),
     theme: createChoiceSubmenu(themeOptions()),
     spinner: createChoiceSubmenu(spinnerOptions()),
+    concurrency: createChoiceSubmenu(concurrentRunOptions()),
   };
 
   const importItems = (Array.isArray(sources) ? sources : []).map((source) => ({
@@ -76,15 +77,16 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
     rootIndex = ROOT_LEVELS.indexOf(initialLevel);
   } else if (initialLevel === "import" && importItems.length) {
     level = "import";
-    rootIndex = 3;
+    rootIndex = ROOT_LEVELS.indexOf("import");
   }
   let importIndex = 0;
 
   const briefChanged = () => submenus.brief.changed();
   const themeChanged = () => submenus.theme.changed();
   const spinnerChanged = () => submenus.spinner.changed();
+  const concurrencyChanged = () => submenus.concurrency.changed();
   const importChanged = () => importItems.some((item) => item.chosen !== Boolean(item.enabled));
-  const changed = () => briefChanged() || themeChanged() || spinnerChanged() || importChanged();
+  const changed = () => briefChanged() || themeChanged() || spinnerChanged() || concurrencyChanged() || importChanged();
 
   function importChoices() {
     return Object.fromEntries(
@@ -117,6 +119,12 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
         label: "Working spinner",
         value: `${submenus.spinner.chosenLabel()} ›`,
         description: "Choose the working activity animation",
+      },
+      {
+        id: "concurrency",
+        label: "Concurrent runs",
+        value: `${submenus.concurrency.chosenLabel()} ›`,
+        description: "Set the global parallel agent run limit",
       },
       {
         id: "import",
@@ -212,13 +220,13 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
       for (const item of importItems) {
         item.chosen = Boolean(item.enabled);
       }
-      rootIndex = 3;
+      rootIndex = ROOT_LEVELS.indexOf("import");
       level = "root";
       return "redraw";
     }
     if (key?.name === "enter" || key?.name === "return") {
       if (changed()) return "submit";
-      rootIndex = 3;
+      rootIndex = ROOT_LEVELS.indexOf("import");
       level = "root";
       return "redraw";
     }
@@ -240,9 +248,11 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
     selectedBrief: () => submenus.brief.selected(),
     selectedTheme: () => submenus.theme.selected(),
     selectedSpinner: () => submenus.spinner.selected(),
+    selectedConcurrency: () => submenus.concurrency.selected(),
     briefChanged,
     themeChanged,
     spinnerChanged,
+    concurrencyChanged,
     importChanged,
     changed,
     importChoices,
@@ -253,6 +263,8 @@ export function createSettingsMenuState({ brief = false, sources = [], initialLe
       themeChanged: themeChanged(),
       spinner: submenus.spinner.chosen(),
       spinnerChanged: spinnerChanged(),
+      concurrency: Number(submenus.concurrency.chosen()),
+      concurrencyChanged: concurrencyChanged(),
       importChoices: importChoices(),
     }),
     handleKey(key) {

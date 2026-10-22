@@ -607,6 +607,11 @@ export function slashDisplayText(display, commands = []) {
         display.enabled ? "Brief output enabled." : "Brief output disabled.",
         "applies globally across live turns and replayed sessions",
       );
+    case "concurrency":
+      return commandResultText(
+        `Max concurrent runs: ${display.current}.`,
+        "applies globally across managed agent runs",
+      );
     default:
       return "";
   }
@@ -679,12 +684,12 @@ export function modelMenuText(items, selectedIndex = 0) {
 }
 
 export function settingsMenuText(items, selectedIndex = 0, level = "root") {
-  if (level === "brief") {
+  if (level === "brief" || level === "concurrency") {
     const visible = menuWindow(items, selectedIndex);
     if (!visible.items.length) {
       return "";
     }
-    const lines = [dim("  Settings · Brief output")];
+    const lines = [dim(level === "concurrency" ? "  Settings · Max concurrent runs" : "  Settings · Brief output")];
     const labelWidth = Math.max(6, ...items.map((item) => visibleLength(clipSingleLine(item?.label || item?.name, 24))));
     const descWidth = Math.max(12, ...items.map((item) => visibleLength(clipSingleLine(item?.description, 56))));
     for (const [index, item] of visible.items.entries()) {

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { executeLocalSlashCommand } from "../lib/local-slash-commands.js";
-import { resetSpinner, setBriefMode } from "../lib/cli-state-store.js";
+import { resetMaxConcurrentRuns, resetSpinner, setBriefMode } from "../lib/cli-state-store.js";
 
 test("local status renders session and provider state", async () => {
   const result = await executeLocalSlashCommand("/status", {
@@ -92,6 +92,29 @@ test("/settings spinner lists the four animations and updates the active working
 
   const unknown = await executeLocalSlashCommand("/settings spinner sparkle", {});
   assert.match(unknown.text, /Unknown spinner/);
+});
+
+test("/settings concurrency reads and updates global max concurrent runs across preset tiers", async (t) => {
+  t.after(() => resetMaxConcurrentRuns());
+  resetMaxConcurrentRuns();
+  const initial = await executeLocalSlashCommand("/settings concurrency", {});
+  assert.deepEqual(initial, {
+    text: "Max concurrent runs: 128",
+    display: { type: "concurrency", changed: false, current: 128 },
+  });
+
+  let persisted = null;
+  const updated = await executeLocalSlashCommand("/settings concurrency 256", {
+    persistMaxConcurrentRuns: async (val) => { persisted = val; },
+  });
+  assert.equal(persisted, 256);
+  assert.deepEqual(updated, {
+    text: "Max concurrent runs: 256",
+    display: { type: "concurrency", changed: true, previous: 128, current: 256 },
+  });
+
+  const invalid = await executeLocalSlashCommand("/settings concurrency 100", {});
+  assert.match(invalid.text, /Invalid concurrency limit "100"\. Available: 4, 8, 16, 32, 64, 128, 256, 512\./);
 });
 
 test("local status before the first message shows the pending name", async () => {

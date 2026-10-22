@@ -1,14 +1,17 @@
 import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
 import {
+  CONCURRENT_RUN_OPTIONS,
   currentSpinner,
+  getMaxConcurrentRuns,
   isBriefMode,
   setBriefMode,
+  setMaxConcurrentRuns,
   setSpinner,
   spinnerNames,
   spinnerOptions,
 } from "./cli-state-store.js";
 
-const SETTINGS_USAGE = "/settings [brief [on | off] | theme [<name>] | spinner [<name>] | import [<source>=on|off ...]]";
+const SETTINGS_USAGE = "/settings [brief [on | off] | theme [<name>] | spinner [<name>] | concurrency [4 | 8 | 16 | 32 | 64 | 128 | 256 | 512] | import [<source>=on|off ...]]";
 
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "compact", description: "Compact current session context", usage: "/compact" },
@@ -25,7 +28,7 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "remote", description: "Share this session with your phone or browser via QR code", usage: "/remote" },
   { name: "rename", description: "Name this conversation (otherwise it is shown by its first message)", usage: "/rename <name> | /rename --reset" },
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
-  { name: "settings", description: "Configure brief output, color theme, working spinner, and skill imports", usage: SETTINGS_USAGE },
+  { name: "settings", description: "Configure brief output, color theme, working spinner, max concurrent runs, and skill imports", usage: SETTINGS_USAGE },
   { name: "skill", description: "List skills and where they come from", usage: "/skill" },
   { name: "status", description: "Show session and provider status", usage: "/status" },
   { name: "tour", description: "Interactive feature walkthrough", usage: "/tour [page]" },
@@ -156,6 +159,36 @@ function spinnerResult(argument, context = {}) {
   };
 }
 
+async function concurrencyResult(argument, context = {}) {
+  const requested = argument.replace(/^\//, "").trim();
+  if (requested) {
+    const previous = getMaxConcurrentRuns();
+    const applied = setMaxConcurrentRuns(requested);
+    if (!applied) {
+      return { text: `Invalid concurrency limit "${requested}". Available: ${CONCURRENT_RUN_OPTIONS.join(", ")}.` };
+    }
+    await context.persistMaxConcurrentRuns?.(applied);
+    return {
+      text: `Max concurrent runs: ${applied}`,
+      display: {
+        type: "concurrency",
+        changed: previous !== applied,
+        previous,
+        current: applied,
+      },
+    };
+  }
+  const current = getMaxConcurrentRuns();
+  return {
+    text: `Max concurrent runs: ${current}`,
+    display: {
+      type: "concurrency",
+      changed: false,
+      current,
+    },
+  };
+}
+
 function settingsResult(argument, context = {}) {
   const parts = argument.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) {
@@ -174,6 +207,10 @@ function settingsResult(argument, context = {}) {
   if (section === "spinner") {
     if (parts.length > 2) return usageResult(SETTINGS_USAGE);
     return spinnerResult(parts[1] || "", context);
+  }
+  if (section === "concurrency") {
+    if (parts.length > 2) return usageResult(SETTINGS_USAGE);
+    return concurrencyResult(parts[1] || "", context);
   }
   if (section !== "brief" || parts.length > 2) {
     return usageResult(SETTINGS_USAGE);

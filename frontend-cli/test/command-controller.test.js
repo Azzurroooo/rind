@@ -271,13 +271,14 @@ test("/settings routes to selector on a terminal, forwards /settings import args
   await controller.handle("/settings brief");
   await controller.handle("/settings theme");
   await controller.handle("/settings spinner");
+  await controller.handle("/settings concurrency");
   await controller.handle("/settings import");
   await controller.handle("/settings import claude_user=on");
   await controller.handle("/brief");
   await controller.handle("/import");
   await controller.handle("/theme");
 
-  assert.deepEqual(selectorCalls, ["root", "brief", "theme", "spinner", "import"]);
+  assert.deepEqual(selectorCalls, ["root", "brief", "theme", "spinner", "concurrency", "import"]);
   assert.deepEqual(runtimeCalls, [
     { method: "rind/command/execute", params: { input: "/import claude_user=on" } },
   ]);

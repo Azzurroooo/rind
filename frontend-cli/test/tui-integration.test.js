@@ -886,8 +886,8 @@ test("brief mode E2E in headless terminal keeps ◌ with verb trail until assist
   }
 });
 
-test("/settings two-level menu E2E in headless terminal configures brief output, theme, working spinner, and skill imports", async (t) => {
-  const { currentSpinner, isBriefMode, resetSpinner, setBriefMode } = await import("../lib/cli-state-store.js");
+test("/settings two-level menu E2E in headless terminal configures brief output, theme, working spinner, concurrent runs, and skill imports", async (t) => {
+  const { currentSpinner, getMaxConcurrentRuns, isBriefMode, resetMaxConcurrentRuns, resetSpinner, setBriefMode } = await import("../lib/cli-state-store.js");
   const { currentTheme, resetTheme } = await import("../lib/theme.js");
   const { createCliInputActions } = await import("../lib/cli-input-actions.js");
   const { createCliRuntimeController } = await import("../lib/cli-runtime-controller.js");
@@ -899,10 +899,12 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
   setBriefMode(false);
   resetTheme();
   resetSpinner();
+  resetMaxConcurrentRuns();
   t.after(() => {
     setBriefMode(false);
     resetTheme();
     resetSpinner();
+    resetMaxConcurrentRuns();
   });
 
   const virtual = createVirtualOutput({ columns: 96, rows: 22 });
@@ -990,9 +992,6 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     askModelMenu: async () => null,
     askSettingsMenu: (...args) => inputActions.askSettingsMenu(...args),
     getBriefMode: () => isBriefMode(),
-    onBriefChange: (enabled) => commandController.handle(`/settings brief ${enabled ? "on" : "off"}`),
-    onThemeChange: (name) => commandController.handle(`/settings theme ${name}`),
-    onSpinnerChange: (name) => commandController.handle(`/settings spinner ${name}`),
     askChoice: (...args) => inputActions.askChoice(...args),
     askSessionMenu: async () => null,
     askForkPointMenu: async () => null,
@@ -1057,6 +1056,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     assert.match(screen, /› Brief output .* off ›/);
     assert.match(screen, /· Theme .* ›/);
     assert.match(screen, /· Working spinner .* Orbit ›/);
+    assert.match(screen, /· Concurrent runs .* 128 ›/);
     assert.match(screen, /· Skill imports .* 1 of 2 on ›/);
 
     // 2. Press Enter on Brief output to open its Level 2 submenu, select On (Down + Enter)
@@ -1079,6 +1079,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     // 3. Open /settings again, navigate to Skill imports, and press Enter to open Level 2 submenu
     const importDone = commandController.handle("/settings");
     await settle(virtual);
+    inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\x1b[B");
     inputActions.handleTerminalInput("\x1b[B");
@@ -1144,6 +1145,23 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
     state.turn.active = true;
     state.display.activityFrame = 1;
     assert.match(output.mainPromptText(96), /▒█▒░░ Working/);
+    state.turn.active = false;
+
+    // 9. Open /settings concurrency directly, select 256 (Down + Enter), and verify max concurrent runs update
+    const concurrencyDone = commandController.handle("/settings concurrency");
+    await settle(virtual);
+    screen = virtual.getViewport().join("\n");
+    assert.match(screen, /\/settings concurrency/);
+    assert.match(screen, /Settings · Max concurrent runs/);
+    assert.match(screen, /› 128\s+128 concurrent agent runs \(default\)\s+current/);
+    inputActions.handleTerminalInput("\x1b[B");
+    await settle(virtual);
+    assert.match(virtual.getViewport().join("\n"), /› 256\s+256 concurrent agent runs/);
+    inputActions.handleTerminalInput("\r");
+    await concurrencyDone;
+    await settle(virtual);
+    assert.equal(getMaxConcurrentRuns(), 256);
+    assert.match(virtual.getViewport().join("\n"), /Max concurrent runs: 256\./);
   } finally {
     tui.stop();
   }

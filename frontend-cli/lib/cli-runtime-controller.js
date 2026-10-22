@@ -16,9 +16,6 @@ export function createCliRuntimeController({
   askModelMenu,
   askSettingsMenu,
   getBriefMode = () => false,
-  onBriefChange = null,
-  onThemeChange = null,
-  onSpinnerChange = null,
   askEffortMenu = null,
   // A yes/no menu, or null without a terminal UI (a script is never asked).
   askChoice = null,
@@ -608,13 +605,16 @@ export function createCliRuntimeController({
     });
     if (!selected || state.runtime.status === "closing") return;
     if (selected.briefChanged) {
-      await onBriefChange?.(Boolean(selected.brief));
+      await getCommands()?.handle?.(`/settings brief ${selected.brief ? "on" : "off"}`);
     }
     if (selected.themeChanged && selected.theme) {
-      await onThemeChange?.(String(selected.theme));
+      await getCommands()?.handle?.(`/settings theme ${selected.theme}`);
     }
     if (selected.spinnerChanged && selected.spinner) {
-      await onSpinnerChange?.(String(selected.spinner));
+      await getCommands()?.handle?.(`/settings spinner ${selected.spinner}`);
+    }
+    if (selected.concurrencyChanged && selected.concurrency) {
+      await getCommands()?.handle?.(`/settings concurrency ${selected.concurrency}`);
     }
     const choices = selected.importChoices;
     if (!choices || !Object.keys(choices).length) return;

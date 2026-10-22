@@ -1,4 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, rm, copyFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { activeRun, awaitingDelegation, entryTask, ManagementError, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Delegation, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
@@ -21,12 +22,21 @@ interface WaitPending { [WAIT_PENDING]: { sessionId: string; ids: string[]; time
 const teamNameTaken = (state: State, name: string) => Object.values(state.teams).some(t => !t.archive && t.name.trim().toLowerCase() === name.trim().toLowerCase());
 const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listArchive", "listModels", "getMemberModel", "listFolderDefaults"]);
 const MEMBER_MODEL_PARTS = { model: "model", reasoningEffort: "reasoning_effort" } as const;
-const DEFAULT_MAX_CONCURRENT_RUNS = 4;
-function resolveMaxConcurrentRuns(configured?: number) {
+export const DEFAULT_MAX_CONCURRENT_RUNS = 128;
+export const CONCURRENT_RUN_OPTIONS = [4, 8, 16, 32, 64, 128, 256, 512] as const;
+function resolveMaxConcurrentRuns(configured?: number, rindHome?: string) {
   const raw = configured ?? process.env.RIND_MAX_CONCURRENT_RUNS;
-  if (raw === undefined || raw === "") return DEFAULT_MAX_CONCURRENT_RUNS;
-  const parsed = Number(raw);
-  return Number.isInteger(parsed) && parsed >= 1 ? parsed : DEFAULT_MAX_CONCURRENT_RUNS;
+  if (raw !== undefined && raw !== "") {
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed >= 1 ? parsed : DEFAULT_MAX_CONCURRENT_RUNS;
+  }
+  if (rindHome) {
+    try {
+      const saved = Number(JSON.parse(readFileSync(path.join(rindHome, "cli-state.json"), "utf8"))?.maxConcurrentRuns);
+      if ((CONCURRENT_RUN_OPTIONS as readonly number[]).includes(saved)) return saved;
+    } catch {}
+  }
+  return DEFAULT_MAX_CONCURRENT_RUNS;
 }
 export function createService({ store, paths, adapters, toolConfig, folderDefaults, deliver, maxConcurrentRuns }: {
   store: Store; paths: Paths; adapters: Record<string, Adapter>;
@@ -36,7 +46,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   deliver: (runtimeSessionId: string, text: string) => Promise<void>;
   maxConcurrentRuns?: number;
 }) {
-  const runLimit = resolveMaxConcurrentRuns(maxConcurrentRuns);
+  let runLimit = resolveMaxConcurrentRuns(maxConcurrentRuns, path.dirname(paths.root));
   let serial: Promise<unknown> = Promise.resolve();
   let stopped = false;
   let scheduling = false;
@@ -1012,6 +1022,14 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     requireValue(!stopped, "SERVICE_STOPPING", "Management service is shutting down.");
     requireValue((actor.kind === "agent") === MEMBER_OPERATIONS.has(method), "FORBIDDEN", actor.kind === "agent" ? "Members work through delegate and report." : "delegate and report belong to team members.");
     if (reads.has(method)) return operate(store.state, actor, method, params);
+    if (method === "setMaxConcurrentRuns") {
+      userOnly(actor);
+      const next = Number(params.maxConcurrentRuns);
+      requireValue((CONCURRENT_RUN_OPTIONS as readonly number[]).includes(next), "INVALID_INPUT", "maxConcurrentRuns must be one of " + CONCURRENT_RUN_OPTIONS.join(", ") + ".");
+      runLimit = next;
+      void schedule().catch(reportServiceError);
+      return { maxConcurrentRuns: runLimit };
+    }
     const requestId = text(params.requestId, "Request ID", 200);
     if (method === "reconcileSession") {
       userOnly(actor);

@@ -10,7 +10,7 @@ import { createCliState } from "../lib/cli-state.js";
 import { settingsMenuText } from "../lib/rendering.js";
 import { runtimeMethods as methods } from "../lib/runtime-protocol.js";
 import { createSettingsMenuState } from "../lib/settings-menu-state.js";
-import { resetSpinner, setSpinner } from "../lib/cli-state-store.js";
+import { resetMaxConcurrentRuns, resetSpinner, setMaxConcurrentRuns, setSpinner } from "../lib/cli-state-store.js";
 import { resetTheme, setTheme } from "../lib/theme.js";
 
 const SOURCES = [
@@ -29,6 +29,8 @@ function harness({
     themeChanged: false,
     spinner: "orbit",
     spinnerChanged: false,
+    concurrency: 128,
+    concurrencyChanged: false,
     importChoices: { claude_user: false },
   },
   answer = "Apply · change the skills and break the cache",
@@ -36,11 +38,9 @@ function harness({
   const state = createCliState();
   state.session.info = { session_id: sessionId, workspace_root: "/work" };
   const commands = [];
+  const handledCommands = [];
   const questions = [];
   const logs = [];
-  const briefUpdates = [];
-  const themeUpdates = [];
-  const spinnerUpdates = [];
   const client = {
     child: {},
     start() {},
@@ -56,24 +56,28 @@ function harness({
   };
   const controller = createCliRuntimeController({
     client, methods, sessionScopedMethods: new Set([methods.commandExecute]), turnScopedMethods: new Set(),
-    requireInitialization: value => value, state, getCommands: () => ({ normalizeCommands: () => [], localCommands: () => [] }), getTaskMonitor: () => null, getCompactContextState: () => ({ clear() {} }),
+    requireInitialization: value => value, state,
+    getCommands: () => ({
+      normalizeCommands: () => [],
+      localCommands: () => [],
+      handle: async (cmd) => { handledCommands.push(cmd); },
+    }),
+    getTaskMonitor: () => null, getCompactContextState: () => ({ clear() {} }),
     askModelMenu: async () => null,
     askSettingsMenu: async () => selected,
     getBriefMode: () => false,
-    onBriefChange: async (enabled) => { briefUpdates.push(enabled); },
-    onThemeChange: async (name) => { themeUpdates.push(name); },
-    onSpinnerChange: async (name) => { spinnerUpdates.push(name); },
     askChoice: async (question) => { questions.push(question); return answer; },
     askSessionMenu: async () => null, askForkPointMenu: async () => null, restoreLiveTurn() {}, clearPendingInputs() {},
     closeAssistant() {}, refreshInputState() {}, updateGoalState() {}, log: value => logs.push(typeof value === "function" ? value() : value),
     writeError() {}, redraw() {},
   });
-  return { state, controller, commands, questions, logs, briefUpdates, themeUpdates, spinnerUpdates };
+  return { state, controller, commands, handledCommands, questions, logs };
 }
 
-test("two-level /settings menu navigates between root settings and all four submenus", () => {
+test("two-level /settings menu navigates between root settings and all five submenus", () => {
   resetTheme();
   resetSpinner();
+  resetMaxConcurrentRuns();
   const menu = createSettingsMenuState({ brief: false, sources: SOURCES });
   assert.equal(menu.level(), "root");
   assert.equal(menu.changed(), false);
@@ -119,9 +123,22 @@ test("two-level /settings menu navigates between root settings and all four subm
   assert.equal(menu.selectedIndex(), 2);
   assert.equal(menu.spinnerChanged(), false);
 
-  // Move to Skill imports and enter Level 2 submenu
+  // Move to Max concurrent runs and enter Level 2 concurrency submenu
   assert.equal(menu.handleKey({ name: "down" }), "redraw");
   assert.equal(menu.selectedIndex(), 3);
+  assert.equal(menu.handleKey({ name: "enter" }), "redraw");
+  assert.equal(menu.level(), "concurrency");
+  assert.equal(menu.selectedConcurrency().name, "128");
+  assert.equal(menu.handleKey({ name: "down" }), "redraw");
+  assert.equal(menu.selectedConcurrency().name, "256");
+  assert.equal(menu.handleKey({ name: "escape" }), "redraw");
+  assert.equal(menu.level(), "root");
+  assert.equal(menu.selectedIndex(), 3);
+  assert.equal(menu.concurrencyChanged(), false);
+
+  // Move to Skill imports and enter Level 2 submenu
+  assert.equal(menu.handleKey({ name: "down" }), "redraw");
+  assert.equal(menu.selectedIndex(), 4);
   assert.equal(menu.handleKey({ name: "enter" }), "redraw");
   assert.equal(menu.level(), "import");
   assert.equal(menu.selectedIndex(), 0);
@@ -137,7 +154,7 @@ test("two-level /settings menu navigates between root settings and all four subm
   // Esc in Level 2 reverts uncommitted submenu edits and returns to Level 1
   assert.equal(menu.handleKey({ name: "escape" }), "redraw");
   assert.equal(menu.level(), "root");
-  assert.equal(menu.selectedIndex(), 3);
+  assert.equal(menu.selectedIndex(), 4);
   assert.deepEqual(menu.importChoices(), {});
 
   // Re-enter Level 2, toggle claude_user, and submit with Enter
@@ -152,13 +169,16 @@ test("two-level /settings menu navigates between root settings and all four subm
     themeChanged: false,
     spinner: "orbit",
     spinnerChanged: false,
+    concurrency: 128,
+    concurrencyChanged: false,
     importChoices: { claude_user: false },
   });
 });
 
-test("brief, theme, and spinner submenus in /settings follow active state and wrap at edges", () => {
+test("brief, theme, spinner, and concurrency submenus in /settings follow active state and wrap at edges", () => {
   resetTheme();
   resetSpinner();
+  resetMaxConcurrentRuns();
 
   const briefMenu = createSettingsMenuState({ brief: false, initialLevel: "brief" });
   assert.equal(briefMenu.level(), "brief");
@@ -194,19 +214,32 @@ test("brief, theme, and spinner submenus in /settings follow active state and wr
   assert.equal(spinnerMenu.value().spinner, "sweep");
   assert.equal(spinnerMenu.value().spinnerChanged, true);
   resetSpinner();
+
+  setMaxConcurrentRuns(64);
+  const concurrencyMenu = createSettingsMenuState({ initialLevel: "concurrency" });
+  assert.equal(concurrencyMenu.level(), "concurrency");
+  assert.equal(concurrencyMenu.selectedConcurrency().name, "64");
+  assert.equal(concurrencyMenu.handleKey({ name: "down" }), "redraw");
+  assert.equal(concurrencyMenu.selectedConcurrency().name, "128");
+  assert.equal(concurrencyMenu.handleKey({ name: "enter" }), "submit");
+  assert.equal(concurrencyMenu.value().concurrency, 128);
+  assert.equal(concurrencyMenu.value().concurrencyChanged, true);
+  resetMaxConcurrentRuns();
 });
 
-test("settingsMenuText renders root deck, brief submenu, theme submenu, spinner submenu, and skill imports submenu", () => {
+test("settingsMenuText renders root deck, brief, theme, spinner, concurrency, and skill imports submenus", () => {
   resetTheme();
   resetSpinner();
+  resetMaxConcurrentRuns();
   const menu = createSettingsMenuState({ brief: false, sources: SOURCES });
   const rootLines = settingsMenuText(menu.items(), menu.selectedIndex(), menu.level()).split("\n");
   assert.match(rootLines[0], /Settings$/);
   assert.match(rootLines[1], /› Brief output .* off › .* Collapse consecutive tool calls into one live line/);
   assert.match(rootLines[2], /· Theme .* Frappé › .* Switch the CLI color theme/);
   assert.match(rootLines[3], /· Working spinner .* Orbit › .* Choose the working activity animation/);
-  assert.match(rootLines[4], /· Skill imports .* 3 of 4 on › .* Choose the Claude and Codex skills this conversation reads/);
-  assert.match(rootLines[5], /↑↓ select · enter open · esc cancel/);
+  assert.match(rootLines[4], /· Concurrent runs .* 128 › .* Set the global parallel agent run limit/);
+  assert.match(rootLines[5], /· Skill imports .* 3 of 4 on › .* Choose the Claude and Codex skills this conversation reads/);
+  assert.match(rootLines[6], /↑↓ select · enter open · esc cancel/);
 
   menu.handleKey({ name: "enter" });
   const briefLines = settingsMenuText(menu.items(), menu.selectedIndex(), menu.level()).replace(/\x1b\[[0-9;]*m/g, "").split("\n");
@@ -235,6 +268,13 @@ test("settingsMenuText renders root deck, brief submenu, theme submenu, spinner 
   menu.handleKey({ name: "escape" });
   menu.handleKey({ name: "down" });
   menu.handleKey({ name: "enter" });
+  const concurrencyLines = settingsMenuText(menu.items(), menu.selectedIndex(), menu.level()).replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+  assert.match(concurrencyLines[0], /Settings · Max concurrent runs/);
+  assert.match(concurrencyLines[6], /› 128\s+128 concurrent agent runs \(default\)\s+current/);
+
+  menu.handleKey({ name: "escape" });
+  menu.handleKey({ name: "down" });
+  menu.handleKey({ name: "enter" });
   const importLines = settingsMenuText(menu.items(), menu.selectedIndex(), menu.level()).split("\n");
   assert.match(importLines[0], /Settings · Import skills into this conversation/);
   assert.match(importLines[1], /› \[x\] Claude · user .* 1 skill$/);
@@ -252,13 +292,18 @@ test("in a conversation the change is applied after the cache cost is accepted",
       themeChanged: true,
       spinner: "bars",
       spinnerChanged: true,
+      concurrency: 256,
+      concurrencyChanged: true,
       importChoices: { claude_user: false },
     },
   });
   await h.controller.runSettingsSelector();
-  assert.deepEqual(h.briefUpdates, [true]);
-  assert.deepEqual(h.themeUpdates, ["latte"]);
-  assert.deepEqual(h.spinnerUpdates, ["bars"]);
+  assert.deepEqual(h.handledCommands, [
+    "/settings brief on",
+    "/settings theme latte",
+    "/settings spinner bars",
+    "/settings concurrency 256",
+  ]);
   assert.equal(h.questions.length, 1);
   assert.equal(h.questions[0].title, "Import skills");
   assert.match(h.questions[0].message, /^Applying breaks the prompt cache\./);
