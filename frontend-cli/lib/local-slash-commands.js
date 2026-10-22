@@ -47,7 +47,7 @@ export async function executeLocalSlashCommand(input, context = {}) {
 }
 
 function usageResult(usage) {
-  return { text: `Usage: ${usage}` };
+  return { text: `Usage: ${usage}`, level: "warning" };
 }
 
 function currentModelLabel(context) {
@@ -81,7 +81,7 @@ function statusResult(context, argument) {
 function helpResult(argument, commands) {
   const name = argument.replace(/^\//, "").toLowerCase();
   const visible = commands.filter((command) => (!name || command.name === name || command.aliases?.includes(name)));
-  if (name && !visible.length) return { text: `Unknown command: /${name}\nRun /help to see available commands.` };
+  if (name && !visible.length) return { text: `Unknown command: /${name}\nRun /help to see available commands.`, level: "warning" };
   const selected = name ? visible[0] : null;
   const text = selected
     ? `/${selected.name}\n${selected.description}\nUsage: ${selected.usage || `/${selected.name}`}`
@@ -98,7 +98,7 @@ function themeResult(argument, context = {}) {
     const previous = currentTheme();
     const applied = setTheme(requested);
     if (!applied) {
-      return { text: `Unknown theme "${requested}". Available: ${themeNames().join(", ")}.` };
+      return { text: `Unknown theme "${requested}". Available: ${themeNames().join(", ")}.`, level: "warning" };
     }
     context.persistTheme?.(applied.name);
     return {
@@ -130,7 +130,7 @@ function spinnerResult(argument, context = {}) {
     const previous = currentSpinner();
     const applied = setSpinner(requested);
     if (!applied) {
-      return { text: `Unknown spinner "${requested}". Available: ${spinnerNames().join(", ")}.` };
+      return { text: `Unknown spinner "${requested}". Available: ${spinnerNames().join(", ")}.`, level: "warning" };
     }
     context.persistSpinner?.(applied.name);
     return {

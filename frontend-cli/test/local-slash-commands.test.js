@@ -62,6 +62,7 @@ test("/settings brief reads and updates global brief output mode", async (t) => 
 
   const invalid = await executeLocalSlashCommand("/settings unknown", {});
   assert.match(invalid.text, /^Usage: \/settings/);
+  assert.equal(invalid.level, "warning");
 });
 
 test("/settings spinner lists the four animations and updates the active working spinner", async (t) => {
@@ -92,6 +93,7 @@ test("/settings spinner lists the four animations and updates the active working
 
   const unknown = await executeLocalSlashCommand("/settings spinner sparkle", {});
   assert.match(unknown.text, /Unknown spinner/);
+  assert.equal(unknown.level, "warning");
 });
 
 test("local status before the first message shows the pending name", async () => {

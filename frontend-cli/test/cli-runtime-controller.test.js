@@ -656,12 +656,18 @@ test("/model set before the first message updates the window model and carries i
 test("command controller reports usage for local commands with extra arguments instead of unknown command", async () => {
   const { createCommandController } = await import("../lib/command-controller.js");
   const logs = [];
+  const levels = [];
   const backendCalls = [];
   const controller = createCommandController({
     request: async (method, params) => { backendCalls.push({ method, params }); return {}; },
     turn: { submit() {} },
     input: { isTerminal: true, runHistoryLoader: async () => {}, runForkSelector: async () => {} },
-    output: { log: (value) => logs.push(typeof value === "function" ? value() : value) },
+    output: {
+      notify: (value, opts) => {
+        logs.push(value);
+        levels.push(opts?.level ?? "info");
+      },
+    },
   });
 
   await controller.handle("/history extra");
@@ -674,6 +680,7 @@ test("command controller reports usage for local commands with extra arguments i
     "Usage: /exit",
     "Usage: /login [provider]",
   ]);
+  assert.deepEqual(levels, ["warning", "warning", "warning", "warning"]);
   assert.equal(backendCalls.length, 0);
 });
 

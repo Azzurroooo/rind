@@ -1,7 +1,8 @@
 import { parseGoalCommand } from "./slash-command-mode.js";
 import {
   helpText,
-  slashResultText,
+  slashDisplayText,
+  slashResultNotice,
 } from "./rendering.js";
 import { LOCAL_SLASH_COMMANDS } from "./local-slash-commands.js";
 import { runtimeMethods } from "./runtime-protocol.js";
@@ -54,19 +55,19 @@ export function createCommandController({
       if (input.isTerminal && input.runTour) {
         await input.runTour(arg);
       } else {
-        output.log?.("/tour requires an interactive terminal.");
+        output.notify?.("/tour requires an interactive terminal.", { level: "warning" });
       }
       return true;
     }
     if (name === "remote") {
       if (arg) {
-        output.log?.("Usage: /remote");
+        output.notify?.("Usage: /remote", { level: "warning" });
         return true;
       }
       if (input.runRemote) {
         await input.runRemote();
       } else {
-        output.log?.("/remote is unavailable.");
+        output.notify?.("/remote is unavailable.", { level: "warning" });
       }
       return true;
     }
@@ -82,17 +83,17 @@ export function createCommandController({
     }
     if (name === "exit" || name === "quit") {
       if (arg) {
-        output.log?.(`Usage: /${name}`);
+        output.notify?.(`Usage: /${name}`, { level: "warning" });
         return true;
       }
-      output.log?.("Goodbye.");
+      output.notify?.("Goodbye.");
       await output.shutdown?.();
       output.exit?.();
       return true;
     }
     if (name === "login" || name === "logout") {
       if (/\s/.test(arg)) {
-        output.log?.(`Usage: /${name} [provider]`);
+        output.notify?.(`Usage: /${name} [provider]`, { level: "warning" });
         return true;
       }
       await (name === "login" ? input.runLogin : input.runLogout)?.(arg);
@@ -104,7 +105,7 @@ export function createCommandController({
 
   async function runSlashCommand(text, name, arg) {
     if (name === "import" || name === "brief" || name === "theme") {
-      output.log?.(`Unknown command: /${name}\nRun /help to see available commands.`);
+      output.notify?.(`Unknown command: /${name}\nRun /help to see available commands.`, { level: "warning" });
       return;
     }
     if (name === "rename" && input.runRename) {
@@ -135,34 +136,34 @@ export function createCommandController({
     }
     if (name === "history") {
       if (arg) {
-        output.log?.("Usage: /history");
+        output.notify?.("Usage: /history", { level: "warning" });
       } else if (input.isTerminal && input.runHistoryLoader) {
         await input.runHistoryLoader();
       } else {
-        output.log?.("/history requires an interactive terminal.");
+        output.notify?.("/history requires an interactive terminal.", { level: "warning" });
       }
       return;
     }
     if (name === "fork") {
       if (arg) {
-        output.log?.("Usage: /fork");
+        output.notify?.("Usage: /fork", { level: "warning" });
       } else if (input.isTerminal && input.runForkSelector) {
         await input.runForkSelector();
       } else {
-        output.log?.("/fork requires an interactive terminal.");
+        output.notify?.("/fork requires an interactive terminal.", { level: "warning" });
       }
       return;
     }
     if (name === "context") {
       if (arg) {
-        output.log?.("Custom ranges are not supported yet; showing the last 5 days.");
+        output.notify?.("Custom ranges are not supported yet; showing the last 5 days.", { level: "warning" });
       }
       if (input.isTerminal && input.runContextBoard) {
         await input.runContextBoard();
       } else if (input.printContextReport) {
         await input.printContextReport();
       } else {
-        output.log?.("/context requires a connected runtime.");
+        output.notify?.("/context requires a connected runtime.", { level: "warning" });
       }
       return;
     }
@@ -171,8 +172,15 @@ export function createCommandController({
   }
 
   async function applyResult(result = {}) {
-    const text = () => slashResultText(result, state.slashCommands || []);
-    output.log?.(text);
+    const structured = () => slashDisplayText(result.display, state.slashCommands || []);
+    if (structured()) {
+      output.log?.(structured);
+    } else {
+      const notice = slashResultNotice(result);
+      if (notice) {
+        output.notify?.(notice.text, { level: notice.level });
+      }
+    }
     if (result.prompt_prefill) {
       output.setInputPrefill?.(result.prompt_prefill);
     }
