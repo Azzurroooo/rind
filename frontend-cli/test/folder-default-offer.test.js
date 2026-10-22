@@ -49,6 +49,7 @@ test("/model with Enter changes only this conversation and never opens a dialog"
   assert.equal(h.state.session.info.model, "deepseek-v4-pro");
   assert.equal(h.questions.length, 0);
   assert.deepEqual(h.sets(), []);
+  assert.match(h.logs.join("\n"), /Model changed to deepseek-v4-pro \(session only\)/);
 });
 
 test("/model with f saves the folder default without opening a dialog", async () => {
@@ -56,8 +57,11 @@ test("/model with f saves the folder default without opening a dialog", async ()
   await h.controller.runModelSelector();
   assert.equal(h.questions.length, 0);
   assert.deepEqual(h.sets(), [{ workspace_root: "/work/app", provider_id: "deepseek", model_id: "deepseek-v4-pro" }]);
-  assert.match(h.logs.join("\n"), /Folder default updated/);
-  assert.match(h.logs.join("\n"), /open ones keep theirs/);
+  const joined = h.logs.join("\n");
+  assert.match(joined, /Model changed to deepseek-v4-pro/);
+  assert.doesNotMatch(joined, /\(session only\)/);
+  assert.match(joined, /Folder default updated/);
+  assert.match(joined, /open ones keep theirs/);
 });
 
 test("/model with g saves the global default in settings.json", async () => {
@@ -65,18 +69,30 @@ test("/model with g saves the global default in settings.json", async () => {
   await h.controller.runModelSelector();
   assert.equal(h.questions.length, 0);
   assert.deepEqual(h.sets(), [{ workspace_root: "/work/app", scope: "global", provider_id: "deepseek", model_id: "deepseek-v4-pro" }]);
-  assert.match(h.logs.join("\n"), /Global default updated/);
-  assert.match(h.logs.join("\n"), /settings\.json: deepseek \/ deepseek-v4-pro/);
+  const joined = h.logs.join("\n");
+  assert.match(joined, /Model changed to deepseek-v4-pro/);
+  assert.doesNotMatch(joined, /\(session only\)/);
+  assert.match(joined, /Global default updated/);
+  assert.match(joined, /settings\.json: deepseek \/ deepseek-v4-pro/);
 });
 
-test("/effort with f or g saves folder or global effort default", async () => {
+test("/effort with Enter, f, or g emits unified single-line notices and saves folder or global effort default", async () => {
+  const sessionOnly = harness({ effortScope: "session" });
+  await sessionOnly.controller.runEffortCommand();
+  assert.deepEqual(sessionOnly.sets(), []);
+  assert.match(sessionOnly.logs.join("\n"), /Reasoning effort set to high \(session only\)/);
+
   const folder = harness({ effortScope: "folder" });
   await folder.controller.runEffortCommand();
   assert.deepEqual(folder.sets(), [{ workspace_root: "/work/app", reasoning_effort: "high" }]);
+  assert.match(folder.logs.join("\n"), /Reasoning effort set to high/);
+  assert.doesNotMatch(folder.logs.join("\n"), /\(session only\)/);
 
   const global = harness({ effortScope: "global" });
   await global.controller.runEffortCommand();
   assert.deepEqual(global.sets(), [{ workspace_root: "/work/app", scope: "global", reasoning_effort: "high" }]);
+  assert.match(global.logs.join("\n"), /Reasoning effort set to high/);
+  assert.doesNotMatch(global.logs.join("\n"), /\(session only\)/);
 });
 
 test("before the first message, f or g still saves the default while keeping the choice for the window", async () => {
@@ -87,7 +103,44 @@ test("before the first message, f or g still saves the default while keeping the
   assert.deepEqual(h.sets(), [{ workspace_root: "/work/app", reasoning_effort: "high" }]);
 });
 
-test("real TTY CLI: /login custom provider writes providers.json + auth.json, and /model f and g save folder and global defaults", { timeout: 60000 }, async (t) => {
+test("before the first message, /model and /effort reflect the window's chosen model over blank_info defaults", async () => {
+  const state = createCliState();
+  state.session.info = { session_id: "", workspace_root: "/work/app", provider: "deepseek", model: "deepseek-v4-pro", reasoning_effort: "low" };
+  let seenCurrentModel = null;
+  let seenEfforts = null;
+  const client = {
+    child: {},
+    start() {},
+    async request(method) {
+      if (method === methods.modelList) {
+        return {
+          models: [
+            { provider_id: "deepseek", id: "deepseek-flash", reasoning_efforts: [] },
+            { provider_id: "deepseek", id: "deepseek-v4-pro", reasoning_efforts: ["low", "high", "max"] },
+          ],
+          // Server blank_info still reports the disk default before a session exists:
+          current: { provider_id: "deepseek", model_id: "deepseek-flash" },
+          current_model: "deepseek-flash",
+        };
+      }
+      return {};
+    },
+  };
+  const controller = createCliRuntimeController({
+    client, methods, sessionScopedMethods: new Set(), turnScopedMethods: new Set(),
+    requireInitialization: value => value, state, getCommands: () => ({ normalizeCommands: () => [], localCommands: () => [] }), getTaskMonitor: () => null, getCompactContextState: () => ({ clear() {} }),
+    askModelMenu: async (_models, currentModel) => { seenCurrentModel = currentModel; return null; },
+    askEffortMenu: async (_currentEffort, levels) => { seenEfforts = levels; return null; },
+    askChoice: async () => "", askSessionMenu: async () => null, askForkPointMenu: async () => null,
+    restoreLiveTurn() {}, clearPendingInputs() {}, closeAssistant() {}, refreshInputState() {}, updateGoalState() {}, log() {}, writeError() {}, redraw() {},
+  });
+  await controller.runModelSelector();
+  assert.deepEqual(seenCurrentModel, { provider_id: "deepseek", model_id: "deepseek-v4-pro" });
+  await controller.runEffortCommand();
+  assert.deepEqual(seenEfforts, ["low", "high", "max"]);
+});
+
+test("real TTY CLI: /login custom provider writes providers.json + auth.json, and /model and /effort menus operate with single-line notices and zero user bubble echoes", { timeout: 60000 }, async (t) => {
   const { mkdtemp, mkdir, readFile } = await import("node:fs/promises");
   const { spawn } = await import("node:child_process");
   const http = await import("node:http");
@@ -175,10 +228,30 @@ test("real TTY CLI: /login custom provider writes providers.json + auth.json, an
   const authJson = JSON.parse(await readFile(path.join(home, "auth.json"), "utf8"));
   assert.equal(authJson["team-gateway"].key, "gw-secret-key");
 
-  // 2. Open /model menu, verify shortcut footer, and press 'f' to set folder default
+  // 2. Open /model menu and cancel with Esc: leaves zero trace in transcript
+  child.stdin.write("/model\r");
+  await visible("Model deck");
+  child.stdin.write("\x1b");
+  for (let i = 0; i < 200; i++) {
+    if (!(await screen()).includes("Model deck")) break;
+    await new Promise(r => setTimeout(r, 25));
+  }
+  assert.doesNotMatch(await screen(), /Model deck/);
+  assert.doesNotMatch(await screen(), /Model changed to/);
+  assert.doesNotMatch(await screen(), /▷ You/);
+
+  // 3. Open /model menu, select gw-beta with Enter (session only)
   child.stdin.write("/model\r");
   await visible("f folder default · g global default");
+  child.stdin.write("\x1b[B\r");
+  await visible("Model changed to gw-beta (session only)");
+
+  // 4. Open /model menu (highlights current window model gw-beta), move up to gw-alpha, and press 'f' to set folder default
+  child.stdin.write("/model\r");
+  await visible("f folder default · g global default");
+  child.stdin.write("\x1b[A");
   child.stdin.write("f");
+  await visible("Model changed to gw-alpha");
   await visible("Folder default updated");
 
   const workspacesJson = JSON.parse(await readFile(path.join(home, "workspaces.json"), "utf8"));
@@ -186,14 +259,27 @@ test("real TTY CLI: /login custom provider writes providers.json + auth.json, an
   assert.equal(folderEntry.provider, "team-gateway");
   assert.equal(folderEntry.model, "gw-alpha");
 
-  // 3. Open /model menu, move down to gw-beta, and press 'g' to set global default
+  // 5. Open /model menu, move down to gw-beta, and press 'g' to set global default
   child.stdin.write("/model\r");
   await visible("f folder default · g global default");
   child.stdin.write("\x1b[B");
   child.stdin.write("g");
+  await visible("Model changed to gw-beta");
   await visible("Global default updated");
 
   const settingsJson = JSON.parse(await readFile(path.join(home, "settings.json"), "utf8"));
   assert.equal(settingsJson.provider, "team-gateway");
   assert.equal(settingsJson.model, "gw-beta");
+
+  // 6. Open /effort menu: renders Reasoning effort (not Model deck / Image input) and sets session effort on Enter
+  child.stdin.write("/effort\r");
+  const effortMenuScreen = await visible("Reasoning effort");
+  assert.doesNotMatch(effortMenuScreen, /Image input:/);
+  child.stdin.write("\x1b[B\r");
+  await visible("Reasoning effort set to");
+
+  // 7. Direct /effort command: sets effort with concise notice and still zero user bubbles
+  child.stdin.write("/effort high\r");
+  await visible("Reasoning effort set to high (session only)");
+  assert.doesNotMatch(await screen(), /▷ You/);
 });

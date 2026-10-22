@@ -534,7 +534,7 @@ export function createCliRuntimeController({
       notify("No models available. Run /login to configure a provider.", { level: "warning" });
       return;
     }
-    const currentModel = result?.current || result?.current_model || state.session.info.model || result?.default_model || "";
+    const currentModel = currentWindowModel(result);
     const providerNames = new Map(
       (Array.isArray(state.session.info.providers) ? state.session.info.providers : [])
         .map((item) => [String(item?.id || ""), String(item?.name || "")])
@@ -663,13 +663,23 @@ export function createCliRuntimeController({
     }
   }
 
+  function currentWindowModel(result) {
+    if (!hasConversation() && state.session.info.model) {
+      return state.session.info.provider
+        ? { provider_id: state.session.info.provider, model_id: state.session.info.model }
+        : state.session.info.model;
+    }
+    return result?.current || result?.current_model || state.session.info.model || result?.default_model || "";
+  }
+
   async function currentModelEfforts() {
     const result = await request(methods.modelList);
-    const current = result?.current && typeof result.current === "object"
-      ? result.current
-      : { provider_id: state.session.info.provider, model_id: state.session.info.model };
+    const windowCurrent = currentWindowModel(result);
+    const current = windowCurrent && typeof windowCurrent === "object"
+      ? windowCurrent
+      : { provider_id: state.session.info.provider, model_id: String(windowCurrent || state.session.info.model || "") };
     const model = (Array.isArray(result?.models) ? result.models : []).find(
-      (item) => item?.provider_id === current.provider_id && item?.id === current.model_id,
+      (item) => (!current.provider_id || item?.provider_id === current.provider_id) && item?.id === current.model_id,
     );
     return Array.isArray(model?.reasoning_efforts) ? model.reasoning_efforts.map(String) : [];
   }
