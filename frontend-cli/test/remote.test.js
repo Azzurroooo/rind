@@ -9,29 +9,29 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCommandController } from "../lib/command-controller.js";
 import { LOCAL_SLASH_COMMANDS } from "../lib/local-slash-commands.js";
-import {
-  buildPairingUrl,
-  createCliRemoteController,
-  createRemoteMenuState,
-  decodeQrMatrix,
-  decodeTerminalQr,
-  encodeQrMatrix,
-  parseTerminalQrMatrix,
-  RemoteWebSocket,
-  renderSvgQrDataUrl,
-  renderTerminalQr,
-} from "../lib/remote.js";
+import { createCliRemoteController, createRemoteMenuState } from "../lib/remote.js";
 import { promptText, remoteMenuText } from "../lib/rendering.js";
 import { createCliInputActions } from "../lib/cli-input-actions.js";
 import { createCliState } from "../lib/cli-state.js";
 import { createVirtualOutput } from "./helpers/virtual-terminal.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import {
+  decodeQrMatrix,
+  decodeTerminalQr,
+  encodeQrMatrix,
+  parseTerminalQrMatrix,
+  renderSvgQrDataUrl,
+  renderTerminalQr,
+} from "../../rind-runtime-client/remote/qr.js";
+import { RemoteWebSocket } from "../../rind-runtime-client/remote/server.js";
 import { registerSharedWorkspace, samePath } from "../../rind-runtime-client/remote/workspaces.js";
 import { connectManagement } from "../../agent-management/dist/client.js";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cliImplHref = new URL("../lib/frontend-cli-implementation.js", import.meta.url).href;
+const QR_BLOCKS = /[█▀▄]/;
+const LOOPBACK_LINK = /http:\/\/127\.0\.0\.1:\d+\/#connect=\S+/;
 
 function spawnTtyCli({ home, workspace, args = [] }) {
   const script = `
@@ -87,7 +87,39 @@ function spawnTtyCli({ home, workspace, args = [] }) {
   };
 }
 
-test("QR matrix encoder and terminal half-block renderer round-trip pairing URLs accurately", async () => {
+function fakeRemoteMenu(addresses, scope = "lan") {
+  let accessCode = "abCD1234_-efGH567890ijklMNOPqrst";
+  let running = true;
+  const picked = [];
+  const snapshot = () => ({
+    running,
+    scope,
+    port: 8766,
+    addresses: running ? addresses : [],
+    accessCode: running ? accessCode : "",
+    clients: 0,
+  });
+  const menu = createRemoteMenuState({
+    initialState: snapshot(),
+    onStart: async (next) => {
+      running = true;
+      scope = next;
+      return snapshot();
+    },
+    onStop: async () => {
+      running = false;
+      return snapshot();
+    },
+    onRotate: async () => {
+      accessCode = "rotated-0987654321-zyxwVUTSrqpo";
+      return snapshot();
+    },
+    onAddressChange: (address) => picked.push(address),
+  });
+  return { menu, picked };
+}
+
+test("QR matrix encoder and terminal half-block renderer round-trip pairing URLs accurately", () => {
   const urls = [
     "http://127.0.0.1:8766/#connect=test-code-123",
     "http://192.168.1.44:54321/#connect=abCD1234_-efGH567890ijklMNOPqrst",
@@ -114,7 +146,7 @@ test("QR matrix encoder and terminal half-block renderer round-trip pairing URLs
     assert.equal(decodeQrMatrix(matrix), url);
 
     const terminalQr = renderTerminalQr(url, { margin: 2 });
-    assert.match(terminalQr, /[█▀▄]/, "terminal QR must use Unicode half-block characters");
+    assert.match(terminalQr, QR_BLOCKS, "terminal QR must use Unicode half-block characters");
     const parsedMatrix = parseTerminalQrMatrix(terminalQr);
     assert.deepEqual(parsedMatrix, matrix, "parsed terminal QR matrix must equal encoded QR matrix");
     assert.equal(decodeTerminalQr(terminalQr), url, "terminal QR must decode back to exact pairing URL");
@@ -129,33 +161,65 @@ test("QR matrix encoder and terminal half-block renderer round-trip pairing URLs
       globalThis.Buffer = savedBuffer;
     }
   }
-
-  // Verify narrow terminal widths (e.g., columns=42 and columns=32) keep QR scannable or degrade cleanly without line wrapping
-  const narrowMenu = createRemoteMenuState({
-    initialState: {
-      running: true,
-      scope: "lan",
-      port: 8766,
-      addresses: ["http://192.168.1.44:8766"],
-      accessCode: "abCD1234_-efGH567890ijklMNOPqrst",
-      clients: 0,
-    },
-  });
-  await narrowMenu.handleKey({ name: "down" });
-  await narrowMenu.handleKey({ name: "enter" });
-  assert.equal(narrowMenu.level(), "qr");
-  const rendered42 = remoteMenuText(narrowMenu, 42);
-  for (const line of rendered42.trimEnd().split("\n")) {
-    assert.ok(line.replace(/\x1b\[[0-9;]*m/g, "").length <= 42, `line exceeds 42 columns: ${line}`);
-  }
-  assert.equal(decodeTerminalQr(rendered42), buildPairingUrl(narrowMenu.state()), "QR code at 42 columns must still decode accurately");
-
-  const rendered32 = remoteMenuText(narrowMenu, 32);
-  assert.doesNotMatch(rendered32, /[█▀▄]/, "ultra-narrow 32-column terminal omits unbroken 37-col QR matrix instead of corrupting it by wrapping");
-  assert.match(rendered32, /Access code:/);
 });
 
-test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Esc dismissal without transcript log, and ⚯ indicator", async (t) => {
+test("/remote On view fits the QR code to the terminal and never wraps or clips it", () => {
+  const { menu } = fakeRemoteMenu(["http://192.168.1.44:8766", "http://127.0.0.1:8766"]);
+  const link = menu.connection().link;
+  assert.equal(link, "http://192.168.1.44:8766/#connect=abCD1234_-efGH567890ijklMNOPqrst");
+
+  const roomy = remoteMenuText(menu, 96, 40);
+  assert.equal(decodeTerminalQr(roomy), link, "QR code must encode the reachable LAN link");
+  assert.match(roomy, /Remote access · On · Local network · 0 devices/);
+  assert.match(roomy, /Scan with your phone, or open:/);
+  assert.equal(roomy.includes(`Code  abCD1234_-efGH567890ijklMNOPqrst`), true);
+  assert.doesNotMatch(roomy, /←→ address/, "a single reachable address needs no address switcher");
+
+  const narrow = remoteMenuText(menu, 42, 40);
+  for (const line of narrow.trimEnd().split("\n").filter((line) => QR_BLOCKS.test(line))) {
+    assert.ok(line.length <= 42, `QR row exceeds 42 columns: ${line}`);
+  }
+  assert.equal(decodeTerminalQr(narrow), link, "QR code at 42 columns must still decode accurately");
+  assert.equal(narrow.includes(link), true, "the link wraps rather than being clipped");
+
+  const exact = remoteMenuText(menu, 96, 24);
+  assert.equal(exact.trimEnd().split("\n").length, 24, "QR code and text exactly fill 24 rows");
+  assert.equal(decodeTerminalQr(exact), link, "QR code must still decode within 24 rows");
+
+  for (const [columns, rows] of [[32, 40], [96, 23]]) {
+    const cramped = remoteMenuText(menu, columns, rows);
+    assert.doesNotMatch(cramped, QR_BLOCKS, `${columns}x${rows} omits the QR code instead of corrupting it`);
+    assert.match(cramped, /Enlarge the terminal to show the QR code, or open:/);
+    assert.equal(cramped.includes(link), true);
+  }
+});
+
+test("/remote On view cycles reachable addresses, skips loopback, and links loopback-only access without a QR code", async () => {
+  const { menu, picked } = fakeRemoteMenu([
+    "http://192.168.1.44:8766",
+    "http://10.0.0.7:8766",
+    "http://127.0.0.1:8766",
+  ]);
+  assert.match(remoteMenuText(menu, 96, 40), /←→ address 1\/2 · r new code · x turn off · esc close/);
+  await menu.handleKey({ name: "right" });
+  assert.equal(menu.connection().link.startsWith("http://10.0.0.7:8766/"), true);
+  assert.equal(decodeTerminalQr(remoteMenuText(menu, 96, 40)), menu.connection().link);
+  await menu.handleKey({ name: "right" });
+  assert.equal(menu.connection().link.startsWith("http://192.168.1.44:8766/"), true, "loopback is never offered for pairing");
+  await menu.handleKey({ name: "left" });
+  assert.deepEqual(picked, ["http://10.0.0.7:8766", "http://192.168.1.44:8766", "http://10.0.0.7:8766"]);
+
+  const { menu: loopback } = fakeRemoteMenu(["http://127.0.0.1:8766"], "loopback");
+  const text = remoteMenuText(loopback, 96, 40);
+  assert.doesNotMatch(text, QR_BLOCKS, "a phone cannot reach 127.0.0.1, so no QR code is drawn");
+  assert.match(text, /Remote access · On · This computer · 0 devices/);
+  assert.match(text, /Open in a browser on this computer:/);
+  assert.match(text, LOOPBACK_LINK);
+  assert.match(text, /    r new code · x turn off · esc close/);
+  assert.equal(await loopback.handleKey({ name: "right" }), null);
+});
+
+test("/remote two-view menu: Off picks the scope to turn on with, On connects, x returns to Off, and nothing reaches the transcript", async (t) => {
   const remoteCmd = LOCAL_SLASH_COMMANDS.find((cmd) => cmd.name === "remote");
   assert.ok(remoteCmd, "/remote must be listed in LOCAL_SLASH_COMMANDS");
   assert.equal(remoteCmd.usage, "/remote", "/remote usage must not list subcommands");
@@ -174,10 +238,10 @@ test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Es
   };
   const sessionState = cliState.session;
 
-  let currentMenuFrame = "";
+  let frame = "";
   const renderCurrentFrame = () => {
     const session = cliState.input.session;
-    currentMenuFrame = session?.mode === "remote" ? remoteMenuText(session.remoteState, 90) : "";
+    frame = session?.mode === "remote" ? remoteMenuText(session.remoteState, 90, 40) : "";
   };
 
   let remoteController;
@@ -232,13 +296,13 @@ test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Es
     output: { log: (msg) => logs.push(typeof msg === "function" ? msg() : String(msg)) },
   });
 
-  const flushAsyncKey = () => new Promise((resolve) => setTimeout(resolve, 25));
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 25));
+  const menu = () => cliState.input.session.remoteState;
 
-  // 1. Subcommands are rejected cleanly with Usage: /remote, and non-TTY reports interactive terminal required
+  // 1. Subcommands are rejected, and a non-TTY explains the requirement
   await commandController.handle("/remote status");
   assert.equal(logs.at(-1), "Usage: /remote");
   logs.length = 0;
-
   const nonTtyController = createCommandController({
     request: async () => ({}),
     turn: {},
@@ -249,121 +313,85 @@ test("/remote interactive dropdown menu: toggle switch, transient QR submenu, Es
   await nonTtyController.handle("/remote");
   assert.equal(logs.at(-1), "/remote requires an interactive terminal.");
   logs.length = 0;
-
-  assert.equal(remoteController.state().running, false);
-  assert.equal(Boolean(sessionState.info.remote_running), false);
   assert.equal(promptText(sessionState.info).includes("⚯"), false, "⚯ must not appear when remote is off");
 
-  // 2. Opening /remote renders the transient dropdown menu with "Remote access  Off" and "Network scope"; Esc closes cleanly
-  const openOffPromise = commandController.handle("/remote");
-  await flushAsyncKey();
-  assert.equal(cliState.input.session?.mode, "remote");
-  assert.match(currentMenuFrame, /Remote access/);
-  assert.match(currentMenuFrame, /Off/);
-  assert.match(currentMenuFrame, /Network scope/);
-  inputActions.handleTerminalInput("\x1b"); // Esc
-  await openOffPromise;
+  // 2. Off view offers the two scopes; Esc closes without side effects
+  const browse = commandController.handle("/remote");
+  await flush();
+  assert.match(frame, /Remote access · Off/);
+  assert.match(frame, /› Local network\s+Phones and computers on the same Wi-Fi/);
+  assert.match(frame, /· This computer\s+A browser on this machine only/);
+  assert.match(frame, /↑↓ choose · enter turn on · esc close/);
+  inputActions.handleTerminalInput("\x1b");
+  await browse;
   assert.equal(cliState.input.session, null);
-  assert.equal(currentMenuFrame, "", "menu frame must clear on Esc");
+  assert.equal(frame, "");
   assert.equal(remoteController.state().running, false);
-  assert.deepEqual(logs, [], "interactive /remote must not log anything to transcript");
 
-  // 3. Pre-select "This computer" scope in the dropdown menu, then toggle Remote access On in-place on root menu
-  const toggleOnPromise = commandController.handle("/remote");
-  await flushAsyncKey();
-  inputActions.handleTerminalInput("\x1b[B"); // Down to "Network scope"
-  inputActions.handleTerminalInput("\r"); // Open scope submenu
-  await flushAsyncKey();
-  assert.equal(cliState.input.session.remoteState.level(), "scope");
-  assert.match(currentMenuFrame, /Remote access · Network scope/);
-  inputActions.handleTerminalInput("\x1b[B"); // Select "This computer"
-  inputActions.handleTerminalInput("\r"); // Apply scope
-  await flushAsyncKey();
-  assert.equal(cliState.input.session.remoteState.level(), "root");
-  inputActions.handleTerminalInput("\x1b[A"); // Up to "Remote access" switch
-  inputActions.handleTerminalInput(" "); // Space toggles Remote access ON in-place on root menu
-  await flushAsyncKey();
-
+  // 3. Choosing "This computer" turns remote on and switches to the On view in place
+  const session = commandController.handle("/remote");
+  await flush();
+  inputActions.handleTerminalInput("\x1b[B");
+  inputActions.handleTerminalInput("\r");
+  await flush();
   assert.equal(remoteController.state().running, true);
   assert.equal(remoteController.state().scope, "loopback");
-  assert.equal(sessionState.info.remote_running, true);
   assert.match(promptText(sessionState.info).split("\n")[1], /gpt-test · medium · .* · ⚯$/);
-  assert.equal(cliState.input.session.remoteState.level(), "root", "toggling switch keeps user on root menu");
-  assert.match(currentMenuFrame, /On · 0 connected devices/);
-  assert.match(currentMenuFrame, /QR code & sign-in link/);
-  assert.doesNotMatch(currentMenuFrame, /[█▀▄]/, "QR code must only appear when opening the QR submenu");
+  assert.match(frame, /Remote access · On · This computer · 0 devices/);
+  assert.match(frame, /Open in a browser on this computer:/);
+  assert.doesNotMatch(frame, QR_BLOCKS, "loopback access draws no QR code");
+  const loopbackLink = frame.match(LOOPBACK_LINK)[0];
+  assert.equal(loopbackLink, menu().connection().link);
+  assert.equal(loopbackLink.endsWith(encodeURIComponent(remoteController.state().accessCode)), true);
 
-  // 4. Select "QR code & sign-in link" submenu -> displays QR code inside dropdown
-  inputActions.handleTerminalInput("\x1b[B"); // Down to "QR code & sign-in link"
-  inputActions.handleTerminalInput("\r"); // Open QR submenu
-  await flushAsyncKey();
-  assert.equal(cliState.input.session.remoteState.level(), "qr");
-  const expectedUrl = buildPairingUrl(remoteController.state());
-  assert.equal(decodeTerminalQr(currentMenuFrame), expectedUrl, "transient QR submenu must contain valid QR code");
-  assert.equal(currentMenuFrame.includes(remoteController.state().accessCode), true);
-  assert.deepEqual(logs, [], "turning on remote in TTY must NOT print QR code to transcript history");
+  // Live device count while the view is open
+  remoteController.handleRuntimeEvent({ kind: "remote", state: { ...remoteController.state(), clients: 2 } });
+  assert.match(frame, /This computer · 2 devices/);
 
-  // Live update while QR view is open: simulate a remote device connecting and verify the QR header updates live
-  remoteController.handleRuntimeEvent({
-    kind: "remote",
-    state: { ...remoteController.state(), clients: 2 },
-  });
-  assert.match(currentMenuFrame, /2 connected devices/, "active QR submenu must update connected device count live");
-
-  // 5. Pressing 'r' inside the transient QR view rotates the access code in-place
+  // 4. r issues a new code in place
   const oldCode = remoteController.state().accessCode;
   inputActions.handleTerminalInput("r");
-  await flushAsyncKey();
+  await flush();
   assert.notEqual(remoteController.state().accessCode, oldCode);
-  assert.equal(decodeTerminalQr(currentMenuFrame), buildPairingUrl(remoteController.state()));
-  assert.match(currentMenuFrame, /Access code rotated/);
+  assert.match(frame, /New access code\. Previous devices were disconnected\./);
+  assert.equal(frame.includes(menu().connection().link), true);
 
-  // 6. Pressing Esc inside the QR view cancels the QR code display and returns to the /remote root menu
-  inputActions.handleTerminalInput("\x1b"); // Esc exits QR view -> returns to root menu
-  await flushAsyncKey();
-  assert.equal(cliState.input.session.remoteState.level(), "root");
-  assert.doesNotMatch(currentMenuFrame, /[█▀▄]/, "QR code must disappear immediately when Esc is pressed");
-  assert.match(currentMenuFrame, /QR code & sign-in link/);
-
-  // Pressing Esc again in the root menu closes /remote completely while keeping remote running
-  inputActions.handleTerminalInput("\x1b"); // Esc closes /remote
-  await toggleOnPromise;
-  assert.equal(cliState.input.session, null);
-  assert.equal(currentMenuFrame, "", "/remote menu must disappear when Esc is pressed at root");
-  assert.equal(remoteController.state().running, true, "remote stays running after closing /remote with Esc");
-  assert.equal(sessionState.info.remote_running, true);
-  assert.deepEqual(logs, [], "closing QR view must leave zero clutter in transcript logs");
-
-  // 7. Re-opening /remote when On shows "Remote access  On", "QR code & sign-in link", "Network scope", "Rotate access code"
-  const manageOnPromise = commandController.handle("/remote");
-  await flushAsyncKey();
-  assert.equal(cliState.input.session.remoteState.level(), "root");
-  assert.match(currentMenuFrame, /On · 0 connected devices/);
-  assert.match(currentMenuFrame, /QR code & sign-in link/);
-
-  // Navigate to "QR code & sign-in link", open it, press Esc to return to root menu
-  inputActions.handleTerminalInput("\x1b[B"); // Down to "QR code & sign-in link"
-  inputActions.handleTerminalInput("\r");
-  await flushAsyncKey();
-  assert.equal(cliState.input.session.remoteState.level(), "qr");
-  assert.equal(decodeTerminalQr(currentMenuFrame), buildPairingUrl(remoteController.state()));
-  inputActions.handleTerminalInput("\x1b"); // Esc returns to root
-  await flushAsyncKey();
-  assert.equal(cliState.input.session.remoteState.level(), "root");
-
-  // Navigate up to "Remote access" switch and press Enter to toggle Off, then Esc to close
-  inputActions.handleTerminalInput("\x1b[A"); // Up to "Remote access"
-  inputActions.handleTerminalInput("\r"); // Toggle Off
-  await flushAsyncKey();
+  // 5. x turns remote off and returns to the Off view with the last scope selected
+  inputActions.handleTerminalInput("x");
+  await flush();
   assert.equal(remoteController.state().running, false);
-  assert.equal(sessionState.info.remote_running, false);
   assert.equal(promptText(sessionState.info).includes("⚯"), false, "⚯ must disappear when remote is turned off");
-  inputActions.handleTerminalInput("\x1b"); // Esc to close menu
-  await manageOnPromise;
-  assert.deepEqual(logs, [], "entire interactive /remote lifecycle must leave zero transcript logs");
+  assert.match(frame, /Remote access · Off/);
+  assert.match(frame, /› This computer/);
+  assert.doesNotMatch(frame, /New access code/);
+
+  // 6. Changing scope is simply choosing the other one
+  inputActions.handleTerminalInput("\x1b[A");
+  inputActions.handleTerminalInput(" ");
+  await flush();
+  assert.equal(remoteController.state().scope, "lan");
+  assert.match(frame, /Remote access · On · Local network/);
+  const lan = menu().connection();
+  if (lan.reachable) {
+    assert.equal(decodeTerminalQr(frame), lan.link);
+  } else {
+    assert.match(frame, /Open in a browser on this computer:/);
+  }
+
+  // 7. Esc closes the view; remote keeps running and reopening goes straight to the On view
+  inputActions.handleTerminalInput("\x1b");
+  await session;
+  assert.equal(frame, "");
+  assert.equal(remoteController.state().running, true);
+  const reopen = commandController.handle("/remote");
+  await flush();
+  assert.match(frame, /Remote access · On · Local network/);
+  inputActions.handleTerminalInput("\x1b");
+  await reopen;
+  assert.deepEqual(logs, [], "the interactive /remote lifecycle must leave nothing in the transcript");
 });
 
-test("interactive /remote menu: scope switching, address submenu with Esc back, missing webRoot fallback, and port collision auto-fallback", async (t) => {
+test("/remote controller: missing webRoot still serves, a busy port falls back, and x stops sharing", async (t) => {
   const tempHome = await mkdtemp(path.join(os.tmpdir(), "rind-cli-remote-menu-"));
   const missingWebDir = path.join(tempHome, "missing-web");
   const sessionState = {
@@ -372,124 +400,61 @@ test("interactive /remote menu: scope switching, address submenu with Esc back, 
     pendingName: "",
     pendingSkillSources: null,
   };
+  const turnOnThisComputer = async (menuState) => {
+    await menuState.handleKey({ name: "down" });
+    await menuState.handleKey({ name: "enter" });
+    await menuState.handleKey({ name: "escape" });
+  };
 
-  let menuScript = async () => {};
+  let menuScript = turnOnThisComputer;
   const controllerA = createCliRemoteController({
     runtimeClient: { request: async () => ({}) },
     sessionState,
-    askRemoteMenu: async (menuState) => {
-      await menuScript(menuState);
-    },
+    askRemoteMenu: (menuState) => menuScript(menuState),
     cwd: tempHome,
     rindHome: tempHome,
     getInitInfo: () => ({ capabilities: [], methods: ["session/prompt"] }),
     webRoot: missingWebDir,
   });
-
   const controllerB = createCliRemoteController({
     runtimeClient: { request: async () => ({}) },
     sessionState: { info: { cwd: tempHome, workspace_root: tempHome } },
-    askRemoteMenu: async (menuState) => {
-      // Switch scope to loopback and toggle on
-      await menuState.handleKey({ name: "down" });
-      await menuState.handleKey({ name: "enter" });
-      await menuState.handleKey({ name: "down" });
-      await menuState.handleKey({ name: "enter" });
-      await menuState.handleKey({ name: "up" });
-      await menuState.handleKey({ name: "enter" });
-      await menuState.handleKey({ name: "escape" });
-    },
+    askRemoteMenu: turnOnThisComputer,
     cwd: tempHome,
     rindHome: tempHome,
     getInitInfo: () => ({ capabilities: [], methods: ["session/prompt"] }),
     webRoot: missingWebDir,
   });
-
   t.after(async () => {
     await controllerA.stop();
     await controllerB.stop();
     await removeRindHome(tempHome);
   });
 
-  // 1. Start controllerA via menu even when webRoot directory does not exist (allowMissingWebRoot: true)
-  menuScript = async (menuState) => {
-    // Select loopback scope then toggle on in-place, then open QR submenu and Esc back + close
-    await menuState.handleKey({ name: "down" });
-    await menuState.handleKey({ name: "enter" });
-    await menuState.handleKey({ name: "down" });
-    await menuState.handleKey({ name: "enter" });
-    await menuState.handleKey({ name: "up" });
-    await menuState.handleKey({ text: " " });
-    assert.equal(menuState.level(), "root");
-    await menuState.handleKey({ name: "down" }); // Down to QR code & sign-in link
-    await menuState.handleKey({ name: "enter" });
-    assert.equal(menuState.level(), "qr");
-    assert.equal(decodeTerminalQr(remoteMenuText(menuState)), buildPairingUrl(controllerA.state()));
-    await menuState.handleKey({ name: "escape" }); // Exit QR view to root
-    assert.equal(menuState.level(), "root");
-    await menuState.handleKey({ name: "escape" }); // Close /remote
-  };
   const stateA = await controllerA.handleCommand();
   assert.equal(stateA.running, true);
+  assert.equal(stateA.scope, "loopback");
   assert.equal(sessionState.info.remote_running, true);
   const rootRes = await fetch(`${stateA.addresses[0]}/`);
   assert.equal(rootRes.status, 200);
   assert.match(await rootRes.text(), /Rind Remote Access is active/);
 
-  // 2. If port 8766 was bound by controllerA, starting controllerB falls back automatically to an open port
   const stateB = await controllerB.handleCommand();
   assert.equal(stateB.running, true);
   assert.notEqual(stateB.port, stateA.port);
 
-  // 3. Switch scope to LAN via submenu, test Address submenu if multiple addresses exist, rotate code, then turn off
-  const prevCode = controllerA.state().accessCode;
   menuScript = async (menuState) => {
-    // Down to Network scope (index 2 when running: toggle=0, qr=1, scope=2)
-    await menuState.handleKey({ name: "down" });
-    await menuState.handleKey({ name: "down" });
-    await menuState.handleKey({ name: "enter" });
-    assert.equal(menuState.level(), "scope");
-    // Up to Local network (index 0) and apply
-    await menuState.handleKey({ name: "up" });
-    await menuState.handleKey({ name: "enter" });
-    assert.equal(controllerA.state().scope, "lan");
-
-    if (controllerA.state().addresses.length > 1) {
-      // Down to Address (index 3), open it, then press Esc to return to root
-      await menuState.handleKey({ name: "down" });
-      await menuState.handleKey({ name: "enter" });
-      assert.equal(menuState.level(), "address");
-      assert.match(remoteMenuText(menuState), /Remote access · Address/);
-      await menuState.handleKey({ name: "escape" });
-      assert.equal(menuState.level(), "root");
-    }
-
-    // Open QR view and press 'r' to rotate
-    const items = menuState.items();
-    while (menuState.items()[menuState.selectedIndex()]?.id !== "qr") {
-      await menuState.handleKey({ name: "down" });
-    }
-    assert.ok(items.length >= 4);
-    await menuState.handleKey({ name: "enter" });
-    assert.equal(menuState.level(), "qr");
-    await menuState.handleKey({ name: "r", text: "r" });
-    assert.notEqual(controllerA.state().accessCode, prevCode);
+    assert.ok(menuState.connection(), "reopening while on shows the On view directly");
+    await menuState.handleKey({ name: "x", text: "x" });
+    assert.equal(menuState.connection(), null);
     await menuState.handleKey({ name: "escape" });
-    assert.equal(menuState.level(), "root");
-
-    // Navigate to toggle (index 0) and turn off
-    while (menuState.selectedIndex() !== 0) {
-      await menuState.handleKey({ name: "up" });
-    }
-    await menuState.handleKey({ name: "enter" });
-    assert.equal(controllerA.state().running, false);
   };
-  await controllerA.handleCommand();
-  assert.equal(controllerA.state().running, false);
+  const stopped = await controllerA.handleCommand();
+  assert.equal(stopped.running, false);
   assert.equal(sessionState.info.remote_running, false);
 });
 
-test("E2E CLI /remote: user runs /remote, toggles switch On, opens QR submenu, pairs over HTTP/WS, prompts session, and syncs live to CLI", { timeout: 30000 }, async (t) => {
+test("E2E CLI /remote: user turns remote on from the Off view, signs in over HTTP/WS with the shown link, prompts a session, gets a new code, and turns it off", { timeout: 30000 }, async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-cli-remote-e2e-"));
   const workspace = path.join(home, "workspace");
   await mkdir(workspace, { recursive: true });
@@ -573,37 +538,28 @@ test("E2E CLI /remote: user runs /remote, toggles switch On, opens QR submenu, p
   // Wait for CLI startup banner
   await waitForScreen((s) => s.includes("remote-e2e-model"), 15000, "startup banner");
 
-  // 1. User runs `/remote` in CLI, switches scope to "This computer", toggles "Remote access" On, then opens "QR code & sign-in link"
+  // 1. User runs `/remote`, picks "This computer" in the Off view, and the On view appears in place
   sendKey("/remote\r");
-  await waitForScreen((s) => s.includes("› Remote access") && s.includes("Off"), 15000, "/remote Off menu");
-  sendKey("\x1b[B\r"); // Down to Network scope, Enter
-  await waitForScreen((s) => s.includes("Remote access · Network scope"), 10000, "Network scope submenu");
-  sendKey("\x1b[B\r"); // Down to This computer, Enter
-  await waitForScreen((s) => s.includes("This computer ›"), 10000, "Scope updated to This computer");
-  sendKey("\x1b[A "); // Up to Remote access, Space to toggle On
-  await waitForScreen((s) => s.includes("On · 0 connected devices") && s.includes(" · ⚯"), 15000, "Remote access toggled On");
-  sendKey("\x1b[B\r"); // Down to QR code & sign-in link, Enter to open QR submenu
-  const qrScreen = await waitForScreen(
-    (s) => s.includes("Remote access · QR code") && s.includes("Access code:"),
+  await waitForScreen((s) => s.includes("Remote access · Off") && s.includes("› Local network"), 15000, "/remote Off view");
+  sendKey("\x1b[B\r"); // Down to This computer, Enter turns remote on
+  const onScreen = await waitForScreen(
+    (s) => s.includes("Remote access · On · This computer") && s.includes(" · ⚯"),
     15000,
-    "/remote QR submenu",
+    "/remote On view",
   );
 
-  // 2. Scan/decode the terminal QR code directly from the virtual terminal viewport
-  const qrDecodedUrl = decodeTerminalQr(qrScreen);
-  const parsedUrl = new URL(qrDecodedUrl);
-  const origin = parsedUrl.origin;
-  const hashParams = new URLSearchParams(parsedUrl.hash.replace(/^#/, ""));
-  const accessCode = hashParams.get("connect");
-  assert.ok(accessCode && accessCode.length >= 32, "QR code must contain a valid access code in #connect=");
-  assert.equal(qrScreen.includes(`Sign-in URL: ${qrDecodedUrl}`), true);
-  assert.equal(qrScreen.includes(`Access code: ${accessCode}`), true);
+  // 2. Loopback access shows a complete sign-in link and code, and no QR code a phone could not use
+  assert.doesNotMatch(onScreen, QR_BLOCKS);
+  assert.equal(onScreen.includes("Open in a browser on this computer:"), true);
+  const signInUrl = new URL(onScreen.match(LOOPBACK_LINK)[0]);
+  const origin = signInUrl.origin;
+  const accessCode = new URLSearchParams(signInUrl.hash.replace(/^#/, "")).get("connect");
+  assert.ok(accessCode && accessCode.length >= 32, "sign-in link must contain a valid access code in #connect=");
+  assert.equal(onScreen.includes(`Code  ${accessCode}`), true);
 
-  // Press Esc once to exit QR display back to /remote menu, and Esc again to close /remote menu completely
+  // Esc closes /remote; remote keeps running
   sendKey("\x1b");
-  await waitForScreen((s) => !/[█▀▄]/.test(s) && s.includes("› QR code & sign-in link"), 10000, "Esc exits QR submenu to root");
-  sendKey("\x1b");
-  await waitForScreen((s) => !s.includes("QR code & sign-in link"), 10000, "Esc closes /remote menu");
+  await waitForScreen((s) => !s.includes("Remote access · On"), 10000, "Esc closes /remote");
 
   // 3. Verify HTTP web UI is served at the QR origin
   const webRes = await fetch(origin);
@@ -709,22 +665,22 @@ test("E2E CLI /remote: user runs /remote, toggles switch On, opens QR submenu, p
   });
   assert.equal(fileWriteResp.result.path, "uploads/mobile-note.txt");
 
-  // 8. Rotate access code from CLI (`/remote` -> "Rotate access code") and verify old WS closes with 4401
+  // 8. Reopening `/remote` goes straight to the On view; r issues a new code and the old WS closes with 4401
   const wsClosed = once(ws, "close");
   sendKey("/remote\r");
-  await waitForScreen((s) => s.includes("› Remote access") && s.includes("Rotate access code"), 10000, "/remote On menu for rotate");
-  sendKey("\x1b[A\r"); // Up wraps to last item ("Rotate access code"), Enter rotates and opens QR view
+  await waitForScreen((s) => s.includes("Remote access · On · This computer"), 10000, "/remote On view on reopen");
+  sendKey("r");
   const [closeCode] = await wsClosed;
-  assert.equal(closeCode, 4401, "rotating access code must disconnect existing WebSocket with 4401");
+  assert.equal(closeCode, 4401, "a new access code must disconnect existing WebSocket with 4401");
 
   const rotatedScreen = await waitForScreen(
-    (s) => s.includes("Access code rotated.") && s.includes("Access code:"),
+    (s) => s.includes("New access code. Previous devices were disconnected.") && !s.includes(accessCode),
     10000,
-    "rotated QR submenu",
+    "new access code",
   );
-  const rotatedQrUrl = decodeTerminalQr(rotatedScreen);
-  const rotatedCode = new URLSearchParams(new URL(rotatedQrUrl).hash.replace(/^#/, "")).get("connect");
+  const rotatedCode = new URLSearchParams(new URL(rotatedScreen.match(LOOPBACK_LINK)[0]).hash.replace(/^#/, "")).get("connect");
   assert.notEqual(rotatedCode, accessCode);
+  assert.equal(rotatedScreen.includes(`Code  ${rotatedCode}`), true);
 
   const oldTicketAttempt = await fetch(`${origin}/ticket`, {
     headers: { Authorization: `Bearer ${accessCode}` },
@@ -736,13 +692,11 @@ test("E2E CLI /remote: user runs /remote, toggles switch On, opens QR submenu, p
   });
   assert.equal(newTicketAttempt.status, 200);
 
-  // 9. Press Esc to exit QR view back to root, then turn off remote access and verify ⚯ is removed from prompt header
-  sendKey("\x1b"); // Esc from QR view back to root (selection is on QR code & sign-in link)
-  await waitForScreen((s) => !/[█▀▄]/.test(s) && s.includes("› QR code & sign-in link"), 10000, "back to root menu");
-  sendKey("\x1b[A "); // Up to Remote access, Space to toggle Off
-  await waitForScreen((s) => s.includes("› Remote access") && s.includes("Off") && !s.includes(" · ⚯"), 10000, "Remote access toggled Off");
-  sendKey("\x1b"); // Esc to close /remote menu
-  await waitForScreen((s) => !s.includes("Network scope"), 10000, "/remote menu closed");
+  // 9. x turns remote off in place (⚯ disappears), then Esc closes the Off view
+  sendKey("x");
+  await waitForScreen((s) => s.includes("Remote access · Off") && !s.includes(" · ⚯"), 10000, "Remote access turned off");
+  sendKey("\x1b");
+  await waitForScreen((s) => !s.includes("Remote access · Off"), 10000, "/remote closed");
 
   sendKey("/exit\r");
   await once(cliChild, "exit");
@@ -809,32 +763,21 @@ test("E2E multi-surface unification: CLI and Desktop share Remote gateway, Works
   const initialDesktopRemote = await desktopPeer.request("remote/get");
   assert.equal(initialDesktopRemote.running, false);
 
-  // 4. Enable /remote in CLI via interactive menu and open QR submenu -> verify Desktop immediately receives the running state and matches QR/code/port
+  // 4. Turn remote on from the CLI's /remote Off view -> Desktop immediately sees the same running gateway
   sendKey("/remote\r");
-  await waitForScreen((s) => s.includes("› Remote access") && s.includes("Off"), 15000, "CLI /remote Off menu");
-  sendKey("\x1b[B\r"); // Down to Network scope, Enter
-  await waitForScreen((s) => s.includes("Remote access · Network scope"), 10000, "Network scope submenu");
-  sendKey("\x1b[B\r"); // Select This computer, Enter
-  await waitForScreen((s) => s.includes("This computer ›"), 10000, "Scope updated to This computer");
-  sendKey("\x1b[A "); // Up to Remote access, Space to toggle On
-  await waitForScreen((s) => s.includes("On · 0 connected devices") && s.includes(" · ⚯"), 15000, "CLI /remote toggled On");
-  sendKey("\x1b[B\r"); // Down to QR code & sign-in link, Enter
-  const qrScreen = await waitForScreen(
-    (s) => s.includes("Remote access · QR code") && s.includes("Access code:"),
+  await waitForScreen((s) => s.includes("Remote access · Off"), 15000, "CLI /remote Off view");
+  sendKey("\x1b[B\r"); // This computer, Enter turns remote on
+  const onScreen = await waitForScreen(
+    (s) => s.includes("Remote access · On · This computer") && s.includes(" · ⚯"),
     15000,
-    "CLI /remote QR submenu",
+    "CLI /remote On view",
   );
-
-  const cliQrUrl = decodeTerminalQr(qrScreen);
-  const parsedUrl = new URL(cliQrUrl);
+  const parsedUrl = new URL(onScreen.match(LOOPBACK_LINK)[0]);
   const origin = parsedUrl.origin;
   const cliAccessCode = new URLSearchParams(parsedUrl.hash.replace(/^#/, "")).get("connect");
 
-  // Close QR submenu and /remote menu with Esc
   sendKey("\x1b");
-  await waitForScreen((s) => !/[█▀▄]/.test(s) && s.includes("› QR code & sign-in link"), 10000, "Esc exits QR submenu");
-  sendKey("\x1b");
-  await waitForScreen((s) => !s.includes("QR code & sign-in link"), 10000, "Esc closes /remote menu");
+  await waitForScreen((s) => !s.includes("Remote access · On"), 10000, "Esc closes /remote");
 
   const syncedDesktopRemote = await desktopPeer.request("remote/get");
   assert.equal(syncedDesktopRemote.running, true, "Desktop must see Remote running when enabled from CLI");

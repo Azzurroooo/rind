@@ -1149,175 +1149,178 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
   }
 });
 
-test("/remote transient dropdown menu E2E in headless virtual terminal: toggle switch, QR submenu, and Esc dismissal leave zero transcript residue", async () => {
-  const { createRemoteMenuState, decodeTerminalQr, buildPairingUrl } = await import("../lib/remote.js");
+test("/remote two-view menu E2E in headless virtual terminal: turn on, scan, new code, turn off, and Esc leaves zero residue", async () => {
+  const { createRemoteMenuState } = await import("../lib/remote.js");
+  const { decodeTerminalQr } = await import("../../rind-runtime-client/remote/qr.js");
   const { remoteMenuText } = await import("../lib/rendering.js");
   const { createCommandController } = await import("../lib/command-controller.js");
   const { createCliInputActions } = await import("../lib/cli-input-actions.js");
-  const virtual = createVirtualOutput({ columns: 96, rows: 36 });
-  const input = createVirtualInput();
-  const tui = createTui({
-    input,
-    output: virtual.output,
-    renderIntervalMs: 0,
-    setTimeout: (fn) => setTimeout(fn, 0),
-    clearTimeout,
-  });
-  const state = createCliState();
-  state.runtime.status = "ready";
-  state.session.info = {
-    session_id: "s-remote-vt",
-    model: "gpt-5.4",
-    reasoning_effort: "medium",
-    cwd: "/workspace/proj",
-  };
-  const transcriptContainer = createTranscript();
-  const output = createCliOutputController({
-    state,
-    terminalUi: tui,
-    transcript: transcriptContainer,
-  });
-  const composerArea = new ComposerArea((width) => {
-    const session = state.input.session;
-    if (!session) return null;
-    if (session.mode === "remote") {
-      return {
-        showCaret: false,
-        prompt: output.mainPromptText(width),
-        inputText: session.inputText,
-        cursor: { line: 0, column: session.inputText.length },
-        menuText: remoteMenuText(session.remoteState, width).trimEnd(),
-      };
-    }
-    return {
-      showCaret: true,
-      prompt: output.mainPromptText(width),
-      inputText: session.editor?.input?.() || "",
-      cursor: session.editor?.cursorPosition?.() || { line: 0, column: 0 },
-      placeholder: promptPlaceholderText(),
-      menuText: "",
+
+  async function openRemote({ columns, rows }) {
+    const virtual = createVirtualOutput({ columns, rows });
+    const tui = createTui({
+      input: createVirtualInput(),
+      output: virtual.output,
+      renderIntervalMs: 0,
+      setTimeout: (fn) => setTimeout(fn, 0),
+      clearTimeout,
+    });
+    const state = createCliState();
+    state.runtime.status = "ready";
+    state.session.info = {
+      session_id: "s-remote-vt",
+      model: "gpt-5.4",
+      reasoning_effort: "medium",
+      cwd: "/workspace/proj",
     };
-  });
-  tui.addChild(transcriptContainer);
-  tui.addChild(composerArea);
+    const transcriptContainer = createTranscript();
+    const output = createCliOutputController({ state, terminalUi: tui, transcript: transcriptContainer });
+    // Mirrors composeFrame in frontend-cli-implementation.js
+    const composerArea = new ComposerArea((width) => {
+      const session = state.input.session;
+      if (!session) return null;
+      const prompt = output.mainPromptText(width);
+      if (session.mode === "remote") {
+        return {
+          showCaret: false,
+          prompt,
+          inputText: session.inputText,
+          cursor: { line: 0, column: session.inputText.length },
+          menuText: remoteMenuText(session.remoteState, width, tui.rows - prompt.split("\n").length).trimEnd(),
+        };
+      }
+      return {
+        showCaret: true,
+        prompt,
+        inputText: session.editor?.input?.() || "",
+        cursor: session.editor?.cursorPosition?.() || { line: 0, column: 0 },
+        placeholder: promptPlaceholderText(),
+        menuText: "",
+      };
+    });
+    tui.addChild(transcriptContainer);
+    tui.addChild(composerArea);
 
-  let remoteRunning = false;
-  let remoteCode = "init-secret-code-1234567890abcdef";
-  const currentRemoteState = () => ({
-    running: remoteRunning,
-    scope: "lan",
-    port: 8766,
-    addresses: remoteRunning ? ["http://192.168.1.88:8766"] : [],
-    accessCode: remoteRunning ? remoteCode : "",
-    clients: 0,
-  });
+    let running = false;
+    let code = "init-secret-code-1234567890abcdef";
+    const snapshot = () => ({
+      running,
+      scope: "lan",
+      port: 8766,
+      addresses: running ? ["http://192.168.1.88:8766", "http://127.0.0.1:8766"] : [],
+      accessCode: running ? code : "",
+      clients: 0,
+    });
+    const setRunning = (value) => {
+      running = value;
+      state.session.info = { ...state.session.info, remote_running: running };
+      return snapshot();
+    };
 
-  let inputActions;
-  const commandController = createCommandController({
-    request: async () => ({}),
-    turn: { submit() {} },
-    input: {
-      isTerminal: true,
-      runRemote: async () => {
-        const menuState = createRemoteMenuState({
-          initialState: currentRemoteState(),
-          initialScope: "lan",
-          onToggle: async (enable) => {
-            remoteRunning = Boolean(enable);
-            state.session.info = { ...state.session.info, remote_running: remoteRunning };
-            return currentRemoteState();
-          },
+    let inputActions;
+    const commandController = createCommandController({
+      request: async () => ({}),
+      turn: { submit() {} },
+      input: {
+        isTerminal: true,
+        runRemote: () => inputActions.askRemoteMenu(createRemoteMenuState({
+          initialState: snapshot(),
+          onStart: async () => setRunning(true),
+          onStop: async () => setRunning(false),
           onRotate: async () => {
-            remoteCode = "rotated-secret-code-9876543210fedcba";
-            return currentRemoteState();
+            code = "rotated-secret-code-9876543210fedcba";
+            return snapshot();
           },
-        });
-        await inputActions.askRemoteMenu(menuState);
+        })),
       },
-    },
-    state: { slashCommands: [] },
-    output: { log: output.log },
-  });
+      state: { slashCommands: [] },
+      output: { log: output.log },
+    });
+    inputActions = createCliInputActions({
+      state,
+      request: async () => ({}),
+      output,
+      getTurnController: () => ({}),
+      getCommandController: () => commandController,
+      getTaskMonitor: () => null,
+      getLineInput: () => null,
+      getEffortLevels: async () => [],
+      pausePrompt: () => {},
+      resumePrompt: () => {},
+      handleSigint: () => {},
+    });
 
-  inputActions = createCliInputActions({
-    state,
-    request: async () => ({}),
-    output,
-    getTurnController: () => ({}),
-    getCommandController: () => commandController,
-    getTaskMonitor: () => null,
-    getLineInput: () => null,
-    getEffortLevels: async () => [],
-    pausePrompt: () => {},
-    resumePrompt: () => {},
-    handleSigint: () => {},
-  });
-
-  tui.start();
-  try {
+    tui.start();
     output.writeUserInput("Check remote menu");
     const promptPromise = inputActions.ask(output.mainPromptText, promptPlaceholderText());
     await settle(virtual);
-
-    // 1. User types /remote and presses Enter
     for (const ch of "/remote") inputActions.handleTerminalInput(ch);
     inputActions.handleTerminalInput("\r");
-    const submitted = await promptPromise;
-    assert.equal(submitted, "/remote");
-
-    const remoteDone = commandController.handle(submitted);
+    assert.equal(await promptPromise, "/remote");
+    const done = commandController.handle("/remote");
     await settle(virtual);
-    let screen = virtual.getViewport().join("\n");
-    assert.match(screen, /› Remote access\s+Off/);
-    assert.match(screen, /· Network scope\s+Local network ›/);
+    const press = async (key) => {
+      inputActions.handleTerminalInput(key);
+      await settle(virtual);
+      return virtual.getViewport().join("\n");
+    };
+    return { virtual, tui, inputActions, output, done, press, link: () => `http://192.168.1.88:8766/#connect=${code}` };
+  }
 
-    // 2. Toggle Remote access On with Space -> switches On in-place on root menu and reveals QR submenu item
-    inputActions.handleTerminalInput(" ");
-    await settle(virtual);
-    screen = virtual.getViewport().join("\n");
+  const roomy = await openRemote({ columns: 96, rows: 36 });
+  try {
+    // 1. Off view: choose how to share, nothing else
+    let screen = roomy.virtual.getViewport().join("\n");
+    assert.match(screen, /Remote access · Off/);
+    assert.match(screen, /› Local network\s+Phones and computers on the same Wi-Fi/);
+    assert.doesNotMatch(screen, /gpt-5\.4 · medium · \/workspace\/proj · ⚯/);
+
+    // 2. Enter turns remote on and shows the QR code in place
+    screen = await roomy.press("\r");
     assert.match(screen, /gpt-5\.4 · medium · \/workspace\/proj · ⚯/);
-    assert.match(screen, /› Remote access\s+On · 0 connected devices/);
-    assert.match(screen, /· QR code & sign-in link\s+http:\/\/192\.168\.1\.88:8766 ›/);
-    assert.doesNotMatch(screen, /[█▀▄]/, "toggling switch On must not immediately dump QR code");
+    assert.match(screen, /Remote access · On · Local network · 0 devices/);
+    assert.match(screen, /Scan with your phone, or open:/);
+    assert.equal(decodeTerminalQr(screen), roomy.link(), "QR code in the viewport must decode to the LAN sign-in link");
+    assert.equal(screen.includes(roomy.link()), true);
+    assert.match(screen, /    r new code · x turn off · esc close/);
 
-    // 3. Select "QR code & sign-in link" in the dropdown menu and press Enter -> displays QR code inside dropdown
-    inputActions.handleTerminalInput("\x1b[B"); // Down to "QR code & sign-in link"
-    inputActions.handleTerminalInput("\r"); // Open QR submenu
-    await settle(virtual);
-    screen = virtual.getViewport().join("\n");
-    assert.match(screen, /Remote access · QR code \(Local network · 0 connected devices\)/);
-    assert.equal(
-      decodeTerminalQr(screen),
-      buildPairingUrl(currentRemoteState()),
-      "QR code in virtual terminal viewport must decode to exact pairing URL",
-    );
+    // 3. r issues a new code; the QR code follows
+    screen = await roomy.press("r");
+    assert.match(screen, /New access code\. Previous devices were disconnected\./);
+    assert.equal(decodeTerminalQr(screen), roomy.link());
 
-    // 4. Press Esc in the QR code view -> cancels QR display and returns to the /remote root dropdown menu
-    inputActions.handleTerminalInput("\x1b");
-    await settle(virtual);
-    screen = virtual.getViewport().join("\n");
-    assert.doesNotMatch(screen, /[█▀▄]/, "QR code blocks must be erased from viewport immediately when Esc exits QR submenu");
-    assert.doesNotMatch(screen, /Sign-in URL:/, "Sign-in URL must be erased when Esc exits QR submenu");
-    assert.match(screen, /› QR code & sign-in link\s+http:\/\/192\.168\.1\.88:8766 ›/);
+    // 4. x turns remote off and returns to the Off view without leaving the QR code behind
+    screen = await roomy.press("x");
+    assert.match(screen, /Remote access · Off/);
+    assert.doesNotMatch(screen, /[█▀▄]/);
+    assert.doesNotMatch(screen, /· ⚯/);
 
-    // 5. Press Esc in root menu to dismiss /remote completely -> zero residue in viewport or scrollback
-    const nextPromptPromise = remoteDone.then(() =>
-      inputActions.ask(output.mainPromptText, promptPlaceholderText()),
-    );
-    inputActions.handleTerminalInput("\x1b");
-    await settle(virtual);
-    screen = virtual.getViewport().join("\n");
-    const scrollback = virtual.getScrollBuffer().join("\n");
-    assert.doesNotMatch(screen, /[█▀▄]/, "QR code blocks must be erased from viewport after Esc");
-    assert.doesNotMatch(scrollback, /[█▀▄]/, "QR code blocks must not remain in terminal scrollback after Esc");
-    assert.doesNotMatch(screen, /QR code & sign-in link/, "menu items must be erased after Esc");
-    assert.match(screen, /gpt-5\.4 · medium · \/workspace\/proj · ⚯/, "⚯ indicator remains in prompt header while remote is on");
-    assert.match(screen, /Check remote menu/, "prior conversation transcript remains intact");
-    inputActions.cancel();
-    await nextPromptPromise;
+    // 5. Turn on again, then Esc closes /remote with zero residue in viewport or scrollback
+    await roomy.press("\r");
+    const nextPrompt = roomy.done.then(() => roomy.inputActions.ask(roomy.output.mainPromptText, promptPlaceholderText()));
+    screen = await roomy.press("\x1b");
+    assert.doesNotMatch(screen, /[█▀▄]/, "QR code must be erased from the viewport after Esc");
+    assert.doesNotMatch(roomy.virtual.getScrollBuffer().join("\n"), /[█▀▄]/, "QR code must not remain in scrollback after Esc");
+    assert.doesNotMatch(screen, /Remote access · On/);
+    assert.match(screen, /gpt-5\.4 · medium · \/workspace\/proj · ⚯/, "⚯ stays while remote is on");
+    assert.match(screen, /Check remote menu/, "prior transcript remains intact");
+    roomy.inputActions.cancel();
+    await nextPrompt;
   } finally {
-    tui.stop();
+    roomy.tui.stop();
+  }
+
+  // A terminal too short for the QR code keeps the whole menu on screen and offers the link instead
+  const short = await openRemote({ columns: 96, rows: 20 });
+  try {
+    const screen = await short.press("\r");
+    assert.match(screen, /Remote access · On · Local network/);
+    assert.match(screen, /Enlarge the terminal to show the QR code, or open:/);
+    assert.equal(screen.includes(short.link()), true);
+    assert.doesNotMatch(`${short.virtual.getScrollBuffer().join("\n")}\n${screen}`, /[█▀▄]/);
+    short.inputActions.handleTerminalInput("\x1b");
+    await short.done;
+  } finally {
+    short.tui.stop();
   }
 });
-
-

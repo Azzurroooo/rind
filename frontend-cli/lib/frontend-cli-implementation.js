@@ -383,7 +383,7 @@ const runtimeController = createCliRuntimeController({
 remoteController = createCliRemoteController({
   runtimeClient: runtimeController,
   rawClient: runtimeClient,
-  askRemoteMenu: tui ? (...args) => inputActions.askRemoteMenu(...args) : null,
+  askRemoteMenu: (...args) => inputActions.askRemoteMenu(...args),
   sessionState,
   redraw: redrawInput,
   onSessionRestored: rebindSendEndpoint,
@@ -964,12 +964,13 @@ function composeFrame(width = process.stdout.columns || 80) {
     };
   }
   if (session.mode === "remote") {
+    const prompt = mainPromptText(width);
     return {
       showCaret,
-      prompt: mainPromptText(width),
+      prompt,
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
-      menuText: remoteMenuText(session.remoteState, width).trimEnd(),
+      menuText: remoteMenuText(session.remoteState, width, process.stdout.rows - prompt.split("\n").length).trimEnd(),
     };
   }
   if (session.mode === "question") {

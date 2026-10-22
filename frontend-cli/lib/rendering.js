@@ -3,6 +3,7 @@ import { formatDuration } from "./tool-display.js";
 import { DEFAULT_THEME, paint, paintRaw, flavorSwatch, themeNames, breathingAccent } from "./theme.js";
 import { DEFAULT_SPINNER, isBriefMode, spinnerFrame, spinnerNames } from "./cli-state-store.js";
 import { homedir } from "node:os";
+import { encodeQrMatrix, renderTerminalQr } from "../../rind-runtime-client/remote/qr.js";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
 const MAX_COMPOSER_WIDTH = 78;
@@ -776,78 +777,52 @@ export function settingsMenuText(items, selectedIndex = 0, level = "root") {
   return `${lines.join("\n")}\n`;
 }
 
-export function remoteMenuText(remoteState, width = process.stdout.columns) {
-  if (!remoteState) return "";
-  const columns = Number(width);
-  const lineWidth = Number.isFinite(columns) && columns > 0 ? Math.max(20, Math.floor(columns) - 2) : 96;
-  const level = remoteState.level();
-  if (level === "qr") {
-    const qrView = remoteState.qrView(columns);
-    if (!qrView) return "";
-    const fit = (text) => clipCells(text, lineWidth);
-    const lines = [
-      fit(dim(`  Remote access · QR code (${qrView.scopeLabel} · ${qrView.clientLabel})`)),
-    ];
-    if (qrView.notice) {
-      lines.push(fit(`  ${accent(qrView.notice)}`));
+const QR_QUIET_ZONE = 2;
+
+export function remoteMenuText(remoteState, width = process.stdout.columns, rows = process.stdout.rows) {
+  const columns = Math.max(20, Math.floor(Number(width) || 80));
+  const rowBudget = Number(rows) > 0 ? Math.floor(Number(rows)) : Infinity;
+  const connection = remoteState.connection();
+  if (!connection) {
+    const scopes = remoteState.scopes();
+    const labelWidth = Math.max(...scopes.map((scope) => visibleLength(scope.label)));
+    const lines = [dim("  Remote access · Off"), dim("  Use this Rind from your phone or another computer.")];
+    for (const [index, scope] of scopes.entries()) {
+      const active = index === remoteState.scopeIndex();
+      const label = padRight(scope.label, labelWidth);
+      lines.push(`  ${active ? accent("›") : dim("·")} ${active ? bold(label) : dim(label)}  ${dim(scope.description)}`);
     }
-    if (qrView.qrBlock) {
-      lines.push("");
-      for (const qrLine of qrView.qrBlock.split("\n")) {
-        lines.push(`  ${qrLine}`);
-      }
-      lines.push("");
-    }
-    lines.push(fit(`  ${dim("Sign-in URL:")} ${accent(qrView.pairingUrl)}`));
-    lines.push(fit(`  ${dim("Address:")}     ${qrView.primaryAddress}`));
-    if (qrView.alternates.length > 0) {
-      lines.push(fit(`  ${dim("Alternates:")}  ${dim(qrView.alternates.join(", "))}`));
-    }
-    lines.push(fit(`  ${dim("Access code:")} ${bold(qrView.accessCode)}`));
-    lines.push(fit(dim("    r rotate code · esc back")));
-    return `${lines.join("\n")}\n`;
+    lines.push(dim("    ↑↓ choose · enter turn on · esc close"));
+    return `${lines.map((line) => clipCells(line, columns)).join("\n")}\n`;
   }
-  const items = remoteState.items();
-  const selectedIndex = remoteState.selectedIndex();
-  if (level === "scope" || level === "address") {
-    const visible = menuWindow(items, selectedIndex);
-    if (!visible.items.length) return "";
-    const title = level === "scope" ? "Remote access · Network scope" : "Remote access · Address";
-    const lines = [dim(`  ${title}`)];
-    const labelWidth = Math.max(12, ...items.map((item) => visibleLength(clipSingleLine(item?.label || item?.name, 36))));
-    const descWidth = Math.max(16, ...items.map((item) => visibleLength(clipSingleLine(item?.description, 56))));
-    for (const [index, item] of visible.items.entries()) {
-      const active = index === visible.activeIndex;
-      const marker = active ? accent("›") : dim("·");
-      const label = padRight(clipSingleLine(item?.label || item?.name, 36), labelWidth);
-      const name = active ? bold(label) : dim(label);
-      const rawDesc = clipSingleLine(item?.description, 56);
-      const desc = rawDesc ? dim(padRight(rawDesc, descWidth)) : "";
-      const suffix = item?.current ? dim("current") : "";
-      lines.push(`  ${marker} ${name}${desc ? `  ${desc}` : ""}${suffix ? `  ${suffix}` : ""}`.trimEnd());
-    }
-    lines.push(dim("    ↑↓ select · enter apply · esc back"));
-    return `${lines.join("\n")}\n`;
-  }
-  if (!items.length) return "";
-  const labelWidth = Math.max(18, ...items.map((item) => visibleLength(item.label)));
-  const valueWidth = Math.max(11, ...items.map((item) => visibleLength(item.value || "")));
-  const lines = [dim("  Remote access")];
-  const contentWidth = Number.isFinite(columns) && columns > 0 ? Math.max(28, Math.min(96, columns - 6)) : slashContentWidth();
-  const descWidth = Math.max(18, contentWidth - labelWidth - valueWidth - 10);
-  for (const [index, item] of items.entries()) {
-    const active = index === selectedIndex;
-    const marker = active ? accent("›") : dim("·");
-    const label = padRight(item.label, labelWidth);
-    const name = active ? bold(label) : dim(label);
-    const rawValue = String(item.value || "");
-    const paddedValue = padRight(rawValue, valueWidth);
-    const value = active ? accent(paddedValue) : dim(paddedValue);
-    const description = item.description ? `  ${dim(clipSingleLine(item.description, descWidth))}` : "";
-    lines.push(`  ${marker} ${name}  ${value}${description}`);
-  }
-  lines.push(dim("    ↑↓ select · space/enter toggle or open · esc close"));
-  return `${lines.join("\n")}\n`;
+  const devices = `${connection.clients} ${connection.clients === 1 ? "device" : "devices"}`;
+  const actions = [
+    connection.addressCount > 1 ? `←→ address ${connection.addressIndex + 1}/${connection.addressCount}` : "",
+    "r new code",
+    "x turn off",
+    "esc close",
+  ].filter(Boolean).join(" · ");
+  const header = [dim(`  Remote access · On · ${connection.scopeLabel} · ${devices}`)];
+  if (connection.notice) header.push(`  ${accent(connection.notice)}`);
+  // These lines wrap rather than clip so the link and code stay complete.
+  const footer = [`  ${accent(connection.link)}`, `  ${dim("Code")}  ${bold(connection.accessCode)}`, dim(`    ${actions}`)];
+  const scan = "  Scan with your phone, or open:";
+  const textRows = [...header, scan, ...footer]
+    .reduce((sum, line) => sum + Math.max(1, Math.ceil(visibleLength(line) / columns)), 0);
+  const qr = connection.reachable ? fittedTerminalQr(connection.link, columns - 2, rowBudget - textRows) : [];
+  const caption = !connection.reachable
+    ? "  Open in a browser on this computer:"
+    : qr.length ? scan : "  Enlarge the terminal to show the QR code, or open:";
+  return `${[...header, ...qr.map((line) => `  ${line}`), dim(caption), ...footer].join("\n")}\n`;
+}
+
+// A wrapped or clipped QR code cannot be scanned, so it is left out when it does not fit.
+function fittedTerminalQr(text, columns, rows) {
+  const matrix = encodeQrMatrix(text);
+  const size = matrix.length + QR_QUIET_ZONE * 2;
+  return size <= columns && Math.ceil(size / 2) <= rows
+    ? renderTerminalQr(matrix, { margin: QR_QUIET_ZONE }).split("\n")
+    : [];
 }
 
 export function taskMonitorTabs(_page = "background", backgroundCount = 0) {

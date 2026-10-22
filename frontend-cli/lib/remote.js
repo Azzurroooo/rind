@@ -4,28 +4,7 @@ import {
   resolveRindHome,
   resolveWebRoot,
 } from "../../rind-runtime-client/remote/host.js";
-import {
-  decodeQrMatrix,
-  decodeTerminalQr,
-  encodeQrMatrix,
-  parseTerminalQrMatrix,
-  renderSvgQrDataUrl,
-  renderTerminalQr,
-} from "../../rind-runtime-client/remote/qr.js";
-import { RemoteServer, RemoteWebSocket } from "../../rind-runtime-client/remote/server.js";
 import { registerSharedWorkspace } from "../../rind-runtime-client/remote/workspaces.js";
-
-export {
-  decodeQrMatrix,
-  decodeTerminalQr,
-  encodeQrMatrix,
-  parseTerminalQrMatrix,
-  RemoteServer,
-  RemoteWebSocket,
-  renderSvgQrDataUrl,
-  renderTerminalQr,
-  resolveWebRoot,
-};
 
 const STOPPED_STATE = {
   running: false,
@@ -36,350 +15,114 @@ const STOPPED_STATE = {
   clients: 0,
 };
 
-export function buildPairingUrl(state, selectedAddress = "") {
-  if (!state?.running || !state.addresses?.length || !state.accessCode) return "";
-  const primary = selectedAddress && state.addresses.includes(selectedAddress) ? selectedAddress : state.addresses[0];
-  return `${primary}/#connect=${encodeURIComponent(state.accessCode)}`;
+const REMOTE_SCOPES = Object.freeze([
+  { name: "lan", label: "Local network", description: "Phones and computers on the same Wi-Fi" },
+  { name: "loopback", label: "This computer", description: "A browser on this machine only" },
+]);
+
+const LOOPBACK_ADDRESS = /^https?:\/\/(?:127\.\d+\.\d+\.\d+|localhost|\[::1\])(?::\d+)?\/?$/i;
+
+function scopeIndexOf(scope) {
+  return Math.max(0, REMOTE_SCOPES.findIndex((item) => item.name === scope));
 }
 
-function buildQrView(state, selectedAddress = "", notice = "", width = process.stdout.columns) {
-  if (!state?.running) return null;
-  const primaryAddress =
-    selectedAddress && state.addresses?.includes(selectedAddress)
-      ? selectedAddress
-      : state.addresses?.[0] || `http://127.0.0.1:${state.port}`;
-  const pairingUrl = buildPairingUrl(state, primaryAddress);
-  let qrBlock = "";
-  if (pairingUrl) {
-    const matrix = encodeQrMatrix(pairingUrl);
-    const cols = Number(width);
-    const available = Number.isFinite(cols) && cols > 0 ? Math.floor(cols) - 2 : Infinity;
-    if (available >= matrix.length + 4) {
-      qrBlock = renderTerminalQr(matrix, { margin: 2 });
-    } else if (available >= matrix.length + 2) {
-      qrBlock = renderTerminalQr(matrix, { margin: 1 });
-    } else if (available >= matrix.length) {
-      qrBlock = renderTerminalQr(matrix, { margin: 0 });
-    }
-  }
-  const scopeLabel = state.scope === "lan" ? "Local network" : "This computer";
-  const clientLabel = `${state.clients} connected ${state.clients === 1 ? "device" : "devices"}`;
-  const alternates = (state.addresses || []).filter((addr) => addr !== primaryAddress);
-  return {
-    primaryAddress,
-    pairingUrl,
-    qrBlock,
-    scopeLabel,
-    clientLabel,
-    alternates,
-    accessCode: state.accessCode || "",
-    notice,
-  };
-}
-
+// /remote shows one of two views: Off picks the network scope to turn on
+// with; On shows how to connect. Esc closes either view.
 export function createRemoteMenuState({
   initialState = STOPPED_STATE,
   initialScope = "lan",
   initialAddress = "",
-  onToggle = async () => initialState,
-  onScopeChange = async () => initialState,
+  onStart,
+  onStop,
+  onRotate,
   onAddressChange = () => {},
-  onRotate = async () => initialState,
-} = {}) {
-  let state = { ...STOPPED_STATE, ...(initialState && typeof initialState === "object" ? initialState : {}) };
-  let preferredScope = state.running
-    ? state.scope === "loopback" ? "loopback" : "lan"
-    : initialScope === "loopback" ? "loopback" : "lan";
-  let selectedAddress = initialAddress || state.addresses?.[0] || "";
-  let level = "root";
-  let rootIndex = 0;
-  let subIndex = 0;
+}) {
+  let state = { ...STOPPED_STATE, ...initialState };
+  let scopeIndex = scopeIndexOf(state.running ? state.scope : initialScope);
+  let selectedAddress = initialAddress;
+  let notice = "";
   let busy = false;
-  let qrNotice = "";
 
-  function syncState(next, notice) {
-    if (next && typeof next === "object") {
-      state = { ...STOPPED_STATE, ...next };
-      if (state.running) {
-        preferredScope = state.scope === "loopback" ? "loopback" : "lan";
-        if (!selectedAddress || !state.addresses?.includes(selectedAddress)) {
-          selectedAddress = state.addresses?.[0] || "";
-        }
-      } else {
-        selectedAddress = "";
-        if (level === "qr" || level === "address") {
-          level = "root";
-        }
-      }
-    }
-    if (notice !== undefined) {
-      qrNotice = notice;
-    }
-    const maxRoot = Math.max(0, rootItems().length - 1);
-    if (rootIndex > maxRoot) rootIndex = maxRoot;
-  }
+  // A phone can never reach a loopback address, so only other addresses are offered for pairing.
+  const reachableAddresses = () => state.addresses.filter((address) => !LOOPBACK_ADDRESS.test(address));
 
   function activeAddress() {
-    if (!state.running) return "";
-    return selectedAddress && state.addresses?.includes(selectedAddress)
-      ? selectedAddress
-      : state.addresses?.[0] || `http://127.0.0.1:${state.port}`;
+    const reachable = reachableAddresses();
+    if (!reachable.length) return state.addresses[0] || "";
+    return reachable.includes(selectedAddress) ? selectedAddress : reachable[0];
   }
 
-  function scopeLabel(scope = state.running ? state.scope : preferredScope) {
-    return scope === "loopback" ? "This computer" : "Local network";
+  function connection() {
+    if (!state.running) return null;
+    const reachable = reachableAddresses();
+    const address = activeAddress();
+    return {
+      scopeLabel: REMOTE_SCOPES[scopeIndexOf(state.scope)].label,
+      clients: state.clients,
+      reachable: reachable.length > 0,
+      addressIndex: reachable.indexOf(address),
+      addressCount: reachable.length,
+      link: address && state.accessCode ? `${address}/#connect=${encodeURIComponent(state.accessCode)}` : "",
+      accessCode: state.accessCode,
+      notice,
+    };
   }
 
-  function rootItems() {
-    const running = Boolean(state.running);
-    const clientLabel = `${state.clients} connected ${state.clients === 1 ? "device" : "devices"}`;
-    const items = [
-      {
-        id: "toggle",
-        label: "Remote access",
-        value: running ? `On · ${clientLabel}` : "Off",
-        description: running
-          ? "Press space or enter to turn off remote access"
-          : `Press space or enter to turn on (${scopeLabel(preferredScope)})`,
-      },
-    ];
-    if (running) {
-      items.push({
-        id: "qr",
-        label: "QR code & sign-in link",
-        value: `${activeAddress()} ›`,
-        description: "Display pairing QR code and connection details (Esc to close)",
-      });
+  async function apply(action) {
+    busy = true;
+    try {
+      state = { ...STOPPED_STATE, ...(await action()) };
+    } finally {
+      busy = false;
     }
-    items.push({
-      id: "scope",
-      label: "Network scope",
-      value: `${scopeLabel()} ›`,
-      description:
-        (running ? state.scope : preferredScope) === "loopback"
-          ? "127.0.0.1 only on this computer"
-          : "Wi-Fi / LAN devices and this computer",
-    });
-    if (running && Array.isArray(state.addresses) && state.addresses.length > 1) {
-      items.push({
-        id: "address",
-        label: "Address",
-        value: `${activeAddress()} ›`,
-        description: "Choose the address encoded in the QR code",
-      });
-    }
-    if (running) {
-      items.push({
-        id: "rotate",
-        label: "Rotate access code",
-        value: "rotate ›",
-        description: "Generate a new code and disconnect connected devices",
-      });
-    }
-    return items;
-  }
-
-  function scopeItems() {
-    const current = state.running ? state.scope : preferredScope;
-    return [
-      {
-        name: "lan",
-        label: "Local network",
-        description: "Share on Wi-Fi / LAN and this computer",
-        current: current === "lan",
-      },
-      {
-        name: "loopback",
-        label: "This computer",
-        description: "Restrict access to 127.0.0.1 only",
-        current: current === "loopback",
-      },
-    ];
-  }
-
-  function addressItems() {
-    const current = activeAddress();
-    return (state.addresses || []).map((addr) => ({
-      name: addr,
-      label: addr,
-      description: addr.startsWith("http://127.0.0.1") ? "Loopback interface" : "LAN interface",
-      current: addr === current,
-    }));
   }
 
   async function handleKey(key) {
     if (busy) return null;
-    const rawKey = String(key?.name || key?.text || "").toLowerCase();
-
-    if (level === "qr") {
-      if (
-        key?.name === "escape" ||
-        key?.name === "left" ||
-        key?.name === "backspace" ||
-        key?.name === "enter" ||
-        key?.name === "return"
-      ) {
-        qrNotice = "";
-        level = "root";
-        const idx = rootItems().findIndex((item) => item.id === "qr");
-        if (idx >= 0) rootIndex = idx;
+    const name = key?.name;
+    if (name === "escape") return "close";
+    if (!state.running) {
+      if (name === "up" || name === "down") {
+        scopeIndex = (scopeIndex + 1) % REMOTE_SCOPES.length;
         return "redraw";
       }
-      if (rawKey === "r") {
-        busy = true;
-        try {
-          const next = await onRotate();
-          syncState(next, "Access code rotated. Previous devices were disconnected.");
-        } finally {
-          busy = false;
-        }
+      if (name === "enter" || name === "return" || key?.text === " ") {
+        notice = "";
+        await apply(() => onStart(REMOTE_SCOPES[scopeIndex].name));
         return "redraw";
       }
       return null;
     }
-
-    if (level === "scope") {
-      const items = scopeItems();
-      if (key?.name === "up") {
-        subIndex = (subIndex - 1 + items.length) % items.length;
-        return "redraw";
-      }
-      if (key?.name === "down") {
-        subIndex = (subIndex + 1) % items.length;
-        return "redraw";
-      }
-      if (key?.name === "escape" || key?.name === "left" || key?.name === "backspace") {
-        level = "root";
-        const idx = rootItems().findIndex((item) => item.id === "scope");
-        if (idx >= 0) rootIndex = idx;
-        return "redraw";
-      }
-      if (key?.name === "enter" || key?.name === "return" || key?.text === " ") {
-        const picked = items[subIndex]?.name || "lan";
-        preferredScope = picked;
-        busy = true;
-        try {
-          const next = await onScopeChange(picked);
-          syncState(next);
-          level = "root";
-          const idx = rootItems().findIndex((item) => item.id === "scope");
-          if (idx >= 0) rootIndex = idx;
-        } finally {
-          busy = false;
-        }
-        return "redraw";
-      }
-      return null;
-    }
-
-    if (level === "address") {
-      const items = addressItems();
-      if (!items.length) {
-        level = "root";
-        return "redraw";
-      }
-      if (key?.name === "up") {
-        subIndex = (subIndex - 1 + items.length) % items.length;
-        return "redraw";
-      }
-      if (key?.name === "down") {
-        subIndex = (subIndex + 1) % items.length;
-        return "redraw";
-      }
-      if (key?.name === "escape" || key?.name === "left" || key?.name === "backspace") {
-        level = "root";
-        const idx = rootItems().findIndex((item) => item.id === "address");
-        if (idx >= 0) rootIndex = idx;
-        return "redraw";
-      }
-      if (key?.name === "enter" || key?.name === "return" || key?.text === " ") {
-        const picked = items[subIndex]?.name || "";
-        if (picked) {
-          selectedAddress = picked;
-          onAddressChange(picked);
-        }
-        level = "qr";
-        return "redraw";
-      }
-      return null;
-    }
-
-    const items = rootItems();
-    const count = items.length;
-    if (!count) return "close";
-    if (key?.name === "up") {
-      rootIndex = (rootIndex - 1 + count) % count;
+    const reachable = reachableAddresses();
+    if ((name === "left" || name === "right") && reachable.length > 1) {
+      const step = name === "left" ? -1 : 1;
+      selectedAddress = reachable[(reachable.indexOf(activeAddress()) + step + reachable.length) % reachable.length];
+      onAddressChange(selectedAddress);
       return "redraw";
     }
-    if (key?.name === "down") {
-      rootIndex = (rootIndex + 1) % count;
+    const letter = String(key?.text || key?.name || "").toLowerCase();
+    if (letter === "r") {
+      await apply(onRotate);
+      notice = "New access code. Previous devices were disconnected.";
       return "redraw";
     }
-    if (key?.name === "escape") {
-      return "close";
-    }
-    if (key?.name === "enter" || key?.name === "return" || key?.text === " " || key?.name === "right") {
-      const target = items[rootIndex]?.id;
-      if (target === "toggle") {
-        if (key?.name === "right") return null;
-        busy = true;
-        try {
-          const nextRunning = !state.running;
-          const next = await onToggle(nextRunning, preferredScope);
-          syncState(next);
-        } finally {
-          busy = false;
-        }
-        return "redraw";
-      }
-      if (target === "qr") {
-        qrNotice = "";
-        level = "qr";
-        return "redraw";
-      }
-      if (target === "scope") {
-        const sItems = scopeItems();
-        subIndex = Math.max(0, sItems.findIndex((item) => item.current));
-        level = "scope";
-        return "redraw";
-      }
-      if (target === "address") {
-        const aItems = addressItems();
-        subIndex = Math.max(0, aItems.findIndex((item) => item.current));
-        level = "address";
-        return "redraw";
-      }
-      if (target === "rotate") {
-        if (key?.name === "right") return null;
-        busy = true;
-        try {
-          const next = await onRotate();
-          syncState(next, "Access code rotated. Previous devices were disconnected.");
-          level = "qr";
-        } finally {
-          busy = false;
-        }
-        return "redraw";
-      }
+    if (letter === "x") {
+      scopeIndex = scopeIndexOf(state.scope);
+      notice = "";
+      await apply(onStop);
+      return "redraw";
     }
     return null;
   }
 
   return {
-    level: () => level,
-    items: () => {
-      if (level === "scope") return scopeItems();
-      if (level === "address") return addressItems();
-      return rootItems();
-    },
-    selectedIndex: () => {
-      if (level === "scope" || level === "address") return subIndex;
-      return rootIndex;
-    },
-    qrView: (width) => buildQrView(state, selectedAddress, qrNotice, width),
     state: () => state,
-    selectedAddress: () => selectedAddress,
-    updateState: (next) => syncState(next),
+    scopes: () => REMOTE_SCOPES,
+    scopeIndex: () => scopeIndex,
+    connection,
+    updateState: (next) => {
+      state = { ...STOPPED_STATE, ...next };
+    },
     handleKey,
   };
 }
@@ -389,7 +132,7 @@ export function createCliRemoteController({
   rawClient,
   sessionState,
   redraw = () => {},
-  askRemoteMenu = null,
+  askRemoteMenu,
   onSessionRestored = () => {},
   cwd = process.cwd(),
   getInitInfo = () => null,
@@ -421,7 +164,7 @@ export function createCliRemoteController({
     cachedState = state && typeof state === "object" ? { ...STOPPED_STATE, ...state } : { ...STOPPED_STATE };
     const running = Boolean(cachedState.running);
     if (running) {
-      preferredScope = cachedState.scope === "loopback" ? "loopback" : "lan";
+      preferredScope = cachedState.scope;
     }
     if (sessionState?.info && Boolean(sessionState.info.remote_running) !== running) {
       sessionState.info = { ...sessionState.info, remote_running: running };
@@ -569,62 +312,30 @@ export function createCliRemoteController({
     }
   }
 
-  async function startRemote(scope) {
-    const next = await requestRemote("remote/start", {
-      scope,
-      ...(webRoot ? { webRoot: resolveWebRoot(webRoot) } : {}),
-      workspace_root: currentWorkspace(),
-    });
-    if (!selectedAddress || !next.addresses.includes(selectedAddress)) {
-      selectedAddress = next.addresses[0] || "";
-    }
-    return next;
-  }
-
   async function handleCommand() {
     await registerSharedWorkspace(rindHome, currentWorkspace(), { setActive: true }).catch(() => {});
-    let current = await requestRemote("remote/get");
-    if (typeof askRemoteMenu !== "function") return current;
-
     const menuState = createRemoteMenuState({
-      initialState: current,
+      initialState: await requestRemote("remote/get"),
       initialScope: preferredScope,
       initialAddress: selectedAddress,
-      onToggle: async (enable, scope) => {
-        if (enable) {
-          preferredScope = scope === "loopback" ? "loopback" : "lan";
-          current = await startRemote(preferredScope);
-          return current;
-        }
-        current = await requestRemote("remote/stop");
-        selectedAddress = "";
-        return current;
-      },
-      onScopeChange: async (nextScope) => {
-        preferredScope = nextScope === "loopback" ? "loopback" : "lan";
-        if (current.running && current.scope !== preferredScope) {
-          selectedAddress = "";
-          current = await startRemote(preferredScope);
-        }
-        return current;
-      },
-      onAddressChange: (addr) => {
-        selectedAddress = addr;
-      },
-      onRotate: async () => {
-        current = await requestRemote("remote/rotate");
-        return current;
+      onStart: (scope) => requestRemote("remote/start", {
+        scope,
+        ...(webRoot ? { webRoot: resolveWebRoot(webRoot) } : {}),
+        workspace_root: currentWorkspace(),
+      }),
+      onStop: () => requestRemote("remote/stop"),
+      onRotate: () => requestRemote("remote/rotate"),
+      onAddressChange: (address) => {
+        selectedAddress = address;
       },
     });
     activeMenuState = menuState;
     try {
       await askRemoteMenu(menuState);
     } finally {
-      if (activeMenuState === menuState) {
-        activeMenuState = null;
-      }
+      activeMenuState = null;
     }
-    return current;
+    return cachedState;
   }
 
   async function stop() {
