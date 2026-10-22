@@ -1,6 +1,6 @@
 import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells, wrapTextWithAnsi } from "./text-width.js";
 import { formatDuration } from "./tool-display.js";
-import { DEFAULT_THEME, paint, paintRaw, flavorSwatch, themeNames, breathingAccent } from "./theme.js";
+import { DEFAULT_THEME, colorEnabled, paint, paintRaw, flavorSwatch, themeNames, breathingAccent } from "./theme.js";
 import { DEFAULT_SPINNER, isBriefMode, spinnerFrame, spinnerNames } from "./cli-state-store.js";
 import { homedir } from "node:os";
 
@@ -601,21 +601,40 @@ export function slashDisplayText(display, commands = []) {
       return slashThemeText(display);
     case "spinner":
       return slashSpinnerText(display);
-    case "brief":
-      return commandResultText(
-        display.enabled ? "Brief output enabled." : "Brief output disabled.",
-        "applies globally across live turns and replayed sessions",
-      );
     default:
       return "";
   }
+}
+
+export function slashResultNotice(result) {
+  if (!result || typeof result !== "object") {
+    return null;
+  }
+  if (result.display && typeof result.display === "object" && result.display.type === "brief") {
+    const label = result.display.enabled ? "Brief output enabled" : "Brief output disabled";
+    return {
+      text: `${label} · applies globally across live turns and replayed sessions`,
+      level: "info",
+    };
+  }
+  if (slashDisplayText(result.display)) {
+    return null;
+  }
+  const text = String(result.text || "").trim();
+  if (!text) {
+    return null;
+  }
+  return {
+    text: String(result.text || ""),
+    level: result.level || "info",
+  };
 }
 
 export function slashResultText(result, commands = []) {
   if (!result || typeof result !== "object") {
     return "";
   }
-  return slashDisplayText(result.display, commands) || String(result.text || "");
+  return slashDisplayText(result.display, commands) || slashResultNotice(result)?.text || "";
 }
 
 export function answerPromptText() {
@@ -1272,11 +1291,100 @@ export function commandResultText(text, detail = "") {
   return `${green("✓")} ${bold(clipSingleLine(text, 96))}${extra ? dim(` — ${extra}`) : ""}`;
 }
 
-export function systemNoticeLine(text, { level = "info", color = Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined } = {}) {
-  const prefix = "· System:";
-  if (!color) return `  ${prefix} ${text}`;
-  if (level !== "warning") return `  ${paintRaw.dim(`${prefix} ${text}`)}`;
-  return `  ${paintRaw.warning(prefix)} ${paintRaw.dim(text)}`;
+const SYSTEM_NOTICE_PREFIX = "· System:";
+const SYSTEM_NOTICE_HEAD_WIDTH = 12;
+const SYSTEM_NOTICE_INDENT = " ".repeat(SYSTEM_NOTICE_HEAD_WIDTH);
+const SYSTEM_NOTICE_NARROW_INDENT = "    ";
+
+export function systemNoticeLines(text, { level = "info", width, color = colorEnabled() } = {}) {
+  const normalized = String(text ?? "").replace(/\r\n?/g, "\n").trimEnd();
+  if (!normalized.trim()) {
+    return [];
+  }
+  const formatFirstLine = (chunk) => {
+    if (!color) {
+      return chunk ? `  ${SYSTEM_NOTICE_PREFIX} ${chunk}` : `  ${SYSTEM_NOTICE_PREFIX}`;
+    }
+    if (level === "warning") {
+      return chunk
+        ? `  ${paintRaw.warning(SYSTEM_NOTICE_PREFIX)} ${paintRaw.dim(chunk)}`
+        : `  ${paintRaw.warning(SYSTEM_NOTICE_PREFIX)}`;
+    }
+    if (level === "error") {
+      return chunk
+        ? `  ${paintRaw.danger(SYSTEM_NOTICE_PREFIX)} ${chunk}`
+        : `  ${paintRaw.danger(SYSTEM_NOTICE_PREFIX)}`;
+    }
+    return `  ${paintRaw.dim(chunk ? `${SYSTEM_NOTICE_PREFIX} ${chunk}` : SYSTEM_NOTICE_PREFIX)}`;
+  };
+  const formatContinuationLine = (chunk, indent) => {
+    if (!chunk) {
+      return "";
+    }
+    if (!color || level === "error") {
+      return `${indent}${chunk}`;
+    }
+    return `${indent}${paintRaw.dim(chunk)}`;
+  };
+
+  const logicalLines = normalized.split("\n");
+  if (width === undefined) {
+    return logicalLines.map((line, index) => (
+      index === 0 ? formatFirstLine(line) : formatContinuationLine(line, SYSTEM_NOTICE_INDENT)
+    ));
+  }
+
+  const columns = Math.max(1, Math.floor(Number(width) || 0));
+  if (columns < SYSTEM_NOTICE_HEAD_WIDTH + 1) {
+    const raw = `  ${SYSTEM_NOTICE_PREFIX} ${logicalLines.join(" ")}`;
+    return wrapTextCells(raw, columns, columns).map(({ text: chunk }) => {
+      if (!color || !chunk) return chunk;
+      if (level === "warning") return paintRaw.warning(chunk);
+      if (level === "error") return paintRaw.danger(chunk);
+      return paintRaw.dim(chunk);
+    });
+  }
+
+  const contIndent = columns - SYSTEM_NOTICE_HEAD_WIDTH < 16
+    ? SYSTEM_NOTICE_NARROW_INDENT
+    : SYSTEM_NOTICE_INDENT;
+  const firstBodyWidth = Math.max(1, columns - SYSTEM_NOTICE_HEAD_WIDTH);
+  const contBodyWidth = Math.max(1, columns - contIndent.length);
+  const lines = [];
+  for (const [index, logicalLine] of logicalLines.entries()) {
+    if (index === 0) {
+      if (!logicalLine) {
+        lines.push(formatFirstLine(""));
+        continue;
+      }
+      const firstCharWidth = textWidth(graphemes(logicalLine)[0] || "");
+      if (firstCharWidth > firstBodyWidth) {
+        lines.push(formatFirstLine(""));
+        for (const chunk of wrapTextCells(logicalLine, contBodyWidth, contBodyWidth)) {
+          lines.push(formatContinuationLine(chunk.text, contIndent));
+        }
+        continue;
+      }
+      const chunks = wrapTextCells(logicalLine, firstBodyWidth, contBodyWidth);
+      lines.push(formatFirstLine(chunks[0].text));
+      for (const chunk of chunks.slice(1)) {
+        lines.push(formatContinuationLine(chunk.text, contIndent));
+      }
+      continue;
+    }
+    if (!logicalLine) {
+      lines.push("");
+      continue;
+    }
+    for (const chunk of wrapTextCells(logicalLine, contBodyWidth, contBodyWidth)) {
+      lines.push(formatContinuationLine(chunk.text, contIndent));
+    }
+  }
+  return lines;
+}
+
+export function systemNoticeLine(text, options = {}) {
+  return systemNoticeLines(text, options).join("\n");
 }
 
 export function contextBuiltLine(event) {

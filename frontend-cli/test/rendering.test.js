@@ -15,6 +15,7 @@ import {
   commandResultText,
   contextBuiltLine,
   systemNoticeLine,
+  systemNoticeLines,
   errorLine,
   goalCommandText,
   goalText,
@@ -38,6 +39,7 @@ import {
   choiceMenuText,
   slashDisplayText,
   slashMenuText,
+  slashResultNotice,
   slashResultText,
   startupText,
   welcomeText,
@@ -1447,16 +1449,107 @@ test("AssistantRenderer keeps markdown structure markers dim", () => {
 });
 
 
-test("system notices use two-space indentation and theme warning only on the prefix", () => {
+test("system notices use two-space indentation and theme warning/danger only on the prefix", () => {
+  assert.equal(systemNoticeLine("notice", { color: false, level: "info" }), "  · System: notice");
   assert.equal(systemNoticeLine("notice", { color: false, level: "warning" }), "  · System: notice");
+  assert.equal(systemNoticeLine("notice", { color: false, level: "error" }), "  · System: notice");
   assert.equal(systemNoticeLine("notice", { color: true }), `  ${paintRaw.dim("· System: notice")}`);
+  assert.equal(
+    systemNoticeLine("failed", { color: true, level: "error" }),
+    `  ${paintRaw.danger("· System:")} failed`,
+  );
   try {
     for (const theme of ["dracula", "catppuccin-mocha"]) {
       setTheme(theme);
       assert.equal(systemNoticeLine("notice", { color: true, level: "warning" }),
         `  ${paintRaw.warning("· System:")} ${paintRaw.dim("notice")}`);
+      assert.equal(systemNoticeLine("failed\ndetail", { color: true, level: "error" }),
+        `  ${paintRaw.danger("· System:")} failed\n            detail`);
     }
   } finally { resetTheme(); }
+});
+
+test("systemNoticeLines handles empty input, CRLF normalization, and 12-space hanging indent", () => {
+  assert.deepEqual(systemNoticeLines(""), []);
+  assert.deepEqual(systemNoticeLines("   \r\n  "), []);
+  assert.deepEqual(
+    systemNoticeLines("line one\r\nline two\nline three   ", { color: false }),
+    [
+      "  · System: line one",
+      "            line two",
+      "            line three",
+    ],
+  );
+  const colored = systemNoticeLines("line one\nline two", { color: true, level: "warning" });
+  assert.deepEqual(colored, [
+    `  ${paintRaw.warning("· System:")} ${paintRaw.dim("line one")}`,
+    `            ${paintRaw.dim("line two")}`,
+  ]);
+});
+
+test("systemNoticeLines wraps English and CJK text within width and degrades indent on narrow terminals", () => {
+  const english = "Cannot fork while a turn is running. Wait for it to finish or stop it first.";
+  const wrapped60 = systemNoticeLines(english, { width: 60, color: false });
+  assert.ok(wrapped60.length >= 2);
+  assert.ok(wrapped60[0].startsWith("  · System: "));
+  assert.ok(wrapped60[1].startsWith("            "));
+  assert.ok(wrapped60.every((line) => textWidth(line) <= 60));
+
+  const cjk = "未发送的图片：当前模型不支持图像输入，已忽略剪贴板中的图片内容。";
+  const wrappedCjk = systemNoticeLines(cjk, { width: 36, color: true, level: "warning" });
+  assert.ok(wrappedCjk.length >= 2);
+  assert.ok(stripAnsi(wrappedCjk[0]).startsWith("  · System: "));
+  assert.ok(stripAnsi(wrappedCjk[1]).startsWith("            "));
+  assert.ok(wrappedCjk.every((line) => textWidth(line) <= 36));
+
+  for (const width of [20, 13, 4]) {
+    const narrowEn = systemNoticeLines("Model updated: glm-5.1", { width, color: false });
+    assert.ok(narrowEn.length >= 2);
+    assert.ok(narrowEn.every((line) => textWidth(line) <= width), `English lines fit width=${width}`);
+    if (width >= 13) {
+      assert.ok(narrowEn[0].startsWith("  · System: "));
+      assert.ok(narrowEn[0].length >= 13);
+      assert.ok(narrowEn[1].startsWith("    "));
+      assert.ok(!narrowEn[1].startsWith("     "));
+    }
+
+    const narrowCjk = systemNoticeLines("未发送的图片提示", { width, color: true, level: "error" });
+    assert.ok(narrowCjk.every((line) => textWidth(line) <= width), `CJK lines fit width=${width}`);
+  }
+});
+
+test("slashResultNotice converts brief display and plain text results while ignoring structured displays", () => {
+  assert.deepEqual(
+    slashResultNotice({ display: { type: "brief", enabled: true } }),
+    {
+      text: "Brief output enabled · applies globally across live turns and replayed sessions",
+      level: "info",
+    },
+  );
+  assert.deepEqual(
+    slashResultNotice({ display: { type: "brief", enabled: false } }),
+    {
+      text: "Brief output disabled · applies globally across live turns and replayed sessions",
+      level: "info",
+    },
+  );
+  assert.deepEqual(
+    slashResultNotice({ text: "Usage: /theme [name]", level: "warning" }),
+    { text: "Usage: /theme [name]", level: "warning" },
+  );
+  assert.deepEqual(
+    slashResultNotice({ text: "Model updated: m1" }),
+    { text: "Model updated: m1", level: "info" },
+  );
+  assert.equal(
+    slashResultNotice({
+      text: "Status summary",
+      display: { type: "status", entries: [{ label: "model", value: "m1" }], usage: [] },
+    }),
+    null,
+  );
+  assert.equal(slashResultNotice({ text: "   " }), null);
+  assert.equal(slashResultNotice(null), null);
 });
 
 test("the unmatched slash note names the way back", async () => {
