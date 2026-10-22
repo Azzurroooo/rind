@@ -272,6 +272,7 @@ const {
   clearActivityTimer,
   mainPromptText,
   log: logOutput,
+  notify: notifyOutput,
   writeError: writeErrorOutput,
   closeAssistant,
   settleTools,
@@ -377,6 +378,7 @@ const runtimeController = createCliRuntimeController({
   refreshInputState,
   updateGoalState,
   log: logOutput,
+  notify: notifyOutput,
   writeError: writeErrorOutput,
   redraw: redrawInput,
 });
@@ -458,6 +460,7 @@ commandController = createCommandController({
   },
   output: {
     log: logOutput,
+    notify: notifyOutput,
     setInputPrefill: (value) => {
       inputStateData.prefill = String(value || "");
     },
@@ -488,6 +491,7 @@ taskMonitorController = createTaskMonitorController({
   },
   redraw: redrawInput,
   log: logOutput,
+  notify: notifyOutput,
 });
 const eventController = createEventController({
   state: {
@@ -518,6 +522,7 @@ const eventController = createEventController({
     closeAssistant,
     settleTools,
     log: logOutput,
+    notify: notifyOutput,
     debug: (text) => writeErrorOutput(`${text}\n`),
     updateGoal: updateGoalState,
     setStats: (stats) => {

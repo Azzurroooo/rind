@@ -6,6 +6,8 @@ import {
   outputBlockText,
   promptText,
   startupText,
+  systemNoticeLine,
+  systemNoticeLines,
   toolRequestedLine,
   toolResultLine,
   toolStartedLine,
@@ -226,6 +228,31 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     }
     const leading = blockCount > 0;
     appendBlock(lazyLines(build, leading));
+  }
+
+  // System notices: one style, three levels; content blocks keep their own renderers.
+  function notify(text, { level = "info" } = {}) {
+    const value = String(text ?? "").trim();
+    if (!value) {
+      return;
+    }
+    settleToolGroup();
+    const tuiActive = terminalUi && !(level === "error" && (!terminalUi.started || state.runtime.status === "closing"));
+    if (!tuiActive) {
+      const rendered = systemNoticeLine(value, { level, color: hasColor() });
+      if (level === "error") {
+        process.stderr.write(`${rendered}\n`);
+        return;
+      }
+      process.stdout.write(outputBlockText(rendered, state.display.outputStarted));
+      state.display.outputStarted = true;
+      return;
+    }
+    const leading = blockCount > 0;
+    appendBlock(new DynamicBlock((width) => {
+      const lines = systemNoticeLines(value, { level, width, color: hasColor() });
+      return leading ? ["", ...lines] : lines;
+    }));
   }
 
   function writeOutput(text) {
@@ -605,6 +632,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     setBackgroundWait,
     mainPromptText,
     log,
+    notify,
     writeUserInput,
     writeDelivery,
     writeError,
