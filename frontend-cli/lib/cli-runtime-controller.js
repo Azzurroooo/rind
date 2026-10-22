@@ -712,12 +712,12 @@ export function createCliRuntimeController({
   async function applyReasoningEffort(effort, scope = "session") {
     if (!hasConversation()) {
       state.session.info = { ...state.session.info, reasoning_effort: effort };
-      notify(`Reasoning effort: ${effort}`);
+      notify(`Reasoning effort updated · session effort: ${effort}`);
     } else {
       try {
         const update = await request(methods.modelEffortSet, { reasoning_effort: effort });
         state.session.info = { ...state.session.info, reasoning_effort: effort };
-        notify(`Reasoning effort: ${effort} · ${appliesNote(update)}`);
+        notify(`Reasoning effort updated · session effort: ${effort} · ${appliesNote(update)}`);
       } catch (error) {
         notify(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
         return;
