@@ -7,11 +7,13 @@ test("status uses the current entries/usage protocol and includes cached input",
   const html = renderCommandResult({
     command: "/status", content: "fallback",
     display: { type: "status",
-      entries: [{ label: "session", value: "s1" }, { label: "settings", value: "<settings>", state: "found" }, { label: "reasoningEffort", value: "high" }],
+      entries: [{ label: "session", value: "s1" }, { label: "settings", value: "<settings>", note: "not created" }, { label: "effort", value: "high" },
+        { label: "auth", value: "not signed in", note: "/login", tone: "warning" }],
       usage: [{ input_tokens: 12000, context_window_tokens: 100000, context_usage_percent: 0.12, cached_input_tokens: 9000, cache_hit_rate: 0.75, output_tokens: 345 }],
     },
   })
-  for (const text of ["s1", "&lt;settings&gt;", "found", "Reasoning effort", "high", "Cached input", "75.0% hit", "12.0%", "345"]) assert.ok(html.includes(text), text)
+  for (const text of ["s1", "&lt;settings&gt;", "not created", "Reasoning effort", "high", "Sign-in", "Cached input", "75.0% hit", "12.0%", "345"]) assert.ok(html.includes(text), text)
+  assert.match(html, /<div class="status-warning"><dt>Sign-in<\/dt><dd>not signed in <small>\/login<\/small>/)
   assert.ok(html.includes((9000).toLocaleString()))
   assert.match(html, /<meter[^>]*value="0.12"/)
   const empty = renderCommandResult({ command: "/status", content: "", display: { type: "status", entries: [], usage: [] } })

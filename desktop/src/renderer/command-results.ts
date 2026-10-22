@@ -110,12 +110,13 @@ function renderSkillsDisplay(display: Record<string, unknown>) {
 }
 
 function renderStatusDisplay(display: Record<string, unknown>) {
-  const labels: Record<string, string> = { session: "Session", name: "Name", settings: "Settings", connection: "Connection", endpoint: "Endpoint", key: "Key", model: "Model", reasoningEffort: "Reasoning effort", runtime: "Runtime", workspace: "Workspace" }
+  const labels: Record<string, string> = { session: "Session", name: "Name", settings: "Settings", provider: "Provider", auth: "Sign-in", endpoint: "Endpoint", model: "Model", effort: "Reasoning effort", runtime: "Runtime", workspace: "Workspace" }
   const entries = recordList(display.entries)
   const config = entries.map((entry) => {
     const label = displayText(entry.label)
     if (!label) return ""
-    return `<div><dt>${escapeHtml(labels[label] || label)}</dt><dd>${escapeHtml(displayText(entry.value) || "—")}${entry.state ? ` <small>${escapeHtml(displayText(entry.state))}</small>` : ""}</dd></div>`
+    const warning = entry.tone === "warning" ? ' class="status-warning"' : ""
+    return `<div${warning}><dt>${escapeHtml(labels[label] || label)}</dt><dd>${escapeHtml(displayText(entry.value) || "—")}${entry.note ? ` <small>${escapeHtml(displayText(entry.note))}</small>` : ""}</dd></div>`
   }).join("")
   const usage = recordList(display.usage).map((item) => {
     const limit = Number(item.context_window_tokens)

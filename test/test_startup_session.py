@@ -285,12 +285,13 @@ async def test_status_before_the_first_message_reports_what_the_window_chose(wor
         await request("initialize")
         draft = {"name": "Spike", "provider": "longcat", "model": "longcat-flash", "reasoning_effort": "low"}
         result = await request("rind/command/execute", input="/status", draft=draft)
-        entries = {entry["label"]: entry["value"] for entry in result["display"]["entries"]}
+        entries = {entry["label"]: " · ".join(filter(None, (entry["value"], entry.get("note")))) for entry in result["display"]["entries"]}
         assert entries["name"] == "Spike · applies when the conversation starts"
         assert entries["model"] == "longcat-flash · this conversation", "the window chose it, not a default"
-        assert entries["connection"] == "longcat · LongCat", "built-in connections are named even before a login"
+        assert entries["provider"] == "LongCat · built-in", "built-in connections are named even before a login"
+        assert entries["auth"] == "not signed in · /login", "and say they still need a sign-in"
         # A draft that is not a mapping is ignored rather than trusted.
         plain = await request("rind/command/execute", input="/status", draft="nonsense")
-        assert {entry["label"]: entry["value"] for entry in plain["display"]["entries"]}["name"] == "unset · shown by its first message"
+        assert {entry["label"]: (entry["value"], entry.get("note")) for entry in plain["display"]["entries"]}["name"] == ("unset", "shown by its first message")
     finally:
         await worker.close()
