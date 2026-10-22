@@ -1538,24 +1538,90 @@ function slashHelpText(display, commands) {
   return lines.join("\n");
 }
 
+const STATUS_GROUPS = [["model", "Model"], ["provider", "Provider"], ["conversation", "Conversation"]];
+// Values that identify the setup are lit; paths read as paths.
+const STATUS_ACCENT_LABELS = new Set(["model", "effort", "provider", "session"]);
+const STATUS_LABEL_WIDTH = 12;
+const STATUS_VALUE_WIDTH = 28;
+
+// /status: what this conversation runs on (model, provider), the conversation
+// itself, and its context use. Entries carry their own group, note and tone;
+// anything to fix is drawn as a warning with the command that fixes it lit.
 function slashStatusText(display) {
-  const lines = [slashConfigText({ entries: display.entries })];
-  lines.push("", sectionRule("Assistant sampling"));
-  const usage = Array.isArray(display.usage) ? display.usage[0] : null;
-  if (!usage) {
-    lines.push(dim("  no completed sampling yet"));
-    return lines.join("\n");
+  const entries = (Array.isArray(display.entries) ? display.entries : []).filter((entry) => entry && typeof entry === "object" && entry.label);
+  const known = new Set(STATUS_GROUPS.map(([group]) => group));
+  const sections = STATUS_GROUPS
+    .map(([group, title]) => [title, entries.filter((entry) => entry.group === group).map(statusEntryRow)])
+    .filter(([, rows]) => rows.length);
+  // Entries from a host that does not group them stay visible, untitled.
+  const ungrouped = entries.filter((entry) => !known.has(entry.group) && entry.group !== "settings").map(statusEntryRow);
+  if (ungrouped.length) sections.push(["", ungrouped]);
+  sections.push(["Context", statusUsageRows(Array.isArray(display.usage) ? display.usage[0] : null)]);
+
+  const allRows = sections.flatMap(([, rows]) => rows).filter((row) => row.note);
+  const valueWidth = Math.min(STATUS_VALUE_WIDTH, Math.max(0, ...allRows.map((row) => visibleLength(row.value))));
+  const lines = [sectionRule("Status", statusSelectionSummary(display.selection))];
+  for (const [title, rows] of sections) {
+    if (title) lines.push(`  ${bold(title)}`);
+    lines.push(...rows.map((row) => statusRowText(row, valueWidth)));
   }
-  const windowTokens = Number(usage.context_window_tokens) || 0;
-  if (windowTokens > 0) {
-    lines.push(kvRow("context", `${usageMeter(usage.context_usage_percent)} ${dim(formatPercent(usage.context_usage_percent))}`));
-    lines.push(kvRow("input", `${formatCount(usage.input_tokens)} ${dim(`/ ${formatCount(windowTokens)} tokens`)}`));
-  } else {
-    lines.push(kvRow("input", formatCount(usage.input_tokens)));
+  const footer = entries.filter((entry) => entry.group === "settings");
+  if (footer.length) {
+    lines.push("", ...footer.map((entry) => {
+      const value = entry.label === "settings" ? promptPath(middleClip(homeRelativePath(entry.value), slashContentWidth() - 12)) : singleLine(entry.value);
+      const note = entry.note ? dim(`  ${clipSingleLine(entry.note, 40)}`) : "";
+      return `  ${dim(entry.label)} ${entry.tone === "warning" ? paint.warning(stripAnsi(value)) : value}${note}`;
+    }));
   }
-  lines.push(kvRow("cached", `${formatCount(usage.cached_input_tokens)} ${dim(`· ${formatPercent(usage.cache_hit_rate)} hit`)}`));
-  lines.push(kvRow("output", formatCount(usage.output_tokens)));
   return lines.join("\n");
+}
+
+function statusSelectionSummary(selection) {
+  if (!selection || typeof selection !== "object" || !selection.model) return "";
+  const model = [selection.provider, selection.model].map(singleLine).filter(Boolean).join(" / ");
+  const effort = singleLine(selection.reasoning_effort);
+  return effort ? `${model} · ${effort}` : model;
+}
+
+// A row is { label, value, note } with value and note already painted.
+function statusEntryRow(entry) {
+  const label = singleLine(entry.label);
+  const warning = entry.tone === "warning";
+  const raw = label === "endpoint" ? singleLine(entry.value).replace(/^https?:\/\//i, "") : singleLine(entry.value);
+  const valueText = label === "endpoint" ? middleClip(raw, STATUS_VALUE_WIDTH + 12) : clipSingleLine(raw, STATUS_VALUE_WIDTH + 12);
+  const value = warning ? paint.warning(valueText)
+    : label === "endpoint" ? promptPath(valueText)
+      : STATUS_ACCENT_LABELS.has(label) ? accent(valueText) : valueText;
+  return { label, value, note: statusNoteText(entry) };
+}
+
+function statusNoteText(entry) {
+  const text = clipSingleLine(entry.note, Math.max(18, slashContentWidth() - STATUS_LABEL_WIDTH - STATUS_VALUE_WIDTH - 8));
+  if (!text) return "";
+  const tone = entry.tone === "warning" ? paint.warning : entry.note_tone === "accent" ? accent : dim;
+  const actions = (Array.isArray(entry.actions) ? entry.actions : []).map(singleLine).filter(Boolean);
+  if (!actions.length) return tone(text);
+  const pattern = new RegExp(`(${actions.map((action) => action.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`);
+  return text.split(pattern).map((part) => (actions.includes(part) ? accent(part) : part ? tone(part) : "")).join("");
+}
+
+function statusUsageRows(usage) {
+  if (!usage || typeof usage !== "object") return [{ label: "", value: dim("no completed sampling yet"), note: "" }];
+  const windowTokens = Number(usage.context_window_tokens) || 0;
+  const rows = windowTokens > 0
+    ? [{ label: "usage", value: `${usageMeter(usage.context_usage_percent)} ${formatPercent(usage.context_usage_percent)}`,
+      note: dim(`${formatCount(usage.input_tokens)} / ${formatCount(windowTokens)} tokens`) }]
+    : [{ label: "input", value: formatCount(usage.input_tokens), note: "" }];
+  rows.push(
+    { label: "cached", value: formatCount(usage.cached_input_tokens), note: dim(`${formatPercent(usage.cache_hit_rate)} hit`) },
+    { label: "output", value: formatCount(usage.output_tokens), note: "" },
+  );
+  return rows;
+}
+
+function statusRowText(row, valueWidth) {
+  const value = row.note ? `${padRight(row.value, valueWidth)}  ${row.note}` : row.value;
+  return (row.label ? `    ${dim(padRight(row.label, STATUS_LABEL_WIDTH))}${value}` : `    ${value}`).trimEnd();
 }
 
 function slashSessionsText(display) {
@@ -1668,17 +1734,17 @@ function skillRowText(skill, nameWidth, noteWidth) {
 // Paths read best compressed: collapse the home directory to "~" and drop the
 // redundant SKILL.md filename that every entry shares.
 function prettySkillLocation(value) {
-  let location = String(value || "").trim();
-  if (!location) {
-    return "";
-  }
-  location = location.replace(/[\\/]+SKILL\.md$/i, "");
+  return homeRelativePath(String(value || "").trim().replace(/[\\/]+SKILL\.md$/i, ""));
+}
+
+// "~" for the home directory itself or a path inside it (not a sibling that
+// merely shares its prefix, like /home/al for /home/alice).
+function homeRelativePath(value) {
+  const location = String(value || "").trim();
   const home = homedir();
-  if (home && (location === home || location.startsWith(home))) {
-    const rest = location.slice(home.length);
-    location = rest ? `~${rest}` : "~";
-  }
-  return location;
+  if (!location || !home) return location;
+  if (location === home) return "~";
+  return location.startsWith(home) && /^[\\/]/.test(location.slice(home.length)) ? `~${location.slice(home.length)}` : location;
 }
 
 function sessionSizeText(session) {
@@ -1693,21 +1759,6 @@ function sessionSizeText(session) {
 function optionalNonnegativeNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : null;
-}
-
-function slashConfigText(display) {
-  const entries = (Array.isArray(display.entries) ? display.entries : [])
-    .filter((entry) => entry && typeof entry === "object");
-  const lines = [sectionRule("Config")];
-  for (const entry of entries) {
-    const label = clipSingleLine(entry.label, 22);
-    const rawValue = entry.label === "settings"
-      ? middleClip(entry.value, Math.max(18, slashContentWidth() - visibleLength(label) - 6))
-      : clipSingleLine(entry.value, Math.max(18, slashContentWidth() - visibleLength(label) - 6));
-    const state = entry.state ? dim(`  (${clipSingleLine(entry.state, 18)})`) : "";
-    lines.push(`  ${dim(padRight(label, 18))}${rawValue}${state}`.trimEnd());
-  }
-  return lines.join("\n");
 }
 
 function slashThemeText(display) {

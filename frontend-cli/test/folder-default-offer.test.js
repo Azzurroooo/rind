@@ -140,7 +140,7 @@ test("before the first message, /model and /effort reflect the window's chosen m
   assert.deepEqual(seenEfforts, ["low", "high", "max"]);
 });
 
-test("real TTY CLI: /login custom provider writes providers.json + auth.json, and /model and /effort menus operate with single-line notices and zero user bubble echoes", { timeout: 60000 }, async (t) => {
+test("real TTY CLI: /login custom provider writes providers.json + auth.json, /model and /effort menus operate with single-line notices and zero user bubble echoes, and /status describes the provider", { timeout: 60000 }, async (t) => {
   const { mkdtemp, mkdir, readFile } = await import("node:fs/promises");
   const { spawn } = await import("node:child_process");
   const http = await import("node:http");
@@ -197,6 +197,14 @@ test("real TTY CLI: /login custom provider writes providers.json + auth.json, an
   }
 
   await visible("session new");
+
+  // 0. /status before any login: the built-in provider is named and the missing sign-in is a warning with its fix
+  child.stdin.write("/status\r");
+  const firstStatus = await visible("not signed in");
+  assert.match(firstStatus, /── Status · /);
+  assert.match(firstStatus, /Provider\n\s+provider\s+\S.*built-in/);
+  assert.match(firstStatus, /auth\s+not signed in\s+\/login/);
+  assert.doesNotMatch(firstStatus, /▷ You/);
 
   // 1. Add a custom provider via /login
   child.stdin.write("/login\r");
@@ -282,4 +290,18 @@ test("real TTY CLI: /login custom provider writes providers.json + auth.json, an
   child.stdin.write("/effort high\r");
   await visible("Reasoning effort set to high (session only)");
   assert.doesNotMatch(await screen(), /▷ You/);
+
+  // 8. /status names the custom provider, how it signs in, its endpoint and protocol
+  child.stdin.write("/status\r");
+  const status = await visible("custom · providers.json");
+  assert.match(status, /── Status · team-gateway \/ gw-beta · high/);
+  assert.match(status, /model\s+gw-beta/);
+  assert.match(status, /effort\s+high\s+this conversation/);
+  assert.match(status, /provider\s+Team Gateway\s+custom · providers\.json/);
+  assert.match(status, /auth\s+API key\s+saved login/);
+  assert.ok(status.includes(`${baseUrl.replace(/^http:\/\//, "")}`), "the endpoint is shown without its scheme");
+  assert.match(status, /openai-chat/);
+  assert.match(status, /Context\n\s+no completed sampling yet/);
+  assert.doesNotMatch(status, /not signed in/);
+  assert.doesNotMatch(status, /▷ You/);
 });

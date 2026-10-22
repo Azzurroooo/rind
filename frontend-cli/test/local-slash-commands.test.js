@@ -22,16 +22,23 @@ test("local status renders session and provider state", async () => {
 
   assert.deepEqual(result.display, {
     type: "status",
+    selection: { provider: "openai", model: "gpt-5.5", reasoning_effort: "high" },
     entries: [
-      { label: "session", value: "session_1" },
-      { label: "name", value: "unset · shown by its first message" },
-      { label: "connection", value: "openai" },
-      { label: "model", value: "gpt-5.5" },
-      { label: "reasoningEffort", value: "high" },
-      { label: "configured", value: "openai" },
+      { group: "model", label: "model", value: "gpt-5.5" },
+      { group: "model", label: "effort", value: "high" },
+      { group: "provider", label: "provider", value: "openai" },
+      { group: "provider", label: "signed in", value: "openai" },
+      { group: "conversation", label: "session", value: "session_1" },
+      { group: "conversation", label: "name", value: "unset", note: "shown by its first message" },
     ],
     usage: [],
   });
+});
+
+test("local status before any login warns with the command that fixes it", async () => {
+  const result = await executeLocalSlashCommand("/status", { sessionInfo: { providers: [] }, runtimeInitialized: false });
+  const signedIn = result.display.entries.find((entry) => entry.label === "signed in");
+  assert.deepEqual(signedIn, { group: "provider", label: "signed in", value: "none", note: "/login", tone: "warning", actions: ["/login"] });
 });
 
 test("config, brief, import, and theme are no longer standalone local slash commands", async () => {
@@ -98,7 +105,7 @@ test("/settings spinner lists the four animations and updates the active working
 
 test("local status before the first message shows the pending name", async () => {
   const result = await executeLocalSlashCommand("/status", { sessionInfo: {}, pendingName: "Spike", runtimeInitialized: false });
-  const entries = Object.fromEntries(result.display.entries.map(entry => [entry.label, entry.value]));
+  const entries = Object.fromEntries(result.display.entries.map(entry => [entry.label, [entry.value, entry.note].filter(Boolean).join(" · ")]));
   assert.equal(entries.session, "none · the first message starts it");
   assert.equal(entries.name, "Spike · applies when the conversation starts");
 });

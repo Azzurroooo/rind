@@ -591,35 +591,82 @@ test("slashDisplayText renders command help payloads", () => {
   );
 });
 
-test("slashDisplayText renders the two status sections", () => {
+const STATUS_DISPLAY = {
+  type: "status",
+  selection: { provider: "team-gateway", model: "gw-beta", reasoning_effort: "max" },
+  entries: [
+    { group: "model", label: "model", value: "gw-beta", note: "folder default" },
+    { group: "model", label: "effort", value: "max", note: "this conversation" },
+    { group: "provider", label: "provider", value: "Team Gateway", note: "custom · providers.json", note_tone: "accent" },
+    { group: "provider", label: "auth", value: "not signed in", note: "/login or set GW_KEY", tone: "warning", actions: ["/login"] },
+    { group: "provider", label: "endpoint", value: "https://gw.example/v1", note: "openai-chat" },
+    { group: "conversation", label: "session", value: "session_1" },
+    { group: "conversation", label: "name", value: "unset", note: "shown as \"fix the login page\"" },
+    { group: "settings", label: "settings", value: "E:\\rind\\settings.json", note: "not created · defaults apply" },
+  ],
+  usage: [{
+    input_tokens: 121300,
+    context_window_tokens: 258400,
+    context_usage_percent: 121300 / 258400,
+    cached_input_tokens: 98700,
+    cache_hit_rate: 98700 / 121300,
+    output_tokens: 2100,
+  }],
+};
+
+test("slashDisplayText groups status into model, provider, conversation and context with aligned notes", () => {
   assert.equal(
-    slashDisplayText({
-      type: "status",
-      entries: [
-        { label: "session", value: "session_1" },
-        { label: "model", value: "model_a" },
-      ],
-      usage: [{
-        input_tokens: 121300,
-        context_window_tokens: 258400,
-        context_usage_percent: 121300 / 258400,
-        cached_input_tokens: 98700,
-        cache_hit_rate: 98700 / 121300,
-        output_tokens: 2100,
-      }],
-    }),
+    slashDisplayText(STATUS_DISPLAY),
     [
-      `  ── Config ${"─".repeat(84)}`,
-      "  session           session_1",
-      "  model             model_a",
+      `  ── Status · team-gateway / gw-beta · max ${"─".repeat(53)}`,
+      "  Model",
+      "    model       gw-beta           folder default",
+      "    effort      max               this conversation",
+      "  Provider",
+      "    provider    Team Gateway      custom · providers.json",
+      "    auth        not signed in     /login or set GW_KEY",
+      "    endpoint    gw.example/v1     openai-chat",
+      "  Conversation",
+      "    session     session_1",
+      "    name        unset             shown as \"fix the login page\"",
+      "  Context",
+      "    usage       ▮▮▮▮▮▯▯▯▯▯ 46.9%  121.3k / 258.4k tokens",
+      "    cached      98.7k             81.4% hit",
+      "    output      2.1k",
       "",
-      `  ── Assistant sampling ${"─".repeat(72)}`,
-      "  context     ▮▮▮▮▮▯▯▯▯▯ 46.9%",
-      "  input       121.3k / 258.4k tokens",
-      "  cached      98.7k · 81.4% hit",
-      "  output      2.1k",
+      "  settings E:\\rind\\settings.json  not created · defaults apply",
     ].join("\n"),
   );
+});
+
+test("status colors identify the setup, dim the notes and light the command that fixes a warning", () => {
+  const plain = slashDisplayText(STATUS_DISPLAY);
+  const tty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+  const priorNoColor = process.env.NO_COLOR;
+  Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+  delete process.env.NO_COLOR;
+  try {
+    const colored = slashDisplayText(STATUS_DISPLAY);
+    assert.equal(stripAnsi(colored), plain);
+    assert.ok(colored.includes(paintRaw.accent("gw-beta")), "the model is lit");
+    assert.ok(colored.includes(paintRaw.accent("Team Gateway")), "the provider is lit");
+    assert.ok(colored.includes(paintRaw.accent("custom · providers.json")), "a custom provider stands out");
+    assert.ok(colored.includes(paintRaw.dim("folder default")), "where a choice came from is dim");
+    assert.ok(colored.includes(paintRaw.warning("not signed in")), "what needs fixing is a warning");
+    assert.ok(colored.includes(paintRaw.accent("/login")), "with the command that fixes it lit");
+    assert.ok(colored.includes(paintRaw.warning(" or set GW_KEY")));
+    assert.ok(colored.includes(paintRaw.path("gw.example/v1")), "the endpoint reads as a path");
+  } finally {
+    if (tty) Object.defineProperty(process.stdout, "isTTY", tty);
+    else delete process.stdout.isTTY;
+    if (priorNoColor !== undefined) process.env.NO_COLOR = priorNoColor;
+  }
+});
+
+test("status settings path collapses the home directory but not a sibling sharing its prefix", () => {
+  const status = (value) => slashDisplayText({ type: "status", entries: [{ group: "settings", label: "settings", value }], usage: [] }).split("\n").at(-1);
+  assert.match(status(path.join(homedir(), ".rind", "settings.json")), /^  settings ~[\\/]\.rind[\\/]settings\.json$/);
+  assert.equal(status(`${homedir()}-other${path.sep}settings.json`), `  settings ${homedir()}-other${path.sep}settings.json`);
 });
 
 test("slashDisplayText renders sessions and skills payloads", () => {
@@ -719,11 +766,10 @@ test("slashDisplayText and slashResultNotice split structured displays from syst
   assert.equal(
     slashDisplayText({ type: "status", entries: [{ label: "apiKey", value: "unset" }], usage: [] }),
     [
-      `  ── Config ${"─".repeat(84)}`,
-      "  apiKey            unset",
-      "",
-      `  ── Assistant sampling ${"─".repeat(72)}`,
-      "  no completed sampling yet",
+      `  ── Status ${"─".repeat(84)}`,
+      "    apiKey      unset",
+      "  Context",
+      "    no completed sampling yet",
     ].join("\n"),
   );
   assert.equal(
