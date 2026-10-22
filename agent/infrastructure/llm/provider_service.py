@@ -93,16 +93,37 @@ class ProviderServiceImpl:
             self._read_cache().get(definition.id),
         )
 
-    def describe_connection(self, provider_id: str) -> dict[str, str] | None:
-        """Name, endpoint and key source of a connection; None when it is not configured here."""
+    def describe_connection(self, provider_id: str, model_id: str = "") -> dict[str, str] | None:
+        """What /status shows about a connection; None when it is not configured here.
+
+        `kind`: builtin, custom (added in providers.json) or overridden (a
+        built-in whose endpoint providers.json replaces). `auth`: how requests
+        sign in (oauth, api_key or none); `credential`: where that comes from
+        (stored, environment or none). `api` is the protocol the model is called with.
+        """
         try:
             definition = self._provider(provider_id)
         except ProviderError:
             return None
+        builtin = self.providers.get(definition.id)
+        if builtin is None:
+            kind = "custom"
+        elif builtin.default_base_url != definition.default_base_url:
+            kind = "overridden"
+        else:
+            kind = "builtin"
+        credential, source = self._credential_with_source(definition)
+        auth = credential.type if credential is not None else "none"
+        known_model = next((model for model in definition.fallback_models if model.id == model_id), None)
         return {
             "name": definition.name,
             "endpoint": definition.default_base_url,
-            "credential": self._credential_source(definition),
+            "api": known_model.api if known_model is not None else definition.api,
+            "kind": kind,
+            "auth": auth,
+            "credential": source,
+            "env_key": definition.environment_key,
+            "account": getattr(OAUTH_FLOWS.get(definition.id), "ACCOUNT_NAME", "") if auth == "oauth" else "",
         }
 
     def list_providers(self) -> list[ProviderStatus]:
@@ -436,19 +457,20 @@ class ProviderServiceImpl:
             )
         return definition
 
-    def _credential_source(self, definition: ProviderDefinition) -> str:
-        if self.credentials.get(definition.id) is not None:
-            return "stored"
-        env_name = definition.environment_key
-        return "environment" if env_name and os.getenv(env_name, "").strip() else "none"
-
-    def _resolve_credential(self, definition: ProviderDefinition) -> Credential | None:
+    def _credential_with_source(self, definition: ProviderDefinition) -> tuple[Credential | None, str]:
+        """A stored login wins over the provider's environment variable."""
         stored = self.credentials.get(definition.id)
         if stored is not None:
-            return stored
+            return stored, "stored"
         env_name = definition.environment_key
         value = os.getenv(env_name, "").strip() if env_name else ""
-        return Credential(type="api_key", key=value) if value else None
+        return (Credential(type="api_key", key=value), "environment") if value else (None, "none")
+
+    def _credential_source(self, definition: ProviderDefinition) -> str:
+        return self._credential_with_source(definition)[1]
+
+    def _resolve_credential(self, definition: ProviderDefinition) -> Credential | None:
+        return self._credential_with_source(definition)[0]
 
     def _read_cache(self) -> dict[str, Any]:
         if not self.cache_path.exists():

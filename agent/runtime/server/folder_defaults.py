@@ -127,7 +127,7 @@ async def explain_selection(worker, workspace_root: str, selection: dict[str, st
     if source is None:
         chosen, source = await asyncio.to_thread(
             worker.repository.choose_selection, workspace_root, chosen.provider_id, chosen.model_id, selection.get("reasoning_effort"))
-    connection = await asyncio.to_thread(worker.provider_service.describe_connection, chosen.provider_id)
+    connection = await asyncio.to_thread(worker.provider_service.describe_connection, chosen.provider_id, chosen.model_id)
     return {
         "provider": chosen.provider_id, "model": chosen.model_id, "reasoning_effort": chosen.reasoning_effort,
         "connection": connection, "model_source": source.get("model", ""), "effort_source": source.get("effort", ""),
