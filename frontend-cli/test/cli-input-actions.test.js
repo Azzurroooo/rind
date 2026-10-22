@@ -345,3 +345,67 @@ test("askModelMenu and askEffortMenu resolve scope when f or g is pressed", asyn
   assert.deepEqual(await effortSelected, { effort: "medium", scope: "global" });
 });
 
+test("cycleReasoningEffort and error paths emit system notices with appropriate levels", async () => {
+  const state = createCliState();
+  state.runtime.status = "ready";
+  state.session.info = { session_id: "sess-1", reasoning_effort: "low" };
+  const notices = [];
+  let effortLevels = [];
+  let shouldFailSet = false;
+  const actions = createCliInputActions({
+    state,
+    request: async () => {
+      if (shouldFailSet) throw new Error("effort set failed");
+      return {};
+    },
+    output: {
+      terminalUi: {},
+      writeUserInput() {},
+      redraw() {},
+      notify: (text, opts) => notices.push({ text, level: opts?.level ?? "info" }),
+    },
+    getEffortLevels: async () => effortLevels,
+    getCommandController: () => ({ handle: async () => { throw new Error("dispatch failed"); } }),
+    getTurnController: () => ({}),
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    pausePrompt() {},
+    resumePrompt() {},
+    handleSigint() {},
+  });
+
+  // Ctrl+T with empty levels -> warning
+  actions.handleTerminalInput("\x14");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(notices, [
+    { text: "The current model does not declare reasoning effort levels.", level: "warning" },
+  ]);
+
+  // Ctrl+T with valid levels -> info
+  notices.length = 0;
+  effortLevels = ["low", "medium", "high"];
+  actions.handleTerminalInput("\x14");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(notices, [
+    { text: "Reasoning effort: medium", level: "info" },
+  ]);
+
+  // Ctrl+T when request fails -> error
+  notices.length = 0;
+  shouldFailSet = true;
+  actions.handleTerminalInput("\x14");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(notices, [
+    { text: "effort set failed", level: "error" },
+  ]);
+
+  // dispatchExternal error -> error
+  notices.length = 0;
+  actions.dispatchExternal("/boom");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(notices, [
+    { text: "dispatch failed", level: "error" },
+  ]);
+});
+
+

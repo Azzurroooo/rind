@@ -89,7 +89,7 @@ export function createCliInputActions({
       output.redraw();
     } catch (error) {
       if (state.runtime.status !== "closing") {
-        output.writeError(`${error instanceof Error ? error.message : String(error)}\n`);
+        output.notify?.(error instanceof Error ? error.message : String(error), { level: "error" });
       }
     } finally {
       state.input.retrievingModes.delete(mode);
@@ -111,7 +111,7 @@ export function createCliInputActions({
       output.redraw();
     } catch (error) {
       if (state.runtime.status !== "closing") {
-        output.writeError(`${error instanceof Error ? error.message : String(error)}\n`);
+        output.notify?.(error instanceof Error ? error.message : String(error), { level: "error" });
       }
     } finally {
       state.input.retrievingModes.delete("follow_up");
@@ -374,7 +374,7 @@ export function createCliInputActions({
       && key.name === "left" && !key.ctrl && !key.alt && !key.shift) {
       if (!openingAgents) {
         openingAgents = true;
-        Promise.resolve().then(openAgents).catch(error => output.writeError(error.message + "\n"))
+        Promise.resolve().then(openAgents).catch((error) => output.notify?.(error.message, { level: "error" }))
           .finally(() => { openingAgents = false; });
       }
       return;
@@ -505,7 +505,7 @@ export function createCliInputActions({
         output.redraw();
       }
     } catch (error) {
-      output.writeError(`${error instanceof Error ? error.message : String(error)}\n`);
+      output.notify?.(error instanceof Error ? error.message : String(error), { level: "error" });
       output.redraw();
     }
   }
@@ -589,7 +589,7 @@ export function createCliInputActions({
     try {
       const levels = await getEffortLevels();
       if (!levels.length) {
-        output.writeError("The current model does not declare reasoning effort levels.\n");
+        output.notify?.("The current model does not declare reasoning effort levels.", { level: "warning" });
         return;
       }
       const index = levels.indexOf(String(state.session.info.reasoning_effort || "").toLowerCase());
@@ -598,9 +598,9 @@ export function createCliInputActions({
       // message the window keeps it for the conversation it creates.
       if (state.session.info.session_id) await request(runtimeMethods.modelEffortSet, { reasoning_effort: next });
       state.session.info = { ...state.session.info, reasoning_effort: next };
-      output.writeError(`Reasoning effort: ${next}\n`);
+      output.notify?.(`Reasoning effort: ${next}`);
     } catch (error) {
-      output.writeError(`${error instanceof Error ? error.message : String(error)}\n`);
+      output.notify?.(error instanceof Error ? error.message : String(error), { level: "error" });
     }
   }
 
@@ -790,7 +790,7 @@ export function createCliInputActions({
       })
       .catch((error) => {
         if (state.runtime.status !== "closing") {
-          output.writeError(`${error instanceof Error ? error.message : String(error)}\n`);
+          output.notify?.(error instanceof Error ? error.message : String(error), { level: "error" });
         }
       });
   }
