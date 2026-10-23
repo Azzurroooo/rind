@@ -28,6 +28,7 @@ export async function connectSharedRuntime(options = {}) {
   const paths = sharedRuntimePaths(options.rindHome);
   const connect = async () => {
     const token = (await readFile(paths.token, "utf8")).trim();
+    if (!token) throw Object.assign(new Error("Shared Runtime credentials are not ready."), { code: "RUNTIME_NOT_READY" });
     const socket = net.connect(paths.endpoint);
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => failed(new Error("Runtime connection timed out.")), 3000);

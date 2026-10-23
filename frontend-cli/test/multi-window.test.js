@@ -92,6 +92,10 @@ test("answering or skipping a question in one window updates another window and 
   const closed = await first.visible("answered in another window");
   assert.match(closed, /Yes/);
   await first.visible("GOT_THE_ANSWER");
+  // Streaming the final text precedes turn completion. Start the next turn
+  // only after both windows have processed completion, not as late steering.
+  await first.visible("Worked for");
+  await second.visible("Worked for");
 
   // Skipping with Esc sends an empty answer, does not interrupt the turn, and
   // lets the model continue after UserQuestionEmptyAnswer.

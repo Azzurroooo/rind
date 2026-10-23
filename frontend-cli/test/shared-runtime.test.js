@@ -18,6 +18,26 @@ import { startServer } from "../../agent-management/dist/ipc.js";
 import { runOneShot } from "../lib/one-shot.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 
+test("startup rejects empty credentials and publishes a complete reusable token", { timeout: 20000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-token-ready-"));
+  const paths = sharedRuntimePaths(home);
+  let host, client;
+  t.after(async () => { client?.close(); await host?.close(); await rm(home, { recursive: true, force: true }); });
+  await mkdir(paths.directory, { recursive: true });
+  await writeFile(paths.token, "");
+  await assert.rejects(connectSharedRuntime({ home, start: false }), { code: "RUNTIME_NOT_READY" });
+  await unlink(paths.token);
+  const options = { rindHome: home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  host = await startSharedServer(options);
+  const token = await readFile(paths.token, "utf8");
+  assert.match(token, /^[a-f0-9]{64}$/);
+  client = await connectSharedRuntime({ home, start: false });
+  assert.equal((await client.request("runtime/info")).pid, process.pid);
+  client.close(); await host.close();
+  host = await startSharedServer(options);
+  assert.equal(await readFile(paths.token, "utf8"), token, "restarts retain the established credential");
+});
+
 test("one host isolates workspaces and tools, runs sessions concurrently and survives client detach", { timeout: 25000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-shared-test-"));
   const a = path.join(home, "a"), b = path.join(home, "b");

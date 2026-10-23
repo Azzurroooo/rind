@@ -2,7 +2,7 @@ import net from "node:net";
 import { existsSync } from "node:fs";
 import { privateDirectory, recordedNonce, resolveRindHome } from "./local-files.js";
 import { randomBytes, randomUUID } from "node:crypto";
-import { appendFile, readFile, writeFile, unlink } from "node:fs/promises";
+import { appendFile, readFile, writeFile, unlink, link } from "node:fs/promises";
 import { createRuntimeClient } from "./runtime-client.js";
 import { sharedRuntimePaths } from "./shared-runtime.js";
 import { listenOwned } from "./endpoint.js";
@@ -395,9 +395,15 @@ export async function startSharedServer(options) {
     try { token = (await readFile(paths.token, "utf8")).trim(); } catch (error) { if (error.code !== "ENOENT") throw error; }
     if (!token) {
       const candidate = randomBytes(32).toString("hex");
-      try { await writeFile(paths.token, candidate, { mode: 0o600, flag: "wx" }); token = candidate; }
+      // Clients can connect as soon as the endpoint appears. Publish only a
+      // fully written token, as the Management service does for its user token.
+      const draft = paths.token + "." + randomUUID() + ".tmp";
+      await writeFile(draft, candidate, { mode: 0o600, flag: "wx" });
+      try { await link(draft, paths.token); token = candidate; }
       catch (error) { if (error.code !== "EEXIST") throw error; token = (await readFile(paths.token, "utf8")).trim(); }
+      finally { await unlink(draft).catch(() => {}); }
     }
+    if (!token) throw new Error("Shared Runtime credentials are empty.");
     // Published once this host owns the endpoint: it names the process that
     // answers here, so a host that stops answering can still be ended.
     recordNonce = options.hostNonce || randomUUID();

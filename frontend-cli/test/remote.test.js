@@ -541,6 +541,7 @@ test("E2E CLI /remote: user turns remote on from the Off view, signs in over HTT
     } catch {
       // ignore
     }
+    provider.closeAllConnections();
     await new Promise((resolve) => provider.close(resolve));
     await removeRindHome(home);
   });
