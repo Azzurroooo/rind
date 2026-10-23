@@ -9,6 +9,7 @@ import threading
 import time
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 os.chdir(PROJECT_ROOT)
@@ -18,6 +19,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
+from agent.domain.models import ModelSelection
+from agent.runtime.server.session_service import SessionService
 import agent.infrastructure.persistence.session_files as session_files
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_HANDOFF_REASONING_CONTENT
 from agent.domain.message_boundary import validate_model_message_boundary
@@ -545,12 +548,20 @@ async def test_reading_another_session_does_not_rebind_the_active_session(tmp_pa
     )
     await active.initialize()
     await other.initialize()
+    await active.persist_message("user", "active session history")
     await other.persist_message("user", "history from the other session")
 
-    messages = await active.get_messages_for_session("other_session")
+    service = SessionService(
+        session_dir=str(session_root),
+        provider_service=SimpleNamespace(default_selection=lambda: ModelSelection("openai", "fixture")),
+    )
+    messages = (await service.replay("other_session"))["messages"]
 
     assert active.session_id == "active_session"
     assert any(message.get("content") == "history from the other session" for message in messages)
+    await active.persist_message("assistant", "still in the active session")
+    assert (await active.get_messages_slice())[-1]["content"] == "still in the active session"
+    assert (await other.get_messages_slice())[-1]["content"] == "history from the other session"
 
 
 def test_session_files_read_jsonl_waits_for_active_writer(tmp_path):

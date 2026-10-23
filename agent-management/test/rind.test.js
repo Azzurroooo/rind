@@ -60,7 +60,12 @@ test("direct session remains observable after detach and management restart, and
   assert.equal(attached.id, session.id);
   viewer = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", workspace, "--session", info.session_id], externalTools: await user.request("sessionTools", { sessionId: session.id }) });
   assert.equal((await viewer.request("initialize")).live_turn.status, "running");
-  await assert.rejects(viewer.request("session/prompt", { session_id: info.session_id, input: "Duplicate" }), /active request/);
+  const steered = await viewer.request("session/prompt", { session_id: info.session_id, input: "Duplicate" });
+  assert.equal(steered.steered, true, "input during an active turn is steering, not a second run");
+  assert.equal(calls, 1);
+  const retrieved = await viewer.request("rind/session/unsteer", { session_id: info.session_id });
+  assert.equal(retrieved.input_id, steered.input_id);
+  assert.equal(retrieved.input, "Duplicate");
   const history = await user.request("listSessions", { agentId: agent.id });
   assert.ok(history.sessions.some(s => s.runtimeSessionId === info.session_id && s.teamId === team.id));
   response.writeHead(200, { "Content-Type": "text/event-stream" });

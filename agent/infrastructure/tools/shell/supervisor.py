@@ -266,7 +266,8 @@ class ProcessSupervisor:
         if self.journal:
             for task_id, record in list(self._processes.items()):
                 if (record.finished.is_set() and not record.persistence_error
-                        and not (record.process is not None and record.process.returncode is None and record.status == "lost")
+                        # An exited parent does not confirm descendant cleanup.
+                        and not (record.process is not None and record.status == "lost")
                         and (record.monitor is None or record.monitor.done())):
                     self._processes.pop(task_id)
                     self._origins.pop((record.session_id, record.call_id), None)
