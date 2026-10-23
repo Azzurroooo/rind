@@ -144,7 +144,8 @@ test("the Manager keeps every Rind tool and is held to agent_management by its i
   assert.deepEqual(config.skill_files, []);
   assert.match(config.instructions, /only through agent_management/);
   assert.match(config.instructions, /never carry out that action another way/);
-  assert.ok(config.instructions.includes(path.resolve(home)), "names the Rind home it must not modify");
+  const comparable = value => process.platform === "win32" ? value.toLowerCase() : value;
+  assert.ok(comparable(config.instructions).includes(comparable(path.resolve(home))), "names the Rind home it must not modify");
 });
 
 test("shared session credentials remain valid across management restart before and after first turn binding", async t => {

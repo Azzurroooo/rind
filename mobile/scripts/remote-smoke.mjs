@@ -96,7 +96,7 @@ try {
   await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
   await expect(page.locator(".sidebar")).toHaveClass(/drawer-open/); await screenshot("sessions");
   await page.locator(".drawer-backdrop").click({ position: { x: 375, y: 200 } });
-  await page.getByRole("button", { name: "Open tasks", exact: true }).click();
+  await page.getByRole("button", { name: "Open session activity", exact: true }).click();
   await expect(page.getByRole("tab", { name: "Activity", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "No active work", exact: true })).toBeVisible(); await screenshot("activity");
   await page.getByRole("tab", { name: "Files", exact: true }).click();
@@ -120,6 +120,7 @@ try {
   assert.equal(requests.filter((r) => r.method === "session/prompt").length, 1, "reconnection never resends a prompt");
   await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
   await page.getByRole("button", { name: "Open settings", exact: true }).click();
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
   await page.getByRole("radio", { name: "Dark", exact: true }).click();
   await page.getByRole("button", { name: "Close dialog", exact: true }).click();
   await page.locator(".drawer-backdrop").click({ position: { x: 375, y: 200 } });

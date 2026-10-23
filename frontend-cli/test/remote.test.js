@@ -33,7 +33,7 @@ const cliImplHref = new URL("../lib/frontend-cli-implementation.js", import.meta
 const QR_BLOCKS = /[█▀▄]/;
 const LOOPBACK_LINK = /http:\/\/127\.0\.0\.1:\d+\/#connect=\S+/;
 
-function spawnTtyCli({ home, workspace, args = [] }) {
+function spawnTtyCli({ home, workspace, args = [], webRoot = "" }) {
   const script = `
     Object.defineProperty(process.stdin, 'isTTY', { value: true });
     Object.defineProperty(process.stdout, 'isTTY', { value: true });
@@ -49,6 +49,7 @@ function spawnTtyCli({ home, workspace, args = [] }) {
       ...process.env,
       RIND_HOME: home,
       RIND_PYTHON: process.env.RIND_PYTHON || "python",
+      ...(webRoot ? { RIND_WEB_ROOT: webRoot } : {}),
       NO_COLOR: "1",
     },
     stdio: ["pipe", "pipe", "pipe"],
@@ -531,7 +532,7 @@ test("E2E CLI /remote: user turns remote on from the Off view, signs in over HTT
     "utf8",
   );
 
-  const tty = spawnTtyCli({ home, workspace });
+  const tty = spawnTtyCli({ home, workspace, webRoot: webDir });
   const { child: cliChild, waitForScreen, sendKey } = tty;
 
   t.after(async () => {

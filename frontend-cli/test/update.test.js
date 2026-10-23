@@ -346,11 +346,16 @@ test("TTL cache and promptStartupUpdate handle update, skip, and dismiss choices
     output: fakeOutput,
     rindHome,
   });
-  setImmediate(() => {
-    fakeInput.emit("data", Buffer.from("\x1b[B")); // Down -> Skip
-    fakeInput.emit("data", Buffer.from("\x1b[B")); // Down -> Skip until next version
-    fakeInput.emit("data", Buffer.from("\r")); // Enter
-  });
+  // Wait for the scheduled TUI frame before accepting a choice; setImmediate
+  // may run first on Node 18 and close the prompt before anything is drawn.
+  const renderDeadline = Date.now() + 2000;
+  while (!renderedOutput.includes("Update available")) {
+    assert.ok(Date.now() < renderDeadline, "startup update dialog rendered");
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  fakeInput.emit("data", Buffer.from("\x1b[B")); // Down -> Skip
+  fakeInput.emit("data", Buffer.from("\x1b[B")); // Down -> Skip until next version
+  fakeInput.emit("data", Buffer.from("\r")); // Enter
 
   const choice = await promptPromise;
   assert.equal(choice, "dismiss");
