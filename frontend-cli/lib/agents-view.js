@@ -74,7 +74,6 @@ function rightColumns(row, width) {
   if (row.kind === "team" && row.summary) return row.summary.needs ? paint.warning("! " + row.summary.needs) : row.summary.working ? paint.accent("● " + row.summary.working) : "";
   if (row.kind === "inbox" && row.badge) return paint.warning(String(row.badge));
   if (row.kind === "background" && row.badge) return paint.accent("● " + row.badge);
-  if (row.kind === "archive") return paint.dim(String(row.badge));
   if (row.kind === "live") return paint.dim(truncateToWidth(row.context || "", 24, "…") + " · " + (row.time || "").padStart(3));
   if (row.kind === "service") return (row.stale ? paint.warning : paint.dim)(row.note);
   if (row.context) return paint.dim(row.context);
@@ -86,7 +85,6 @@ function leadIcon(row) {
   if (row.reworked) return paint.warning("↺");
   if (row.kind === "approval") return glyph(row.status);
   if (row.kind === "notice") return paint.notice("◆");
-  if (row.kind === "archive") return paint.dim("▤");
   if (row.kind === "member" || row.kind === "session" || row.kind === "task" || row.kind === "run") return glyph(row.status);
   if (["add-member", "new-session", "assign", "new-team"].includes(row.kind)) return paint.accent("+");
   if (row.kind === "more") return paint.dim("…");

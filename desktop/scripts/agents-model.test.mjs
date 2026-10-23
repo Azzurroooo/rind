@@ -10,7 +10,6 @@ import {
   mergeManagerSessions,
   mergeTeamSessions,
   normalizeAgentsSnapshot,
-  renderArchiveSurfaceHtml,
   renderBackgroundSurfaceHtml,
   renderHeaderAgentBreadcrumbHtml,
   renderInboxSurfaceHtml,
@@ -104,7 +103,7 @@ const sampleSnapshot = normalizeAgentsSnapshot({
     { id: "ms-mgr", agentId: "agent-mgr", origin: "direct", runtimeSessionId: "rt-mgr-1" },
   ],
   approvals: [
-    { id: "app-1", kind: "deleteTeam", teamId: "team-1", title: "Approve archiving legacy team", createdAt: "2026-10-17T11:30:00Z" },
+    { id: "app-1", kind: "deleteTeam", teamId: "team-1", title: "Approve deleting legacy team", createdAt: "2026-10-17T11:30:00Z" },
   ],
   notices: [
     { id: "not-1", teamId: "team-1", agentId: "agent-qa", title: "Delivery submitted for task-2" },
@@ -215,7 +214,7 @@ test("resolveSessionAgentContext identifies team member, manager, and independen
   assert.equal(indepCtx.kind, "independent")
 })
 
-test("pure HTML renderers produce accessible markup for sidebar, team, task drawer, manager, inbox, background, archive, and header sessions switcher", () => {
+test("pure HTML renderers produce accessible markup for sidebar, team, task drawer, manager, inbox, background, and header sessions switcher", () => {
   const sixLeadSessions = Array.from({ length: 6 }, (_, idx) => ({
     runtimeSessionId: `rt-lead-${idx + 1}`,
     teamId: "team-1",
@@ -336,7 +335,7 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
     busy: false,
     artifactPreview: null,
   })
-  assert.match(inboxHtml, /Approve archiving legacy team/)
+  assert.match(inboxHtml, /Approve deleting legacy team/)
   assert.match(inboxHtml, /Delivery Ready for Review/)
   assert.match(inboxHtml, /Changed by the Manager/)
 
@@ -356,12 +355,6 @@ test("pure HTML renderers produce accessible markup for sidebar, team, task draw
   assert.match(bgHtml, /Running \(PID 4321\)/)
   assert.match(bgHtml, /127\.0\.0\.1:8900/)
   assert.doesNotMatch(bgHtml, /Service Log|Runtime Log/)
-
-  const archiveHtml = renderArchiveSurfaceHtml({
-    snapshot: sampleSnapshot,
-    archivedTeams: [{ id: "arch-1", name: "Legacy Team", deletedAt: "2026-10-16T00:00:00Z" }],
-  })
-  assert.match(archiveHtml, /Legacy Team/)
 
   const breadcrumbHtml = renderHeaderAgentBreadcrumbHtml(
     {

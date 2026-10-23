@@ -125,16 +125,11 @@ export function detailFor(view, row) {
       };
     }
     case "task": {
-      const archivedTask = row.archived && view.archive?.teams?.flatMap(t => t.tasks || []).find(t => t.id === row.taskId);
-      const task = byId(snapshot.tasks, row.taskId) || archivedTask;
-      if (!task) {
-        if (row.archived) return { title: row.title, titleLines: 3, context: "Owner " + row.owner + " · read-only, the team was deleted", state: stateLine(row.status), facts: [{ label: "Delivery", value: formatReportLines(row.note).length ? formatReportLines(row.note) : paint.dim("No report"), lines: 6 }] };
-        return null;
-      }
+      const task = byId(snapshot.tasks, row.taskId);
+      if (!task) return null;
       const asked = task.blockedOn && !needsUser(task);
       const fresh = row.fresh ?? unreviewed(task);
-      const review = row.archived ? undefined
-        : fresh ? { text: "● New delivery · open it to accept or send back", tone: "accent" }
+      const review = fresh ? { text: "● New delivery · open it to accept or send back", tone: "accent" }
         : task.review?.decision === "accepted" ? { text: "✓ Accepted", tone: "success" }
         : task.review?.decision === "rework" ? { text: "↺ Sent back for rework" + (task.review.feedback ? " · " + single(task.review.feedback) : ""), tone: "warning" }
         : undefined;
@@ -153,13 +148,11 @@ export function detailFor(view, row) {
       const next = formatReportLines(r?.nextAction, paint.notice);
       return {
         title: single(task.brief), titleLines: 3,
-        context: row.archived
-          ? "Owner " + row.owner + " · read-only, the team was deleted"
-          : ["Owner " + row.owner, task.priority && task.priority + " priority"].filter(Boolean).join(" · "),
+        context: ["Owner " + row.owner, task.priority && task.priority + " priority"].filter(Boolean).join(" · "),
         state: stateLine(row.status || taskStatus(task, snapshot)),
         callout: first(
-          !row.archived && needsUser(task) && task.blockedOn && { text: "! Needs your answer · " + single(task.blockedOn.action) },
-          !row.archived && task.error && { text: "! " + single(task.error), tone: "danger" },
+          needsUser(task) && task.blockedOn && { text: "! Needs your answer · " + single(task.blockedOn.action) },
+          task.error && { text: "! " + single(task.error), tone: "danger" },
           review,
         ),
         facts: [
@@ -176,7 +169,7 @@ export function detailFor(view, row) {
     case "approval": {
       const approval = (snapshot.approvals || []).find(item => item.id === row.approvalId);
       return { title: row.title.replace(/^Approve: /, ""), context: row.context, callout: { text: "! The Manager asks for your approval" },
-        text: [approval?.kind === "deleteTeam" ? "Delivered work stays readable under Archive; folders and history are never touched." : "The running task is cancelled; its conversation is kept."] };
+        text: [approval?.kind === "deleteTeam" ? "The team and its tasks are removed; folders and conversation history are never touched." : "The running task is cancelled; its conversation is kept."] };
     }
     case "notice": return { title: row.title, context: row.context, text: ["Applies from the member's next task; running work keeps its model."] };
     case "team": {
@@ -207,7 +200,6 @@ export function detailFor(view, row) {
     case "background": return { title: "Background", context: "What keeps running after you leave", text: ["Leaving Rind only closes windows. Agents, tasks and the shared Runtime keep working until you stop them here."] };
     case "independent": return { title: "Independent", context: "Conversations outside any team", text: ["Grouped by folder, with what is running or open now."] };
     case "manager": return { title: "Manager", context: "Coordinates every team", text: ["Assembles teams, delegates to leaders and reviews their reports. Members' private conversations stay with them."] };
-    case "archive": return { title: "Archive", context: "Deleted teams, read-only", text: ["What deleted teams delivered: reports, evidence and files."] };
     case "new-team": return { title: "Create a team", text: ["Name it, then add folders as members. The first member leads; others report to the leader unless you choose a supervisor."] };
     case "add-member": return { title: "Add a member", text: ["An existing folder, a new empty workspace, or a Git worktree for parallel work.", row.firstMember ? "The first member becomes the team leader." : "New members report to the leader; select a member and press a to add below it."] };
     case "assign": return { title: "Assign a task", text: ["Choose an owner and describe the delivery. The owner reports back with a summary, evidence and files."] };

@@ -123,7 +123,6 @@ export type AppState = {
   agentChatContext: SessionAgentContext | null
   teamSessionsByTeam: Record<string, Array<Record<string, any>>>
   managerSessions: Array<Record<string, any>>
-  archivedTeams: Array<Record<string, any>>
   collapsedTeams: Set<string>
   expandedSidebarMembers: Set<string>
   expandedOrgMembers: Set<string>

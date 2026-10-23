@@ -1,6 +1,4 @@
-import { activeRun, awaitingDelegation, memberKey, type Session, type State, type Task } from "./model.js";
-
-const unfinished = (task: Task) => !["done", "cancelled"].includes(task.status);
+import { activeRun, awaitingDelegation, memberKey, type Session, type State } from "./model.js";
 
 // A conversation's history stays in its folder; dropping the registration only
 // turns it back into a plain session outside every team. One that a window
@@ -29,7 +27,7 @@ export function pruneAgents(state: State, candidates: Iterable<string>) {
   for (const membership of Object.values(state.memberships)) used.add(membership.agentId);
   for (const session of Object.values(state.sessions)) used.add(session.agentId);
   for (const task of Object.values(state.tasks)) {
-    if (state.teams[task.teamId]?.archive) continue;
+    if (!state.teams[task.teamId]) continue;
     used.add(task.assigneeAgentId);
   }
   for (const d of Object.values(state.delegations || {})) {
@@ -47,32 +45,32 @@ export function expireApprovals(state: State) {
   for (const approval of Object.values(state.approvals)) {
     const team = state.teams[approval.teamId];
     const run = approval.runId ? state.runs[approval.runId] : undefined;
-    if (!team || team.archive || (approval.kind === "cancelRun" && !(run && activeRun(run)))) delete state.approvals[approval.id];
+    if (!team || (approval.kind === "cancelRun" && !(run && activeRun(run)))) delete state.approvals[approval.id];
   }
   for (const notice of Object.values(state.notices)) {
-    if (!state.teams[notice.teamId] || state.teams[notice.teamId].archive || !state.memberships[memberKey(notice.teamId, notice.agentId)]) delete state.notices[notice.id];
+    if (!state.teams[notice.teamId] || !state.memberships[memberKey(notice.teamId, notice.agentId)]) delete state.notices[notice.id];
   }
 }
 
-// Deleting a team cancels work that has not finished, dissolves its
-// memberships and conversations, and keeps what it delivered as a read-only
-// archive (with the owners' names, since the agents may be unregistered).
-// A team that never had a task leaves nothing behind. Folders are never touched.
-export function dissolveTeam(state: State, teamId: string, note: (taskId: string, text: string) => void, isOpen: (session: Session) => boolean) {
-  const team = state.teams[teamId];
+// Deleting a team removes its tasks, notes, artifacts, delegations and
+// memberships, and releases its conversations. Folders are never touched.
+export function dissolveTeam(state: State, teamId: string, isOpen: (session: Session) => boolean) {
   const tasks = Object.values(state.tasks).filter(task => task.teamId === teamId);
-  for (const task of tasks.filter(unfinished)) {
-    task.status = "cancelled"; delete task.dispatch; delete task.blockedOn;
-    note(task.id, "Team deleted.");
+  const taskIds = new Set(tasks.map(task => task.id));
+  for (const id of taskIds) delete state.tasks[id];
+  for (const [noteId, note] of Object.entries(state.notes)) if (taskIds.has(note.taskId)) delete state.notes[noteId];
+  for (const [artId, art] of Object.entries(state.artifacts)) if (taskIds.has(art.taskId)) delete state.artifacts[artId];
+  for (const [runId, run] of Object.entries(state.runs)) if (run.taskId && taskIds.has(run.taskId) && !activeRun(run)) delete state.runs[runId];
+  for (const d of Object.values(state.delegations || {})) {
+    if (d.teamId !== teamId) continue;
+    delete state.delegations[d.id];
+    for (const [runId, run] of Object.entries(state.runs)) if (run.delegationId === d.id && !activeRun(run)) delete state.runs[runId];
   }
-  for (const d of Object.values(state.delegations || {})) if (d.teamId === teamId) delete state.delegations[d.id];
   const memberIds = Object.values(state.memberships).filter(m => m.teamId === teamId).map(m => m.agentId);
   const owners = new Set([...tasks.map(task => task.assigneeAgentId), ...memberIds]);
-  const members = Object.fromEntries([...owners].filter(id => state.agents[id]).map(id => [id, state.agents[id].name]));
   for (const agentId of memberIds) delete state.memberships[memberKey(teamId, agentId)];
   const released = unbindSessions(state, session => session.teamId === teamId, isOpen);
-  if (tasks.length) state.teams[teamId] = { ...team, archive: { at: new Date().toISOString(), members } };
-  else delete state.teams[teamId];
-  pruneAgents(state, new Set([...memberIds, ...released]));
-  return { archived: tasks.length > 0 };
+  delete state.teams[teamId];
+  pruneAgents(state, new Set([...owners, ...released]));
+  return { deleted: true };
 }

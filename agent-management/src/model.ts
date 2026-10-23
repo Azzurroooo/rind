@@ -1,8 +1,7 @@
 export type Principal = { kind: "user" } | { kind: "manager"; sessionId: string } | { kind: "agent"; sessionId: string };
 // addedBy: the member that added this one with delegate; worktreeOf: the repository its folder is a worktree of.
 export interface Agent { id: string; name: string; canonicalWorkspace: string; adapter: string; hint?: string; skillRefs?: string[]; addedBy?: string; worktreeOf?: string }
-// A deleted team with history keeps its record as a read-only archive.
-export interface Team { id: string; name: string; leaderAgentId?: string; createRoot: string; archive?: { at: string; members: Record<string, string> } }
+export interface Team { id: string; name: string; leaderAgentId?: string; createRoot: string }
 export interface Membership { teamId: string; agentId: string; reportsToAgentId?: string; position?: string; responsibility?: string }
 export interface Report { outcome: string; summary: string; evidence: string[]; artifacts: string[]; nextAction?: string }
 export interface Task {

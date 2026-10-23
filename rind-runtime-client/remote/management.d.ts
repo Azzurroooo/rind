@@ -11,7 +11,6 @@ export type AgentsSnapshot = {
   folderDefaultsVersion?: number;
   notices?: Array<Record<string, unknown>>;
   approvals?: Array<Record<string, unknown>>;
-  archivedTeams?: Array<Record<string, unknown>>;
   notes?: Array<Record<string, unknown>>;
   artifacts?: Array<Record<string, unknown>>;
 };

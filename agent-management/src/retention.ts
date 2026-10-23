@@ -28,6 +28,17 @@ export function retain(state: State, now = Date.now()) {
   for (const key of notices.slice(0, Math.max(0, notices.length - NOTICE_LIMIT))) delete state.notices[key];
 
   const activeRuns = Object.values(state.runs).filter(activeRun);
+  for (const [id, team] of Object.entries(state.teams)) {
+    if ((team as { archive?: unknown }).archive) delete state.teams[id];
+  }
+  for (const [id, task] of Object.entries(state.tasks)) {
+    if (state.teams[task.teamId]) continue;
+    delete state.tasks[id];
+    for (const [noteId, note] of Object.entries(state.notes)) if (note.taskId === id) delete state.notes[noteId];
+    for (const [artId, art] of Object.entries(state.artifacts)) if (art.taskId === id) delete state.artifacts[artId];
+    for (const [runId, run] of Object.entries(state.runs)) if (run.taskId === id && !activeRun(run)) delete state.runs[runId];
+  }
+
   const delegations = Object.keys(state.delegations);
   for (let drop = Math.max(0, delegations.length - DELEGATION_LIMIT), i = 0; drop > 0 && i < delegations.length; i++) {
     const d = state.delegations[delegations[i]];
@@ -39,7 +50,7 @@ export function retain(state: State, now = Date.now()) {
     drop--;
   }
 
-  const finishedTasks = Object.values(state.tasks).filter(t => !state.teams[t.teamId]?.archive && (t.status === "done" || t.status === "cancelled"));
+  const finishedTasks = Object.values(state.tasks).filter(t => t.status === "done" || t.status === "cancelled");
   for (let drop = Math.max(0, finishedTasks.length - COMPLETED_TASK_LIMIT), i = 0; drop > 0 && i < finishedTasks.length; i++) {
     const task = finishedTasks[i];
     if (activeRuns.some(r => r.taskId === task.id)) continue;

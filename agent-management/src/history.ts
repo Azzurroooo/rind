@@ -34,7 +34,7 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
     const registeredByRuntimeId = new Map(registered.map(s => [s.runtimeSessionId, s]));
     const scoped = scope.teamId ? registered.filter(s => s.teamId === scope.teamId) : registered;
     const activeTeams = Object.values(state.memberships)
-      .filter(m => m.agentId === agentId && state.teams[m.teamId] && !state.teams[m.teamId].archive)
+      .filter(m => m.agentId === agentId && state.teams[m.teamId])
       .map(m => m.teamId);
     const defaultTeamId = activeTeams.length === 1 ? activeTeams[0] : undefined;
     const seen = new Set<string>();
@@ -162,7 +162,7 @@ export async function independentFolder(state: State, managerWorkspace: string, 
 const teamWorkspaces = (state: State) => [
   ...new Set(
     Object.values(state.memberships)
-      .filter(m => state.teams[m.teamId] && !state.teams[m.teamId].archive)
+      .filter(m => state.teams[m.teamId])
       .map(m => state.agents[m.agentId]?.canonicalWorkspace)
       .filter((w): w is string => Boolean(w)),
   ),

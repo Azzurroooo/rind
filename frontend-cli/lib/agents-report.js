@@ -75,8 +75,7 @@ function briefBlock(brief, width, expanded) {
 }
 
 function standing(report, width, now) {
-  const { task, archived, team } = report;
-  if (archived) return [paintBackground(paint.dim(single(team) + " was deleted. This report is kept read-only."), "surface")];
+  const { task } = report;
   if (task.status === "done" && task.review?.decision === "accepted") return [paintBackground(paint.bold(paint.success("✓ Accepted " + ago(task.review.at, now))), "surface")];
   if (task.status === "done" && task.review?.decision === "rework") {
     return [
@@ -137,7 +136,7 @@ function history({ task, runs, name }, width, expanded) {
 }
 
 // report: { task (with notes), team, owner, artifacts [{name, path}], runs,
-// archived, decide (the review keys offered, e.g. "a accept"),
+// decide (the review keys offered, e.g. "a accept"),
 // name(id) for note authors }.
 export function renderReport(report, width, { expanded = false, now = Date.now() } = {}) {
   const { task } = report;

@@ -23,7 +23,6 @@ export function emptyAgentsSnapshot() {
     folderDefaultsVersion: 0,
     notices: [],
     approvals: [],
-    archivedTeams: [],
     notes: [],
     artifacts: [],
   };

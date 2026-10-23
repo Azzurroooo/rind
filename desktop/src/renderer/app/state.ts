@@ -96,7 +96,6 @@ export const state: AppState = {
   agentChatContext: null,
   teamSessionsByTeam: {},
   managerSessions: [],
-  archivedTeams: [],
   collapsedTeams: new Set(),
   expandedSidebarMembers: new Set(),
   expandedOrgMembers: new Set(),

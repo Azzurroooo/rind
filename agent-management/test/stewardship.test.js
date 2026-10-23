@@ -51,12 +51,12 @@ test("only the user reviews, and only finished deliveries", async t => {
   await assert.rejects(f.call("reviewTask", { taskId: running.id, decision: "accept" }, { kind: "manager", sessionId: managerSession.id }), { code: "USER_CONFIRMATION_REQUIRED" });
 });
 
-test("deleting a team keeps its deliveries read-only and releases its members and conversations", async t => {
+test("deleting a team removes its tasks and releases its members and conversations", async t => {
   const f = await fixture(t);
   const writer = await f.member("writer");
   const session = await f.call("attachSession", { agentId: writer.id, teamId: f.team.id, runtimeSessionId: "conversation-1" });
   const delivered = await deliver(f, writer.id, "Ship the docs");
-  const waiting = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Later", start: false });
+  await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Later", start: false });
   const running = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: writer.id, brief: "Busy" });
   await eventually(() => f.starts.some(s => s.input.task.id === running.id));
 
@@ -67,29 +67,27 @@ test("deleting a team keeps its deliveries read-only and releases its members an
 
   await f.call("detachSession", { sessionId: session.id });
   const result = await f.call("deleteTeam", { teamId: f.team.id, confirmName: "Product" });
-  assert.equal(result.archived, true);
+  assert.deepEqual(result, { deleted: true });
   const state = f.store.state;
-  assert.ok(state.teams[f.team.id].archive.at);
-  assert.equal(state.teams[f.team.id].archive.members[writer.id], "writer", "owner names outlive their registration");
+  assert.equal(state.teams[f.team.id], undefined);
   assert.equal(Object.values(state.memberships).length, 0);
   assert.equal(state.sessions[session.id], undefined, "its conversations become plain sessions in their folders");
-  assert.equal(state.tasks[waiting.id].status, "cancelled");
-  assert.equal(state.tasks[delivered.id].status, "done");
+  assert.equal(Object.keys(state.tasks).length, 0);
+  assert.equal(Object.keys(state.notes).length, 0);
+  assert.equal(Object.keys(state.runs).length, 0);
   assert.deepEqual(Object.keys(state.agents), [], "agents in no team are unregistered");
 
   const snapshot = await f.call("snapshot");
   assert.deepEqual(snapshot.teams, [], "a deleted team leaves the team list");
-  assert.equal(snapshot.tasks.length, 0, "archived work stays out of every live snapshot");
-  assert.deepEqual(snapshot.archivedTeams.map(team => team.name), ["Product"]);
-  const archive = await f.call("listArchive");
-  assert.deepEqual(archive.teams[0].tasks.map(task => task.brief).sort(), ["Busy", "Later", "Ship the docs"]);
-  assert.equal((await f.call("getTask", { taskId: delivered.id })).report.summary, "Ship the docs delivered");
-  await assert.rejects(f.call("postTaskNote", { taskId: delivered.id, text: "late" }), { code: "TEAM_ARCHIVED" });
-  await assert.rejects(f.call("reviewTask", { taskId: delivered.id, decision: "accept" }), { code: "TEAM_ARCHIVED" });
-  await assert.rejects(f.call("createWorkspace", { teamId: f.team.id, name: "again" }), { code: "TEAM_ARCHIVED" });
+  assert.equal(snapshot.tasks.length, 0, "deleted team work is removed");
+  assert.equal(snapshot.archivedTeams, undefined);
+  await assert.rejects(f.call("getTask", { taskId: delivered.id }), { code: "NOT_FOUND" });
+  await assert.rejects(f.call("postTaskNote", { taskId: delivered.id, text: "late" }), { code: "NOT_FOUND" });
+  await assert.rejects(f.call("reviewTask", { taskId: delivered.id, decision: "accept" }), { code: "NOT_FOUND" });
+  await assert.rejects(f.call("createWorkspace", { teamId: f.team.id, name: "again" }), { code: "NOT_FOUND" });
 });
 
-test("a team without history is removed completely, and removing a member releases it", async t => {
+test("an empty team is removed completely, and removing a member releases it", async t => {
   const f = await fixture(t);
   const helper = await f.member("helper");
   const session = await f.call("attachSession", { agentId: helper.id, teamId: f.team.id, runtimeSessionId: "helper-chat" });
@@ -99,7 +97,7 @@ test("a team without history is removed completely, and removing a member releas
   assert.equal(f.store.state.agents[helper.id], undefined, "a member in no other team is unregistered");
 
   const empty = await f.call("createTeam", { name: "Scratch" });
-  assert.deepEqual(await f.call("deleteTeam", { teamId: empty.id, confirmName: "Scratch" }), { archived: false });
+  assert.deepEqual(await f.call("deleteTeam", { teamId: empty.id, confirmName: "Scratch" }), { deleted: true });
   assert.equal(f.store.state.teams[empty.id], undefined);
 });
 
@@ -109,7 +107,7 @@ test("Manager deletes empty teams directly but asks the user before deleting his
   const manager = { kind: "manager", sessionId: managerSession.id };
 
   const empty = await f.call("createTeam", { name: "Scratch" }, manager);
-  assert.deepEqual(await f.call("deleteTeam", { teamId: empty.id }, manager), { archived: false });
+  assert.deepEqual(await f.call("deleteTeam", { teamId: empty.id }, manager), { deleted: true });
 
   const running = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Long job" });
   await eventually(() => activeRunOf(f, running.id)?.status === "running");
@@ -127,9 +125,11 @@ test("Manager deletes empty teams directly but asks the user before deleting his
   const deletion = await f.call("deleteTeam", { teamId: f.team.id }, manager);
   assert.equal(deletion.approval.kind, "deleteTeam");
   assert.deepEqual(await f.call("resolveApproval", { approvalId: deletion.approval.id, approve: false }), { declined: true });
-  assert.ok(f.store.state.teams[f.team.id] && !f.store.state.teams[f.team.id].archive);
+  assert.ok(f.store.state.teams[f.team.id]);
   const again = await f.call("deleteTeam", { teamId: f.team.id }, manager);
-  assert.equal((await f.call("resolveApproval", { approvalId: again.approval.id, approve: true })).archived, true);
+  assert.deepEqual(await f.call("resolveApproval", { approvalId: again.approval.id, approve: true }), { deleted: true });
+  assert.equal(f.store.state.teams[f.team.id], undefined);
+  assert.equal(Object.keys(f.store.state.tasks).length, 0);
   assert.equal(Object.keys(f.store.state.approvals).length, 0);
 });
 
@@ -195,7 +195,7 @@ test("approvals disappear once they no longer apply, and the Manager asks before
   assert.deepEqual((await f.call("snapshot")).approvals.map(a => a.kind), ["deleteTeam"]);
 });
 
-test("a deleted imported team can be imported again, and archived teams do not answer team reads", async t => {
+test("a deleted imported team can be imported again, and deleted teams do not answer team reads", async t => {
   const f = await fixture(t);
   const legacy = path.join(f.home, "legacy"), agentDir = path.join(legacy, "agents", "main", ".aiteam");
   await mkdir(agentDir, { recursive: true }); await mkdir(path.join(legacy, ".aiteam"));
@@ -205,10 +205,10 @@ test("a deleted imported team can be imported again, and archived teams do not a
   const first = await f.call("importTeam", { root: legacy, confirmation: preview.fingerprint });
   await f.call("assignTask", { teamId: first.id, assigneeAgentId: first.leaderAgentId, brief: "Keep", start: false });
   await f.call("deleteTeam", { teamId: first.id, confirmName: "Legacy" });
-  await assert.rejects(f.call("getTeam", { teamId: first.id }), { code: "TEAM_ARCHIVED" });
+  await assert.rejects(f.call("getTeam", { teamId: first.id }), { code: "NOT_FOUND" });
   const second = await f.call("importTeam", { root: legacy, confirmation: preview.fingerprint });
-  assert.notEqual(second.id, first.id);
-  assert.equal(second.archive, undefined);
+  assert.equal(second.id, first.id);
+  assert.equal(Object.keys(f.store.state.tasks).length, 0);
   assert.equal((await f.call("importTeam", { root: legacy, confirmation: preview.fingerprint })).id, second.id, "importing again stays idempotent");
 });
 

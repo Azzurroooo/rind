@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyAgentsSnapshot, inboxRows, sidebarRows, archiveRows } from "../lib/agents-model.js";
+import { emptyAgentsSnapshot, inboxRows, sidebarRows } from "../lib/agents-model.js";
 import { renderReport, briefTitle, mayFoldBrief } from "../lib/agents-report.js";
-import { actionFor, available } from "../lib/agents-keys.js";
+import { available } from "../lib/agents-keys.js";
 import { textWidth } from "../lib/text-width.js";
 
 const NOW = Date.parse("2026-10-06T12:00:00Z");
@@ -34,23 +34,10 @@ test("the Inbox puts Manager approvals first and marks deliveries not reviewed y
   assert.equal(available({ focus: "main", page: { kind: "inbox" } }, rows[1])[0].label, "decide");
 });
 
-test("deleted teams appear under Archive, read-only", () => {
-  const s = snapshot();
-  assert.ok(!sidebarRows(s).some(row => row.kind === "archive"), "no Archive until a team is deleted");
-  s.archivedTeams.push({ id: "old", name: "Old", archivedAt: "2026-10-04T12:00:00Z" });
-  assert.equal(sidebarRows(s).at(-1).kind, "archive");
-  const rows = archiveRows({ teams: [{ id: "old", name: "Old", archive: { at: "2026-10-04T12:00:00Z", members: { lead: "Lead" } }, tasks: [done("a", { teamId: "old" })] }] });
-  assert.match(rows[0].title, /Old · deleted/);
-  assert.deepEqual([rows[1].owner, rows[1].archived], ["Lead", true]);
-  const view = { focus: "main", page: { kind: "archive" } };
-  assert.equal(available(view, rows[1])[0].label, "open report");
-  assert.equal(actionFor(view, rows[1], { text: " " }), undefined, "archived work has no actions");
-});
-
 test("a report aligns its blocks, says what needs deciding and folds its history", () => {
   const task = { ...done("a"), priority: "high", notes: [{ id: "n", author: "lead", text: "Started", createdAt: "2026-10-06T10:00:00Z" }],
     report: { outcome: "completed", summary: "Shipped the new login page with a much longer summary that has to wrap onto a second line", evidence: ["unit tests pass", "screenshot attached"], artifacts: ["f"], nextAction: "Announce it" } };
-  const report = { task, team: "Product", owner: "Lead", artifacts: [{ name: "login.png", path: "/a/login.png" }], runs: [{ startedAt: "2026-10-06T10:00:00Z", status: "succeeded" }], archived: false, decide: "a accept · b send back for rework", name: id => id === "lead" ? "Lead" : id };
+  const report = { task, team: "Product", owner: "Lead", artifacts: [{ name: "login.png", path: "/a/login.png" }], runs: [{ startedAt: "2026-10-06T10:00:00Z", status: "succeeded" }], decide: "a accept · b send back for rework", name: id => id === "lead" ? "Lead" : id };
   const lines = renderReport(report, 60, { now: NOW }).map(strip);
   assert.match(lines[0], /✓ Done · Product › Lead · delivered 59m ago · high priority/);
   assert.match(lines.join("\n"), /New delivery · a accept · b send back for rework/);
@@ -66,15 +53,13 @@ test("a report aligns its blocks, says what needs deciding and folds its history
   const accepted = renderReport({ ...report, task: { ...task, review: { decision: "accepted", at: "2026-10-06T11:30:00Z" } } }, 60, { now: NOW }).map(strip);
   assert.match(accepted.join("\n"), /✓ Accepted 30m ago/);
   assert.doesNotMatch(accepted.join("\n"), /a accept/);
-  const archived = renderReport({ ...report, archived: true }, 60, { now: NOW }).map(strip).join("\n");
-  assert.match(archived, /Product was deleted. This report is kept read-only./);
   const rework = renderReport({ ...report, task: { ...task, review: { decision: "rework", at: "2026-10-06T11:00:00Z", feedback: "Add the dark theme" } } }, 60, { now: NOW }).map(strip).join("\n");
   assert.match(rework, /↺ Sent back for rework 1h ago\nFeedback {2}Add the dark theme/);
 });
 
 test("a report shows file sizes, an honest empty evidence row, and no file row when nothing was delivered", () => {
   const task = { ...done("a"), report: { outcome: "completed", summary: "Done", evidence: [], artifacts: [] } };
-  const report = { task, team: "Product", owner: "Lead", runs: [], archived: false, artifacts: [], name: id => id };
+  const report = { task, team: "Product", owner: "Lead", runs: [], artifacts: [], name: id => id };
   const lines = renderReport({ ...report, artifacts: [{ name: "login.png", size: 2048, path: "/a/login.png" }, { name: "diff.patch", size: 1048576, path: "/a/diff.patch" }] }, 80, { now: NOW }).map(strip);
   assert.match(lines.join("\n"), /login\.png {2}2\.0 KiB {2}\/a\/login\.png/);
   assert.match(lines.join("\n"), /diff\.patch {2}1\.0 MiB/);
@@ -107,12 +92,6 @@ test("report keys accept a delivery or send it back with feedback", async () => 
   await form.submit({ feedback: "Add screenshots" });
   assert.deepEqual(calls.at(-1), ["reviewTask", { taskId: "a", decision: "rework", feedback: "Add screenshots" }]);
 
-  await review.delivery("a");
-  s.archivedTeams.push({ id: "team", name: "Product", archivedAt: "x" });
-  await review.delivery("a");
-  assert.deepEqual(shown.actions.map(action => action.key), ["r"], "archived reports are read-only");
-
-  s.archivedTeams.length = 0;
   s.memberships.length = 0;
   await review.delivery("a");
   assert.deepEqual(shown.actions.map(action => action.key), ["a", "n", "space", "r"], "no rework once the owner left the team");
@@ -138,7 +117,7 @@ test("Stop all names jobs that will stop, and a running job is explained in word
 test("a long brief reads in full under Task, folds past six lines, and titles the page with its first line", () => {
   const brief = "Write the launch notes for v2\n" + "Cover every change in the changelog and link each one to its pull request. ".repeat(8) + "\nThen post a summary.";
   const task = { ...done("a"), brief, notes: [] };
-  const report = { task, team: "Product", owner: "Lead", artifacts: [], runs: [], archived: false, decide: "", name: id => id };
+  const report = { task, team: "Product", owner: "Lead", artifacts: [], runs: [], decide: "", name: id => id };
   assert.equal(briefTitle(brief), "Write the launch notes for v2");
   assert.equal(mayFoldBrief(brief), true);
   assert.equal(mayFoldBrief("Fix the typo"), false);
@@ -203,7 +182,7 @@ test("renderReport formats Markdown headings, lists, inline code, bold and links
       nextAction: "Run `rind agents` to review",
     },
   };
-  const baseReport = { task: richTask, team: "Product", owner: "Lead", artifacts: [{ name: "demo.png", size: 512, path: "/w/demo.png" }], runs: [], archived: false, decide: "a accept · b send back for rework", name: id => id };
+  const baseReport = { task: richTask, team: "Product", owner: "Lead", artifacts: [{ name: "demo.png", size: 512, path: "/w/demo.png" }], runs: [], decide: "a accept · b send back for rework", name: id => id };
   const prevTty = process.stdout.isTTY;
   process.stdout.isTTY = true;
   try {
@@ -211,7 +190,6 @@ test("renderReport formats Markdown headings, lists, inline code, bold and links
       baseReport,
       { ...baseReport, decide: "", task: { ...richTask, review: { decision: "accepted", at: "2026-10-06T11:30:00Z" } } },
       { ...baseReport, decide: "", task: { ...richTask, review: { decision: "rework", at: "2026-10-06T11:30:00Z", feedback: "Fix `header` alignment" } } },
-      { ...baseReport, decide: "", archived: true },
     ]) {
       const rawLines = renderReport(variant, 72, { now: NOW });
       const plainLines = rawLines.map(strip);

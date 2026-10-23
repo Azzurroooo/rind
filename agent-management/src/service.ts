@@ -19,8 +19,8 @@ type Params = Record<string, any>;
 const WAIT_PENDING = Symbol("waitPending");
 interface WaitPending { [WAIT_PENDING]: { sessionId: string; ids: string[]; timeoutMs: number; includeReturned: boolean } }
 // Teams are picked by name in the sidebar and in `rind agents`; two live teams never share one.
-const teamNameTaken = (state: State, name: string) => Object.values(state.teams).some(t => !t.archive && t.name.trim().toLowerCase() === name.trim().toLowerCase());
-const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listArchive", "listModels", "getMemberModel", "listFolderDefaults"]);
+const teamNameTaken = (state: State, name: string) => Object.values(state.teams).some(t => t.name.trim().toLowerCase() === name.trim().toLowerCase());
+const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listModels", "getMemberModel", "listFolderDefaults"]);
 const MEMBER_MODEL_PARTS = { model: "model", reasoningEffort: "reasoning_effort" } as const;
 export const DEFAULT_MAX_CONCURRENT_RUNS = 128;
 export const CONCURRENT_RUN_OPTIONS = [4, 8, 16, 32, 64, 128, 256, 512] as const;
@@ -128,20 +128,20 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     requireValue(session, "SESSION_EXPIRED", "This management session is no longer registered.");
     return session;
   }
-  function teamAccess(state: State, actor: Principal, teamId: string, read = false) {
+  function teamAccess(state: State, actor: Principal, teamId: string) {
     const team = state.teams[teamId];
     requireValue(team, "NOT_FOUND", "Team not found.");
     if (actor.kind === "agent") {
       const session = sessionOf(state, actor)!;
       requireValue(session.teamId === teamId && state.memberships[memberKey(teamId, session.agentId)], "FORBIDDEN", "This session cannot access that team.");
     }
-    requireValue(read || !team.archive, "TEAM_ARCHIVED", "This team was deleted; its deliveries are kept read-only. Read them with listArchive.");
+
     return team;
   }
-  function taskAccess(state: State, actor: Principal, taskId: string, read = false) {
+  function taskAccess(state: State, actor: Principal, taskId: string) {
     const task = state.tasks[taskId];
     requireValue(task, "NOT_FOUND", "Task not found.");
-    teamAccess(state, actor, task.teamId, read);
+    teamAccess(state, actor, task.teamId);
     if (actor.kind === "agent") {
       const session = sessionOf(state, actor)!;
       requireValue(session.agentId === task.assigneeAgentId || manages(state, task.teamId, session.agentId, task.assigneeAgentId), "FORBIDDEN", "Only the task owner or its supervisors can access this task.");
@@ -452,9 +452,9 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       next: DELEGATE_NEXT,
     };
   }
-  function deleteTeam(state: State, teamId: string) {
+  async function deleteTeam(state: State, teamId: string) {
     requireValue(!Object.values(state.runs).some(r => activeRun(r) && state.sessions[r.sessionId]?.teamId === teamId), "TEAM_BUSY", "Stop or resolve the team's running work before deleting it.");
-    return dissolveTeam(state, teamId, (taskId, message) => note(state, taskId, "system", message), openInWindow);
+    const result = dissolveTeam(state, teamId, openInWindow); await rm(path.join(paths.artifacts, teamId), { recursive: true, force: true }).catch(() => {}); return result;
   }
   // A window shows it, or a private worker still hosts it.
   function openInWindow(session: Session) {
@@ -494,7 +494,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   }
   // What the user and the Manager see; members never read the organization.
   function filtered(state: State, actor: Principal) {
-    const teams = Object.values(state.teams).filter(t => !t.archive);
+    const teams = Object.values(state.teams);
     const teamIds = new Set(teams.map(t => t.id));
     const tasks = Object.values(state.tasks).filter(t => teamIds.has(t.teamId) && entryTask(t));
     const taskIds = new Set(tasks.map(t => t.id));
@@ -508,9 +508,9 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       connectedSessions: sessions.filter(s => connected.has(s.id)).map(s => s.id),
       // Every conversation in the shared Runtime, including plain ones outside any team.
       ...(actor.kind === "user" ? { live: [...runtimeSessions.values()], folderDefaultsVersion } : {}),
-      // Archived work is read on demand (listArchive) so it never weighs on live pushes.
+
       ...(actor.kind === "user" ? { notices: Object.values(state.notices) } : {}),
-      approvals: Object.values(state.approvals), archivedTeams: Object.values(state.teams).filter(t => t.archive).map(t => ({ id: t.id, name: t.name, archivedAt: t.archive!.at })),
+      approvals: Object.values(state.approvals),
       runs: Object.values(state.runs).map(r => {
         const origin = r.delegationId ? state.delegations[r.delegationId]?.originSessionId : undefined;
         return origin ? { ...r, originSessionId: origin } : r;
@@ -531,7 +531,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         return { team: state.teams[p.teamId], members: view.memberships.filter(m => m.teamId === p.teamId), tasks, briefing: teamBriefing(tasks, state.agents) };
       }
       case "getTask": {
-        const task = taskAccess(state, actor, p.taskId, true);
+        const task = taskAccess(state, actor, p.taskId);
         const queueReason = task.status === "queued" ? queuedReason(projectionIndex(state, connected, runtimeSessions), task) : undefined;
         return { ...task, ...(queueReason ? { queueReason } : {}), notes: Object.values(state.notes).filter(n => n.taskId === task.id), artifacts: Object.values(state.artifacts).filter(a => a.taskId === task.id) };
       }
@@ -548,7 +548,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can rename teams.");
         const team = teamAccess(state, actor, p.teamId);
         const name = text(p.name, "Team name", 200);
-        requireValue(!Object.values(state.teams).some(t => t.id !== team.id && !t.archive && t.name.trim().toLowerCase() === name.trim().toLowerCase()), "TEAM_NAME_TAKEN", "A team named \"" + name.trim() + "\" already exists. Choose another name.");
+        requireValue(!Object.values(state.teams).some(t => t.id !== team.id && t.name.trim().toLowerCase() === name.trim().toLowerCase()), "TEAM_NAME_TAKEN", "A team named \"" + name.trim() + "\" already exists. Choose another name.");
         team.name = name; return team;
       }
       case "registerAgent": return register(state, p);
@@ -573,11 +573,6 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           return askUser(state, actor, { kind: "deleteTeam", teamId: team.id, title: "Delete team " + team.name });
         }
         return deleteTeam(state, team.id);
-      }
-      case "listArchive": {
-        requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or Manager can read deleted teams.");
-        const teams = Object.values(state.teams).filter(t => t.archive).sort((a, b) => b.archive!.at.localeCompare(a.archive!.at));
-        return { teams: teams.map(team => ({ ...team, tasks: Object.values(state.tasks).filter(t => t.teamId === team.id && entryTask(t)) })) };
       }
       case "setLeader": {
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can change team leadership.");
@@ -637,11 +632,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         userOnly(actor);
         const preview = await previewLegacyTeam(text(p.root, "Legacy team directory"));
         requireValue(p.confirmation === preview.fingerprint && !preview.errors.length, "IMPORT_CONFIRMATION_REQUIRED", "Review and resolve the import preview first.", preview);
-        // Importing the same folder again returns its live team; a deleted one stays archived and a new team is made.
-        const base = "import-" + createHash("sha256").update(preview.root).digest("hex").slice(0, 24);
-        const existing = Object.values(state.teams).find(t => (t.id === base || t.id.startsWith(base + "-")) && !t.archive);
-        if (existing) return existing;
-        const id = state.teams[base] ? base + "-" + randomUUID().slice(0, 8) : base;
+        // Importing the same folder again returns its live team.
+        const id = "import-" + createHash("sha256").update(preview.root).digest("hex").slice(0, 24);
+        if (state.teams[id]) return state.teams[id];
+
+
         // The name comes from the old files, not from the user: keep it free of clashes.
         let name = preview.name;
         for (let n = 2; teamNameTaken(state, name); n++) name = preview.name + " (" + n + ")";
@@ -722,7 +717,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       }
       case "readArtifact": {
         const artifact = state.artifacts[p.artifactId]; requireValue(artifact, "NOT_FOUND", "Artifact not found.");
-        const task = taskAccess(state, actor, artifact.taskId, true);
+        const task = taskAccess(state, actor, artifact.taskId);
         const location = path.join(paths.artifacts, artifact.file);
         if (actor.kind === "user") return { ...artifact, path: location };
         requireValue(artifact.size <= 64 * 1024, "ARTIFACT_TOO_LARGE", "Ask the user to open this artifact; inline preview is limited to 64 KiB.");
@@ -972,7 +967,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           if (approval.taskId && state.tasks[approval.taskId]) note(state, approval.taskId, "user", "Declined: " + approval.title);
           return { declined: true };
         }
-        if (approval.kind === "deleteTeam") return state.teams[approval.teamId] && !state.teams[approval.teamId].archive ? deleteTeam(state, approval.teamId) : { expired: true };
+        if (approval.kind === "deleteTeam") return state.teams[approval.teamId] ? deleteTeam(state, approval.teamId) : { expired: true };
         const run = state.runs[approval.runId!];
         if ((!run?.taskId && !run?.delegationId) || !live.has(run.id) || !activeRun(run)) return { expired: true };
         if (run.taskId && state.tasks[run.taskId]) return stopRun(state, "user", run, state.tasks[run.taskId]);
@@ -1072,7 +1067,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         const session = store.state.sessions[(actor as { sessionId: string }).sessionId];
         const d = store.state.delegations[typeof params.task === "string" ? params.task.trim() : ""];
         const rawMsg = params.message === undefined || params.brief === undefined || params.message === params.brief ? (params.message ?? params.brief) : undefined;
-        if (session && d && d.status === "running" && session.teamId === d.teamId && store.state.memberships[memberKey(d.teamId, session.agentId)] && !store.state.teams[d.teamId]?.archive && (d.fromAgentId === session.agentId || manages(store.state, d.teamId, session.agentId, d.assigneeAgentId)) && typeof rawMsg === "string" && rawMsg.trim()) {
+        if (session && d && d.status === "running" && session.teamId === d.teamId && store.state.memberships[memberKey(d.teamId, session.agentId)] && store.state.teams[d.teamId] && (d.fromAgentId === session.agentId || manages(store.state, d.teamId, session.agentId, d.assigneeAgentId)) && typeof rawMsg === "string" && rawMsg.trim()) {
           const run = Object.values(store.state.runs).find(r => r.delegationId === d.id && activeRun(r));
           const from = "From " + nameOf(store.state, session.agentId) + ": " + text(rawMsg, "Message");
           if (run && live.get(run.id)?.steer) prefetched = await live.get(run.id)!.steer!(from);

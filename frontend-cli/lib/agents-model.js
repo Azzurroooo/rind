@@ -1,7 +1,7 @@
 // Pure projections from the management snapshot into the rows the Agents page
 // renders. Nothing here touches the terminal or the service.
 
-export const emptyAgentsSnapshot = () => ({ teams: [], memberships: [], agents: [], tasks: [], runs: [], sessions: [], notes: [], artifacts: [], approvals: [], archivedTeams: [] });
+export const emptyAgentsSnapshot = () => ({ teams: [], memberships: [], agents: [], tasks: [], runs: [], sessions: [], notes: [], artifacts: [], approvals: [] });
 
 export const clean = value => String(value ?? "").replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
 export const single = value => clean(value).replace(/\s+/g, " ").trim();
@@ -348,23 +348,7 @@ export function sidebarRows(snapshot) {
     { id: "section:teams", kind: "section", title: "Teams", count: snapshot.teams.length },
     ...snapshot.teams.map(team => ({ id: team.id, kind: "team", title: single(team.name), status: teamStatus(snapshot, team.id, inbox), teamId: team.id, summary: teamSummary(snapshot, team.id, inbox) })),
     { id: "new-team", kind: "new-team", title: "New team" },
-    ...(snapshot.archivedTeams?.length ? [{ id: "archive", kind: "archive", title: "Archive", badge: snapshot.archivedTeams.length }] : []),
   ];
-}
-
-// Deleted teams, newest first, with what they delivered. Read-only.
-export function archiveRows(archive, { query = "" } = {}) {
-  if (!archive) return [{ id: "loading", kind: "clear", title: "Loading…" }];
-  const rows = [];
-  for (const team of archive.teams) {
-    const owner = id => single(team.archive?.members?.[id]) || "Removed member";
-    const tasks = team.tasks.filter(task => entryTask(task) && matches(query, task.brief, owner(task.assigneeAgentId), task.report?.summary))
-      .sort((a, b) => (b.deliveredAt || "").localeCompare(a.deliveredAt || "") || single(a.brief).localeCompare(single(b.brief)));
-    if (!tasks.length) continue;
-    rows.push({ id: "section:" + team.id, kind: "section", title: single(team.name) + " · deleted " + relativeTime(team.archive?.at), count: undefined },
-      ...tasks.map(task => ({ id: "x:" + task.id, kind: "task", archived: true, status: taskStatus(task), title: single(task.brief), note: single(task.report?.summary), owner: owner(task.assigneeAgentId), taskId: task.id, teamId: team.id })));
-  }
-  return rows.length ? rows : [{ id: "clear", kind: "clear", title: query ? "Nothing matches" : "No deleted teams" }];
 }
 
 // One folder can be spelled with different case or a trailing separator.

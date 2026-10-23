@@ -7,7 +7,6 @@ import {
   mergeManagerSessions,
   mergeTeamSessions,
   normalizeAgentsSnapshot,
-  renderArchiveSurfaceHtml,
   renderBackgroundSurfaceHtml,
   renderHeaderAgentBreadcrumbHtml,
   renderInboxSurfaceHtml,
@@ -105,16 +104,16 @@ export function currentSessionAgentContext(): SessionAgentContext {
   )
 }
 
-function scheduleRefreshAgentSessionsAndArchive() {
+function scheduleRefreshAgentSessions() {
   if (!window.api.agents) return
   if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer)
   refreshDebounceTimer = setTimeout(() => {
     refreshDebounceTimer = undefined
-    void refreshAgentSessionsAndArchive()
+    void refreshAgentSessions()
   }, 60)
 }
 
-export async function refreshAgentSessionsAndArchive() {
+export async function refreshAgentSessions() {
   if (!window.api.agents) return
   if (refreshInFlight) {
     refreshPending = true
@@ -123,9 +122,8 @@ export async function refreshAgentSessionsAndArchive() {
   refreshInFlight = true
   try {
     const teams = state.agentsSnapshot.teams || []
-    const [managerRes, archiveRes, ...teamResults] = await Promise.all([
+    const [managerRes, ...teamResults] = await Promise.all([
       window.api.agents.request("listSessions", { manager: true }).catch(() => null),
-      window.api.agents.request("listArchive", {}).catch(() => null),
       ...teams.map((team) =>
         window.api.agents
           .request("listSessions", { teamId: team.id })
@@ -139,13 +137,6 @@ export async function refreshAgentSessionsAndArchive() {
     if (Array.isArray(mgrRec.sessions)) {
       if (JSON.stringify(state.managerSessions) !== JSON.stringify(mgrRec.sessions)) {
         state.managerSessions = mgrRec.sessions as Array<Record<string, any>>
-        changed = true
-      }
-    }
-    const archRec = asRecord(archiveRes)
-    if (Array.isArray(archRec.archivedTeams)) {
-      if (JSON.stringify(state.archivedTeams) !== JSON.stringify(archRec.archivedTeams)) {
-        state.archivedTeams = archRec.archivedTeams as Array<Record<string, any>>
         changed = true
       }
     }
@@ -167,7 +158,7 @@ export async function refreshAgentSessionsAndArchive() {
     refreshInFlight = false
     if (refreshPending) {
       refreshPending = false
-      scheduleRefreshAgentSessionsAndArchive()
+      scheduleRefreshAgentSessions()
     }
   }
 }
@@ -176,7 +167,7 @@ export function renderAgentsUI() {
   const snapshot = state.agentsSnapshot
   if (snapshot.seq !== lastRefreshedSeq && window.api.agents) {
     lastRefreshedSeq = snapshot.seq
-    scheduleRefreshAgentSessionsAndArchive()
+    scheduleRefreshAgentSessions()
   }
 
   const chatContext = currentSessionAgentContext()
@@ -241,7 +232,6 @@ export function renderAgentsUI() {
       managerExpanded: state.managerExpanded,
       teamSessionsByTeam: state.teamSessionsByTeam,
       managerSessions: state.managerSessions,
-      archivedTeams: state.archivedTeams,
       viewedSessionId: state.viewedSessionId,
       itemMenuKey: state.agentItemMenuKey,
       sessionMenuId: state.sessionMenuId,
@@ -305,11 +295,6 @@ export function renderAgentsUI() {
           snapshot,
           serviceInfo: state.agentsService,
           busy: state.agentsBusy,
-        })
-      } else if (state.agentSurface.kind === "archive") {
-        nextSurfaceHtml = renderArchiveSurfaceHtml({
-          snapshot,
-          archivedTeams: state.archivedTeams,
         })
       }
       if (nextSurfaceHtml && nextSurfaceHtml !== lastSurfaceHtml) {
@@ -534,7 +519,7 @@ export async function openManagedAgentChat(options: {
         void loadDirectory("").catch(() => {})
       }
     }
-    scheduleRefreshAgentSessionsAndArchive()
+    scheduleRefreshAgentSessions()
     prompt.focus()
   } finally {
     state.agentsBusy = false
@@ -551,7 +536,7 @@ async function runManagementOp(op: Record<string, unknown>, toastMessage = "") {
       state.agentsSnapshot = normalizeAgentsSnapshot(res.snapshot)
     }
     if (toastMessage) showToast(toastMessage, "success")
-    scheduleRefreshAgentSessionsAndArchive()
+    scheduleRefreshAgentSessions()
     return res
   } finally {
     state.agentsBusy = false
@@ -734,9 +719,6 @@ export function bindAgentsEvents(): () => void {
       } else if (next === "background") {
         state.sidebarMode = "agents"
         state.agentSurface = { kind: "background" }
-      } else if (next === "archive") {
-        state.sidebarMode = "agents"
-        state.agentSurface = { kind: "archive" }
       } else {
         state.agentSurface = { kind: "chat" }
       }
@@ -1386,7 +1368,7 @@ export function bindAgentsEvents(): () => void {
       const confirmName = String(data.get("confirmName") || "").trim()
       if (!confirmName) return
       runAction(async () => {
-        await runManagementOp({ op: "deleteTeam", teamId, confirmName }, "Team deleted and archived.")
+        await runManagementOp({ op: "deleteTeam", teamId, confirmName }, "Team deleted.")
         state.agentSurface = { kind: "chat" }
         render()
       })

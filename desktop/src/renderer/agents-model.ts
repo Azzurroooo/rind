@@ -18,7 +18,6 @@ export type AgentsSnapshotData = {
   folderDefaultsVersion: number
   notices: Array<Record<string, any>>
   approvals: Array<Record<string, any>>
-  archivedTeams: Array<Record<string, any>>
   notes: Array<Record<string, any>>
   artifacts: Array<Record<string, any>>
 }
@@ -176,7 +175,6 @@ export function emptyAgentsSnapshot(): AgentsSnapshotData {
     folderDefaultsVersion: 0,
     notices: [],
     approvals: [],
-    archivedTeams: [],
     notes: [],
     artifacts: [],
   }
@@ -199,7 +197,6 @@ export function normalizeAgentsSnapshot(raw: unknown): AgentsSnapshotData {
     folderDefaultsVersion: Number(obj.folderDefaultsVersion) || 0,
     notices: Array.isArray(obj.notices) ? (obj.notices as Array<Record<string, any>>) : [],
     approvals: Array.isArray(obj.approvals) ? (obj.approvals as Array<Record<string, any>>) : [],
-    archivedTeams: Array.isArray(obj.archivedTeams) ? (obj.archivedTeams as Array<Record<string, any>>) : [],
     notes: Array.isArray(obj.notes) ? (obj.notes as Array<Record<string, any>>) : [],
     artifacts: Array.isArray(obj.artifacts) ? (obj.artifacts as Array<Record<string, any>>) : [],
   }
@@ -1039,7 +1036,6 @@ export type DesktopAgentSurfaceState =
   | { kind: "inbox" }
   | { kind: "manager" }
   | { kind: "background" }
-  | { kind: "archive" }
   | {
       kind: "team"
       teamId: string
@@ -1367,7 +1363,6 @@ export function renderSidebarAgentsHtml(options: {
   managerExpanded?: boolean
   teamSessionsByTeam?: Record<string, Array<Record<string, any>>>
   managerSessions?: Array<Record<string, any>>
-  archivedTeams?: Array<Record<string, any>>
   viewedSessionId?: string
   itemMenuKey?: string
   sessionMenuId?: string
@@ -1382,13 +1377,11 @@ export function renderSidebarAgentsHtml(options: {
   const bgCount = activeBackgroundCount(snapshot)
   const isInbox = options.surface.kind === "inbox"
   const isBg = options.surface.kind === "background"
-  const isArchive = options.surface.kind === "archive"
   const isManagerActive =
     options.surface.kind === "manager" || (options.surface.kind === "chat" && options.chatContext.kind === "manager")
   const expandedMembers = options.expandedSidebarMembers || new Set<string>()
   const teamSessionsByTeam = options.teamSessionsByTeam || {}
   const managerSessionsList = mergeManagerSessions(snapshot, options.managerSessions || [])
-  const archivedList = options.archivedTeams?.length ? options.archivedTeams : snapshot.archivedTeams
   const itemMenuKey = options.itemMenuKey || ""
   const sessionMenuId = options.sessionMenuId || ""
   const sessionDeleteConfirmId = options.sessionDeleteConfirmId || ""
@@ -1612,16 +1605,6 @@ export function renderSidebarAgentsHtml(options: {
               ${bgCount > 0 ? `<span class="sidebar-nav-badge working">${bgCount}</span>` : ""}
             </button>
           </div>
-          ${
-            archivedList.length > 0
-              ? `<div class="session-item-row">
-                  <button type="button" class="session-item${isArchive ? " selected" : ""}" data-sidebar-surface="archive"${isArchive ? ' aria-current="page"' : ""}>
-                    <span class="session-item-title"><span class="session-item-title-text">Archive</span></span>
-                    <span class="sidebar-nav-tag">${archivedList.length}</span>
-                  </button>
-                </div>`
-              : ""
-          }
         </div>
         <div class="project-list">
           <section class="project-item manager-project-item${options.managerExpanded ? " expanded" : ""}${isManagerActive ? " is-selected-team" : ""}${managerItemMenuOpen ? " menu-open" : ""}">
@@ -2038,7 +2021,7 @@ export function renderTeamSurfaceHtml(options: {
   const deleteConfirmHtml = surface.deleteConfirmOpen
     ? `<form id="agent-delete-team-form" class="agent-inline-panel danger-panel" data-team-id="${escapeAttribute(team.id)}">
         <div class="agent-panel-head"><h3>Delete Team "${escapeHtml(team.name)}"?</h3></div>
-        <p class="agent-empty-hint">Type <strong>${escapeHtml(team.name)}</strong> to archive this team and stop active runs:</p>
+        <p class="agent-empty-hint">Type <strong>${escapeHtml(team.name)}</strong> to delete this team:</p>
         <div class="agent-form-grid">
           <input id="agent-delete-confirm-name" name="confirmName" type="text" class="agent-input" placeholder="${escapeAttribute(team.name)}" required />
         </div>
@@ -2470,52 +2453,6 @@ export function renderBackgroundSurfaceHtml(options: {
                   </div>`
             }
           </section>
-        </div>
-      </div>
-    </div>
-  `
-}
-
-export function renderArchiveSurfaceHtml(options: {
-  snapshot: AgentsSnapshotData
-  archivedTeams?: Array<Record<string, any>>
-}): string {
-  const snapshot = normalizeAgentsSnapshot(options.snapshot)
-  const archived = options.archivedTeams?.length ? options.archivedTeams : snapshot.archivedTeams
-
-  return `
-    <div class="agent-surface archive-surface">
-      <div class="agent-surface-main">
-        <header class="agent-surface-header">
-          <div class="agent-surface-headline-row">
-            <h2 class="agent-surface-title">Archived Teams</h2>
-            <span class="agent-metric-pill">${archived.length} archived</span>
-          </div>
-        </header>
-        <div class="agent-surface-body panel-scroll">
-          ${
-            archived.length === 0
-              ? `<div class="agent-empty-box"><h3>No archived teams</h3><p>Deleted teams appear here with their preserved workspace paths.</p></div>`
-              : `<div class="agent-runs-list">
-                  ${archived
-                    .map(
-                      (item) => `
-                        <div class="agent-run-row">
-                          <div class="agent-run-main">
-                            <strong>${escapeHtml(String(item.name || item.id))}</strong>
-                            <span class="agent-timestamp">Archived ${escapeHtml(relativeTimeLabel(item.deletedAt))}</span>
-                            ${
-                              Array.isArray(item.workspaces) && item.workspaces.length > 0
-                                ? `<code class="org-workspace-path">${escapeHtml(item.workspaces.map((w: any) => w.workspace || w).join(", "))}</code>`
-                                : ""
-                            }
-                          </div>
-                        </div>
-                      `,
-                    )
-                    .join("")}
-                </div>`
-          }
         </div>
       </div>
     </div>

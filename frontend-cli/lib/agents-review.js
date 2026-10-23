@@ -17,34 +17,30 @@ async function preview(file) {
 // for approval: the flows that decide what happens to finished work.
 export function createReviewActions(ui, { agentName, display, teamOf, assignTask, taskActions, answer }) {
   const snap = () => ui.view.snapshot;
-  const archivedTeam = teamId => ui.view.archive?.teams?.find(team => team.id === teamId);
-  const name = (task, id) => archivedTeam(task.teamId)?.archive?.members?.[id] || display(id);
 
   async function delivery(taskId) {
     const task = await ui.request("getTask", { taskId });
-    const archive = archivedTeam(task.teamId);
-    const archived = Boolean(archive || snap().archivedTeams?.some(team => team.id === task.teamId));
     const artifacts = await Promise.all((task.report?.artifacts || []).map(artifactId => ui.request("readArtifact", { artifactId })));
     const report = {
-      task, archived, artifacts,
-      team: teamOf(task.teamId)?.name || archive?.name || "Team",
-      owner: name(task, task.assigneeAgentId),
+      task, artifacts,
+      team: teamOf(task.teamId)?.name || "Team",
+      owner: display(task.assigneeAgentId),
       runs: snap().runs.filter(run => run.taskId === taskId && !run.delegationId),
-      name: id => name(task, id),
+      name: id => display(id),
     };
-    const delivered = task.status === "done" && !task.review && !archived;
-    const owner = !archived && snap().memberships.some(m => m.teamId === task.teamId && m.agentId === task.assigneeAgentId);
+    const delivered = task.status === "done" && !task.review;
+    const owner = snap().memberships.some(m => m.teamId === task.teamId && m.agentId === task.assigneeAgentId);
     // Rework goes back to the same owner, so it needs the owner still in the team.
     const review = delivered ? [{ key: "a", label: "accept", run: () => ui.run(() => accept(task)) }, ...(owner ? [{ key: "b", label: "send back", run: () => sendBack(task, report.owner) }] : [])] : [];
     report.decide = review.length ? (owner ? "a accept · b send back for rework" : "a accept · the owner left the team, so it cannot be sent back") : "";
     const blocked = task.status === "blocked" && task.blockedOn?.responder === "user";
     const actions = [
       ...review,
-      ...(!archived ? [{ key: "n", label: blocked ? "answer" : "add note", run: () => answer(taskId) }] : []),
+      { key: "n", label: blocked ? "answer" : "add note", run: () => answer(taskId) },
       ...(artifacts.length || owner ? [{ key: "o", label: artifacts.length ? "open files" : "conversations", run: () => openFrom(task, artifacts, owner) }] : []),
       // z unfolds what is folded: a long brief and the history.
       ...(mayFoldBrief(task.brief) || task.notes.length || report.runs.length ? [{ key: "z", label: "show all", run: detail => { detail.expanded = !detail.expanded; } }] : []),
-      ...(!archived ? [{ key: "space", label: "more actions", run: () => taskActions(taskId) }] : []),
+      { key: "space", label: "more actions", run: () => taskActions(taskId) },
       { key: "r", label: "refresh", run: () => ui.run(() => delivery(taskId), "Refreshing…") },
     ];
     ui.showReport(briefTitle(task.brief), { render: (width, detail) => renderReport(report, width, { expanded: detail.expanded }), actions, refresh: () => delivery(taskId) });
@@ -101,16 +97,14 @@ export function createReviewActions(ui, { agentName, display, teamOf, assignTask
     const sessions = new Set(snap().sessions.filter(s => s.teamId === teamId).map(s => s.id));
     const running = snap().runs.filter(run => sessions.has(run.sessionId) && ["starting", "running", "unknown"].includes(run.status)).length;
     if (running) { ui.notify("The team still has running or unconfirmed work. Stop or resolve it on the Tasks tab or in Background first.", "error"); return; }
-    const unfinished = tasks.filter(task => !["done", "cancelled"].includes(task.status)).length;
     const members = snap().memberships.filter(m => m.teamId === teamId).length;
     const teamName = single(team.name);
     ui.form("Delete " + teamName + "?", [{ key: "confirmName", label: "Team name", hint: "Type " + teamName + " to confirm.", validate: value => value === team.name ? "" : "Type " + teamName + " exactly to delete it." }],
       async ({ confirmName }) => {
-        const result = await ui.request("deleteTeam", { teamId, confirmName });
-        ui.notify(teamName + " deleted." + (result.archived ? " Its deliveries are in Archive." : ""), "success");
+        await ui.request("deleteTeam", { teamId, confirmName });
+        ui.notify(teamName + " deleted.", "success");
       }, { danger: true, description: [
-        members + (members === 1 ? " member is" : " members are") + " released" + (unfinished ? " and " + unfinished + " unfinished " + (unfinished === 1 ? "task is" : "tasks are") + " cancelled." : "."),
-        tasks.length ? "Delivered work stays readable, read-only, under Archive." : "The team has no tasks, so nothing is archived.",
+        members + (members === 1 ? " member is" : " members are") + " released" + (tasks.length ? " and " + tasks.length + " " + (tasks.length === 1 ? "task is" : "tasks are") + " removed." : "."),
         "Folders, their files and conversation history are never touched. Open conversations keep working outside the team.",
       ] });
   }
@@ -120,7 +114,7 @@ export function createReviewActions(ui, { agentName, display, teamOf, assignTask
     if (!request) return;
     const team = single(teamOf(request.teamId)?.name || "the team");
     const description = request.kind === "deleteTeam"
-      ? ["The Manager asks to delete " + team + ".", "Unfinished tasks are cancelled and members released; delivered work stays readable under Archive. Folders and history are never touched."]
+      ? ["The Manager asks to delete " + team + ".", "Tasks are removed and members released. Folders and conversation history are never touched."]
       : ["The Manager asks to stop running work in " + team + ":", single(request.title.replace(/^Stop /, "")), "The task is cancelled; its conversation is kept."];
     const resolve = approve => async () => {
       const result = await ui.request("resolveApproval", { approvalId, approve });

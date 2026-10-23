@@ -90,7 +90,7 @@ test("every kind of row draws inside the panel at 28 and 46 columns", () => {
   assert.doesNotMatch(sub, /high …/);
 });
 
-test("task detail panel renders structured Delivery, Evidence, Files and Next with ANSI styling in unreviewed, accepted, rework and archived states", () => {
+test("task detail panel renders structured Delivery, Evidence, Files and Next with ANSI styling in unreviewed, accepted and rework states", () => {
   const s = emptyAgentsSnapshot();
   s.teams.push({ id: "team", name: "Product", leaderAgentId: "lead", createRoot: "/w" });
   s.agents.push({ id: "lead", name: "Lead", canonicalWorkspace: "/w/lead" });
@@ -110,15 +110,13 @@ test("task detail panel renders structured Delivery, Evidence, Files and Next wi
     { task: { ...baseTask }, row: { kind: "task", taskId: "t1", owner: "Lead", status: "Done" }, callout: /● New delivery · open it to accept or send\s+back/ },
     { task: { ...baseTask, review: { decision: "accepted", at: "2026-10-06T11:10:00Z" } }, row: { kind: "task", taskId: "t1", owner: "Lead", status: "Done" }, callout: /✓ Accepted/ },
     { task: { ...baseTask, review: { decision: "rework", at: "2026-10-06T11:10:00Z", feedback: "Add metrics" } }, row: { kind: "task", taskId: "t1", owner: "Lead", status: "Done" }, callout: /↺ Sent back for rework · Add metrics/ },
-    { task: { ...baseTask, review: { decision: "accepted", at: "2026-10-06T11:10:00Z" } }, row: { kind: "task", taskId: "t1", owner: "Lead", status: "Done", archived: true }, callout: null },
   ];
   const prevTty = process.stdout.isTTY;
   process.stdout.isTTY = true;
   try {
     for (const { task, row, callout } of states) {
-      s.tasks = row.archived ? [] : [task];
-      const archive = row.archived ? { teams: [{ id: "team", name: "Product", tasks: [task] }] } : undefined;
-      const raw = detailLines({ snapshot: s, archive }, row, 46, 28);
+      s.tasks = [task];
+      const raw = detailLines({ snapshot: s }, row, 46, 28);
       const text = plain(raw).join("\n");
       if (callout) assert.match(text, callout);
       assert.match(text, /Delivery {1}Completed\n {9}1\) Built report\.md with clean/);

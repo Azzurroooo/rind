@@ -10,7 +10,7 @@ function openPage(t, h, options = {}) {
   t.after(async () => { abort.abort(); await running; await h.cleanup(); });
 }
 
-test("a team is deleted from the sidebar by typing its name, and its work stays readable in Archive", { timeout: 40000 }, async t => {
+test("a team is deleted from the sidebar by typing its name, and its tasks are removed", { timeout: 40000 }, async t => {
   const h = await harness({ prefix: "rind-agents-delete-" });
   const team = await h.client.request("createTeam", { name: "Product" });
   const lead = await h.client.request("createWorkspace", { teamId: team.id, name: "Lead" });
@@ -22,19 +22,15 @@ test("a team is deleted from the sidebar by typing its name, and its work stays 
   key("j"); key("j"); key("j"); key("j"); await visible("space more actions");
   key(" "); await visible("Delete team…"); key("x");
   await visible("Delete Product?");
-  await visible("1 member is released and 1 unfinished task is cancelled.");
+  await visible("1 member is released and 1 task is removed.");
   await visible("Folders, their files and conversation history are never touched.");
   paste("product"); key("\r"); await visible("Type Product exactly to delete it.");
   key("\x15"); paste("Product"); key("\r");
-  await visible("Product deleted. Its deliveries are in Archive.");
-  assert.deepEqual((await h.client.request("snapshot")).teams, []);
-
-  await visible("Archive");
-  key("G"); key("\r"); await visible("PRODUCT · DELETED");
-  await visible("Write the launch notes");
-  await visible("enter open report");
-  key("\r"); await visible("Product was deleted. This report is kept read-only.");
-  assert.doesNotMatch(h.screen(), /a accept|space more actions/, "an archived report offers no actions");
+  await visible("Product deleted.");
+  const snapshot = await h.client.request("snapshot");
+  assert.deepEqual(snapshot.teams, []);
+  assert.deepEqual(snapshot.tasks, []);
+  assert.doesNotMatch(h.screen(), /Archive|Write the launch notes/);
 });
 
 test("the Manager's request to delete a team waits in the Inbox until the user decides", { timeout: 40000 }, async t => {

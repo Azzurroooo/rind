@@ -385,8 +385,8 @@ test("team names are unique among live teams, ignoring case and spaces", async t
   await assert.rejects(f.call("createTeam", { name: " notes " }), { code: "TEAM_NAME_TAKEN" });
   assert.equal((await f.call("snapshot")).teams.filter(team => team.name.toLowerCase().trim() === "notes").length, 1);
   // A deleted team no longer holds its name.
-  const archived = await f.call("createTeam", { name: "Old" });
-  await f.call("deleteTeam", { teamId: archived.id, confirmName: "Old" });
+  const deleted = await f.call("createTeam", { name: "Old" });
+  await f.call("deleteTeam", { teamId: deleted.id, confirmName: "Old" });
   await f.call("createTeam", { name: "Old" });
 });
 test("the Manager's snapshot is an overview; the user's keeps every detail", async t => {
@@ -693,6 +693,10 @@ test("delegation depth is capped at MAX_DELEGATION_DEPTH and leaf members do not
 test("retain bounds settled delegations and completed tasks with cascading notes/artifacts/runs without evicting bound direct sessions", async t => {
   const state = emptyState();
   state.teams.t1 = { id: "t1", name: "T1", createRoot: "/tmp", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  state.teams.legacy = { id: "legacy", name: "Legacy", createRoot: "/tmp", archive: { at: "2026-01-01T00:00:00Z", members: {} }, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  state.tasks["legacy-task"] = { id: "legacy-task", teamId: "legacy", assigneeAgentId: "a1", brief: "old", priority: "normal", status: "done", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  state.notes["legacy-note"] = { id: "legacy-note", taskId: "legacy-task", author: "user", text: "n", createdAt: "2026-01-01T00:00:00Z" };
+  state.artifacts["legacy-art"] = { id: "legacy-art", taskId: "legacy-task", name: "a", path: "/tmp/a", sha256: "0", size: 1, createdAt: "2026-01-01T00:00:00Z" };
   for (let i = 0; i < DELEGATION_LIMIT + 15; i++) {
     const id = `del-${i}`;
     state.delegations[id] = {
@@ -718,6 +722,8 @@ test("retain bounds settled delegations and completed tasks with cascading notes
     state.sessions[id] = { id, agentId: "a1", teamId: "t1", runtimeSessionId: "", origin: "direct", shared: true };
   }
   retain(state);
+  assert.equal(state.teams.legacy, undefined, "legacy archived team is pruned");
+  assert.equal(state.tasks["legacy-task"], undefined, "orphaned task from deleted team is pruned");
   assert.equal(Object.keys(state.delegations).length, DELEGATION_LIMIT);
   assert.equal(Object.keys(state.tasks).length, COMPLETED_TASK_LIMIT);
   assert.equal(Object.keys(state.notes).length, COMPLETED_TASK_LIMIT);
