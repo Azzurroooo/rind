@@ -25,7 +25,7 @@ import {
   renderTerminalQr,
 } from "../../rind-runtime-client/remote/qr.js";
 import { RemoteWebSocket } from "../../rind-runtime-client/remote/server.js";
-import { registerSharedWorkspace, samePath } from "../../rind-runtime-client/remote/workspaces.js";
+import { canonicalDirectory, registerSharedWorkspace, samePath } from "../../rind-runtime-client/remote/workspaces.js";
 import { connectManagement } from "../../agent-management/dist/client.js";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -462,7 +462,7 @@ test("/remote controller: missing webRoot still serves, a busy port falls back, 
 });
 
 test("E2E CLI /remote: user turns remote on from the Off view, signs in over HTTP/WS with the shown link, prompts a session, gets a new code, and turns it off", { timeout: 30000 }, async (t) => {
-  const home = await mkdtemp(path.join(os.tmpdir(), "rind-cli-remote-e2e-"));
+  const home = await canonicalDirectory(await mkdtemp(path.join(os.tmpdir(), "rind-cli-remote-e2e-")));
   const workspace = path.join(home, "workspace");
   const webDir = path.join(home, "web-dist");
   await mkdir(workspace, { recursive: true });
@@ -714,7 +714,7 @@ test("E2E CLI /remote: user turns remote on from the Off view, signs in over HTT
 });
 
 test("E2E multi-surface unification: CLI and Desktop share Remote gateway, Workspaces, Teams, and auto-reclaim on last window exit", { timeout: 30000 }, async (t) => {
-  const home = await mkdtemp(path.join(os.tmpdir(), "rind-multi-surface-e2e-"));
+  const home = await canonicalDirectory(await mkdtemp(path.join(os.tmpdir(), "rind-multi-surface-e2e-")));
   const desktopWorkspace = path.join(home, "desktop-project");
   const cliWorkspace = path.join(home, "cli-project");
   const teamMemberWorkspace = path.join(home, "team-member");

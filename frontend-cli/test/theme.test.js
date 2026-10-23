@@ -15,7 +15,7 @@ import {
 } from "../lib/theme.js";
 import { executeLocalSlashCommand } from "../lib/local-slash-commands.js";
 import { cliStatePath, loadCliState, saveCliState } from "../lib/cli-state-store.js";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -156,6 +156,21 @@ test("cli state store merges patches atomically and tolerates corruption", async
     assert.equal(saveCliState({ theme: "catppuccin-mocha" }, root), true);
     assert.deepEqual(loadCliState(root), { theme: "catppuccin-mocha" });
     resetTheme();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cli state reloads changed contents even when the modification timestamp is preserved", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "rind-cli-state-stamp-"));
+  const file = path.join(root, "cli-state.json");
+  try {
+    assert.equal(saveCliState({ theme: "latte" }, root), true);
+    await utimes(file, 1234567890, 1234567890);
+    assert.equal(loadCliState(root).theme, "latte");
+    await writeFile(file, "{broken", "utf8");
+    await utimes(file, 1234567890, 1234567890);
+    assert.deepEqual(loadCliState(root), {});
   } finally {
     await rm(root, { recursive: true, force: true });
   }

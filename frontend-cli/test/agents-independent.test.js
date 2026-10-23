@@ -10,11 +10,12 @@ import { fileURLToPath } from "node:url";
 import { startServer } from "../../agent-management/dist/ipc.js";
 import { connectClient } from "../../agent-management/dist/client.js";
 import { removeRindHome } from "./helpers/rind-home.js";
+import { canonicalDirectory } from "../../rind-runtime-client/remote/workspaces.js";
 
 const entry = (id, workspace, updatedAt) => ({ id, workspace_root: workspace, updated_at: updatedAt, has_user_message: true, title: id });
 
 test("independent listing is one bounded page per folder with truthful counts", { timeout: 120000 }, async t => {
-  const home = await mkdtemp(path.join(os.tmpdir(), "rind-independent-"));
+  const home = await canonicalDirectory(await mkdtemp(path.join(os.tmpdir(), "rind-independent-")));
   const alpha = path.join(home, "alpha"), beta = path.join(home, "beta"), other = path.join(home, "other");
   await Promise.all([mkdir(alpha), mkdir(beta), mkdir(other)]);
   const index = { sessions: [

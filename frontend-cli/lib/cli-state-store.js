@@ -4,7 +4,7 @@ import path from "node:path";
 import { setTheme } from "./theme.js";
 
 let cachedPath = "";
-let cachedMtimeMs = -1;
+let cachedStamp = "";
 let cachedState = null;
 let briefMode = false;
 
@@ -124,23 +124,28 @@ export function cliStatePath(rindHome = process.env.RIND_HOME || path.join(homed
   return path.join(String(rindHome), "cli-state.json");
 }
 
+function stateFileStamp(file) {
+  const info = statSync(file, { bigint: true });
+  return `${info.mtimeNs}:${info.ctimeNs}:${info.size}:${info.ino}`;
+}
+
 export function loadCliState(rindHome) {
   const file = cliStatePath(rindHome);
   try {
-    const { mtimeMs } = statSync(file);
-    if (cachedState && cachedPath === file && cachedMtimeMs === mtimeMs) {
+    const stamp = stateFileStamp(file);
+    if (cachedState && cachedPath === file && cachedStamp === stamp) {
       return { ...cachedState };
     }
     const parsed = JSON.parse(readFileSync(file, "utf8"));
     const state = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
     cachedPath = file;
-    cachedMtimeMs = mtimeMs;
+    cachedStamp = stamp;
     cachedState = state;
     return { ...state };
   } catch {
     if (cachedPath === file) {
       cachedPath = "";
-      cachedMtimeMs = -1;
+      cachedStamp = "";
       cachedState = null;
     }
     return {};
@@ -161,7 +166,7 @@ export function saveCliState(patch, rindHome) {
     writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, "utf8");
     renameSync(temp, file);
     cachedPath = file;
-    cachedMtimeMs = statSync(file).mtimeMs;
+    cachedStamp = stateFileStamp(file);
     cachedState = next;
     return true;
   } catch {
