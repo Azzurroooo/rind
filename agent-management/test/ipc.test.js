@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, mkdir, writeFile, realpath } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -145,7 +145,7 @@ test("the Manager keeps every Rind tool and is held to agent_management by its i
   assert.match(config.instructions, /only through agent_management/);
   assert.match(config.instructions, /never carry out that action another way/);
   const comparable = value => process.platform === "win32" ? value.toLowerCase() : value;
-  assert.ok(comparable(config.instructions).includes(comparable(path.resolve(home))), "names the Rind home it must not modify");
+  assert.ok(comparable(config.instructions).includes(comparable(await realpath(home))), "names the canonical Rind home it must not modify");
 });
 
 test("shared session credentials remain valid across management restart before and after first turn binding", async t => {
