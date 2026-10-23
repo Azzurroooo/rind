@@ -48,15 +48,21 @@ export async function startSharedServer(options) {
   let token, recordNonce, initialized, workerPid = null, authOwner, stopping = false, closing, remoteHost;
   const startedAt = new Date().toISOString();
   const build = runtimeBuildId(options);
-  const peers = new Set(), auth = new Map(), prompts = new Set();
+  const peers = new Set(), auth = new Map(), prompts = new Map();
   const deleting = new Set(), opening = new Map();
   const remoteEventListeners = new Set(), sessionWorkspaces = new Map(), pendingPromptTexts = new Map();
+  const holdPrompt = (map, sid) => map.set(sid, (map.get(sid) || 0) + 1);
+  const releasePrompt = (map, sid) => {
+    const count = (map.get(sid) || 1) - 1;
+    if (count > 0) map.set(sid, count);
+    else map.delete(sid);
+  };
   const writeLog = (event, fields = {}) => existsSync(paths.directory)
     ? appendFile(paths.log, `[${new Date().toISOString()}] ${event}${Object.entries(fields).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => ` ${k}=${v}`).join("")}\n`, { mode: 0o600 }).catch(() => {})
     : Promise.resolve();
   const live = createLiveSessions({ onChange(sessions) { for (const peer of peers) if (peer.observe) peer.send({ event: { kind: "runtime", type: "sessions_changed", sessions } }); } });
   const busyCount = () => new Set([
-    ...prompts,
+    ...prompts.keys(),
     ...live.list().filter(item => item.turn !== "idle" || item.background).map(item => item.id),
   ]).size;
   const idleTtlMs = resolveIdleTtlMs(options);
@@ -148,22 +154,22 @@ export async function startSharedServer(options) {
     if (method === "initialize") return base;
     const sid = String(params.session_id || "");
     if (method === "session/prompt") {
-      if (prompts.has(sid)) throw new Error("This session already has an active request. Use steering or follow-up input.");
-      prompts.add(sid);
-      if (typeof params.input === "string" && params.input.trim() && !params.resume) {
+      if (!prompts.has(sid) && live.turn(sid) === "idle" && typeof params.input === "string" && params.input.trim() && !params.resume) {
         pendingPromptTexts.set(sid, { input: params.input, clientInputId: params.client_input_id, remote: true });
       }
+      holdPrompt(prompts, sid);
       attachIdleWindowPeersToSession(sid, sessionWorkspaces.get(sid) || "");
-      let promptFailed = false;
+      let promptFailed = false, result;
       try {
-        return await client.request(method, params);
+        result = await client.request(method, params);
+        return result;
       } catch (error) {
         promptFailed = true;
-        pendingPromptTexts.delete(sid);
         throw error;
       } finally {
-        prompts.delete(sid);
-        live.settle(sid, promptFailed);
+        pendingPromptTexts.delete(sid);
+        releasePrompt(prompts, sid);
+        if (!result?.steered && !prompts.has(sid)) live.settle(sid, promptFailed);
         if (isIdle()) touchActivity();
       }
     }
@@ -205,12 +211,12 @@ export async function startSharedServer(options) {
   ready.catch(() => {});
   const server = net.createServer(socket => {
     socket.setEncoding("utf8"); let buffer = "";
-    const peer = { socket, sessions: new Set(), prompts: new Set(), observe: false, oneShot: false, window: false, workspace: "", send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
+    const peer = { socket, sessions: new Set(), prompts: new Map(), observe: false, oneShot: false, window: false, workspace: "", send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
     peers.add(peer); touchActivity(); socket.on("error", () => {});
     socket.on("close", () => {
       peers.delete(peer); live.leave(peer);
       if (peer.oneShot && initialized) {
-        for (const sessionId of peer.prompts) void client.request("session/cancel", { session_id: sessionId }).catch(() => {});
+        for (const sessionId of peer.prompts.keys()) void client.request("session/cancel", { session_id: sessionId }).catch(() => {});
       }
       for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); }
       if (peer.window && remoteHost && ![...peers].some(other => other.window)) {
@@ -336,24 +342,28 @@ export async function startSharedServer(options) {
                 .catch(() => {});
             }
           }
-          if (method === "session/prompt" && prompts.has(params.session_id)) throw new Error("This session already has an active request. Use steering or follow-up input.");
           if (method === "session/prompt") {
-            prompts.add(params.session_id);
-            peer.prompts.add(params.session_id);
-            viewIfOpen(peer, params.session_id);
-            if (typeof workerParams.input === "string" && workerParams.input.trim() && !workerParams.resume) {
+            if (!prompts.has(params.session_id) && live.turn(params.session_id) === "idle" && typeof workerParams.input === "string" && workerParams.input.trim() && !workerParams.resume) {
               pendingPromptTexts.set(params.session_id, { input: workerParams.input, clientInputId: workerParams.client_input_id, remote: false });
             }
+            holdPrompt(prompts, params.session_id);
+            holdPrompt(peer.prompts, params.session_id);
+            viewIfOpen(peer, params.session_id);
           }
           if (method === "rind/auth/login") { if (authOwner) throw new Error("Another connection is signing in."); authOwner = peer; }
           if (method === "session/subscribe" || method === "session/prompt") peer.sessions.add(params.session_id);
           if (method === "session/unsubscribe") { peer.sessions.delete(params.session_id); live.leave(peer, params.session_id); result = { ok: true }; }
           let promptFailed = false;
           try { if (method !== "session/unsubscribe") result = await client.request(method, workerParams); }
-          catch (error) { promptFailed = true; if (method === "session/prompt") pendingPromptTexts.delete(params.session_id); throw error; }
+          catch (error) { promptFailed = true; throw error; }
           finally {
             if (method === "rind/auth/login") authOwner = null;
-            if (method === "session/prompt") { prompts.delete(params.session_id); peer.prompts.delete(params.session_id); live.settle(params.session_id, promptFailed); }
+            if (method === "session/prompt") {
+              pendingPromptTexts.delete(params.session_id);
+              releasePrompt(prompts, params.session_id);
+              releasePrompt(peer.prompts, params.session_id);
+              if (!result?.steered && !prompts.has(params.session_id)) live.settle(params.session_id, promptFailed);
+            }
           }
           // A window before its first message has no session; session/create makes one.
           if (["session/open", "session/new", "session/switch", "session/create"].includes(method) && result.session_id) {

@@ -399,6 +399,7 @@ turnController = createTurnController({
   },
   output: {
     queueInput: (...args) => inputActions.addPendingInput(...args),
+    writeUserInput: outputController.writeUserInput,
     restoreInputText: (...args) => inputActions.restoreInputText(...args),
     writeError: (text) => notifyOutput(text, { level: "error" }),
     refreshInputState,
@@ -904,6 +905,11 @@ function restoreLiveTurn(value) {
   displayState.assistantHeaderShown = false;
   const text = String(value.assistant_text || "");
   if (text) outputController.assistantAppend(text);
+  for (const item of Array.isArray(value.pending_inputs) ? value.pending_inputs : []) {
+    if (item?.input_id && item?.input) {
+      inputActions.addPendingInput(String(item.input), item.mode === "steering" ? "steering" : "follow_up", { input_id: String(item.input_id) });
+    }
+  }
 }
 
 function composeFrame(width = process.stdout.columns || 80) {

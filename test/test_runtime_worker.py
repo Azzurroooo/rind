@@ -723,3 +723,133 @@ def test_replay_end_zero_skips_store_and_refreshes_running_session_credentials(t
 
     asyncio.run(run())
 
+
+def test_semaphore_queued_turn_is_visible_steerable_cancellable_and_orders_after_hook(tmp_path, monkeypatch):
+    import sys
+    from agent.domain.models import ModelStreamEvent
+    from agent.infrastructure.tools.external import ExternalTool
+
+    async def run():
+        monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+        worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
+        await worker.initialize()
+        try:
+            worker.execution._turn_semaphore = asyncio.Semaphore(1)
+            await worker.execution._turn_semaphore.acquire()
+
+            after_entered = asyncio.Event()
+            release_after = asyncio.Event()
+            seen_prompts = []
+
+            async def fake_notify(self_tool, phase, session_id, parameters, cancellation_token=None):
+                if phase == "after":
+                    after_entered.set()
+                    await release_after.wait()
+
+            monkeypatch.setattr(ExternalTool, "notify", fake_notify)
+
+            async def fake_create_client(*_args, **_kwargs):
+                async def stream(*, messages, **_kw):
+                    user_texts = [m.get("content") for m in messages if m.get("role") == "user"]
+                    seen_prompts.append(user_texts)
+                    yield ModelStreamEvent(kind="text_delta", text="done")
+                    yield ModelStreamEvent(kind="completed", stop_reason="stop")
+
+                return SimpleNamespace(stream=stream, close=AsyncMock())
+
+            monkeypatch.setattr(worker.provider_service, "create_chat_client", fake_create_client)
+
+            tool_cfg = {
+                "command": sys.executable,
+                "args": ["bridge.js"],
+                "env": {},
+                "lifecycle": {"before": "hostTurnStart", "after": "hostTurnEnd", "env": {}},
+                "tools": [],
+            }
+            s1 = (await worker.create_conversation({"external_tools": tool_cfg, "enable_user_question": False}))["session_id"]
+            s2 = (await worker.create_conversation({"external_tools": tool_cfg, "enable_user_question": False}))["session_id"]
+
+            # 1. Start s1 while semaphore is saturated: turn_started emits immediately, live_turn is running,
+            #    and cancelling aborts the semaphore wait without needing a slot.
+            s1_events = []
+            s1_started = asyncio.Event()
+
+            async def consume_s1():
+                async for ev in worker.execution.run_turn(s1, query="queued cancel test"):
+                    s1_events.append(ev)
+                    if ev.get("type") == "turn_started":
+                        s1_started.set()
+
+            t1 = asyncio.create_task(consume_s1())
+            await asyncio.wait_for(s1_started.wait(), timeout=2.0)
+            assert worker.execution.live_turn(s1)["status"] == "running"
+            assert worker.execution.active_turn_id(s1) != ""
+
+            release_after.set()
+            worker.execution.interrupt(s1, "User interrupted")
+            await asyncio.wait_for(t1, timeout=2.0)
+            assert [e["type"] for e in s1_events] == ["turn_started", "turn_cancelled"]
+            assert (await worker.replay(s1, end=0))["turn_state"]["status"] == "cancelled"
+
+            # 2. Start s2 while semaphore is still saturated: steer into it via dispatcher's auto-steer
+            #    on session/prompt, then release semaphore and verify notify("after") ordering.
+            release_after.clear()
+            after_entered.clear()
+            server = RuntimeDispatcher(worker, writer=JsonlWriter())
+            messages = []
+
+            async def send(payload):
+                messages.append(payload)
+
+            server._writer.send = send
+            server._initialized = True
+
+            s2_started = asyncio.Event()
+            orig_send_event = server._send_event
+
+            async def tracked_send_event(event):
+                await orig_send_event(event)
+                if event.get("session_id") == s2 and event.get("type") == "turn_started":
+                    s2_started.set()
+
+            server._send_event = tracked_send_event
+
+            prompt_task = asyncio.create_task(server._dispatch({
+                "request_id": "p-initial",
+                "method": RuntimeMethod.SESSION_PROMPT,
+                "params": {"session_id": s2, "input": "initial question"},
+            }))
+            await asyncio.wait_for(s2_started.wait(), timeout=2.0)
+            assert worker.execution.live_turn(s2)["status"] == "running"
+
+            # Sending another interactive session/prompt while active auto-converts to steering.
+            await server._dispatch({
+                "request_id": "p-auto-steer",
+                "method": RuntimeMethod.SESSION_PROMPT,
+                "params": {"session_id": s2, "input": "steered while queued"},
+            })
+            responses = {m["request_id"]: m for m in messages if m.get("kind") == "response"}
+            assert responses["p-auto-steer"]["result"]["steered"] is True
+            assert len(worker.execution.live_turn(s2)["pending_inputs"]) == 1
+
+            # Release semaphore slot: LLM runs with steered input, then blocks in notify("after").
+            worker.execution._turn_semaphore.release()
+            await asyncio.wait_for(after_entered.wait(), timeout=2.0)
+
+            # While notify("after") is still running, turn_completed has NOT been emitted yet!
+            emitted_types = [m["event"]["type"] for m in messages if m.get("kind") == "event" and m.get("session_id") == s2]
+            assert "turn_completed" not in emitted_types
+            assert worker.execution.live_turn(s2)["status"] == "running"
+
+            release_after.set()
+            await asyncio.wait_for(prompt_task, timeout=2.0)
+            emitted_types = [m["event"]["type"] for m in messages if m.get("kind") == "event" and m.get("session_id") == s2]
+            assert emitted_types[-1] == "turn_completed"
+            assert (await worker.replay(s2, end=0))["turn_state"]["status"] == "completed"
+            assert any("steered while queued" in str(batch) for batch in seen_prompts)
+        finally:
+            await worker.close()
+
+    asyncio.run(run())
+
+

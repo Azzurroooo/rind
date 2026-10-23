@@ -264,7 +264,7 @@ export function observeRuntime(client, management) {
     get child() { return client.child; },
     async request(method, params = {}) {
       await management.before(method, params);
-      const result = await client.request(method, method === "session/prompt" ? { ...params, completion_scope: "request" } : params);
+      const result = await client.request(method, params);
       await management.after(method, result);
       return result;
     },

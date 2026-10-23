@@ -48,16 +48,22 @@ export function createCliInputActions({
     if (!inputId) {
       throw new Error("Runtime accepted queued input without input_id.");
     }
-    state.input.pending.push({ inputId, input, mode });
+    if (state.input.pending.some((entry) => entry.inputId === inputId)) {
+      return;
+    }
+    state.input.pending.push({ inputId, input, mode, echoed: Boolean(result?.echoed) });
     output.redraw();
   }
 
   function deliverQueuedInput(input, _mode, inputId) {
     const index = state.input.pending.findIndex((entry) => entry.inputId === inputId);
+    const echoed = index !== -1 && state.input.pending[index].echoed;
     if (index !== -1) {
       state.input.pending.splice(index, 1);
     }
-    output.writeUserInput(input);
+    if (!echoed) {
+      output.writeUserInput(input);
+    }
   }
 
   async function retrievePendingInput(mode, session) {

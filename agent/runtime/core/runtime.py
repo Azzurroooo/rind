@@ -258,6 +258,7 @@ class AgentRuntime:
         resume: bool = False,
         compact: str | None = None,
         delivery: bool = False,
+        before_execution: Callable[[], Any] | None = None,
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Run a single conversational turn asynchronously, yielding runtime events.
@@ -299,6 +300,8 @@ class AgentRuntime:
                 if compact:
                     yield started_event
                     try:
+                        if before_execution is not None:
+                            await before_execution()
                         record = await self._turn_runner.compact_context(
                             self._session_store, reason=compact, phase="manual",
                             cancellation_token=cancellation_token,
@@ -334,6 +337,34 @@ class AgentRuntime:
                 try:
                     if not compact:
                         yield started_event
+                        if before_execution is not None:
+                            try:
+                                await before_execution()
+                            except asyncio.CancelledError as exc:
+                                cancelled_event = TurnCancelledEvent(
+                                    **event_meta(self._session_store, turn_id),
+                                    reason=(cancellation_token.reason if self._is_cancelled(cancellation_token) else str(exc)) or "Turn cancelled.",
+                                )
+                                self._accepting_inputs = False
+                                self.discard_pending_inputs()
+                                await self._stop_active_goal("paused")
+                                await self._persist_turn_state(cancelled_event)
+                                terminal_persisted = True
+                                yield cancelled_event
+                                return
+                            except Exception as exc:
+                                failed_event = TurnFailedEvent(
+                                    **event_meta(self._session_store, turn_id),
+                                    error=str(exc),
+                                    error_type=type(exc).__name__,
+                                )
+                                self._accepting_inputs = False
+                                self.discard_pending_inputs()
+                                await self._stop_active_goal("blocked")
+                                await self._persist_turn_state(failed_event)
+                                terminal_persisted = True
+                                yield failed_event
+                                return
 
                     total_duration_ms = 0
                     while True:

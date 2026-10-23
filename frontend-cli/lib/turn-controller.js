@@ -24,6 +24,11 @@ export function createTurnController({
       const result = await request(method, { input: text });
       output.queueInput?.(text, mode, result);
     } catch (error) {
+      if ((error?.code === "TurnNotActive" || /no active turn|no longer active/i.test(error?.message || "")) && !state.activeTurn && !state.runtimeClosing) {
+        output.writeUserInput?.(originalInput);
+        start(originalInput);
+        return;
+      }
       handleSubmissionError(error, originalInput);
     }
   }
@@ -48,12 +53,19 @@ export function createTurnController({
 
   async function run(text, extra = {}) {
     let requestSucceeded = false;
+    let steered = false;
     try {
-      await request(runtimeMethods.sessionPrompt, { input: text, ...extra });
+      const result = await request(runtimeMethods.sessionPrompt, { input: text, ...extra });
       requestSucceeded = true;
+      if (result?.steered) {
+        steered = true;
+        output.queueInput?.(text, result.mode || "steering", { ...result, echoed: true });
+      }
     } finally {
-      output.settleTools?.();
-      output.closeAssistant();
+      if (!steered) {
+        output.settleTools?.();
+        output.closeAssistant();
+      }
       output.refreshInputState();
       if (!requestSucceeded) {
         state.activeTurn = false;

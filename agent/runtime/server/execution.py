@@ -489,6 +489,22 @@ class ExecutionCoordinator:
             current["status"] = event_type.removeprefix("turn_")
             current["question"] = None
 
+    async def _acquire_turn_semaphore(self, token) -> None:
+        if getattr(token, "is_cancelled", False):
+            raise asyncio.CancelledError(getattr(token, "reason", "User interrupted"))
+        task = asyncio.create_task(self._turn_semaphore.acquire())
+        deregister = token.register_callback(task.cancel) if hasattr(token, "register_callback") else (lambda: None)
+        try:
+            await task
+        except asyncio.CancelledError:
+            if task.done() and not task.cancelled() and task.exception() is None:
+                self._turn_semaphore.release()
+            if getattr(token, "is_cancelled", False):
+                raise asyncio.CancelledError(getattr(token, "reason", "User interrupted")) from None
+            raise
+        finally:
+            deregister()
+
     async def run_turn(
         self,
         session_id: str,
@@ -511,9 +527,10 @@ class ExecutionCoordinator:
             raise RuntimeError("Cannot compact context while a turn is active.")
         execution.queued_turn_starts += 1
         terminal_type = ""
+        terminal_event: dict[str, Any] | None = None
         business_started = not compact
         try:
-            async with execution.turn_slot, self._turn_semaphore:
+            async with execution.turn_slot:
                 # Stop suppresses automatic continuation, not explicit maintenance.
                 # Keep the marker: compact must not restart a stopped goal afterward.
                 if self._closed or (clean in self._suppressed and not compact) or (continuation and execution.queued_turn_starts > 1):
@@ -535,18 +552,26 @@ class ExecutionCoordinator:
                 await self._apply_selection(execution)
                 if checkpoint:
                     await execution.container.session_store.persist_message("user", build_goal_checkpoint_prompt(checkpoint), meta={"kind": "goal_checkpoint"})
-                if self.external_tool(clean) and not compact:
-                    await self.external_tool(clean).notify("before", clean, {})
                 cancel_source = CancellationTokenSource(parent_token=cancellation_token)
                 execution.current_cancel = cancel_source
                 execution.container.runtime.set_user_question_responder(
                     lambda event: self._answer_user_question(clean, event)
                 )
+                semaphore_acquired = False
+
+                async def before_execution() -> None:
+                    nonlocal semaphore_acquired
+                    await self._acquire_turn_semaphore(cancel_source.token)
+                    semaphore_acquired = True
+
                 try:
+                    if self.external_tool(clean) and not compact:
+                        await self.external_tool(clean).notify("before", clean, {}, cancellation_token=cancel_source.token)
                     run_kwargs: dict[str, Any] = {
                         "query": query,
                         "cancellation_token": cancel_source.token,
                         "transient_system_messages": transient_system_messages,
+                        "before_execution": before_execution,
                     }
                     if resume:
                         run_kwargs["resume"] = True
@@ -563,20 +588,13 @@ class ExecutionCoordinator:
                             event_data["delivery_text"] = str(query or "")
                         if event_data.get("type") == "queued_input_delivered":
                             business_started = True
-                        if event_data.get("type") in {"turn_completed", "turn_failed", "turn_cancelled"}:
-                            terminal_type = str(event_data["type"])
                         scope = self._scopes.get(clean)
                         if scope and event_data.get("type") == "assistant_message_completed":
                             scope.answer = str(event_data.get("content") or "")
-                        if event_data.get("type") in {"turn_failed", "turn_cancelled"}:
-                            self._suppressed.add(clean)
-                            self.refresh_background_wait(clean)
-                            await self._task_notifications.continuation_failed(clean,
-                                str(event_data.get("error") or event_data.get("reason") or "Request failed."))
-                            if scope:
-                                scope.error = str(event_data.get("error") or event_data.get("reason") or "Request failed.")
-                        if event_data.get("type") == "turn_completed":
-                            event_data["background_wait"] = await self.background_wait(clean)
+                        if event_data.get("type") in {"turn_completed", "turn_failed", "turn_cancelled"}:
+                            terminal_type = str(event_data["type"])
+                            terminal_event = event_data
+                            continue
                         self.update_live_event(event_data)
                         if event_data.get("type") == "user_question_requested":
                             self._prepare_user_question(clean, str(event_data.get("tool_call_id") or ""))
@@ -584,6 +602,17 @@ class ExecutionCoordinator:
                             await self._emit_to_event_sinks(event_data)
                         yield event_data
                 finally:
+                    if semaphore_acquired:
+                        self._turn_semaphore.release()
+                        semaphore_acquired = False
+                    if terminal_type in {"turn_failed", "turn_cancelled"}:
+                        self._suppressed.add(clean)
+                        self.refresh_background_wait(clean)
+                        failure_reason = str((terminal_event or {}).get("error") or (terminal_event or {}).get("reason") or "Request failed.")
+                        await self._task_notifications.continuation_failed(clean, failure_reason)
+                        scope = self._scopes.get(clean)
+                        if scope:
+                            scope.error = failure_reason
                     if self.external_tool(clean) and terminal_type and not compact:
                         records = await self._task_notifications.store.relevant(clean)
                         pending = terminal_type == "turn_completed" and (
@@ -602,6 +631,14 @@ class ExecutionCoordinator:
                     if execution.current_cancel is cancel_source:
                         execution.current_cancel = None
                     cancel_source.dispose()
+                    if terminal_event is not None:
+                        if terminal_type == "turn_completed":
+                            terminal_event["background_wait"] = await self.background_wait(clean)
+                        self.update_live_event(terminal_event)
+                        if continuation or delivery:
+                            await self._emit_to_event_sinks(terminal_event)
+                if terminal_event is not None:
+                    yield terminal_event
         finally:
             execution.queued_turn_starts = max(0, execution.queued_turn_starts - 1)
             await self._release_if_idle(clean, execution)
@@ -632,6 +669,9 @@ class ExecutionCoordinator:
         if scope:
             scope.error = reason
             scope.changed.set()
+        snapshot = self._live.get(clean)
+        if isinstance(snapshot, dict):
+            snapshot["pending_inputs"] = []
         execution = self._active.get(clean)
         if execution is None:
             return True
@@ -680,14 +720,26 @@ class ExecutionCoordinator:
             if mode == "steering"
             else execution.container.runtime.dequeue_follow_up
         )
-        return retrieve(input_id)
+        result = retrieve(input_id)
+        snapshot = self._live.get(clean)
+        retrieved_id = str(result.get("input_id") or "").strip() if isinstance(result, dict) else ""
+        if isinstance(snapshot, dict) and retrieved_id:
+            snapshot["pending_inputs"] = [item for item in snapshot["pending_inputs"] if item.get("input_id") != retrieved_id]
+        return result
 
     def promote_follow_up(self, session_id: str, input_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         execution = self._active.get(clean)
         if execution is None:
             raise RuntimeError("Session execution is not active.")
-        return execution.container.runtime.promote_follow_up(input_id)
+        result = execution.container.runtime.promote_follow_up(input_id)
+        snapshot = self._live.get(clean)
+        promoted_id = str(result.get("input_id") or "").strip() if isinstance(result, dict) else ""
+        if isinstance(snapshot, dict) and promoted_id:
+            for item in snapshot["pending_inputs"]:
+                if item.get("input_id") == promoted_id:
+                    item["mode"] = "steering"
+        return result
 
     async def answer_user_question(self, session_id: str, tool_call_id: str, answer: str) -> None:
         clean = validate_session_id(session_id)

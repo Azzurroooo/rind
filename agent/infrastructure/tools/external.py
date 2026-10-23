@@ -71,10 +71,25 @@ class ExternalTool:
                 await process.wait()
             close_process_tree(job)
 
-    async def notify(self, phase: str, session_id: str, parameters: dict) -> None:
+    async def notify(self, phase: str, session_id: str, parameters: dict, cancellation_token=None) -> None:
         if not self.lifecycle:
             return
-        result = await self.call(session_id, self.lifecycle[phase], parameters, self.lifecycle["env"])
+        if getattr(cancellation_token, "is_cancelled", False):
+            raise asyncio.CancelledError(getattr(cancellation_token, "reason", "User interrupted"))
+        task = asyncio.create_task(self.call(session_id, self.lifecycle[phase], parameters, self.lifecycle["env"]))
+        deregister = (
+            cancellation_token.register_callback(task.cancel)
+            if hasattr(cancellation_token, "register_callback")
+            else (lambda: None)
+        )
+        try:
+            result = await task
+        except asyncio.CancelledError:
+            if getattr(cancellation_token, "is_cancelled", False):
+                raise asyncio.CancelledError(getattr(cancellation_token, "reason", "User interrupted")) from None
+            raise
+        finally:
+            deregister()
         if not result.get("ok"):
             raise RuntimeError(result.get("error", {}).get("message", "Execution host rejected this turn."))
 

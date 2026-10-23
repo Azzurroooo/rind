@@ -576,6 +576,29 @@ class RuntimeDispatcher:
         completion_scope = params.get("completion_scope", "turn")
         if completion_scope not in {"turn", "request"}:
             raise ValueError("completion_scope must be turn or request.")
+        if (
+            completion_scope == "turn"
+            and query.strip()
+            and not resume
+            and not delivery
+            and hasattr(self._worker.execution, "submit_input")
+            and self._worker.execution.active_turn_id(session_id)
+        ):
+            try:
+                steered = self._worker.execution.submit_input(session_id, "steering", query)
+            except (InputQueueError, RuntimeError):
+                pass
+            else:
+                await self._respond(
+                    request,
+                    {
+                        "ok": True,
+                        "session_id": session_id,
+                        "steered": True,
+                        **steered,
+                    },
+                )
+                return
         request_result = {}
         if completion_scope == "request":
             self._worker.execution.begin_request(session_id)
