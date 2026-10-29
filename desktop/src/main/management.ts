@@ -1,7 +1,6 @@
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { resolveRindHome } from "../../../rind-runtime-client/local-files.js"
-import { resolveSourcePython } from "../../../rind-runtime-client/runtime-env.js"
 import {
   createManagementBridge,
   emptyAgentsSnapshot,
@@ -37,10 +36,6 @@ export const managementBridge = createManagementBridge({
   getRindHome: () => resolveRindHome(process.env.RIND_HOME),
   repoRoot,
   getRuntimePath: () => process.env.RIND_RUNTIME_PATH || "",
-  getPython: () => {
-    const runtimePath = process.env.RIND_RUNTIME_PATH || ""
-    return runtimePath ? undefined : resolveSourcePython(process.env.RIND_PYTHON, repoRoot)
-  },
   requestRuntime: (method, params) => requestRuntime(method as RuntimeMethod, params),
   ensureRuntimeForWorkspace,
   isSharedRuntime,

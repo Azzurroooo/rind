@@ -29,7 +29,7 @@ export async function sessionWorkspace(home, sessionId, sessionDir = "") {
 // Name a conversation (empty: back to its first message) through the same
 // command a window uses, so there is one place that writes names.
 export async function renameConversation(launch, sessionId, name) {
-  const host = await connectSharedRuntime({ rindHome: launch.home, repoRoot: launch.repoRoot, python: launch.python, runtimePath: launch.runtimePath });
+  const host = await connectSharedRuntime({ rindHome: launch.home, repoRoot: launch.repoRoot, runtimePath: launch.runtimePath });
   try {
     await host.request("initialize");
     const result = await host.request("rind/command/execute", { session_id: sessionId, input: name.trim() ? "/rename " + name.trim() : "/rename --reset" });

@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { conversationView, emptyConversationState, normalizeHistoryMessages, QUESTION_TTL_MS, questionKey, reduceConversation, TRANSCRIPT_CAP } from "./conversationReducer.js";
 
-// Golden fixture lives outside frontend-web: ../test/fixtures/ relative to here.
-const FIXTURE_PATH = resolve(process.cwd(), "../test/fixtures/runtime_protocol.golden.jsonl");
+// Golden fixture lives outside frontend-web: ../runtime/test/fixtures/ relative to here.
+const FIXTURE_PATH = resolve(process.cwd(), "../runtime/test/fixtures/runtime_protocol.golden.jsonl");
 
 function loadGoldenEnvelopes() {
   const raw = readFileSync(FIXTURE_PATH, "utf8");

@@ -48,7 +48,6 @@ function spawnTtyCli({ home, workspace, args = [], webRoot = "" }) {
     env: {
       ...process.env,
       RIND_HOME: home,
-      RIND_PYTHON: process.env.RIND_PYTHON || "python",
       ...(webRoot ? { RIND_WEB_ROOT: webRoot } : {}),
       NO_COLOR: "1",
     },

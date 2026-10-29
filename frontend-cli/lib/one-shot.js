@@ -137,7 +137,7 @@ export async function writeRunLog({ workspace, sessionId, turnId, model, prompt,
   }
 }
 
-export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = process.cwd(), stderr = console.error, stdout = console.log, clientFactory = createSharedRuntimeClient }) {
+export async function runOneShot({ args, repoRoot, runtimePath, cwd = process.cwd(), stderr = console.error, stdout = console.log, clientFactory = createSharedRuntimeClient }) {
   const options = parseOneShotArgs(args);
   if (!options) return false;
   const runtimeArgs = ["--no-user-question"];
@@ -179,11 +179,10 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   if (process.platform !== "win32") process.on("SIGHUP", onSignal);
   try {
     management = clientFactory === createSharedRuntimeClient
-      ? await interruptible(prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false, stopSpawnedService: true }))
+      ? await interruptible(prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { repoRoot, runtimePath }, { interactive: false, stopSpawnedService: true }))
       : { args: runtimeArgs, shared: true };
     progress.begin();
     client = observeRuntime(clientFactory({
-      python,
       repoRoot,
       runtimePath,
       cwd: options.dir || cwd,

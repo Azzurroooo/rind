@@ -196,7 +196,6 @@ export function createCliRemoteController({
       getRindHome: () => rindHome,
       repoRoot: managementLaunch?.repoRoot,
       getRuntimePath: () => managementLaunch?.runtimePath || "",
-      getPython: () => managementLaunch?.python,
       initializeRuntime: async () => {
         const initInfo = getInitInfo?.() || {};
         return {

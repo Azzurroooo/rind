@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import log from "electron-log/main"
 import { RuntimeInputs } from "./runtime-inputs.ts"
 import { runtimeRequestTimeout } from "./runtime-request-policy.ts"
-import { buildRuntimeEnv, resolveSourcePython } from "../../../rind-runtime-client/runtime-env.js"
+import { buildRuntimeEnv } from "../../../rind-runtime-client/runtime-env.js"
 import { resolveRindHome } from "../../../rind-runtime-client/local-files.js"
 
 import { buildAuthReply, parseAuthPrompt, parseAuthUpdate, validateAuthReply } from "./auth-messages.ts"
@@ -177,7 +177,7 @@ function runtimeLaunch() {
     return { command: join(process.resourcesPath, "runtime", executable), args: [] }
   }
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
-  return { command: resolveSourcePython(process.env.RIND_PYTHON, repoRoot), args: [join(repoRoot, "main.py")] }
+  return { command: process.execPath, args: [join(repoRoot, "runtime", "dist", "cli.js")] }
 }
 
 let runtimeGeneration = 0
@@ -210,7 +210,6 @@ function ensureSharedClient(): Promise<SharedRuntimeConnection> {
     const conn = (await connectSharedRuntime({
       rindHome,
       repoRoot: isSource ? repoRoot : undefined,
-      python: isSource ? resolveSourcePython(process.env.RIND_PYTHON, repoRoot) : undefined,
       runtimePath: packagedRuntimePath,
       onMessage(message: unknown) {
         dispatchRuntimeEnvelope(message)
@@ -295,7 +294,7 @@ export function startRuntime(workspace: string) {
   const environment: NodeJS.ProcessEnv = buildRuntimeEnv(repoRoot, process.env, {
     sourceRuntime: Boolean(process.env.ELECTRON_RENDERER_URL) && !process.env.RIND_RUNTIME_PATH,
   })
-  if (launch.command === process.execPath && /\.(?:c|m)?js$/i.test(process.env.RIND_RUNTIME_PATH || "")) {
+  if (launch.command === process.execPath) {
     environment.ELECTRON_RUN_AS_NODE = "1"
   }
   const current = spawn(

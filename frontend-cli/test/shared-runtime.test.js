@@ -53,7 +53,7 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
-  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  const options = { rindHome: home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   const host = await startSharedServer(options);
   const eventsA = [], eventsB = [];
   const tool = { command: process.execPath, args: [], env: {}, tools: [{ name: "host_fixture", description: "Fixture", parameters: { type: "object", properties: {} } }] };
@@ -131,7 +131,7 @@ test("resolveRindHome, sharedRuntimePaths, and managementPaths canonicalize syml
 test("second startSharedServer or startServer instance for the same RIND_HOME is rejected immediately", { timeout: 20000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-singleton-"));
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot };
+  const options = { rindHome: home, repoRoot };
   const host = await startSharedServer(options);
   const management = await startServer({ home, repoRoot });
   t.after(async () => {
@@ -145,7 +145,7 @@ test("second startSharedServer or startServer instance for the same RIND_HOME is
 
 test("host.json records workerPid and stopSharedRuntime cleans up orphaned worker when shared-server is killed", { timeout: 25000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-orphan-worker-"));
-  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  const options = { rindHome: home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   t.after(async () => { await stopSharedRuntime(options); await removeRindHome(home); });
   const connection = await connectSharedRuntime(options);
   await connection.request("initialize");
@@ -181,7 +181,6 @@ test("one-shot run stops a shared host it spawned when idle, preserves an existi
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-  const python = process.env.RIND_PYTHON || "python";
   const previousHome = process.env.RIND_HOME;
   process.env.RIND_HOME = home;
   t.after(async () => {
@@ -195,7 +194,7 @@ test("one-shot run stops a shared host it spawned when idle, preserves an existi
   const stdout = [], stderr = [];
   await runOneShot({
     args: ["run", "--dir", work, "--prompt", "Reply"],
-    python, repoRoot, cwd: work,
+    repoRoot, cwd: work,
     stdout: text => stdout.push(text),
     stderr: text => stderr.push(text),
   });
@@ -209,12 +208,12 @@ test("one-shot run stops a shared host it spawned when idle, preserves an existi
   assert.match(logText, /host stopped pid=\d+ workerPid=\d+ reason=shutdown/);
 
   // When a host is already running before one-shot starts, one-shot leaves it running.
-  const existing = await connectSharedRuntime({ rindHome: home, python, repoRoot });
+  const existing = await connectSharedRuntime({ rindHome: home, repoRoot });
   assert.equal(existing.spawned, true);
   existing.close();
   await runOneShot({
     args: ["run", "--dir", work, "--prompt", "Reply again"],
-    python, repoRoot, cwd: work,
+    repoRoot, cwd: work,
     stdout: text => stdout.push(text),
     stderr: text => stderr.push(text),
   });
@@ -224,9 +223,9 @@ test("one-shot run stops a shared host it spawned when idle, preserves an existi
   await stopSharedRuntime({ rindHome: home });
 
   // When a spawned host is joined by another window before shutdown, stopSpawnedHost leaves it up for that window.
-  const firstClient = createSharedRuntimeClient({ rindHome: home, python, repoRoot, cwd: work, cliArgs: ["--cwd", work], stopSpawnedHost: true });
+  const firstClient = createSharedRuntimeClient({ rindHome: home, repoRoot, cwd: work, cliArgs: ["--cwd", work], stopSpawnedHost: true });
   await firstClient.request("initialize");
-  const secondWindow = createSharedRuntimeClient({ rindHome: home, python, repoRoot, cwd: work, cliArgs: ["--cwd", work] });
+  const secondWindow = createSharedRuntimeClient({ rindHome: home, repoRoot, cwd: work, cliArgs: ["--cwd", work] });
   await secondWindow.request("initialize");
   await firstClient.shutdown();
   const afterFirst = await connectSharedRuntime({ rindHome: home, start: false });
@@ -238,7 +237,7 @@ test("one-shot run stops a shared host it spawned when idle, preserves an existi
 test("idle TTL and record removal automatically stop an unattached shared host", { timeout: 25000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-idle-ttl-"));
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot };
+  const options = { rindHome: home, repoRoot };
   t.after(async () => { await stopSharedRuntime(options); await removeRindHome(home); });
 
   // 1. Idle timeout stops the host after all peers disconnect.
@@ -266,7 +265,7 @@ test("idle TTL and record removal automatically stop an unattached shared host",
 
 test("a host replaced in host.json stops while a window is still attached and leaves the replacement's record", { timeout: 25000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-superseded-host-"));
-  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  const options = { rindHome: home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   t.after(async () => { await stopSharedRuntime(options); await removeRindHome(home); });
   const host = await startSharedServer({ ...options, idleTtlMs: 60000 });
   const window = await connectSharedRuntime({ ...options, start: false });
@@ -343,7 +342,6 @@ test("one-shot leaves zero orphan processes across plain and registered folders,
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
   const rindBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));
-  const python = process.env.RIND_PYTHON || "python";
   const rtPaths = sharedRuntimePaths(home);
   const mgmtPaths = managementPaths(home);
   const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -357,7 +355,7 @@ test("one-shot leaves zero orphan processes across plain and registered folders,
   });
 
   // Register a team and member first, then stop the management service so user-token exists on disk while nothing is running.
-  const setupServer = await startServer({ home, repoRoot, python });
+  const setupServer = await startServer({ home, repoRoot });
   const { connectClient } = await import("../../agent-management/dist/client.js");
   const setupClient = await connectClient({ endpoint: setupServer.paths.endpoint, token: (await readFile(setupServer.paths.token, "utf8")).trim() });
   const agent = await setupClient.request("registerAgent", { workspace: memberDir, name: "Worker" });
@@ -372,7 +370,7 @@ test("one-shot leaves zero orphan processes across plain and registered folders,
   const runCli = (cwd, ...args) => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [rindBin, ...args], {
       cwd,
-      env: { ...process.env, RIND_HOME: home, RIND_PYTHON: python, NO_COLOR: "1" },
+      env: { ...process.env, RIND_HOME: home, NO_COLOR: "1" },
       windowsHide: true,
     });
     let out = "", err = "";
@@ -403,7 +401,7 @@ test("one-shot leaves zero orphan processes across plain and registered folders,
   const heldArrived = new Promise(resolve => { notifyHeld = resolve; });
   const killedChild = spawn(process.execPath, [rindBin, "run", "--dir", memberDir, "--prompt", "Hold reply"], {
     cwd: memberDir,
-    env: { ...process.env, RIND_HOME: home, RIND_PYTHON: python, NO_COLOR: "1" },
+    env: { ...process.env, RIND_HOME: home, NO_COLOR: "1" },
     windowsHide: true,
   });
   await heldArrived;
@@ -418,12 +416,12 @@ test("one-shot leaves zero orphan processes across plain and registered folders,
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.equal(alive(rtRecordBeforeKill.pid), false, "spawned shared-server exits after one-shot SIGKILL");
-  assert.equal(alive(rtRecordBeforeKill.workerPid), false, "spawned python worker exits after one-shot SIGKILL");
+  assert.equal(alive(rtRecordBeforeKill.workerPid), false, "spawned runtime worker exits after one-shot SIGKILL");
   assert.equal(alive(mgmtRecordBeforeKill.pid), false, "spawned management server exits after one-shot SIGKILL");
 
   // 4. Existing Rind running when `rind run` starts a background bash task and is killed with SIGKILL:
   //    existing host stays alive while the one-shot's background bash task is terminated.
-  const existingHost = await connectSharedRuntime({ rindHome: home, python, repoRoot });
+  const existingHost = await connectSharedRuntime({ rindHome: home, repoRoot });
   t.after(() => existingHost.close());
   await existingHost.request("initialize");
   const hostInfoBefore = await existingHost.request("runtime/info");
@@ -432,7 +430,7 @@ test("one-shot leaves zero orphan processes across plain and registered folders,
   const bgWaitArrived = new Promise(resolve => { notifyHeld = resolve; });
   const bgChild = spawn(process.execPath, [rindBin, "run", "--dir", plainDir, "--prompt", "Start bg"], {
     cwd: plainDir,
-    env: { ...process.env, RIND_HOME: home, RIND_PYTHON: python, NO_COLOR: "1" },
+    env: { ...process.env, RIND_HOME: home, NO_COLOR: "1" },
     windowsHide: true,
   });
   await bgWaitArrived;

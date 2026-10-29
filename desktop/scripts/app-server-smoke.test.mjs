@@ -16,7 +16,7 @@ test("real app-server supports desktop and remote browser session lifecycles", a
   const rindHome = join(home, ".rind")
   await mkdir(rindHome, { recursive: true })
   await writeFile(join(rindHome, "settings.json"), JSON.stringify({ apiKey: "desktop-smoke-key" }), "utf8")
-  const runtime = spawn(process.env.RIND_PYTHON || "python", ["main.py", "app-server", "--stdio", "--cwd", repoRoot], {
+  const runtime = spawn(process.execPath, [join(repoRoot, "runtime", "dist", "cli.js"), "app-server", "--stdio", "--cwd", repoRoot], {
     cwd: repoRoot,
     env: {
       ...process.env,

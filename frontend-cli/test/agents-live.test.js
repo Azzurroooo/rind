@@ -30,7 +30,7 @@ test("a plain window's turn is visible to management while it runs, and its pres
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
   const server = await startServer({ home, repoRoot });
-  const window = createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
+  const window = createSharedRuntimeClient({ rindHome: home, repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
   let client;
   t.after(async () => {
     held.forEach(response => response.destroy()); client?.close(); await window.shutdown(); await server.close();
@@ -80,7 +80,7 @@ test("a plain window's turn is visible to management while it runs, and its pres
   await until(snapshot => mine(snapshot)?.watchers === 0 && mine(snapshot)?.turn === "running", "the turn keeps running with nobody watching");
   held.forEach(response => response.destroy());
   await prompt;
-  const admin = createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder, "--session", info.session_id], onMessage() {} });
+  const admin = createSharedRuntimeClient({ rindHome: home, repoRoot, cliArgs: ["--cwd", folder, "--session", info.session_id], onMessage() {} });
   await admin.request("initialize");
   await admin.request("session/cancel", { session_id: info.session_id }).catch(() => {});
   await admin.shutdown();

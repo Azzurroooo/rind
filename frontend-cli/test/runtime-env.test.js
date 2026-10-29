@@ -4,26 +4,24 @@ import test from "node:test";
 
 import { buildRuntimeEnv } from "../lib/runtime-env.js";
 
-test("buildRuntimeEnv pins Python stdio to UTF-8", () => {
+test("buildRuntimeEnv preserves base environment and sets RIND_HOME when requested", () => {
   const repoRoot = path.join("repo", "root");
   const env = buildRuntimeEnv(repoRoot, {
     PATH: "bin",
-    PYTHONIOENCODING: "gbk",
-    PYTHONPATH: "existing",
-    PYTHONUTF8: "0",
+  }, {
+    sourceRuntime: true,
+    rindHome: "user-data",
   });
 
-  assert.equal(env.PYTHONIOENCODING, "utf-8");
-  assert.equal(env.PYTHONUTF8, "1");
-  assert.equal(env.PYTHONPATH, `${repoRoot}${path.delimiter}existing`);
   assert.equal(env.PATH, "bin");
+  assert.equal(env.RIND_HOME, "user-data");
 });
 
 test("buildRuntimeEnv preserves packaged runtime environment and accepts RIND_HOME", () => {
-  const env = buildRuntimeEnv("repo", { PATH: "bin", PYTHONPATH: "existing" }, {
+  const env = buildRuntimeEnv("repo", { PATH: "bin" }, {
     sourceRuntime: false,
     rindHome: "user-data",
   });
 
-  assert.deepEqual(env, { PATH: "bin", PYTHONPATH: "existing", RIND_HOME: "user-data" });
+  assert.deepEqual(env, { PATH: "bin", RIND_HOME: "user-data" });
 });

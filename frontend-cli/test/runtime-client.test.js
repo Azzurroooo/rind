@@ -4,29 +4,12 @@ import test from "node:test";
 import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
-import { createRuntimeClient, resolveRuntimeLaunch, resolveSourcePython } from "../lib/runtime-client.js";
-
-test("a source checkout runs its own virtual environment when no interpreter is chosen", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "rind-python-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const windows = process.platform === "win32";
-  const venv = path.join(root, ".venv", windows ? "Scripts" : "bin");
-  const executable = path.join(venv, windows ? "python.exe" : "python");
-
-  assert.equal(resolveSourcePython(undefined, root), windows ? "python" : "python3");
-  await mkdir(venv, { recursive: true });
-  await writeFile(executable, "");
-  assert.equal(resolveSourcePython(undefined, root), executable);
-  assert.equal(resolveSourcePython(null, root), executable);
-  assert.equal(resolveSourcePython("python", root), "python");
-  assert.equal(resolveSourcePython("python3", root), "python3");
-  assert.equal(resolveSourcePython("/usr/bin/python3", root), "/usr/bin/python3");
-  assert.equal(resolveRuntimeLaunch({ repoRoot: root }).command, executable);
-});
+import { createRuntimeClient, resolveRuntimeLaunch } from "../lib/runtime-client.js";
 
 async function shutdownFixture(t, handler) {
   const root = await mkdtemp(path.join(tmpdir(), "rind-shutdown-"));
-  await writeFile(path.join(root, "main.py"), `
+  await mkdir(path.join(root, "runtime", "dist"), { recursive: true });
+  await writeFile(path.join(root, "runtime", "dist", "cli.js"), `
 const fs = require("fs");
 const path = require("path");
 const reply = (r) => process.stdout.write(JSON.stringify({kind: "response", request_id: r.request_id, result: {ok: true}}) + "\\n");
@@ -38,7 +21,7 @@ input.on("line", (line) => {
   else { ${handler} }
 });
 `);
-  const client = createRuntimeClient({ python: process.execPath, repoRoot: root, rindHome: path.join(root, "home") });
+  const client = createRuntimeClient({ repoRoot: root, rindHome: path.join(root, "home") });
   const runtime = client.start();
   const exited = new Promise((resolve) => runtime.once("close", resolve));
   t.after(async () => {
@@ -56,7 +39,7 @@ test("shutdown allows slow cleanup, joins repeated calls, and waits for process 
     if (r.method === "shutdown") {
       shutdownRequest = r;
       setInterval(() => {
-        if (fs.existsSync(path.join(__dirname, "exit"))) process.exit(0);
+        if (fs.existsSync(path.join(${JSON.stringify("")} || __dirname, "..", "..", "exit"))) process.exit(0);
       }, 10);
     } else if (r.method === "release") { reply(shutdownRequest); reply(r); }
   `);
@@ -81,7 +64,7 @@ test("shutdown preserves cleanup errors and lets the worker finish exiting", { t
     if (r.method === "shutdown") {
       process.stdout.write(JSON.stringify({kind: "response", request_id: r.request_id, error: {type: "ShutdownFailed", message: "termination not confirmed"}}) + "\\n");
       input.once("close", () => {
-        fs.writeFileSync(path.join(__dirname, "cleanup"), "finished");
+        fs.writeFileSync(path.join(__dirname, "..", "..", "cleanup"), "finished");
         process.exit(1);
       });
     }
@@ -104,7 +87,8 @@ test("shutdown timeout forces exit and rejects instead of reporting success", { 
 
 test("compact waits beyond 120 seconds while ordinary commands time out", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "rind-rpc-timeout-"));
-  await writeFile(path.join(root, "main.py"), `
+  await mkdir(path.join(root, "runtime", "dist"), { recursive: true });
+  await writeFile(path.join(root, "runtime", "dist", "cli.js"), `
 const pending = [];
 const reply = (r) => process.stdout.write(JSON.stringify({kind: "response", request_id: r.request_id, result: {ok: true}}) + "\\n");
 require("readline").createInterface({input: process.stdin}).on("line", (line) => {
@@ -115,7 +99,7 @@ require("readline").createInterface({input: process.stdin}).on("line", (line) =>
   else pending.push(r);
 });
 `);
-  const client = createRuntimeClient({python: process.execPath, repoRoot: root, rindHome: path.join(root, "home")});
+  const client = createRuntimeClient({ repoRoot: root, rindHome: path.join(root, "home") });
   try {
     client.start();
     await client.request("initialize");
@@ -125,7 +109,7 @@ require("readline").createInterface({input: process.stdin}).on("line", (line) =>
       client.request("rind/session/compact"),
       client.request("rind/command/execute", { input: " /COMPACT " }),
     ]).then(() => { settled = true; });
-    const short = assert.rejects(client.request("rind/command/execute", {input: "/help"}), /timed out after 120s/);
+    const short = assert.rejects(client.request("rind/command/execute", { input: "/help" }), /timed out after 120s/);
     t.mock.timers.tick(120001);
     await short;
     assert.equal(settled, false);
@@ -136,21 +120,20 @@ require("readline").createInterface({input: process.stdin}).on("line", (line) =>
   } finally {
     t.mock.timers.reset();
     await client.shutdown();
-    await rm(root, {recursive: true, force: true});
+    await rm(root, { recursive: true, force: true });
   }
 });
 
 test("source runtime launch uses the shared app-server entry", () => {
   const repoRoot = path.join("repo", "root");
   const launch = resolveRuntimeLaunch({
-    python: "python",
     repoRoot,
     cliArgs: ["--debug", "--session", "session-1"],
   });
 
-  assert.equal(launch.command, "python");
+  assert.equal(launch.command, process.execPath);
   assert.deepEqual(launch.args, [
-    path.join(repoRoot, "main.py"),
+    path.join(repoRoot, "runtime", "dist", "cli.js"),
     "app-server",
     "--stdio",
     "--debug",
@@ -161,7 +144,6 @@ test("source runtime launch uses the shared app-server entry", () => {
 
 test("packaged runtime launch does not depend on the source tree", () => {
   const launch = resolveRuntimeLaunch({
-    python: "python",
     repoRoot: "unused",
     runtimePath: "C:\\Rind\\rind-runtime.exe",
     cliArgs: ["--cwd", "workspace"],
@@ -177,7 +159,6 @@ test("runtime exit rejects an in-flight request and reports a recoverable failur
     resolveExit = resolve;
   });
   const client = createRuntimeClient({
-    python: "unused",
     repoRoot: "unused",
     runtimePath: process.execPath,
     onExit: (code, signal, details) => resolveExit({ code, signal, details }),
@@ -190,12 +171,11 @@ test("runtime exit rejects an in-flight request and reports a recoverable failur
   assert.notEqual(result.code, 0);
   assert.equal(result.details.closing, false);
   assert.match(result.details.error.message, /Runtime exited/);
-  await client.shutdown(); // A worker already released by close needs no further shutdown.
+  await client.shutdown();
 });
 
 test("runtime client stays stopped until explicit start", async () => {
   const client = createRuntimeClient({
-    python: "unused",
     repoRoot: "unused",
     runtimePath: process.execPath,
   });
@@ -205,15 +185,14 @@ test("runtime client stays stopped until explicit start", async () => {
   assert.equal(client.child, null);
 });
 
-test("the Worker never opens a console window of its own", async () => {
+test("the Worker never opens a console window of its own", () => {
   const spawned = [];
   const fakeSpawn = (command, args, options) => {
     spawned.push(options);
     throw Object.assign(new Error("spawn recorded"), { code: "ENOENT" });
   };
-  const client = createRuntimeClient({ python: "python", repoRoot: tmpdir(), spawnProcess: fakeSpawn });
+  const client = createRuntimeClient({ repoRoot: tmpdir(), spawnProcess: fakeSpawn });
   assert.throws(() => client.start(), /spawn recorded/);
   assert.equal(spawned.length, 1);
-  // A detached shared Runtime has no console; without this Windows gives the Worker a visible one.
   assert.equal(spawned[0].windowsHide, true);
 });

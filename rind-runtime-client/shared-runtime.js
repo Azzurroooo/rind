@@ -18,12 +18,10 @@ export function sharedRuntimePaths(home = process.env.RIND_HOME) {
 
 export async function connectSharedRuntime(options = {}) {
   // The detached host changes cwd; resolve caller-relative paths before that.
-  const rawPython = options.python || process.env.RIND_PYTHON;
   options = { ...options,
     rindHome: resolveRindHome(options.rindHome || options.home),
     repoRoot: options.repoRoot && path.resolve(options.repoRoot),
     runtimePath: options.runtimePath && path.resolve(options.runtimePath),
-    python: rawPython && /[\\/]/.test(rawPython) ? path.resolve(rawPython) : rawPython,
   };
   const paths = sharedRuntimePaths(options.rindHome);
   const connect = async () => {
@@ -148,7 +146,7 @@ export async function connectSharedRuntime(options = {}) {
     const log = await open(paths.log, "a", 0o600);
     // The host must not hold the caller's working directory open: on Windows a
     // process whose current directory is inside a folder blocks removing it.
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ python: options.python, repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome, ...(options.stopSpawnedHost && !replaced ? { stopWhenIdle: true } : {}) }), "--rind-host-nonce=" + randomUUID()], { cwd: paths.directory, detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd], env: process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env });
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome, ...(options.stopSpawnedHost && !replaced ? { stopWhenIdle: true } : {}) }), "--rind-host-nonce=" + randomUUID()], { cwd: paths.directory, detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd], env: process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env });
     child.on("error", () => {}); child.unref(); await log.close();
     for (let i = 0; i < 100; i++) {
       try { const started = await connect(); started.spawned = !replaced; return started; } catch {}
@@ -207,7 +205,7 @@ async function waitForFreeEndpoint(paths, ms) {
 // A live endpoint that does not answer cannot be reached through its own
 // protocol. A pid alone is never proof: it may have been reused. The OS command
 // must identify our entry point and the nonce passed to this particular host,
-// and any recorded Python worker child is terminated along with it.
+// and any recorded worker child is terminated along with it.
 async function endStuckHost(paths, connect) {
   const raw = await readFile(paths.record, "utf8").catch(() => null);
   if (!raw) return false;

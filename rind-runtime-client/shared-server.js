@@ -188,7 +188,6 @@ export async function startSharedServer(options) {
       getRindHome: () => rindHome,
       repoRoot: options.repoRoot,
       getRuntimePath: () => options.runtimePath || "",
-      getPython: () => options.python,
       initializeRuntime: () => initialize(),
       requestRuntime: (method, params) => requestFromRemote(method, params),
       subscribeRuntime: (listener) => {
@@ -250,7 +249,7 @@ export async function startSharedServer(options) {
           opening.set(sessionId, (opening.get(sessionId) || 0) + 1); holdsSession = true;
         }
         // Answered without starting the worker, so a client can decide whether
-        // this host is current, and stop it, without spawning Python.
+        // this host is current, and stop it, without spawning a worker.
         // Windows count as attached; the management service only observes and
         // follows a replaced host by itself, so it never blocks an update.
         if (method === "runtime/info") {

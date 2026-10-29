@@ -304,14 +304,12 @@ function rindAgentsDevPlugin() {
         connection = client ? "reconnecting" : "connecting";
         broadcast();
         connecting = (async () => {
-          const { connectManagement, buildRuntimeEnv, resolveSourcePython, resolveRindHome } = await loadManagement();
+          const { connectManagement, buildRuntimeEnv, resolveRindHome } = await loadManagement();
           const home = resolveRindHome(process.env.RIND_HOME);
           const runtimePath = process.env.RIND_RUNTIME_PATH || "";
-          const python = runtimePath ? undefined : resolveSourcePython(process.env.RIND_PYTHON, repoRoot);
           buildRuntimeEnv(repoRoot, process.env, { sourceRuntime: !runtimePath, rindHome: home });
           const connected = await connectManagement({
             home,
-            python,
             repoRoot,
             runtimePath,
             start,

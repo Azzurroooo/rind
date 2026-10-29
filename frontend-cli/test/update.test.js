@@ -45,9 +45,9 @@ function createFakeCliTree(rootDir, { version = "0.10.0", channel = "npm", platf
   writeFileSync(path.join(frontendDir, "bin", "rind.js"), "#!/usr/bin/env node\n");
 
   if (channel === "source") {
-    mkdirSync(path.join(rootDir, "agent"), { recursive: true });
-    writeFileSync(path.join(rootDir, "main.py"), "print('rind')\n");
-    writeFileSync(path.join(rootDir, "agent", "version.py"), `__version__ = "${version}"\n`);
+    mkdirSync(path.join(rootDir, "runtime", "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "runtime", "src", "cli.ts"), "export {};\n");
+    writeFileSync(path.join(rootDir, "runtime", "src", "version.ts"), `export const RIND_VERSION = "${version}";\n`);
   } else if (channel === "npm") {
     mkdirSync(path.join(rootDir, "lib"), { recursive: true });
     mkdirSync(path.join(rootDir, "bin"), { recursive: true });
@@ -218,7 +218,7 @@ test("resolveInstalledRuntime isolates against leaked RIND_RUNTIME_PATH from ano
   });
   assert.ok(resolvedForNpm.includes(path.join("npm-install", "@rind-ai", "cli")));
 
-  // source checkout ignores leaked packaged RIND_RUNTIME_PATH so it runs Python main.py
+  // source checkout ignores leaked packaged RIND_RUNTIME_PATH so it runs runtime/dist/cli.js
   const resolvedForSource = resolveInstalledRuntime({
     repoRoot: sourceTree.rootDir,
     envRuntimePath: leakedWinRuntime,

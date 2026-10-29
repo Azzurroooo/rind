@@ -36,7 +36,7 @@ test("a second rind run in a busy member folder names the run that holds it, and
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
-  const env = { ...process.env, RIND_HOME: home, RIND_PYTHON: process.env.RIND_PYTHON || "python", NO_COLOR: "1" };
+  const env = { ...process.env, RIND_HOME: home, NO_COLOR: "1" };
   delete env.RIND_SHARED_HOST_PID;
   const rind = async (...args) => {
     try { return { code: 0, ...await promisify(execFile)(process.execPath, [rindBin, ...args], { cwd: root, env, timeout: 60000 }) }; }
@@ -51,7 +51,7 @@ test("a second rind run in a busy member folder names the run that holds it, and
   });
 
   // Registered as the Agents page does, through the management service.
-  const management = await connectManagement({ home, python: env.RIND_PYTHON, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) });
+  const management = await connectManagement({ home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) });
   const team = await management.request("createTeam", { name: "desk" });
   await management.request("addMember", { teamId: team.id, workspace: work });
   management.close();

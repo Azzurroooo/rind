@@ -48,7 +48,6 @@ test("one-shot execution keeps stdout to the assistant and writes a compact log"
   };
   const result = await runOneShot({
     args: ["run", "--prompt", "hello"],
-    python: "python",
     repoRoot: workspace,
     runtimePath: "runtime",
     cwd: workspace,

@@ -36,7 +36,7 @@ function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
-export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string; serviceNonce?: string; idleTtlMs?: number; stopWhenIdle?: boolean; onShutdown?: () => void }) {
+export async function startServer(options: { home?: string; repoRoot: string; runtimePath?: string; serviceNonce?: string; idleTtlMs?: number; stopWhenIdle?: boolean; onShutdown?: () => void }) {
   const startedAt = new Date().toISOString();
   const recordNonce = options.serviceNonce || randomUUID();
   // Fingerprint the code this process loaded, before anything can rebuild it.

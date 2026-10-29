@@ -210,8 +210,8 @@ export function detectInstallation({
   const installRoot = path.dirname(canonicalFrontend);
   const version = readInstallationVersion(installRoot, canonicalFrontend);
   const isSource =
-    existsSync(path.join(installRoot, "main.py")) &&
-    existsSync(path.join(installRoot, "agent", "version.py"));
+    existsSync(path.join(installRoot, "runtime", "src", "cli.ts")) &&
+    existsSync(path.join(installRoot, "runtime", "src", "version.ts"));
   if (isSource) {
     return {
       channel: "source",
@@ -902,7 +902,7 @@ export async function runUpdate({
 
   if (installation.channel === "source" && !options.check) {
     stdout(`Rind v${installation.version} is running from a source checkout (${installation.installRoot}).`);
-    stdout("Update your checkout with: git pull && python -m pip install -r requirements-runtime.txt && npm run build --prefix agent-management");
+    stdout("Update your checkout with: git pull && npm run build --prefix runtime && npm run build --prefix agent-management");
     if (conflictReport) stdout(`\n${conflictReport}`);
     return 0;
   }

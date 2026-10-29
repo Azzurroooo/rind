@@ -35,7 +35,7 @@ docker compose down
 Set `RIND_SERVER_TOKEN` in the worker terminal to a long random value, then start the worker from the repository root:
 
 ```bash
-python main.py app-server --web --host 127.0.0.1 --port 8765 --cwd <workspace>
+node runtime/dist/cli.js app-server --web --host 127.0.0.1 --port 8765 --cwd <workspace>
 ```
 
 Leave out `--session-dir` to share the default `~/.rind/sessions` and session index with the CLI. If the CLI uses a custom `--session-dir` or `RIND_HOME`, start the Web worker with the same setting.

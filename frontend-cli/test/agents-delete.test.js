@@ -54,7 +54,7 @@ test("deleting a saved conversation removes it and refuses while it runs or is s
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" } } }));
   const launch = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   const server = await startServer(launch);
-  const window = createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: launch.repoRoot, cliArgs: ["--cwd", workspace], onMessage() {} });
+  const window = createSharedRuntimeClient({ rindHome: home, repoRoot: launch.repoRoot, cliArgs: ["--cwd", workspace], onMessage() {} });
   let client;
   t.after(async () => {
     held.forEach(response => response.destroy());
@@ -101,7 +101,7 @@ test("deleting a saved conversation removes it and refuses while it runs or is s
 
 test("a hidden managed window renews its binding and tools after its conversation is deleted", { timeout: 90000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-delete-managed-"));
-  const launch = { home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  const launch = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   const server = await startServer(launch);
   const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
   let management, window;

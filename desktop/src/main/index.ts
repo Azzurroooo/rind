@@ -253,7 +253,7 @@ function sessionIndexPath() {
 }
 
 function appVersion() {
-  return app.isPackaged ? app.getVersion() : readRindVersion(join(app.getAppPath(), "..", "agent", "version.py"))
+  return app.isPackaged ? app.getVersion() : readRindVersion(join(app.getAppPath(), "..", "runtime", "src", "version.ts"))
 }
 
 function legacyRecentSessionsPath() {

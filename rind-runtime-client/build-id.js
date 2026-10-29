@@ -24,11 +24,11 @@ async function files(root, extensions) {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-// The shared Runtime is this transport plus the Python worker (or the
+// The shared Runtime is this transport plus the TypeScript worker (or the
 // packaged worker binary when one is configured).
 export const runtimeBuildId = ({ repoRoot = "", runtimePath = "" } = {}) => buildId([
   { root: here, extensions: [".js"] },
-  ...(runtimePath ? [{ file: runtimePath }] : [{ root: path.join(repoRoot, "agent"), extensions: [".py"] }, { file: path.join(repoRoot, "main.py") }]),
+  ...(runtimePath ? [{ file: runtimePath }] : [{ root: path.join(repoRoot, "runtime", "dist"), extensions: [".js"] }]),
 ]);
 
 // Streams a file into the hash, so a large packaged worker is not read into memory.

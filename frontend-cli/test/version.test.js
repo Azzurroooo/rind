@@ -15,23 +15,23 @@ function fixture(t) {
   return { root, frontend };
 }
 
-test("source version follows agent/version.py without a separately maintained CLI version", (t) => {
+test("source version follows runtime/src/version.ts without a separately maintained CLI version", (t) => {
   const { root, frontend } = fixture(t);
-  mkdirSync(path.join(root, "agent"));
-  const source = path.join(root, "agent/version.py");
+  mkdirSync(path.join(root, "runtime", "src"), { recursive: true });
+  const source = path.join(root, "runtime", "src", "version.ts");
   for (const version of ["9.8.7", "9.8.8"]) {
-    writeFileSync(source, `__version__ = "${version}"\n`);
+    writeFileSync(source, `export const RIND_VERSION = "${version}";\n`);
     assert.equal(readCliVersion(frontend), version);
   }
 });
 
-test("installed CLI reads generated package metadata without Python source", (t) => {
+test("installed CLI reads generated package metadata without runtime source", (t) => {
   const { frontend } = fixture(t);
   writeFileSync(path.join(frontend, "package.json"), '{"version":"9.8.7"}');
   assert.equal(readCliVersion(frontend), "9.8.7");
 });
 
 test("repository CLI version matches the runtime version source", () => {
-  const source = readFileSync(new URL("../../agent/version.py", import.meta.url), "utf8");
-  assert.equal(readCliVersion(), source.match(/__version__\s*=\s*"([^"]+)"/)[1]);
+  const source = readFileSync(new URL("../../runtime/src/version.ts", import.meta.url), "utf8");
+  assert.equal(readCliVersion(), source.match(/RIND_VERSION\s*=\s*"([^"]+)"/)[1]);
 });

@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { buildRuntimeEnv, resolveSourcePython } from "./runtime-env.js";
-export { resolveSourcePython } from "./runtime-env.js";
+import { buildRuntimeEnv } from "./runtime-env.js";
 import {
   createRuntimeRequest,
   isRuntimeEvent,
@@ -12,10 +12,20 @@ import {
   runtimeRequestId,
 } from "./runtime-protocol.js";
 
-export function resolveRuntimeLaunch({ python, repoRoot, runtimePath = "", cliArgs = [] }) {
-  const executable = runtimePath
-    ? { command: runtimePath, args: [] }
-    : { command: resolveSourcePython(python, repoRoot), args: [path.join(repoRoot, "main.py")] };
+const defaultRepoRoot = fileURLToPath(new URL("..", import.meta.url));
+
+function resolveRuntimeExecutable(repoRoot = defaultRepoRoot, runtimePath = "") {
+  if (!runtimePath) {
+    return { command: process.execPath, args: [path.join(repoRoot, "runtime", "dist", "cli.js")] };
+  }
+  if (/\.(?:c|m)?js$/i.test(runtimePath)) {
+    return { command: process.execPath, args: [runtimePath] };
+  }
+  return { command: runtimePath, args: [] };
+}
+
+export function resolveRuntimeLaunch({ repoRoot = defaultRepoRoot, runtimePath = "", cliArgs = [] } = {}) {
+  const executable = resolveRuntimeExecutable(repoRoot, runtimePath);
   const traceFlag = isTraceLlmEnvSet() ? ["--trace-llm"] : [];
   return {
     command: executable.command,
@@ -39,10 +49,8 @@ function isLongRunningRequest(method, params) {
     || (method === runtimeMethods.commandExecute && /^\/compact(?:\s|$)/i.test(String(params.input || "").trim()));
 }
 
-export function runHelpVersion({ python, repoRoot, runtimePath = "", cliArgs, cwd = process.cwd() }) {
-  const executable = runtimePath
-    ? { command: runtimePath, args: [] }
-    : { command: resolveSourcePython(python, repoRoot), args: [path.join(repoRoot, "main.py")] };
+export function runHelpVersion({ repoRoot = defaultRepoRoot, runtimePath = "", cliArgs = [], cwd = process.cwd() } = {}) {
+  const executable = resolveRuntimeExecutable(repoRoot, runtimePath);
   const result = spawnSync(executable.command, [...executable.args, ...cliArgs], {
     cwd,
     env: buildRuntimeEnv(repoRoot, process.env, { sourceRuntime: !runtimePath }),
@@ -52,8 +60,7 @@ export function runHelpVersion({ python, repoRoot, runtimePath = "", cliArgs, cw
 }
 
 export function createRuntimeClient({
-  python,
-  repoRoot,
+  repoRoot = defaultRepoRoot,
   cliArgs = [],
   cwd = process.cwd(),
   rindHome = process.env.RIND_HOME,
@@ -65,9 +72,9 @@ export function createRuntimeClient({
   onStderr = () => {},
   onExit = () => {},
   spawnProcess = spawn,
-}) {
+} = {}) {
   const handleEvent = onMessage;
-  const launch = resolveRuntimeLaunch({ python, repoRoot, runtimePath, cliArgs });
+  const launch = resolveRuntimeLaunch({ repoRoot, runtimePath, cliArgs });
 
   let nextId = 1;
   let stdoutBuffer = "";

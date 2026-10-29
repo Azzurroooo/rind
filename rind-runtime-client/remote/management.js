@@ -3,7 +3,7 @@ import { open, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveRindHome } from "../local-files.js";
-import { buildRuntimeEnv, resolveSourcePython } from "../runtime-env.js";
+import { buildRuntimeEnv } from "../runtime-env.js";
 import { runtimeMethods } from "../runtime-protocol.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -106,10 +106,6 @@ export function createManagementBridge({
   getRindHome = () => resolveRindHome(process.env.RIND_HOME),
   repoRoot = defaultRepoRoot,
   getRuntimePath = () => process.env.RIND_RUNTIME_PATH || "",
-  getPython = () => {
-    const rtPath = getRuntimePath();
-    return rtPath ? undefined : resolveSourcePython(process.env.RIND_PYTHON, repoRoot);
-  },
   requestRuntime,
   ensureRuntimeForWorkspace = async () => {},
   isSharedRuntime = () => true,
@@ -161,8 +157,7 @@ export function createManagementBridge({
   function launchOptions() {
     const home = getRindHome();
     const runtimePath = getRuntimePath();
-    const python = getPython();
-    return { home, python, repoRoot, runtimePath };
+    return { home, repoRoot, runtimePath };
   }
 
   function getManagementState() {

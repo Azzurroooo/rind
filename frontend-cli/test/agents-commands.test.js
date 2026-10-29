@@ -13,7 +13,7 @@ import { managerWorkspace, openAgentChat } from "../lib/agents-commands.js";
 const rindBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));
 
 function rind(home, cwd, ...args) {
-  const env = { ...process.env, RIND_HOME: home, RIND_PYTHON: process.env.RIND_PYTHON || "python", NO_COLOR: "1" };
+  const env = { ...process.env, RIND_HOME: home, NO_COLOR: "1" };
   delete env.RIND_SHARED_HOST_PID;
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [rindBin, ...args], { cwd, env, windowsHide: true });
@@ -73,7 +73,7 @@ test("rind agents lists and imports from where it runs, and leaves teams and tas
 test("rind agents stop also stops a shared Runtime that only plain conversations started", { timeout: 60000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-agents-stop-"));
   t.after(() => removeRindHome(home));
-  const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  const options = { rindHome: home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   (await connectSharedRuntime(options)).close();
 
   const stopped = await rind(home, home, "agents", "stop");

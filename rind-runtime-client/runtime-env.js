@@ -1,29 +1,10 @@
-import path from "node:path";
-import { existsSync } from "node:fs";
-
-export function resolveSourcePython(python, repoRoot) {
-  if (python) return python;
-  const windows = process.platform === "win32";
-  const candidate = path.join(repoRoot, ".venv", windows ? "Scripts" : "bin", windows ? "python.exe" : "python");
-  return existsSync(candidate) ? candidate : windows ? "python" : "python3";
-}
-
-export function buildRuntimeEnv(repoRoot, baseEnv = process.env, { sourceRuntime = true, rindHome } = {}) {
+export function buildRuntimeEnv(_repoRoot, baseEnv = process.env, { sourceRuntime = true, rindHome } = {}) {
   const env = { ...baseEnv };
   if (rindHome) {
     env.RIND_HOME = rindHome;
   }
-  if (!sourceRuntime) {
-    return env;
+  if (sourceRuntime && process.versions?.electron) {
+    env.ELECTRON_RUN_AS_NODE = "1";
   }
-  return {
-    ...env,
-    PYTHONIOENCODING: "utf-8",
-    PYTHONPATH: prependPath(repoRoot, baseEnv.PYTHONPATH),
-    PYTHONUTF8: "1",
-  };
-}
-
-function prependPath(entry, value) {
-  return value ? `${entry}${path.delimiter}${value}` : entry;
+  return env;
 }

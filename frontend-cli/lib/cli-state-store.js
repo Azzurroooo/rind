@@ -119,7 +119,7 @@ export function spinnerFrame(frame) {
 }
 
 // CLI-owned runtime preferences, separate from the shared ~/.rind/settings.json
-// that the Python runtime manages (apiKey/model/baseUrl).
+// that the runtime manages (apiKey/model/baseUrl).
 export function cliStatePath(rindHome = process.env.RIND_HOME || path.join(homedir(), ".rind")) {
   return path.join(String(rindHome), "cli-state.json");
 }

@@ -1,7 +1,7 @@
 import type { Configuration } from "electron-builder"
 import { readRindVersion } from "./src/main/version"
 
-const version = readRindVersion(new URL("../agent/version.py", import.meta.url))
+const version = readRindVersion(new URL("../runtime/src/version.ts", import.meta.url))
 
 const config: Configuration = {
   appId: "ai.rind.desktop",

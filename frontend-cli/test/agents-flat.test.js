@@ -21,8 +21,8 @@ test("a window covered by Agents stops making its conversation Open", { timeout:
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:1/v1" } } }));
   const server = await startServer({ home, repoRoot });
-  const window = createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
-  const other = createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
+  const window = createSharedRuntimeClient({ rindHome: home, repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
+  const other = createSharedRuntimeClient({ rindHome: home, repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
   let client, latest;
   t.after(async () => { client?.close(); await window.shutdown(); await other.shutdown(); await server.close(); await removeRindHome(home); });
   // Each window has sent its first message, so each shows a conversation.
@@ -120,7 +120,7 @@ test("a window before its first message is listed nowhere; the message creates i
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:1/v1" } } }));
-  const open = () => createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
+  const open = () => createSharedRuntimeClient({ rindHome: home, repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
   const window = open(), probe = open();
   t.after(async () => { await window.shutdown(); await probe.shutdown(); await removeRindHome(home); });
   const info = await window.request("initialize");
@@ -168,7 +168,7 @@ test("a conversation renamed anywhere is shown by its name everywhere", { timeou
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "custom-gw", model: "fixture" }));
   await writeFile(path.join(home, "auth.json"), JSON.stringify({ "custom-gw": { type: "api_key", key: "fixture" } }));
   await writeFile(path.join(home, "providers.json"), JSON.stringify({ providers: { "custom-gw": { api: "openai-chat", baseUrl: "http://127.0.0.1:1/v1" } } }));
-  const open = () => createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
+  const open = () => createSharedRuntimeClient({ rindHome: home, repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
   const window = open(), probe = open();
   t.after(async () => { await window.shutdown(); await probe.shutdown(); await removeRindHome(home); });
   await window.request("initialize"); await probe.request("initialize");
@@ -180,7 +180,7 @@ test("a conversation renamed anywhere is shown by its name everywhere", { timeou
   for (let i = 0; i < 100 && (await live())?.title !== "Release checks"; i++) await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal((await live())?.title, "Release checks", "the live table carries the new title to every list");
 
-  const reset = await renameConversation({ home, repoRoot, python: process.env.RIND_PYTHON || "python" }, id, "");
+  const reset = await renameConversation({ home, repoRoot }, id, "");
   assert.deepEqual([reset.name, reset.title], [null, ""], "no first message yet, so nothing to show but its id");
-  await assert.rejects(renameConversation({ home, repoRoot, python: process.env.RIND_PYTHON || "python" }, "20261007_000000_deadbeef", "x"), /not|Session/i);
+  await assert.rejects(renameConversation({ home, repoRoot }, "20261007_000000_deadbeef", "x"), /not|Session/i);
 });

@@ -86,9 +86,8 @@ const handoffFile = takeHandoffPath();
 const handoffWindow = Boolean(handoffFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const python = process.env.RIND_PYTHON || undefined;
 const runtimePath = resolveInstalledRuntime({ repoRoot });
-const managementLaunch = { python, repoRoot, runtimePath };
+const managementLaunch = { repoRoot, runtimePath };
 if (cliArgs[0] === "agents") {
   try { await runAgentsCommand(cliArgs.slice(1), managementLaunch); }
   catch (error) { process.stderr.write(error.message + "\n"); process.exitCode = 2; }
@@ -163,14 +162,13 @@ if (cliArgs.some((arg) => arg === "--version" || arg === "--help" || arg === "-h
   if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
     process.stdout.write(`${cliHelp}\n\n`);
   }
-  process.exit(runHelpVersion({ python, repoRoot, runtimePath, cliArgs }));
+  process.exit(runHelpVersion({ repoRoot, runtimePath, cliArgs }));
 }
 
 if (cliArgs[0] === "run") {
   try {
     await runOneShot({
       args: cliArgs,
-      python,
       repoRoot,
       runtimePath,
       stderr: (text) => process.stderr.write(text),
@@ -284,7 +282,6 @@ const {
 
 let remoteController;
 const runtimeClient = observeRuntime(createSharedRuntimeClient({
-  python,
   repoRoot,
   runtimePath,
   cliArgs,
