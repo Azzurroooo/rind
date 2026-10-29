@@ -71,7 +71,7 @@ Use `gradlew.bat` on Windows. Output:
 
 `npm run android` opens Android Studio. For store distribution, use `bundleRelease`
 with your own signing configuration; no keys are committed. Increase
-`-PrindVersionCode=N` each release. Version name comes from `agent/version.py`.
+`-PrindVersionCode=N` each release. Version name comes from `runtime/src/version.ts`.
 
 For wireless device debugging, enable Developer options → Wireless debugging on
 the phone. Open **Pair device with pairing code** and use that dialog's pairing
@@ -99,7 +99,7 @@ npm run ios
 ```
 
 The project uses Swift Package Manager. Select your signing team and device in
-Xcode. Minimum iOS: 15. Version sync reads `agent/version.py`; increase Xcode's
+Xcode. Minimum iOS: 15. Version sync reads `runtime/src/version.ts`; increase Xcode's
 build number for distribution. Camera/local-network descriptions, a `rind` URL
 scheme and Preferences/Filesystem privacy manifest entries are included.
 

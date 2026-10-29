@@ -15,9 +15,16 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from agent.runtime.server.protocol import RuntimeMethod
-
 from .transports import build_transport
+
+
+class RuntimeMethod:
+    INITIALIZE = "initialize"
+    SESSION_PROMPT = "session/prompt"
+    SESSION_REPLAY = "session/replay"
+    SESSION_SUBSCRIBE = "session/subscribe"
+    RIND_SESSION_FOLLOW_UP = "rind/session/follow_up"
+    RIND_USER_QUESTION_RESPOND = "rind/user_question/respond"
 
 logger = logging.getLogger(__name__)
 

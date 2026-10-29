@@ -5,18 +5,14 @@ on:
     paths:
       - "frontend-web/**"
       - "desktop/**"
-      - "agent/**"
-      - "main.py"
-      - "requirements*.txt"
+      - "runtime/**"
       - ".github/workflows/verify-surfaces.yml"
   push:
     branches: [main]
     paths:
       - "frontend-web/**"
       - "desktop/**"
-      - "agent/**"
-      - "main.py"
-      - "requirements*.txt"
+      - "runtime/**"
       - ".github/workflows/verify-surfaces.yml"
   workflow_dispatch:
 
@@ -44,12 +40,10 @@ jobs:
           cache-dependency-path: |
             frontend-web/package-lock.json
             desktop/package-lock.json
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install Worker dependencies for the local protocol smoke test
-        run: python -m pip install -r requirements-runtime.txt
+      - name: Build TypeScript Runtime
+        run: |
+          npm --prefix runtime install
+          npm --prefix runtime run build
       - name: Install Web dependencies
         run: npm --prefix frontend-web ci
       - name: Install Desktop dependencies

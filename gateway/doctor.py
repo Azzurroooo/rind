@@ -81,8 +81,8 @@ def ensure_sdk_installed(sdk_module: str, *, runner=None) -> tuple[bool, str]:
 
 
 def _looks_like_source_dir(path: Path) -> bool:
-    """Runtime data must never land in the Rind source tree (main.py + gateway/)."""
-    return (path / "main.py").is_file() and (path / "gateway").is_dir()
+    """Runtime data must never land in the Rind source tree (runtime/ + gateway/)."""
+    return (path / "runtime" / "src" / "cli.ts").is_file() and (path / "gateway").is_dir()
 
 
 def ensure_channel_sdks(guides, *, interactive: bool, confirm=None, echo=print):

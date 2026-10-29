@@ -13,6 +13,7 @@ node_modules/
 # Runtime data defaults to RIND_HOME or ~/.rind.
 .rind/
 sessions/
+logs/
 build/
 dist/
 release/
@@ -46,6 +47,8 @@ prompt.txt
 test_web.py
 test.txt
 src/
+!runtime/src/
+!runtime/src/**
 !agent-management/src/
 !agent-management/src/**
 !frontend-web/src/

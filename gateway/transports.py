@@ -63,7 +63,7 @@ class _StdioTransport:
     """Owns the app-server subprocess and shuts it down through stdin EOF."""
 
     def __init__(self, command: list[str] | None = None) -> None:
-        self._command = command or [sys.executable, str(PROJECT_ROOT / "main.py"), "app-server", "--stdio"]
+        self._command = command or ["node", str(PROJECT_ROOT / "runtime" / "dist" / "cli.js"), "app-server", "--stdio"]
         self._process: asyncio.subprocess.Process | None = None
 
     async def open(self) -> None:

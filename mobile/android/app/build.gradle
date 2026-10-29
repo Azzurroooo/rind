@@ -1,6 +1,6 @@
 apply plugin: 'com.android.application'
 
-def rindVersionMatch = new File(rootProject.projectDir, '../../agent/version.py').text =~ /__version__ = "([^"]+)"/
+def rindVersionMatch = new File(rootProject.projectDir, '../../runtime/src/version.ts').text =~ /RIND_VERSION\s*=\s*"([^"]+)"/
 if (!rindVersionMatch.find()) throw new GradleException('Could not read the Rind version.')
 def rindVersion = rindVersionMatch.group(1)
 

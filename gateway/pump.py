@@ -17,8 +17,6 @@ from collections import OrderedDict, deque
 from dataclasses import dataclass
 from typing import Any
 
-from agent.runtime.server.protocol import RuntimeMethod
-
 from . import Channel, InboundMessage, OutboundPayload, SendTarget
 from .chunk import first_line_title
 from .commands import SESSION_CREATE_FAILED_REPLY, STOPPED_REPLY, CommandContext, CommandHub, HubLinks, is_command
@@ -27,7 +25,7 @@ from .outbound import Outbound
 from .reactions import ReactionController
 from .router import SessionRouter, session_key
 from .security import SecurityGate
-from .worker_client import REQUEST_TIMEOUT_SECONDS, WorkerClient, WorkerError
+from .worker_client import REQUEST_TIMEOUT_SECONDS, RuntimeMethod, WorkerClient, WorkerError
 
 logger = logging.getLogger(__name__)
 

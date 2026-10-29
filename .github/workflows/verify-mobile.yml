@@ -1,10 +1,10 @@
 name: Verify mobile app
 on:
   pull_request:
-    paths: ["mobile/**", "frontend-web/**", "desktop/src/main/gateway/**", "desktop/package*.json", "agent/runtime/server/websocket.py", "agent/version.py", ".github/workflows/verify-mobile.yml"]
+    paths: ["mobile/**", "frontend-web/**", "desktop/src/main/gateway/**", "desktop/package*.json", "runtime/src/server/transports.ts", "runtime/src/version.ts", ".github/workflows/verify-mobile.yml"]
   push:
     branches: [main]
-    paths: ["mobile/**", "frontend-web/**", "desktop/src/main/gateway/**", "desktop/package*.json", "agent/runtime/server/websocket.py", "agent/version.py", ".github/workflows/verify-mobile.yml"]
+    paths: ["mobile/**", "frontend-web/**", "desktop/src/main/gateway/**", "desktop/package*.json", "runtime/src/server/transports.ts", "runtime/src/version.ts", ".github/workflows/verify-mobile.yml"]
   workflow_dispatch:
 permissions:
   contents: read
