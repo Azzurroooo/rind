@@ -11,8 +11,11 @@ import type {
 import { resolveReasoningEffort } from "../providers.js";
 import { DEFAULT_USER_AGENT } from "../settings.js";
 import {
+  awaitWithCancellation,
   chatMessages,
   HttpStatusError,
+  isCancellationError,
+  iterateWithCancellation,
   parseSseEvents,
   promptCacheKey,
   providerError,
@@ -121,7 +124,7 @@ export class OpenAIChatCompletionsClient implements ChatClient {
   ): Promise<unknown> {
     cancellationToken?.throwIfCancelled();
     if (this.asyncClient) {
-      return await this.asyncClient.chat.completions.create(payload);
+      return await awaitWithCancellation(this.asyncClient.chat.completions.create(payload), cancellationToken);
     }
     const url = `${this.baseUrl}/chat/completions`;
     const key = await this.resolveApiKey();
@@ -130,19 +133,22 @@ export class OpenAIChatCompletionsClient implements ChatClient {
       cancellationToken?.throwIfCancelled();
       let response: Response;
       try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: stream ? "text/event-stream" : "application/json",
-            Authorization: `Bearer ${key}`,
-            "User-Agent": DEFAULT_USER_AGENT,
-          },
-          body: JSON.stringify(payload),
-          signal: cancellationToken?.signal,
-        });
+        response = await awaitWithCancellation(
+          fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: stream ? "text/event-stream" : "application/json",
+              Authorization: `Bearer ${key}`,
+              "User-Agent": DEFAULT_USER_AGENT,
+            },
+            body: JSON.stringify(payload),
+            signal: cancellationToken?.signal,
+          }),
+          cancellationToken,
+        );
       } catch (err) {
-        if (cancellationToken?.isCancelled || (err instanceof Error && err.name === "AbortError")) {
+        if (isCancellationError(err, cancellationToken)) {
           throw new CancelledError(cancellationToken?.reason || "cancelled");
         }
         if (attempt < maxRetries) {
@@ -158,7 +164,7 @@ export class OpenAIChatCompletionsClient implements ChatClient {
         }
         await throwForHttpError(response);
       }
-      return stream ? response : await response.json();
+      return stream ? response : await awaitWithCancellation(response.json(), cancellationToken);
     }
   }
 
@@ -249,7 +255,7 @@ export class OpenAIChatCompletionsClient implements ChatClient {
       return parseCompletion(result);
     } catch (exc) {
       if (exc instanceof CancelledError) throw exc;
-      throw providerError(exc);
+      throw providerError(exc, null, cancellationToken);
     }
   }
 
@@ -263,7 +269,7 @@ export class OpenAIChatCompletionsClient implements ChatClient {
       streamResponse = await this.request(messages, tools, true, cancellationToken);
     } catch (exc) {
       if (exc instanceof CancelledError) throw exc;
-      throw providerError(exc);
+      throw providerError(exc, null, cancellationToken);
     }
 
     const callIds = new Map<number, string>();
@@ -275,7 +281,7 @@ export class OpenAIChatCompletionsClient implements ChatClient {
       }
     } catch (exc) {
       if (exc instanceof CancelledError) throw exc;
-      throw providerError(exc, "stream_interrupted");
+      throw providerError(exc, "stream_interrupted", cancellationToken);
     }
   }
 
@@ -310,8 +316,7 @@ async function* iterateChunks(
     return;
   }
   if (response && typeof (response as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function") {
-    for await (const chunk of response as AsyncIterable<unknown>) {
-      cancellationToken?.throwIfCancelled();
+    for await (const chunk of iterateWithCancellation(response as AsyncIterable<unknown>, cancellationToken)) {
       yield chunk;
     }
   }

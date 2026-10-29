@@ -42,7 +42,12 @@ export function createCliRuntimeController({
   async function request(method, params = {}) {
     await ensureRuntime();
     // A window's first message creates its conversation; until then it has none.
-    if (method === methods.sessionPrompt && !params.session_id && !state.session.info.session_id) await createConversation();
+    if (method === methods.sessionPrompt && !params.session_id && !state.session.info.session_id) {
+      await createConversation();
+      if (state.turn?.interruptRequested && state.session.info.session_id) {
+        void client.request(methods.sessionCancel, { session_id: state.session.info.session_id }).catch(() => {});
+      }
+    }
     const requestParams = { ...params };
     const sessionScoped = sessionScopedMethods.has(method) || method === methods.modelList;
     if (sessionScoped && !requestParams.session_id) {

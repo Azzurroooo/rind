@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile, utimes } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -13,6 +13,8 @@ import {
   writePlan,
   loadPlanIfExists,
   forkSession,
+  FileLockHandle,
+  loadSettings,
 } from "../dist/index.js";
 
 test("JsonlSessionStore defers disk creation until first user message, persists messages/tools/plan/goal, and supports fork", async t => {
@@ -144,4 +146,42 @@ test("usage ledger records and summarizes token usage across days and models", a
   assert.equal(summary.totals.output, 300);
   assert.equal(summary.totals.total, 1500);
   assert.equal(summary.totals.cached, 400);
+});
+
+test("FileLockHandle cleans up 0-byte Python filelock files and supports re-entrant withLock", async t => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-file-lock-"));
+  t.after(() => rm(tmp, { recursive: true, force: true }));
+  const targetPath = path.join(tmp, "session_index.json");
+  const lockPath = `${targetPath}.lock`;
+
+  // Simulate a 0-byte .lock file left by Python's filelock.UnixFileLock
+  await writeFile(lockPath, "");
+  const past = new Date(Date.now() - 1000);
+  await utimes(lockPath, past, past);
+
+  const lock = new FileLockHandle(lockPath);
+  let nestedRan = false;
+  lock.withLock(() => {
+    const inner = new FileLockHandle(lockPath);
+    inner.withLock(() => {
+      nestedRan = true;
+    });
+  });
+  assert.equal(nestedRan, true);
+});
+
+test("loadSettings infers deepseek provider from legacy settings.json with api.deepseek.com baseUrl", async t => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-legacy-settings-"));
+  t.after(() => rm(tmp, { recursive: true, force: true }));
+  const settingsPath = path.join(tmp, "settings.json");
+  await writeFile(
+    settingsPath,
+    JSON.stringify({
+      model: "deepseek-flash",
+      baseUrl: "https://api.deepseek.com",
+    }),
+  );
+  const settings = loadSettings(settingsPath);
+  assert.equal(settings.provider, "deepseek");
+  assert.equal(settings.model, "deepseek-flash");
 });

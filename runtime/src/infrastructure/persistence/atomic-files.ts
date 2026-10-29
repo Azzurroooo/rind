@@ -12,18 +12,30 @@ function sleepSync(ms: number): void {
   Atomics.wait(arr, 0, 0, ms);
 }
 
+const PROCESS_LOCKS = new Map<string, FileLockHandle>();
+
 export class FileLockHandle {
   readonly lockPath: string;
   private readonly timeoutMs: number;
   private fd: number | null = null;
+  private depth = 0;
 
   constructor(lockPath: string, timeoutMs: number = 5000) {
-    this.lockPath = lockPath;
+    const resolved = path.resolve(lockPath);
+    const existing = PROCESS_LOCKS.get(resolved);
+    if (existing) {
+      this.lockPath = existing.lockPath;
+      this.timeoutMs = existing.timeoutMs;
+      return existing;
+    }
+    this.lockPath = resolved;
     this.timeoutMs = timeoutMs;
+    PROCESS_LOCKS.set(resolved, this);
   }
 
   acquire(timeoutMs: number = this.timeoutMs): void {
     if (this.fd !== null) {
+      this.depth += 1;
       return;
     }
     fs.mkdirSync(path.dirname(this.lockPath), { recursive: true });
@@ -32,6 +44,7 @@ export class FileLockHandle {
       try {
         this.fd = fs.openSync(this.lockPath, "wx");
         fs.writeFileSync(this.fd, `${process.pid}\n`, "utf8");
+        this.depth = 1;
         return;
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
@@ -41,17 +54,36 @@ export class FileLockHandle {
         try {
           const content = fs.readFileSync(this.lockPath, "utf8").trim();
           const pid = Number.parseInt(content, 10);
-          if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) {
-            try {
-              process.kill(pid, 0);
-            } catch (killErr) {
-              if ((killErr as NodeJS.ErrnoException).code === "ESRCH") {
-                try {
-                  fs.unlinkSync(this.lockPath);
-                  continue;
-                } catch {
-                  // ignore race
+          if (Number.isInteger(pid) && pid > 0) {
+            if (pid === process.pid) {
+              try {
+                fs.unlinkSync(this.lockPath);
+                continue;
+              } catch {
+                // ignore race
+              }
+            } else {
+              try {
+                process.kill(pid, 0);
+              } catch (killErr) {
+                if ((killErr as NodeJS.ErrnoException).code === "ESRCH") {
+                  try {
+                    fs.unlinkSync(this.lockPath);
+                    continue;
+                  } catch {
+                    // ignore race
+                  }
                 }
+              }
+            }
+          } else {
+            const stat = fs.statSync(this.lockPath);
+            if (Date.now() - stat.mtimeMs > 50) {
+              try {
+                fs.unlinkSync(this.lockPath);
+                continue;
+              } catch {
+                // ignore race
               }
             }
           }
@@ -69,6 +101,11 @@ export class FileLockHandle {
   }
 
   release(): void {
+    if (this.depth > 1) {
+      this.depth -= 1;
+      return;
+    }
+    this.depth = 0;
     if (this.fd !== null) {
       try {
         fs.closeSync(this.fd);

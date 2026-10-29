@@ -224,14 +224,28 @@ export async function* pumpModelStreamEvents(options: {
   let done = false;
   let error: unknown = null;
 
-  const pushEvent = (ev: RuntimeEventBase): void => {
-    eventQueue.push(ev);
+  const wakeConsumer = (): void => {
     if (notifyConsumer) {
       const fn = notifyConsumer;
       notifyConsumer = null;
       fn();
     }
   };
+
+  const pushEvent = (ev: RuntimeEventBase): void => {
+    eventQueue.push(ev);
+    wakeConsumer();
+  };
+
+  const unsubscribeCancel = cancellationToken
+    ? cancellationToken.registerCallback(() => {
+        if (!done) {
+          error = new CancelledError(cancellationToken.reason || "User interrupted");
+          done = true;
+          wakeConsumer();
+        }
+      })
+    : () => {};
 
   const consumePromise = (async (): Promise<void> => {
     try {
@@ -319,48 +333,54 @@ export async function* pumpModelStreamEvents(options: {
         }
       }
     } catch (exc) {
-      error = exc;
+      if (!error) {
+        error = exc;
+      }
     } finally {
       done = true;
-      if (notifyConsumer) {
-        const fn = notifyConsumer;
-        notifyConsumer = null;
-        fn();
-      }
+      wakeConsumer();
     }
   })();
 
-  while (true) {
-    if (eventQueue.length === 0) {
-      if (done) {
-        if (error) throw error;
-        break;
+  try {
+    while (true) {
+      if (eventQueue.length === 0) {
+        if (done) {
+          if (error) throw error;
+          break;
+        }
+        await new Promise<void>(resolve => {
+          notifyConsumer = resolve;
+        });
+        continue;
       }
-      await new Promise<void>(resolve => {
-        notifyConsumer = resolve;
-      });
-      continue;
-    }
-    const event = eventQueue.shift()!;
-    if (event.type === "assistant_delta") {
-      const parts = [String(event.text || "")];
-      let textBytes = Buffer.byteLength(parts[0]!, "utf8");
-      while (textBytes < 8192 && eventQueue.length > 0) {
-        const next = eventQueue[0]!;
-        if (next.type !== "assistant_delta") break;
-        const nextText = String(next.text || "");
-        const size = Buffer.byteLength(nextText, "utf8");
-        if (textBytes + size > 8192) break;
-        eventQueue.shift();
-        parts.push(nextText);
-        textBytes += size;
+      if (cancellationToken?.isCancelled) {
+        throw new CancelledError(cancellationToken.reason || "User interrupted");
       }
-      event.text = parts.join("");
+      const event = eventQueue.shift()!;
+      if (event.type === "assistant_delta") {
+        const parts = [String(event.text || "")];
+        let textBytes = Buffer.byteLength(parts[0]!, "utf8");
+        while (textBytes < 8192 && eventQueue.length > 0) {
+          const next = eventQueue[0]!;
+          if (next.type !== "assistant_delta") break;
+          const nextText = String(next.text || "");
+          const size = Buffer.byteLength(nextText, "utf8");
+          if (textBytes + size > 8192) break;
+          eventQueue.shift();
+          parts.push(nextText);
+          textBytes += size;
+        }
+        event.text = parts.join("");
+      }
+      yield event;
     }
-    yield event;
-  }
 
-  await consumePromise;
+    await consumePromise;
+  } finally {
+    unsubscribeCancel();
+    void consumePromise.catch(() => {});
+  }
 }
 
 const MAX_STEP_RECOVERY_ATTEMPTS = 3;
@@ -668,6 +688,11 @@ export class TurnRunner {
               this.validateFinishReason(streamResult);
               break;
             } catch (e) {
+              if (cancellationToken?.isCancelled || e instanceof CancelledError) {
+                throw e instanceof CancelledError
+                  ? e
+                  : new CancelledError(cancellationToken?.reason || "User interrupted");
+              }
               if (
                 !(e instanceof ProviderError) ||
                 e.code !== "stream_interrupted" ||
@@ -917,10 +942,7 @@ export class TurnRunner {
       await new Promise(resolve => setTimeout(resolve, delaySec * 1000));
       return;
     }
-    await Promise.race([
-      cancellationToken.wait().catch(() => {}),
-      new Promise(resolve => setTimeout(resolve, delaySec * 1000)),
-    ]);
+    await cancellationToken.sleep(delaySec * 1000);
   }
 
   async compactContext(

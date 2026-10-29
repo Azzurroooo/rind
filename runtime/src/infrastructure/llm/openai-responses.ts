@@ -12,7 +12,9 @@ import { resolveReasoningEffort } from "../providers.js";
 import { DEFAULT_USER_AGENT } from "../settings.js";
 import type { ApiKeyProvider } from "./openai-chat.js";
 import {
+  awaitWithCancellation,
   imageDataUrl,
+  iterateWithCancellation,
   parseSseEvents,
   promptCacheKey,
   providerError,
@@ -96,25 +98,28 @@ export class OpenAIResponsesClient implements ChatClient {
   ): Promise<unknown> {
     cancellationToken?.throwIfCancelled();
     if (this.asyncClient) {
-      return await this.asyncClient.responses.create(payload);
+      return await awaitWithCancellation(this.asyncClient.responses.create(payload), cancellationToken);
     }
     const stream = Boolean(payload.stream);
     const key = await this.resolveApiKey();
-    const response = await fetch(`${this.baseUrl}/responses`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: stream ? "text/event-stream" : "application/json",
-        Authorization: `Bearer ${key}`,
-        "User-Agent": DEFAULT_USER_AGENT,
-      },
-      body: JSON.stringify(payload),
-      signal: cancellationToken?.signal,
-    });
+    const response = await awaitWithCancellation(
+      fetch(`${this.baseUrl}/responses`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: stream ? "text/event-stream" : "application/json",
+          Authorization: `Bearer ${key}`,
+          "User-Agent": DEFAULT_USER_AGENT,
+        },
+        body: JSON.stringify(payload),
+        signal: cancellationToken?.signal,
+      }),
+      cancellationToken,
+    );
     if (!response.ok) {
       await throwForHttpError(response);
     }
-    return stream ? response : await response.json();
+    return stream ? response : await awaitWithCancellation(response.json(), cancellationToken);
   }
 
   private async request(
@@ -159,7 +164,7 @@ export class OpenAIResponsesClient implements ChatClient {
       return parseCompletion(response);
     } catch (exc) {
       if (exc instanceof CancelledError) throw exc;
-      throw providerError(exc);
+      throw providerError(exc, null, cancellationToken);
     }
   }
 
@@ -179,7 +184,7 @@ export class OpenAIResponsesClient implements ChatClient {
       }
     } catch (exc) {
       if (exc instanceof CancelledError) throw exc;
-      throw providerError(exc, "stream_interrupted");
+      throw providerError(exc, "stream_interrupted", cancellationToken);
     }
   }
 
@@ -205,8 +210,7 @@ async function* iterateResponseEvents(
     return;
   }
   if (response && typeof (response as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function") {
-    for await (const chunk of response as AsyncIterable<unknown>) {
-      cancellationToken?.throwIfCancelled();
+    for await (const chunk of iterateWithCancellation(response as AsyncIterable<unknown>, cancellationToken)) {
       yield chunk;
     }
   }

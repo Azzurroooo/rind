@@ -9,7 +9,14 @@ import type {
   RequestImage,
 } from "../../domain/models.js";
 import { DEFAULT_USER_AGENT } from "../settings.js";
-import { parseSseEvents, providerError, separateToolImages, throwForHttpError } from "./sse.js";
+import {
+  awaitWithCancellation,
+  iterateWithCancellation,
+  parseSseEvents,
+  providerError,
+  separateToolImages,
+  throwForHttpError,
+} from "./sse.js";
 
 export interface MockGoogleGenAIClient {
   aio: {
@@ -72,31 +79,37 @@ export class GoogleGenerativeAIClient implements ChatClient {
     try {
       cancellationToken?.throwIfCancelled();
       if (this.client) {
-        const response = await this.client.aio.models.generate_content({
-          model: this.model,
-          contents,
-          config,
-        });
+        const response = await awaitWithCancellation(
+          this.client.aio.models.generate_content({
+            model: this.model,
+            contents,
+            config,
+          }),
+          cancellationToken,
+        );
         return parseCompletion(response);
       }
       const body = buildRestBody(contents, config);
-      const response = await fetch(this.endpoint(false), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": this.apiKey,
-          "User-Agent": DEFAULT_USER_AGENT,
-        },
-        body: JSON.stringify(body),
-        signal: cancellationToken?.signal,
-      });
+      const response = await awaitWithCancellation(
+        fetch(this.endpoint(false), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": this.apiKey,
+            "User-Agent": DEFAULT_USER_AGENT,
+          },
+          body: JSON.stringify(body),
+          signal: cancellationToken?.signal,
+        }),
+        cancellationToken,
+      );
       if (!response.ok) {
         await throwForHttpError(response);
       }
-      return parseCompletion(await response.json());
+      return parseCompletion(await awaitWithCancellation(response.json(), cancellationToken));
     } catch (exc) {
       if (exc instanceof CancelledError) throw exc;
-      throw providerError(exc);
+      throw providerError(exc, null, cancellationToken);
     }
   }
 
@@ -112,24 +125,30 @@ export class GoogleGenerativeAIClient implements ChatClient {
       cancellationToken?.throwIfCancelled();
       let streamSource: unknown;
       if (this.client) {
-        streamSource = await this.client.aio.models.generate_content_stream({
-          model: this.model,
-          contents,
-          config,
-        });
+        streamSource = await awaitWithCancellation(
+          this.client.aio.models.generate_content_stream({
+            model: this.model,
+            contents,
+            config,
+          }),
+          cancellationToken,
+        );
       } else {
         const body = buildRestBody(contents, config);
-        const response = await fetch(this.endpoint(true), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "text/event-stream",
-            "x-goog-api-key": this.apiKey,
-            "User-Agent": DEFAULT_USER_AGENT,
-          },
-          body: JSON.stringify(body),
-          signal: cancellationToken?.signal,
-        });
+        const response = await awaitWithCancellation(
+          fetch(this.endpoint(true), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "text/event-stream",
+              "x-goog-api-key": this.apiKey,
+              "User-Agent": DEFAULT_USER_AGENT,
+            },
+            body: JSON.stringify(body),
+            signal: cancellationToken?.signal,
+          }),
+          cancellationToken,
+        );
         if (!response.ok) {
           await throwForHttpError(response);
         }
@@ -142,7 +161,7 @@ export class GoogleGenerativeAIClient implements ChatClient {
       }
     } catch (exc) {
       if (exc instanceof CancelledError) throw exc;
-      throw providerError(exc, "stream_interrupted");
+      throw providerError(exc, "stream_interrupted", cancellationToken);
     }
   }
 
@@ -188,8 +207,7 @@ async function* iterateGeminiEvents(
     return;
   }
   if (source && typeof (source as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function") {
-    for await (const chunk of source as AsyncIterable<unknown>) {
-      cancellationToken?.throwIfCancelled();
+    for await (const chunk of iterateWithCancellation(source as AsyncIterable<unknown>, cancellationToken)) {
       yield chunk;
     }
   }

@@ -196,6 +196,7 @@ export class ExecutionCoordinator {
   private readonly deliveries = new Map<string, string[]>();
   private readonly deliveryRuns = new Map<string, Promise<void>>();
   private readonly suppressed = new Set<string>();
+  private readonly pendingInterrupts = new Map<string, string>();
   private readonly pendingWakes = new Set<string>();
   private readonly scopes = new Map<string, RequestScope>();
   private readonly taskEvents = new Map<string, Record<string, unknown>>();
@@ -874,6 +875,9 @@ export class ExecutionCoordinator {
     const query = options.query;
     const transientSystemMessages = options.transientSystemMessages ?? null;
 
+    if (!continuation) {
+      this.pendingInterrupts.delete(clean);
+    }
     if (!continuation && !compact) {
       this.suppressed.delete(clean);
     }
@@ -891,48 +895,16 @@ export class ExecutionCoordinator {
       try {
         if (
           this.closed ||
+          this.pendingInterrupts.has(clean) ||
           (this.suppressed.has(clean) && !compact) ||
           (continuation && execution.queuedTurnStarts > 1)
         ) {
+          this.pendingInterrupts.delete(clean);
           return;
-        }
-        if (continuation) {
-          const records = await this.taskNotifications.store.relevant(clean);
-          const scope = this.scopes.get(clean);
-          const pending = Object.values(records).some(
-            r => (!scope || r.request_id === scope.requestId) && pendingNotification(r),
-          );
-          const goal = this.enableGoal ? await this.repository.getGoal(clean) : null;
-          if (execution.queuedTurnStarts > 1 || this.suppressed.has(clean)) {
-            return;
-          }
-          if (goal && ["paused", "blocked", "budget_exhausted"].includes(String(goal.status || ""))) {
-            return;
-          }
-          const sessionStore = execution.container.session_store;
-          const delivered =
-            pending && sessionStore
-              ? await this.taskNotifications.deliver(sessionStore)
-              : Number(pending);
-          if (!delivered && (!checkpoint || !goal || goal.status !== "active")) {
-            return;
-          }
-        }
-        await this.applySelection(execution);
-        if (checkpoint) {
-          await execution.container.session_store.persist_message(
-            "user",
-            buildGoalCheckpointPrompt(checkpoint),
-            null,
-            null,
-            { kind: "goal_checkpoint" },
-          );
         }
         const cancelSource = new CancellationTokenSource(options.cancellationToken ?? null);
         execution.currentCancel = cancelSource;
-        execution.container.runtime.setUserQuestionResponder(event =>
-          this.answerUserQuestionInternal(clean, event),
-        );
+        this.pendingInterrupts.delete(clean);
         let semaphoreAcquired = false;
 
         const beforeExecution = async (): Promise<void> => {
@@ -941,9 +913,59 @@ export class ExecutionCoordinator {
         };
 
         try {
+          if (continuation) {
+            const records = await this.taskNotifications.store.relevant(clean);
+            const scope = this.scopes.get(clean);
+            const pending = Object.values(records).some(
+              r => (!scope || r.request_id === scope.requestId) && pendingNotification(r),
+            );
+            const goal = this.enableGoal ? await this.repository.getGoal(clean) : null;
+            if (
+              execution.queuedTurnStarts > 1 ||
+              this.suppressed.has(clean) ||
+              cancelSource.token.isCancelled
+            ) {
+              return;
+            }
+            if (goal && ["paused", "blocked", "budget_exhausted"].includes(String(goal.status || ""))) {
+              return;
+            }
+            const sessionStore = execution.container.session_store;
+            const delivered =
+              pending && sessionStore
+                ? await this.taskNotifications.deliver(sessionStore)
+                : Number(pending);
+            if (!delivered && (!checkpoint || !goal || goal.status !== "active")) {
+              return;
+            }
+          }
+          await this.applySelection(execution);
+          if (cancelSource.token.isCancelled || (this.suppressed.has(clean) && !compact)) {
+            return;
+          }
+          if (checkpoint) {
+            await execution.container.session_store.persist_message(
+              "user",
+              buildGoalCheckpointPrompt(checkpoint),
+              null,
+              null,
+              { kind: "goal_checkpoint" },
+            );
+          }
+          execution.container.runtime.setUserQuestionResponder(event =>
+            this.answerUserQuestionInternal(clean, event),
+          );
+
           const extTool = this.externalTool(clean);
           if (extTool && !compact) {
-            await extTool.notify("before", clean, {}, cancelSource.token);
+            try {
+              await extTool.notify("before", clean, {}, cancelSource.token);
+            } catch (exc) {
+              if (exc instanceof CancelledError || cancelSource.token.isCancelled) {
+                return;
+              }
+              throw exc;
+            }
           }
           for await (const event of execution.container.runtime.runTurn({
             query,
@@ -1082,6 +1104,7 @@ export class ExecutionCoordinator {
   interrupt(sessionId: string, reason = "User interrupted"): boolean {
     const clean = validateSessionId(sessionId);
     this.suppressed.add(clean);
+    this.pendingInterrupts.set(clean, reason);
     this.refreshBackgroundWait(clean);
     const scope = this.scopes.get(clean);
     if (scope) {
@@ -1425,6 +1448,7 @@ export class ExecutionCoordinator {
       await this.shellTools.closeSession(clean);
       this.sessionOptions.delete(clean);
       this.suppressed.delete(clean);
+      this.pendingInterrupts.delete(clean);
       this.pendingWakes.delete(clean);
       this.deliveries.delete(clean);
     }

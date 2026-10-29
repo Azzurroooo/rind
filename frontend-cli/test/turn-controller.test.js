@@ -149,3 +149,18 @@ test("prompt converted to steering by runtime queues input without closing activ
   assert.ok(harness.logs.includes("queued:steering:auto-steered:echoed"));
   assert.ok(!harness.logs.includes("close-assistant"));
 });
+
+test("interrupt before turn_started resets activeTurn when session/prompt is suppressed", async () => {
+  const harness = createHarness({ activeTurn: false });
+  harness.controller.submit("cancel me early");
+  assert.equal(harness.state.activeTurn, true);
+
+  harness.controller.interrupt();
+  assert.equal(harness.state.interruptRequested, true);
+
+  harness.resolveRequest({ ok: true, session_id: "s-early", turn_id: "" });
+  await harness.controller.waitForIdle();
+
+  assert.equal(harness.state.activeTurn, false);
+  assert.equal(harness.state.interruptRequested, false);
+});

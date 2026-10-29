@@ -9,7 +9,13 @@ import type {
   RequestImage,
 } from "../../domain/models.js";
 import { DEFAULT_USER_AGENT } from "../settings.js";
-import { parseSseEvents, providerError, throwForHttpError } from "./sse.js";
+import {
+  awaitWithCancellation,
+  iterateWithCancellation,
+  parseSseEvents,
+  providerError,
+  throwForHttpError,
+} from "./sse.js";
 
 export interface MockAnthropicClient {
   messages: {
@@ -47,24 +53,27 @@ export class AnthropicMessagesClient implements ChatClient {
   ): Promise<unknown> {
     cancellationToken?.throwIfCancelled();
     if (this.asyncClient) {
-      return await this.asyncClient.messages.create(payload);
+      return await awaitWithCancellation(this.asyncClient.messages.create(payload), cancellationToken);
     }
-    const response = await fetch(this.messagesEndpoint(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: stream ? "text/event-stream" : "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-        "User-Agent": DEFAULT_USER_AGENT,
-      },
-      body: JSON.stringify(payload),
-      signal: cancellationToken?.signal,
-    });
+    const response = await awaitWithCancellation(
+      fetch(this.messagesEndpoint(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: stream ? "text/event-stream" : "application/json",
+          "x-api-key": this.apiKey,
+          "anthropic-version": "2023-06-01",
+          "User-Agent": DEFAULT_USER_AGENT,
+        },
+        body: JSON.stringify(payload),
+        signal: cancellationToken?.signal,
+      }),
+      cancellationToken,
+    );
     if (!response.ok) {
       await throwForHttpError(response);
     }
-    return stream ? response : await response.json();
+    return stream ? response : await awaitWithCancellation(response.json(), cancellationToken);
   }
 
   async create(
@@ -91,7 +100,7 @@ export class AnthropicMessagesClient implements ChatClient {
       return parseCompletion(response);
     } catch (exc) {
       if (exc instanceof CancelledError) throw exc;
-      throw providerError(exc);
+      throw providerError(exc, null, cancellationToken);
     }
   }
 
@@ -123,7 +132,7 @@ export class AnthropicMessagesClient implements ChatClient {
       }
     } catch (exc) {
       if (exc instanceof CancelledError) throw exc;
-      throw providerError(exc, "stream_interrupted");
+      throw providerError(exc, "stream_interrupted", cancellationToken);
     }
   }
 
@@ -149,8 +158,7 @@ async function* iterateAnthropicEvents(
     return;
   }
   if (response && typeof (response as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function") {
-    for await (const chunk of response as AsyncIterable<unknown>) {
-      cancellationToken?.throwIfCancelled();
+    for await (const chunk of iterateWithCancellation(response as AsyncIterable<unknown>, cancellationToken)) {
       yield chunk;
     }
   }

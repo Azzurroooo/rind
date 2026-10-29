@@ -148,6 +148,11 @@ function stringField(data: Record<string, unknown>, key: string): string {
 }
 
 function buildSettings(settingsPath: string, data: Record<string, unknown>): AppSettings {
+  let provider = stringField(data, "provider");
+  if (!provider) {
+    const baseUrl = stringField(data, "baseUrl");
+    provider = baseUrl.includes("api.deepseek.com") ? "deepseek" : DEFAULT_PROVIDER;
+  }
   return {
     settings_path: settingsPath,
     settings_exists: fs.existsSync(settingsPath),
@@ -155,7 +160,7 @@ function buildSettings(settingsPath: string, data: Record<string, unknown>): App
     reasoning_effort: stringField(data, "reasoningEffort"),
     user_agent: DEFAULT_USER_AGENT,
     server_token: stringField(data, "serverToken"),
-    provider: stringField(data, "provider") || DEFAULT_PROVIDER,
+    provider,
   };
 }
 

@@ -169,6 +169,11 @@ function clampSearchResults(value: unknown): number {
   return Math.max(1, Math.min(parsed, 10));
 }
 
+function createTimeoutSignal(cancellationToken: CancellationToken | null | undefined, timeoutMs: number): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  return cancellationToken ? AbortSignal.any([cancellationToken.signal, timeoutSignal]) : timeoutSignal;
+}
+
 export async function searchWeb(
   query: string,
   maxResults = 5,
@@ -199,7 +204,7 @@ export async function searchWeb(
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9",
       },
-      signal: cancellationToken?.signal ?? AbortSignal.timeout(10000),
+      signal: createTimeoutSignal(cancellationToken, 10000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return parseBingHtml(await res.text(), limit);
@@ -215,7 +220,7 @@ export async function searchWeb(
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9",
       },
-      signal: cancellationToken?.signal ?? AbortSignal.timeout(10000),
+      signal: createTimeoutSignal(cancellationToken, 10000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return parseBaiduHtml(await res.text(), limit);
@@ -233,7 +238,7 @@ export async function searchWeb(
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: body.toString(),
-      signal: cancellationToken?.signal ?? AbortSignal.timeout(10000),
+      signal: createTimeoutSignal(cancellationToken, 10000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return parseDdgHtml(await res.text(), limit);
@@ -309,7 +314,7 @@ export async function fetchWebPage(
           "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         },
         redirect: "manual",
-        signal: cancellationToken?.signal ?? AbortSignal.timeout(15000),
+        signal: createTimeoutSignal(cancellationToken, 15000),
       });
 
       if (response.status >= 300 && response.status < 400) {

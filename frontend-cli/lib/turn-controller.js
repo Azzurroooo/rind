@@ -54,8 +54,9 @@ export function createTurnController({
   async function run(text, extra = {}) {
     let requestSucceeded = false;
     let steered = false;
+    let result = null;
     try {
-      const result = await request(runtimeMethods.sessionPrompt, { input: text, ...extra });
+      result = await request(runtimeMethods.sessionPrompt, { input: text, ...extra });
       requestSucceeded = true;
       if (result?.steered) {
         steered = true;
@@ -67,7 +68,7 @@ export function createTurnController({
         output.closeAssistant();
       }
       output.refreshInputState();
-      if (!requestSucceeded) {
+      if (!requestSucceeded || (!steered && (result?.turn_id === "" || (state.interruptRequested && !result?.turn_id)))) {
         state.activeTurn = false;
         state.interruptRequested = false;
         output.refreshInputState();

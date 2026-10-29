@@ -549,15 +549,23 @@ export class ToolCallProcessor {
             },
           );
           while (!done) {
-            const raceRes = await Promise.race([
-              execPromise.then(r => ({ kind: "done" as const, value: r })),
-              new Promise<{ kind: "tick" }>(resolve =>
-                setTimeout(
-                  () => resolve({ kind: "tick" }),
-                  ToolCallProcessor.HEARTBEAT_INTERVAL * 1000,
-                ),
-              ),
-            ]);
+            let timer: ReturnType<typeof setTimeout> | null = null;
+            let raceRes: { kind: "done"; value: Awaited<typeof execPromise> } | { kind: "tick" };
+            try {
+              raceRes = await Promise.race([
+                execPromise.then(r => ({ kind: "done" as const, value: r })),
+                new Promise<{ kind: "tick" }>(resolve => {
+                  timer = setTimeout(
+                    () => resolve({ kind: "tick" }),
+                    ToolCallProcessor.HEARTBEAT_INTERVAL * 1000,
+                  );
+                }),
+              ]);
+            } finally {
+              if (timer !== null) {
+                clearTimeout(timer);
+              }
+            }
             if (raceRes.kind === "done") {
               outcome = raceRes.value;
               break;

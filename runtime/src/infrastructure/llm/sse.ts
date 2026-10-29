@@ -102,7 +102,102 @@ export class HttpStatusError extends Error {
   }
 }
 
-export function providerError(exc: unknown, code?: string | null): ProviderError {
+export const MODEL_IDLE_TIMEOUT_MS = 600_000;
+
+export function isCancellationError(exc: unknown, cancellationToken?: CancellationToken | null): boolean {
+  if (cancellationToken?.isCancelled || exc instanceof CancelledError) {
+    return true;
+  }
+  if (exc instanceof Error) {
+    if (exc.name === "AbortError") {
+      return true;
+    }
+    if (exc.cause instanceof CancelledError || (exc.cause instanceof Error && exc.cause.name === "AbortError")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function awaitWithCancellation<T>(
+  promise: Promise<T>,
+  cancellationToken?: CancellationToken | null,
+  timeoutMs = MODEL_IDLE_TIMEOUT_MS,
+): Promise<T> {
+  cancellationToken?.throwIfCancelled();
+  let timer = null as ReturnType<typeof setTimeout> | null;
+  let unsubscribe = null as (() => void) | null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const timeoutSec = Math.round(timeoutMs / 1000);
+      reject(
+        new ProviderError(`Model stream timed out after ${timeoutSec}s of inactivity`, {
+          status: "timed_out",
+          errorType: "TimeoutError",
+        }),
+      );
+    }, timeoutMs);
+  });
+
+  const races: Promise<T>[] = [promise, timeoutPromise];
+  if (cancellationToken) {
+    const cancelPromise = new Promise<never>((_, reject) => {
+      unsubscribe = cancellationToken.onCancel(() => {
+        reject(new CancelledError(cancellationToken.reason || "cancelled"));
+      });
+    });
+    races.push(cancelPromise);
+  }
+
+  try {
+    return await Promise.race(races);
+  } catch (exc) {
+    void promise.catch(() => {});
+    if (isCancellationError(exc, cancellationToken)) {
+      throw new CancelledError(
+        cancellationToken?.reason || (exc instanceof CancelledError ? exc.reason : "cancelled"),
+      );
+    }
+    throw exc;
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+    unsubscribe?.();
+  }
+}
+
+export async function* iterateWithCancellation<T>(
+  stream: AsyncIterable<T>,
+  cancellationToken?: CancellationToken | null,
+): AsyncGenerator<T> {
+  const iterator = stream[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      const next = await awaitWithCancellation(iterator.next(), cancellationToken);
+      if (next.done) {
+        break;
+      }
+      yield next.value;
+    }
+  } finally {
+    if (typeof iterator.return === "function") {
+      void Promise.resolve(iterator.return()).catch(() => {});
+    }
+  }
+}
+
+export function providerError(
+  exc: unknown,
+  code?: string | null,
+  cancellationToken?: CancellationToken | null,
+): ProviderError {
+  if (isCancellationError(exc, cancellationToken)) {
+    throw new CancelledError(
+      cancellationToken?.reason || (exc instanceof CancelledError ? exc.reason : "cancelled"),
+    );
+  }
   if (exc instanceof ProviderError) {
     if (exc.code !== "context_length_exceeded" && isContextOverflow(exc.message)) {
       return new ProviderError(exc.message, {
@@ -112,9 +207,6 @@ export function providerError(exc: unknown, code?: string | null): ProviderError
       });
     }
     return exc;
-  }
-  if (exc instanceof CancelledError || (exc instanceof Error && exc.name === "AbortError")) {
-    throw new CancelledError(exc instanceof CancelledError ? exc.reason : "cancelled");
   }
   const errObj = exc as { message?: string; status_code?: number; status?: number; code?: unknown; name?: string } | null;
   const rawMessage = exc instanceof Error ? exc.message : String(exc);
@@ -275,7 +367,7 @@ export async function* parseSseEvents(
   try {
     while (true) {
       cancellationToken?.throwIfCancelled();
-      const { value, done } = await reader.read();
+      const { value, done } = await awaitWithCancellation(reader.read(), cancellationToken);
       cancellationToken?.throwIfCancelled();
       if (done) {
         buffer += decoder.decode();

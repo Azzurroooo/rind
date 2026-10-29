@@ -481,6 +481,9 @@ async function terminateProcessTree(proc: ChildProcess, graceMs: number): Promis
     });
     return;
   }
+  if ((proc.exitCode !== null || proc.signalCode !== null) && !isProcessGroupAlive(pid)) {
+    return;
+  }
   try {
     process.kill(-pid, "SIGTERM");
   } catch (err) {
@@ -488,7 +491,7 @@ async function terminateProcessTree(proc: ChildProcess, graceMs: number): Promis
   }
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
-    if (proc.exitCode !== null && !isProcessGroupAlive(pid)) {
+    if ((proc.exitCode !== null || proc.signalCode !== null) && !isProcessGroupAlive(pid)) {
       return;
     }
     await new Promise(resolve => setTimeout(resolve, 20));

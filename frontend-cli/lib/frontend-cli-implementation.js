@@ -843,6 +843,7 @@ async function renderEvent(message) {
       || (turnStateData.id && nextTurnId !== turnStateData.id)) {
       return;
     }
+    const wasInterrupted = (turnStateData.active || displayState.activeCompact) && turnStateData.interruptRequested;
     if (!turnStateData.active && !message.event.delivery && typeof message.event.input === "string" && message.event.input.trim()) {
       outputController.writeUserInput(message.event.input);
     }
@@ -851,11 +852,14 @@ async function renderEvent(message) {
     displayState.lastTurnId = nextTurnId;
     setTurnContext(nextTurnId);
     turnStateData.active = Boolean(turnStateData.id);
-    turnStateData.interruptRequested = false;
+    turnStateData.interruptRequested = wasInterrupted;
     displayState.activeCompact = message.event.operation === "compact";
     displayState.activityLabel = displayState.activeCompact ? "Compacting" : "Working";
     displayState.assistantHeaderShown = false;
     refreshInputState();
+    if (wasInterrupted) {
+      void request(runtimeMethods.sessionCancel).catch(() => {});
+    }
   }
   if (message?.event?.type === "context_compacted") {
     if (displayState.activeCompact) notifyOutput("Compact complete.");

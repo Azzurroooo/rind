@@ -939,6 +939,9 @@ export class RuntimeDispatcher {
       if (completionScope === "request") {
         requestResult = await this.worker.execution.waitRequest(sessionId);
       }
+      if (!turnId) {
+        await this.discardIfUnsaved(sessionId);
+      }
     } catch (err) {
       if (completionScope === "request") {
         await this.worker.execution.abandonRequest(sessionId);
