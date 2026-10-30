@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Any
 
@@ -15,6 +14,7 @@ from agent.application.context.token_usage import positive_int
 from agent.application.tools import ToolResultNormalizer
 from agent.application.usage_summary import summarize_usage
 from agent.bootstrap import AgentContainer, SharedRuntimeResources
+from agent.bootstrap.container import GLOBAL_TOOL_CONCURRENCY_LIMIT
 from agent.infrastructure.llm import ProviderServiceImpl
 from agent.infrastructure.paths import resolve_rind_home, validate_session_id, validate_workspace_root
 from agent.infrastructure.persistence import ToolOutputStore
@@ -25,6 +25,7 @@ from agent.infrastructure.persistence.usage_ledger import (
     default_usage_ledger_path,
     load_usage_records,
 )
+from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
 from agent.infrastructure.tools.shell.tool import ShellTools
 from agent.infrastructure.tools.external import ExternalTool
 from agent.infrastructure.tools.web.session_pool import WebSessions
@@ -55,7 +56,7 @@ class RuntimeWorker:
         self.session_id = session_id
         self._resume_latest = resume_latest
         tool_output_store = ToolOutputStore(session_dir)
-        self._tool_thread_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="rind-tool")
+        tool_semaphore = asyncio.Semaphore(GLOBAL_TOOL_CONCURRENCY_LIMIT)
         usage_recorder = partial(append_usage_record, default_usage_ledger_path())
         self._shared_resources = SharedRuntimeResources(
             tool_result_normalizer=ToolResultNormalizer(),
@@ -65,7 +66,8 @@ class RuntimeWorker:
                 usage_recorder=usage_recorder,
             ),
             tool_output_store=tool_output_store,
-            tool_thread_pool=self._tool_thread_pool,
+            tool_semaphore=tool_semaphore,
+            file_mutation_queue=FileMutationQueue(semaphore=tool_semaphore),
         )
         self.shell_tools = ShellTools(tool_output_store)
         self.web_sessions = WebSessions()
@@ -275,5 +277,4 @@ class RuntimeWorker:
             if errors:
                 raise BaseExceptionGroup("Worker shutdown failed: " + "; ".join(map(str, errors)), errors)
         finally:
-            self._tool_thread_pool.shutdown(wait=False, cancel_futures=True)
             await asyncio.to_thread(self.web_sessions.close)

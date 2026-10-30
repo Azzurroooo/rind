@@ -724,34 +724,63 @@ def test_replay_end_zero_skips_store_and_refreshes_running_session_credentials(t
     asyncio.run(run())
 
 
-def test_semaphore_queued_turn_is_visible_steerable_cancellable_and_orders_after_hook(tmp_path, monkeypatch):
+def test_unlimited_cross_session_turns_and_steerable_turn_with_thread_reclamation(tmp_path, monkeypatch):
     import sys
+    import time
     from agent.domain.models import ModelStreamEvent
     from agent.infrastructure.tools.external import ExternalTool
 
     async def run():
         monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+        (tmp_path / "sample.txt").write_text("hello world\n", encoding="utf-8")
         worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
         await worker.initialize()
         try:
-            worker.execution._turn_semaphore = asyncio.Semaphore(1)
-            await worker.execution._turn_semaphore.acquire()
-
             after_entered = asyncio.Event()
             release_after = asyncio.Event()
             seen_prompts = []
+            blocked_sessions_entered = 0
+            all_blocked_entered = asyncio.Event()
+            release_blocked = asyncio.Event()
 
             async def fake_notify(self_tool, phase, session_id, parameters, cancellation_token=None):
-                if phase == "after":
+                if phase == "after" and session_id == s_steer:
                     after_entered.set()
                     await release_after.wait()
 
             monkeypatch.setattr(ExternalTool, "notify", fake_notify)
 
             async def fake_create_client(*_args, **_kwargs):
+                call_idx = 0
+
                 async def stream(*, messages, **_kw):
+                    nonlocal call_idx, blocked_sessions_entered
+                    call_idx += 1
                     user_texts = [m.get("content") for m in messages if m.get("role") == "user"]
                     seen_prompts.append(user_texts)
+                    prompt_text = str(user_texts[-1] or "") if user_texts else ""
+                    if prompt_text.startswith("hold-slot-"):
+                        blocked_sessions_entered += 1
+                        if blocked_sessions_entered >= 10:
+                            all_blocked_entered.set()
+                        await release_blocked.wait()
+                        yield ModelStreamEvent(kind="text_delta", text="released")
+                        yield ModelStreamEvent(kind="completed", stop_reason="stop")
+                        return
+                    if prompt_text == "parallel-read-test" and call_idx == 1:
+                        for i in range(12):
+                            yield ModelStreamEvent(kind="tool_start", tool_call_id=f"read_{i}", tool_name="read_file")
+                            yield ModelStreamEvent(
+                                kind="tool_arguments_delta",
+                                tool_call_id=f"read_{i}",
+                                arguments=json.dumps({"path": str(tmp_path / "sample.txt")}),
+                            )
+                        yield ModelStreamEvent(kind="completed", stop_reason="tool_calls")
+                        return
+                    if prompt_text == "initial question" and call_idx == 1:
+                        # Wait briefly so auto-steer arrives while stream is active
+                        while not s2_steered.is_set():
+                            await asyncio.sleep(0.01)
                     yield ModelStreamEvent(kind="text_delta", text="done")
                     yield ModelStreamEvent(kind="completed", stop_reason="stop")
 
@@ -766,35 +795,59 @@ def test_semaphore_queued_turn_is_visible_steerable_cancellable_and_orders_after
                 "lifecycle": {"before": "hostTurnStart", "after": "hostTurnEnd", "env": {}},
                 "tools": [],
             }
-            s1 = (await worker.create_conversation({"external_tools": tool_cfg, "enable_user_question": False}))["session_id"]
-            s2 = (await worker.create_conversation({"external_tools": tool_cfg, "enable_user_question": False}))["session_id"]
 
-            # 1. Start s1 while semaphore is saturated: turn_started emits immediately, live_turn is running,
-            #    and cancelling aborts the semaphore wait without needing a slot.
-            s1_events = []
-            s1_started = asyncio.Event()
+            # 1. Start 10 concurrent sessions at once (> old 8 turn limit) and verify the 11th session
+            #    runs 12 parallel read_file calls (capped at 8 per session) and finishes without queuing!
+            hold_sids = [
+                (await worker.create_conversation({"enable_user_question": False}))["session_id"]
+                for _ in range(10)
+            ]
+            hold_tasks = [
+                asyncio.create_task(
+                    _drain_async_gen(worker.execution.run_turn(sid, query=f"hold-slot-{idx}"))
+                )
+                for idx, sid in enumerate(hold_sids)
+            ]
+            await asyncio.wait_for(all_blocked_entered.wait(), timeout=3.0)
 
-            async def consume_s1():
-                async for ev in worker.execution.run_turn(s1, query="queued cancel test"):
-                    s1_events.append(ev)
-                    if ev.get("type") == "turn_started":
-                        s1_started.set()
+            import threading
+            import agent.infrastructure.tools.files.specs as specs_mod
+            real_read_file = specs_mod.read_file
+            read_lock = threading.Lock()
+            active_reads = 0
+            max_concurrent_reads = 0
 
-            t1 = asyncio.create_task(consume_s1())
-            await asyncio.wait_for(s1_started.wait(), timeout=2.0)
-            assert worker.execution.live_turn(s1)["status"] == "running"
-            assert worker.execution.active_turn_id(s1) != ""
+            def tracked_read_file(*args, **kwargs):
+                nonlocal active_reads, max_concurrent_reads
+                with read_lock:
+                    active_reads += 1
+                    max_concurrent_reads = max(max_concurrent_reads, active_reads)
+                time.sleep(0.05)
+                try:
+                    return real_read_file(*args, **kwargs)
+                finally:
+                    with read_lock:
+                        active_reads -= 1
 
-            release_after.set()
-            worker.execution.interrupt(s1, "User interrupted")
-            await asyncio.wait_for(t1, timeout=2.0)
-            assert [e["type"] for e in s1_events] == ["turn_started", "turn_cancelled"]
-            assert (await worker.replay(s1, end=0))["turn_state"]["status"] == "cancelled"
+            monkeypatch.setattr(specs_mod, "read_file", tracked_read_file)
 
-            # 2. Start s2 while semaphore is still saturated: steer into it via dispatcher's auto-steer
-            #    on session/prompt, then release semaphore and verify notify("after") ordering.
-            release_after.clear()
-            after_entered.clear()
+            s_read = (await worker.create_conversation({"enable_user_question": False}))["session_id"]
+            read_events = await asyncio.wait_for(
+                _drain_async_gen(worker.execution.run_turn(s_read, query="parallel-read-test")),
+                timeout=5.0,
+            )
+            assert read_events[-1]["type"] == "turn_completed"
+            assert 2 <= max_concurrent_reads <= 8, f"Expected per-session parallel cap <= 8, got {max_concurrent_reads}"
+            # Once s_read completes its turn, its execution is unloaded and its thread pool is reclaimed.
+            assert s_read not in worker.execution.active_session_ids()
+
+            release_blocked.set()
+            await asyncio.wait_for(asyncio.gather(*hold_tasks), timeout=3.0)
+            assert worker.execution.active_session_ids() == set()
+
+            # 2. Verify active turn auto-steer on session/prompt and notify("after") ordering.
+            s_steer = (await worker.create_conversation({"external_tools": tool_cfg, "enable_user_question": False}))["session_id"]
+            s2_steered = asyncio.Event()
             server = RuntimeDispatcher(worker, writer=JsonlWriter())
             messages = []
 
@@ -809,7 +862,7 @@ def test_semaphore_queued_turn_is_visible_steerable_cancellable_and_orders_after
 
             async def tracked_send_event(event):
                 await orig_send_event(event)
-                if event.get("session_id") == s2 and event.get("type") == "turn_started":
+                if event.get("session_id") == s_steer and event.get("type") == "turn_started":
                     s2_started.set()
 
             server._send_event = tracked_send_event
@@ -817,39 +870,41 @@ def test_semaphore_queued_turn_is_visible_steerable_cancellable_and_orders_after
             prompt_task = asyncio.create_task(server._dispatch({
                 "request_id": "p-initial",
                 "method": RuntimeMethod.SESSION_PROMPT,
-                "params": {"session_id": s2, "input": "initial question"},
+                "params": {"session_id": s_steer, "input": "initial question"},
             }))
             await asyncio.wait_for(s2_started.wait(), timeout=2.0)
-            assert worker.execution.live_turn(s2)["status"] == "running"
+            assert worker.execution.live_turn(s_steer)["status"] == "running"
 
-            # Sending another interactive session/prompt while active auto-converts to steering.
             await server._dispatch({
                 "request_id": "p-auto-steer",
                 "method": RuntimeMethod.SESSION_PROMPT,
-                "params": {"session_id": s2, "input": "steered while queued"},
+                "params": {"session_id": s_steer, "input": "steered while active"},
             })
             responses = {m["request_id"]: m for m in messages if m.get("kind") == "response"}
             assert responses["p-auto-steer"]["result"]["steered"] is True
-            assert len(worker.execution.live_turn(s2)["pending_inputs"]) == 1
+            assert len(worker.execution.live_turn(s_steer)["pending_inputs"]) == 1
+            s2_steered.set()
 
-            # Release semaphore slot: LLM runs with steered input, then blocks in notify("after").
-            worker.execution._turn_semaphore.release()
             await asyncio.wait_for(after_entered.wait(), timeout=2.0)
-
-            # While notify("after") is still running, turn_completed has NOT been emitted yet!
-            emitted_types = [m["event"]["type"] for m in messages if m.get("kind") == "event" and m.get("session_id") == s2]
+            emitted_types = [m["event"]["type"] for m in messages if m.get("kind") == "event" and m.get("session_id") == s_steer]
             assert "turn_completed" not in emitted_types
-            assert worker.execution.live_turn(s2)["status"] == "running"
+            assert worker.execution.live_turn(s_steer)["status"] == "running"
 
             release_after.set()
             await asyncio.wait_for(prompt_task, timeout=2.0)
-            emitted_types = [m["event"]["type"] for m in messages if m.get("kind") == "event" and m.get("session_id") == s2]
+            emitted_types = [m["event"]["type"] for m in messages if m.get("kind") == "event" and m.get("session_id") == s_steer]
             assert emitted_types[-1] == "turn_completed"
-            assert (await worker.replay(s2, end=0))["turn_state"]["status"] == "completed"
-            assert any("steered while queued" in str(batch) for batch in seen_prompts)
+            assert (await worker.replay(s_steer, end=0))["turn_state"]["status"] == "completed"
+            assert any("steered while active" in str(batch) for batch in seen_prompts)
         finally:
+            release_blocked.set()
+            release_after.set()
             await worker.close()
 
     asyncio.run(run())
+
+
+async def _drain_async_gen(agen):
+    return [item async for item in agen]
 
 

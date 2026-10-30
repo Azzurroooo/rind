@@ -69,7 +69,6 @@ class ExecutionCoordinator:
         session_dir: str | None,
         provider_service: ProviderServiceImpl,
         external_tool=None,
-        max_concurrent_turns: int = 8,
     ):
         self._shared_resources = shared_resources
         self._shell_tools = shell_tools
@@ -102,7 +101,6 @@ class ExecutionCoordinator:
         self._external_tool = external_tool
         self._session_options: dict[str, tuple] = {}
         self._lock = asyncio.Lock()
-        self._turn_semaphore = asyncio.Semaphore(max(1, int(max_concurrent_turns)))
 
     async def configure_session(self, session_id: str, external_tool, enable_user_question: bool) -> None:
         clean = validate_session_id(session_id)
@@ -489,22 +487,6 @@ class ExecutionCoordinator:
             current["status"] = event_type.removeprefix("turn_")
             current["question"] = None
 
-    async def _acquire_turn_semaphore(self, token) -> None:
-        if getattr(token, "is_cancelled", False):
-            raise asyncio.CancelledError(getattr(token, "reason", "User interrupted"))
-        task = asyncio.create_task(self._turn_semaphore.acquire())
-        deregister = token.register_callback(task.cancel) if hasattr(token, "register_callback") else (lambda: None)
-        try:
-            await task
-        except asyncio.CancelledError:
-            if task.done() and not task.cancelled() and task.exception() is None:
-                self._turn_semaphore.release()
-            if getattr(token, "is_cancelled", False):
-                raise asyncio.CancelledError(getattr(token, "reason", "User interrupted")) from None
-            raise
-        finally:
-            deregister()
-
     async def run_turn(
         self,
         session_id: str,
@@ -557,12 +539,6 @@ class ExecutionCoordinator:
                 execution.container.runtime.set_user_question_responder(
                     lambda event: self._answer_user_question(clean, event)
                 )
-                semaphore_acquired = False
-
-                async def before_execution() -> None:
-                    nonlocal semaphore_acquired
-                    await self._acquire_turn_semaphore(cancel_source.token)
-                    semaphore_acquired = True
 
                 try:
                     if self.external_tool(clean) and not compact:
@@ -571,7 +547,6 @@ class ExecutionCoordinator:
                         "query": query,
                         "cancellation_token": cancel_source.token,
                         "transient_system_messages": transient_system_messages,
-                        "before_execution": before_execution,
                     }
                     if resume:
                         run_kwargs["resume"] = True
@@ -602,9 +577,6 @@ class ExecutionCoordinator:
                             await self._emit_to_event_sinks(event_data)
                         yield event_data
                 finally:
-                    if semaphore_acquired:
-                        self._turn_semaphore.release()
-                        semaphore_acquired = False
                     if terminal_type in {"turn_failed", "turn_cancelled"}:
                         self._suppressed.add(clean)
                         self.refresh_background_wait(clean)
@@ -613,6 +585,7 @@ class ExecutionCoordinator:
                         scope = self._scopes.get(clean)
                         if scope:
                             scope.error = failure_reason
+                            await self._shell_tools.supervisor.close_request(clean, scope.request_id, failure_reason)
                     if self.external_tool(clean) and terminal_type and not compact:
                         records = await self._task_notifications.store.relevant(clean)
                         pending = terminal_type == "turn_completed" and (
@@ -973,10 +946,12 @@ class ExecutionCoordinator:
 
 
 async def _close_container(container: AgentContainer) -> None:
+    container.tool_processor.close()
     await container.chat_client.close()
 
 
 async def _close_execution(execution: _ActiveExecution) -> None:
+    execution.container.tool_processor.close()
     # The client may have been replaced since the container was built.
     await (getattr(execution, "chat_client", None) or execution.container.chat_client).close()
 

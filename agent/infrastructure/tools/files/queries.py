@@ -24,6 +24,7 @@ _READ_MAX_LIMIT = 2000
 _READ_MAX_BYTES = 50 * 1024
 _MAX_LINE_CHARS = 2000
 _RG_TIMEOUT_SECONDS = 30.0
+_RG_THREADS = "4"
 _GLOB_SCAN_MULTIPLIER = 10
 _GLOB_MIN_SCAN_LIMIT = 10_000
 
@@ -284,7 +285,7 @@ def glob(
     scan_limit = max(max_results * _GLOB_SCAN_MULTIPLIER, _GLOB_MIN_SCAN_LIMIT)
     scan_truncated = False
     try:
-        process = _popen_rg([rg, "--files", "--hidden", "--glob", pattern, *_SKIP_GLOBS, "."], cwd=search_path)
+        process = _popen_rg([rg, "--files", "--hidden", "--threads", _RG_THREADS, "--glob", pattern, *_SKIP_GLOBS, "."], cwd=search_path)
         assert process.stdout is not None
         paths: list[Path] = []
         with _watch_rg(process, _cancellation_token) as watch:
@@ -336,7 +337,7 @@ def glob(
 
 
 def _rg_command(rg: str, pattern: str, search_path: Path, file_glob: str) -> list[str]:
-    return [rg, "--json", "--color", "never", "--glob", file_glob, *_SKIP_GLOBS, "--", pattern, str(search_path)]
+    return [rg, "--json", "--color", "never", "--threads", _RG_THREADS, "--glob", file_glob, *_SKIP_GLOBS, "--", pattern, str(search_path)]
 
 
 def _rg_result_path(raw_path: str, search_path: Path) -> str:

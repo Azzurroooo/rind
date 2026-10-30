@@ -11,8 +11,9 @@ from agent.domain.cancellation import CancellationToken
 
 
 class FileMutationQueue:
-    def __init__(self) -> None:
+    def __init__(self, semaphore: asyncio.Semaphore | None = None) -> None:
         self._locks: dict[str, tuple[asyncio.Lock, int]] = {}
+        self._semaphore = semaphore
 
     async def run(
         self,
@@ -29,6 +30,7 @@ class FileMutationQueue:
         self._locks[key] = (lock, users + 1)
         acquire = asyncio.create_task(lock.acquire())
         cancelled = asyncio.create_task(cancellation_token.wait()) if cancellation_token else None
+        slot_acquire: asyncio.Task[bool] | None = None
         try:
             if cancelled is not None:
                 await asyncio.wait((acquire, cancelled), return_when=asyncio.FIRST_COMPLETED)
@@ -36,6 +38,15 @@ class FileMutationQueue:
                     return tool_cancelled(tool_name, cancellation_token.reason)
             else:
                 await asyncio.shield(acquire)
+
+            if self._semaphore is not None:
+                slot_acquire = asyncio.create_task(self._semaphore.acquire())
+                if cancelled is not None:
+                    await asyncio.wait((slot_acquire, cancelled), return_when=asyncio.FIRST_COMPLETED)
+                    if cancellation_token.is_cancelled:
+                        return tool_cancelled(tool_name, cancellation_token.reason)
+                else:
+                    await asyncio.shield(slot_acquire)
 
             work = asyncio.create_task(asyncio.to_thread(operation))
             try:
@@ -48,10 +59,12 @@ class FileMutationQueue:
                     except asyncio.CancelledError:
                         continue
         finally:
-            waiters = [acquire] + ([cancelled] if cancelled is not None else [])
+            waiters = [acquire] + ([slot_acquire] if slot_acquire is not None else []) + ([cancelled] if cancelled is not None else [])
             for waiter in waiters:
                 waiter.cancel()
             await asyncio.gather(*waiters, return_exceptions=True)
+            if slot_acquire is not None and not slot_acquire.cancelled() and slot_acquire.result():
+                self._semaphore.release()
             if not acquire.cancelled() and acquire.result():
                 lock.release()
             _, users = self._locks[key]

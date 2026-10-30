@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
@@ -30,6 +31,9 @@ from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
 from agent.application.task_notifications import TaskNotifications
 
 
+GLOBAL_TOOL_CONCURRENCY_LIMIT = 512
+
+
 @dataclass(frozen=True, slots=True)
 class SharedRuntimeResources:
     """Worker-scoped resources without session-bound mutable state."""
@@ -38,6 +42,9 @@ class SharedRuntimeResources:
     stream_parser: MessageStreamParser
     compaction_service: CompactionService
     tool_output_store: ToolOutputStore = field(default_factory=ToolOutputStore)
+    tool_semaphore: asyncio.Semaphore = field(
+        default_factory=lambda: asyncio.Semaphore(GLOBAL_TOOL_CONCURRENCY_LIMIT)
+    )
     file_mutation_queue: FileMutationQueue = field(default_factory=FileMutationQueue)
     tool_thread_pool: ThreadPoolExecutor | None = None
 
@@ -150,6 +157,7 @@ def build_agent_container(
         tool_result_normalizer=tool_result_normalizer,
         tool_output_store=tool_output_store,
         thread_pool=shared_resources.tool_thread_pool if shared_resources else None,
+        global_tool_semaphore=shared_resources.tool_semaphore if shared_resources else None,
         task_notifications=task_notifications,
     )
     stream_parser = shared_resources.stream_parser if shared_resources else MessageStreamParser()

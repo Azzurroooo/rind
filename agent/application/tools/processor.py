@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import contextvars
 import json
 import time
@@ -39,6 +40,49 @@ from agent.domain.cancellation import CancellationToken, CancellationTokenSource
 from agent.application.task_notifications import TaskNotifications
 
 _HEARTBEAT_TOOLS = frozenset({"bash", "task_control", "bash_output"})
+MAX_PARALLEL_TOOL_CALLS = 8
+
+
+async def _try_acquire_slot(semaphore: asyncio.Semaphore | None, token: CancellationToken | None) -> bool:
+    if token and token.is_cancelled:
+        return False
+    if semaphore is None:
+        return True
+    if not semaphore.locked():
+        await semaphore.acquire()
+        if token and token.is_cancelled:
+            semaphore.release()
+            return False
+        return True
+    acquire_task = asyncio.create_task(semaphore.acquire())
+    if token is None:
+        await acquire_task
+        return True
+    wait_cancel = asyncio.create_task(token.wait())
+    try:
+        done, _ = await asyncio.wait(
+            (acquire_task, wait_cancel),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if acquire_task in done and not acquire_task.cancelled() and acquire_task.exception() is None:
+            if token.is_cancelled:
+                semaphore.release()
+                return False
+            return True
+        acquire_task.cancel()
+        await asyncio.gather(acquire_task, return_exceptions=True)
+        if acquire_task.done() and not acquire_task.cancelled() and acquire_task.exception() is None:
+            semaphore.release()
+        return False
+    except asyncio.CancelledError:
+        acquire_task.cancel()
+        await asyncio.gather(acquire_task, return_exceptions=True)
+        if acquire_task.done() and not acquire_task.cancelled() and acquire_task.exception() is None:
+            semaphore.release()
+        raise
+    finally:
+        wait_cancel.cancel()
+        await asyncio.gather(wait_cancel, return_exceptions=True)
 
 
 @dataclass(slots=True)
@@ -61,6 +105,8 @@ class ToolCallProcessor:
         user_question_responder: UserQuestionResponder | None = None,
         task_notifications: TaskNotifications | None = None,
         thread_pool=None,
+        max_parallel_calls: int = MAX_PARALLEL_TOOL_CALLS,
+        global_tool_semaphore: asyncio.Semaphore | None = None,
     ):
         self._tool_executor = tool_executor
         self._tool_result_normalizer = tool_result_normalizer or ToolResultNormalizer()
@@ -68,6 +114,26 @@ class ToolCallProcessor:
         self._user_question_responder = user_question_responder
         self._task_notifications = task_notifications
         self._thread_pool = thread_pool
+        self._owned_thread_pool: ThreadPoolExecutor | None = None
+        self._max_parallel_calls = max(1, int(max_parallel_calls))
+        self._parallel_semaphore = asyncio.Semaphore(self._max_parallel_calls)
+        self._global_tool_semaphore = global_tool_semaphore
+
+    def _executor(self):
+        if self._thread_pool is not None:
+            return self._thread_pool
+        if self._owned_thread_pool is None:
+            self._owned_thread_pool = ThreadPoolExecutor(
+                max_workers=self._max_parallel_calls,
+                thread_name_prefix="rind-tool",
+            )
+        return self._owned_thread_pool
+
+    def close(self) -> None:
+        """Release any session-owned worker threads once the session is idle."""
+        if self._owned_thread_pool is not None:
+            self._owned_thread_pool.shutdown(wait=False, cancel_futures=True)
+            self._owned_thread_pool = None
 
     def set_user_question_responder(self, responder: UserQuestionResponder | None) -> None:
         """Set the callback used to collect answers for ask_user_question."""
@@ -390,33 +456,51 @@ class ToolCallProcessor:
         turn_id: str = "",
     ) -> _ToolCallOutcome:
         try:
-            execution_args = {
-                **parsed_args,
-                "_session_id": session_id,
-                "_cancellation_token": cancellation_token,
-                "_idempotency_key": call.call_id,
-                "_output_store": self._tool_output_store,
-                "_origin_turn_id": turn_id,
-                "_request_id": self._task_notifications.request_id(session_id) if self._task_notifications and self._task_notifications.request_id else None,
-            }
-            if self._tool_executor.is_async_tool(call.name):
-                result = await self._tool_executor.execute_async(call.name, execution_args)
-            else:
-                cancellation = CancellationTokenSource(cancellation_token)
-                execution_args["_cancellation_token"] = cancellation.token
-                def _sync_run():
-                    return self._tool_executor.execute_sync(call.name, execution_args)
+            if not await _try_acquire_slot(self._parallel_semaphore, cancellation_token):
+                return _ToolCallOutcome(
+                    status="cancelled",
+                    error_type="Cancelled",
+                    result=tool_cancelled(call.name, cancellation_token.reason if cancellation_token else "Tool execution cancelled"),
+                )
+            try:
+                execution_args = {
+                    **parsed_args,
+                    "_session_id": session_id,
+                    "_cancellation_token": cancellation_token,
+                    "_idempotency_key": call.call_id,
+                    "_output_store": self._tool_output_store,
+                    "_origin_turn_id": turn_id,
+                    "_request_id": self._task_notifications.request_id(session_id) if self._task_notifications and self._task_notifications.request_id else None,
+                }
+                if self._tool_executor.is_async_tool(call.name):
+                    result = await self._tool_executor.execute_async(call.name, execution_args)
+                else:
+                    if not await _try_acquire_slot(self._global_tool_semaphore, cancellation_token):
+                        return _ToolCallOutcome(
+                            status="cancelled",
+                            error_type="Cancelled",
+                            result=tool_cancelled(call.name, cancellation_token.reason if cancellation_token else "Tool execution cancelled"),
+                        )
+                    cancellation = CancellationTokenSource(cancellation_token)
+                    execution_args["_cancellation_token"] = cancellation.token
 
-                ctx = contextvars.copy_context()
-                task = asyncio.get_running_loop().run_in_executor(self._thread_pool, ctx.run, _sync_run)
-                try:
-                    result = await asyncio.shield(task)
-                except asyncio.CancelledError:
-                    cancellation.cancel("Tool execution cancelled")
-                    await asyncio.gather(task, return_exceptions=True)
-                    raise
-                finally:
-                    cancellation.dispose()
+                    def _sync_run():
+                        return self._tool_executor.execute_sync(call.name, execution_args)
+
+                    ctx = contextvars.copy_context()
+                    task = asyncio.get_running_loop().run_in_executor(self._executor(), ctx.run, _sync_run)
+                    try:
+                        result = await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        cancellation.cancel("Tool execution cancelled")
+                        await asyncio.gather(task, return_exceptions=True)
+                        raise
+                    finally:
+                        cancellation.dispose()
+                        if self._global_tool_semaphore is not None:
+                            self._global_tool_semaphore.release()
+            finally:
+                self._parallel_semaphore.release()
 
             if result.status == "ok":
                 tool_result_str = result.result_str

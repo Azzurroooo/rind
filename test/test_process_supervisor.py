@@ -152,12 +152,14 @@ async def test_unix_tree_kill_targets_process_group(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_supervisor_enforces_per_session_and_global_limits_and_ignores_terminal_records(tmp_path: Path) -> None:
+async def test_process_supervisor_enforces_per_session_limit_without_global_cap_and_ignores_terminal_records(tmp_path: Path) -> None:
     from agent.infrastructure.persistence.task_journal import TaskJournal
     from agent.infrastructure.tools.shell.process import ProcessRecord
 
+    assert ProcessSupervisor().max_tasks == 64
+
     journal = TaskJournal(tmp_path / "sessions")
-    supervisor = ProcessSupervisor(max_tasks=2, max_total_tasks=3, journal=journal)
+    supervisor = ProcessSupervisor(max_tasks=2, journal=journal)
 
     # A finished record still in _processes (e.g., pending persistence retry) must not consume a running slot.
     finished = ProcessRecord(
@@ -194,8 +196,8 @@ async def test_process_supervisor_enforces_per_session_and_global_limits_and_ign
     assert per_session_exceeded.error_type == "TaskLimitExceeded"
     assert "Running task limit reached (2)" in per_session_exceeded.error_msg
 
+    # Another session s2 is unaffected by s1 saturating its per-session limit.
     make_running("t3", "s2")
-    global_exceeded = await supervisor.run("print('hi')", state, "s2")
-    assert global_exceeded.status == "error"
-    assert global_exceeded.error_type == "TaskLimitExceeded"
-    assert "Global running task limit reached (3)" in global_exceeded.error_msg
+    s2_ok = await supervisor.run("print('hi')", state, "s2")
+    assert s2_ok.status == "ok"
+    assert _payload(s2_ok)["data"]["status"] == "completed"

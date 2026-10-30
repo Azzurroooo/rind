@@ -22,8 +22,7 @@ from agent.infrastructure.persistence.task_output import TaskOutput, read_output
 class ProcessSupervisor:
     TERMINATION_GRACE_SECONDS = 1.0
 
-    def __init__(self, max_tasks: int = 8, max_total_tasks: int = 32, journal: TaskJournal | None = None) -> None:
-        self.max_total_tasks = max_total_tasks
+    def __init__(self, max_tasks: int = 64, journal: TaskJournal | None = None) -> None:
         self.max_tasks = max_tasks
         self._processes: dict[str, ProcessRecord] = {}
         self._origins: dict[tuple[str, str], str] = {}
@@ -54,9 +53,6 @@ class ProcessSupervisor:
             return error_result(RuntimeError("Worker is shutting down."))
         if sum(r.session_id == session_id and r.status not in TERMINAL_STATES for r in self._processes.values()) >= self.max_tasks:
             return ToolExecutionResult(status="error", error_type="TaskLimitExceeded", error_msg=f"Running task limit reached ({self.max_tasks}).")
-
-        if sum(r.status not in TERMINAL_STATES for r in self._processes.values()) >= self.max_total_tasks:
-            return ToolExecutionResult(status="error", error_type="TaskLimitExceeded", error_msg=f"Global running task limit reached ({self.max_total_tasks}).")
 
         record = ProcessRecord(task_id=f"task_{uuid.uuid4().hex}", session_id=session_id,
             command=command, cwd=state.cwd, shell_backend=state.shell_backend,

@@ -245,3 +245,25 @@ def test_glob_and_grep_drain_large_stderr_without_deadlock(tmp_path: Path, monke
     monkeypatch.setattr(queries.subprocess, "Popen", noisy_glob_popen)
     payload = assert_ok(glob_tool("*.py", path=str(tmp_path)))
     assert [item["path"] for item in payload["data"]] == ["a.py"]
+
+
+def test_glob_and_grep_pass_bounded_threads_to_rg(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+    import agent.infrastructure.tools.files.queries as queries
+
+    write(tmp_path / "a.py", "needle\n")
+    seen_commands: list[list[str]] = []
+    real_popen = subprocess.Popen
+
+    def spy_popen(cmd, **kwargs):
+        seen_commands.append(list(cmd))
+        return real_popen(cmd, **kwargs)
+
+    monkeypatch.setattr(queries.subprocess, "Popen", spy_popen)
+    assert_ok(glob_tool("*.py", path=str(tmp_path)))
+    assert_ok(grep("needle", path=str(tmp_path)))
+    assert len(seen_commands) == 2
+    for cmd in seen_commands:
+        idx = cmd.index("--threads")
+        assert cmd[idx + 1] == "4"
+

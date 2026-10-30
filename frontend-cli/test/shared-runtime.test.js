@@ -451,5 +451,29 @@ test("one-shot leaves zero orphan processes across plain and registered folders,
   assert.ok(sessions.every(s => s.turn === "idle" && !s.background), "background bash task from killed one-shot is cancelled");
   assert.equal((await existingHost.request("runtime/info")).pid, hostInfoBefore.pid, "existing shared host stays alive");
   assert.equal((await existingHost.request("runtime/observe")).pid, workerBefore.pid, "existing python worker stays alive");
+
+  // 5. Non-oneShot client (e.g. subagent adapter or bridge caller) running completion_scope="request"
+  //    that abruptly disconnects mid-request also auto-cancels its turn and background processes.
+  const bridgeClient = createSharedRuntimeClient({ rindHome: home, python, repoRoot, cwd: plainDir, cliArgs: ["--cwd", plainDir, "--no-user-question"] });
+  bridgeClient.start();
+  await bridgeClient.request("initialize");
+  const bridgeSession = await bridgeClient.request("session/create", {});
+  mode = "bg_task";
+  const bridgeBgArrived = new Promise(resolve => { notifyHeld = resolve; });
+  const bridgePrompt = bridgeClient.request("session/prompt", {
+    session_id: bridgeSession.session_id,
+    input: "Start request bg without oneShot",
+    completion_scope: "request",
+  }).catch(err => err);
+  await bridgeBgArrived;
+  await new Promise(resolve => setTimeout(resolve, 200));
+  await bridgeClient.shutdown();
+  await bridgePrompt;
+  for (let i = 0; i < 60; i++) {
+    sessions = (await existingHost.request("runtime/sessions")).sessions || [];
+    if (sessions.every(s => s.turn === "idle" && !s.background)) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.ok(sessions.every(s => s.turn === "idle" && !s.background), "background bash task from disconnected request client is cancelled");
 });
 

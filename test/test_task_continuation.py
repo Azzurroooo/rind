@@ -395,3 +395,28 @@ async def test_interrupted_request_terminates_running_request_tasks(tmp_path, mo
         await worker.close()
 
 
+@pytest.mark.asyncio
+async def test_mid_turn_cancelled_request_terminates_handed_off_background_tasks(tmp_path, monkeypatch, task_shell):
+    steps = [
+        {"id": "bg_step1", "args": {"command": "long_work", "yield_time_ms": 0}},
+        {"id": "step2", "args": {"command": "second_work", "yield_time_ms": 0}},
+        "Done.",
+    ]
+    worker, sid, processes, calls, clients = await worker_with_script(tmp_path, monkeypatch, task_shell, steps)
+    try:
+        worker.execution.begin_request(sid)
+        events = []
+        async for event in worker.execution.run_turn(sid, query="Two-step request"):
+            events.append(event)
+            if event.get("type") == "tool_result" and event.get("tool_call_id") == "bg_step1":
+                assert processes[0].returncode is None
+                worker.execution.interrupt(sid, "Caller timed out mid-turn")
+        assert events[-1]["type"] == "turn_cancelled"
+        assert processes[0].returncode is not None, "handed-off process from step 1 must be killed when request turn cancels"
+        record = next(iter((await worker.shell_tools.supervisor.journal.records(sid)).values()))
+        assert record["status"] == "cancelled"
+    finally:
+        await worker.close()
+
+
+
