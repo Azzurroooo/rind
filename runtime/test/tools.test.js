@@ -6,7 +6,10 @@ import path from "node:path";
 import {
   buildFileToolSpecs,
   DefaultToolRegistry,
+  ProcessSupervisor,
+  ShellSessionPool,
   ShellTools,
+  TaskJournal,
   ToolOutputStore,
   JsonlSessionStore,
   SkillRepository,
@@ -167,4 +170,100 @@ test("SkillRepository discovers project and system skills and SkillTurnCoordinat
   await coordinator.persistUserInput(store, "Please use $demo-skill to solve this");
   const msgs = await store.loadMessages();
   assert.ok(msgs.some(m => String(m.content).includes("Follow demo skill steps.")));
+});
+
+test("glob and grep pass bounded --threads 4 to rg", async t => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-rg-threads-"));
+  const binDir = path.join(tmp, "bin");
+  const workspace = path.join(tmp, "workspace");
+  const logFile = path.join(tmp, "rg-calls.jsonl");
+  await mkdir(binDir, { recursive: true });
+  await mkdir(workspace, { recursive: true });
+  await writeFile(path.join(workspace, "a.py"), "needle\n");
+
+  const realRg = "/usr/bin/rg";
+  const wrapperPath = path.join(binDir, "rg");
+  await writeFile(
+    wrapperPath,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
+fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(process.argv.slice(2)) + "\\n");
+const res = spawnSync(${JSON.stringify(realRg)}, process.argv.slice(2), { stdio: "inherit" });
+process.exit(res.status ?? 1);
+`,
+    { mode: 0o755 },
+  );
+
+  const prevPath = process.env.PATH;
+  process.env.PATH = `${binDir}${path.delimiter}${prevPath || ""}`;
+  t.after(async () => {
+    process.env.PATH = prevPath;
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  const registry = new DefaultToolRegistry(
+    buildFileToolSpecs({
+      workspaceRoot: workspace,
+      allowedRoots: [workspace],
+    }),
+  );
+
+  const globRes = JSON.parse(await registry.callAsync("glob", { pattern: "*.py", path: workspace }));
+  assert.equal(globRes.ok, true);
+  assert.deepEqual(globRes.data.map(item => item.path), ["a.py"]);
+
+  const grepRes = JSON.parse(await registry.callAsync("grep", { pattern: "needle", path: workspace }));
+  assert.equal(grepRes.ok, true);
+
+  const { readFileSync } = await import("node:fs");
+  const seenCommands = readFileSync(logFile, "utf8")
+    .trim()
+    .split("\n")
+    .map(line => JSON.parse(line));
+  assert.equal(seenCommands.length, 2);
+  for (const cmd of seenCommands) {
+    const idx = cmd.indexOf("--threads");
+    assert.notEqual(idx, -1, `Expected --threads in ${JSON.stringify(cmd)}`);
+    assert.equal(cmd[idx + 1], "4");
+  }
+});
+
+test("ProcessSupervisor enforces per-session limit (default 64) without global cap", async t => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-sup-limits-"));
+  const workspace = path.join(tmp, "work");
+  await mkdir(workspace, { recursive: true });
+
+  assert.equal(new ProcessSupervisor().maxTasks, 64);
+
+  const journal = new TaskJournal(path.join(tmp, "sessions"));
+  const supervisor = new ProcessSupervisor({ maxTasks: 2, journal });
+  const pool = new ShellSessionPool();
+  const state = pool.getState("20261031_000001_aaaaaaaa", workspace);
+
+  t.after(async () => {
+    await supervisor.close();
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  const s1 = "20261031_000001_aaaaaaaa";
+  const s2 = "20261031_000002_bbbbbbbb";
+  const sleepCmd = `"${process.execPath}" -e "setTimeout(() => {}, 30000)"`;
+
+  const r1 = await supervisor.run(sleepCmd, state, s1, null, { yieldTimeMs: 20 });
+  assert.equal(r1.status, "ok");
+  const r2 = await supervisor.run(sleepCmd, state, s1, null, { yieldTimeMs: 20 });
+  assert.equal(r2.status, "ok");
+
+  const perSessionExceeded = await supervisor.run("echo hi", state, s1);
+  assert.equal(perSessionExceeded.status, "error");
+  assert.equal(perSessionExceeded.error_type, "TaskLimitExceeded");
+  assert.match(perSessionExceeded.error_msg, /Running task limit reached \(2\)/);
+
+  // Another session s2 is unaffected by s1 saturating its per-session limit
+  const r3 = await supervisor.run(sleepCmd, state, s2, null, { yieldTimeMs: 20 });
+  assert.equal(r3.status, "ok");
+  const s2Ok = await supervisor.run("echo hi", state, s2);
+  assert.equal(s2Ok.status, "ok");
+  assert.equal(JSON.parse(s2Ok.result_str).data.status, "completed");
 });

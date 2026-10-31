@@ -1,7 +1,11 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import type { CancellationToken } from "../../domain/cancellation.js";
+import {
+  type AsyncSemaphore,
+  type CancellationToken,
+  tryAcquireSlot,
+} from "../../domain/cancellation.js";
 import { ProviderError } from "../../domain/errors.js";
 import { type ImageAttachment, toolCancelled, toolError, toolOk } from "../../domain/models.js";
 import { attachmentPath, isImageFile } from "../images.js";
@@ -15,6 +19,7 @@ const READ_MAX_LIMIT = 2000;
 const READ_MAX_BYTES = 50 * 1024;
 const MAX_LINE_CHARS = 2000;
 const RG_TIMEOUT_MS = 30_000;
+const RG_THREADS = "4";
 const GLOB_SCAN_MULTIPLIER = 10;
 const GLOB_MIN_SCAN_LIMIT = 10_000;
 
@@ -36,6 +41,11 @@ const SKIP_GLOBS: readonly string[] = [
 
 export class FileMutationQueue {
   private readonly queues = new Map<string, Promise<void>>();
+  private readonly semaphore: AsyncSemaphore | null;
+
+  constructor(semaphore?: AsyncSemaphore | null) {
+    this.semaphore = semaphore ?? null;
+  }
 
   async run(
     filePath: string,
@@ -80,7 +90,14 @@ export class FileMutationQueue {
       } else {
         await prev;
       }
-      return await operation();
+      if (this.semaphore && !(await tryAcquireSlot(this.semaphore, options.cancellationToken))) {
+        return toolCancelled(options.toolName, options.cancellationToken?.reason);
+      }
+      try {
+        return await operation();
+      } finally {
+        this.semaphore?.release();
+      }
     } finally {
       release();
       if (this.queues.get(key) === chained) {
@@ -806,7 +823,7 @@ export async function globFiles(
   }
 
   const scanLimit = Math.max(parsedMax * GLOB_SCAN_MULTIPLIER, GLOB_MIN_SCAN_LIMIT);
-  const args = ["--files", "--hidden", "--glob", pattern, ...SKIP_GLOBS, "."];
+  const args = ["--files", "--hidden", "--threads", RG_THREADS, "--glob", pattern, ...SKIP_GLOBS, "."];
 
   return await new Promise<string>(resolve => {
     let child: ReturnType<typeof spawn>;
@@ -986,6 +1003,8 @@ export async function grepFiles(
     "--json",
     "--color",
     "never",
+    "--threads",
+    RG_THREADS,
     "--glob",
     fileGlob,
     ...SKIP_GLOBS,

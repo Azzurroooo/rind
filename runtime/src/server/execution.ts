@@ -68,51 +68,6 @@ class AsyncLock {
   }
 }
 
-class AsyncSemaphore {
-  private available: number;
-  private waiters: Array<() => void> = [];
-
-  constructor(maxConcurrent: number) {
-    this.available = Math.max(1, Math.trunc(maxConcurrent));
-  }
-
-  async acquire(token?: CancellationToken | null): Promise<void> {
-    if (token?.isCancelled) {
-      throw new CancelledError(token.reason || "User interrupted");
-    }
-    if (this.available > 0) {
-      this.available -= 1;
-      return;
-    }
-    await new Promise<void>((resolve, reject) => {
-      let deregister: (() => void) | null = null;
-      const waiter = (): void => {
-        if (deregister) deregister();
-        resolve();
-      };
-      this.waiters.push(waiter);
-      if (token) {
-        deregister = token.registerCallback(() => {
-          const idx = this.waiters.indexOf(waiter);
-          if (idx !== -1) {
-            this.waiters.splice(idx, 1);
-          }
-          reject(new CancelledError(token.reason || "User interrupted"));
-        });
-      }
-    });
-  }
-
-  release(): void {
-    const next = this.waiters.shift();
-    if (next) {
-      next();
-    } else {
-      this.available += 1;
-    }
-  }
-}
-
 interface PendingAnswerFuture {
   promise: Promise<string>;
   resolve: (value: string) => void;
@@ -210,7 +165,6 @@ export class ExecutionCoordinator {
   private readonly defaultExternalTool: ExternalTool | null;
   private readonly sessionOptions = new Map<string, [ExternalTool | null, boolean]>();
   private readonly lock = new AsyncLock();
-  private readonly turnSemaphore: AsyncSemaphore;
 
   constructor(options: {
     sharedResources: SharedRuntimeResources;
@@ -223,7 +177,6 @@ export class ExecutionCoordinator {
     sessionDir: string | null;
     providerService: ProviderServiceImpl;
     externalTool?: ExternalTool | null;
-    maxConcurrentTurns?: number;
   }) {
     this.sharedResources = options.sharedResources;
     this.shellTools = options.shellTools;
@@ -235,7 +188,6 @@ export class ExecutionCoordinator {
     this.sessionDir = options.sessionDir;
     this.providerService = options.providerService;
     this.defaultExternalTool = options.externalTool ?? null;
-    this.turnSemaphore = new AsyncSemaphore(options.maxConcurrentTurns ?? 8);
     this.taskNotifications = new TaskNotifications(
       this.shellTools.supervisor.journal!,
       snapshot => this.taskChanged(snapshot),
@@ -905,12 +857,6 @@ export class ExecutionCoordinator {
         const cancelSource = new CancellationTokenSource(options.cancellationToken ?? null);
         execution.currentCancel = cancelSource;
         this.pendingInterrupts.delete(clean);
-        let semaphoreAcquired = false;
-
-        const beforeExecution = async (): Promise<void> => {
-          await this.turnSemaphore.acquire(cancelSource.token);
-          semaphoreAcquired = true;
-        };
 
         try {
           if (continuation) {
@@ -971,7 +917,6 @@ export class ExecutionCoordinator {
             query,
             cancellationToken: cancelSource.token,
             transientSystemMessages,
-            beforeExecution,
             resume,
             compact: compact ? "manual" : null,
             delivery,
@@ -1007,10 +952,6 @@ export class ExecutionCoordinator {
             yield eventData;
           }
         } finally {
-          if (semaphoreAcquired) {
-            this.turnSemaphore.release();
-            semaphoreAcquired = false;
-          }
           if (terminalType === "turn_failed" || terminalType === "turn_cancelled") {
             this.suppressed.add(clean);
             this.refreshBackgroundWait(clean);
@@ -1021,6 +962,7 @@ export class ExecutionCoordinator {
             const scope = this.scopes.get(clean);
             if (scope) {
               scope.error = failureReason;
+              await this.shellTools.supervisor.closeRequest(clean, scope.requestId, failureReason);
             }
           }
           const extTool = this.externalTool(clean);
@@ -1521,10 +1463,12 @@ export class ExecutionCoordinator {
 }
 
 async function closeContainer(container: AgentContainer): Promise<void> {
+  container.tool_processor.close();
   await container.chat_client.close();
 }
 
 async function closeExecution(execution: ActiveExecution): Promise<void> {
+  execution.container.tool_processor.close();
   await (execution.chatClient ?? execution.container.chat_client).close();
 }
 

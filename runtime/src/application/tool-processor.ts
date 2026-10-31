@@ -1,4 +1,9 @@
-import { CancellationTokenSource, type CancellationToken } from "../domain/cancellation.js";
+import {
+  AsyncSemaphore,
+  CancellationTokenSource,
+  tryAcquireSlot,
+  type CancellationToken,
+} from "../domain/cancellation.js";
 import {
   CancelledError,
   PersistenceError,
@@ -307,6 +312,7 @@ export function buildFileChangeEvent(options: {
 }
 
 const HEARTBEAT_TOOLS = new Set(["bash", "task_control", "bash_output"]);
+export const MAX_PARALLEL_TOOL_CALLS = 8;
 
 interface ToolCallOutcome {
   status: ToolEventStatus;
@@ -322,6 +328,8 @@ export class ToolCallProcessor {
   private readonly toolOutputStore: ToolOutputStore | null;
   private userQuestionResponder: UserQuestionResponder | null;
   private readonly taskNotifications: TaskNotifications | null;
+  private readonly parallelSemaphore: AsyncSemaphore;
+  private readonly globalToolSemaphore: AsyncSemaphore | null;
 
   constructor(options: {
     toolExecutor: ToolExecutor;
@@ -329,12 +337,21 @@ export class ToolCallProcessor {
     toolOutputStore?: ToolOutputStore | null;
     userQuestionResponder?: UserQuestionResponder | null;
     taskNotifications?: TaskNotifications | null;
+    maxParallelCalls?: number;
+    globalToolSemaphore?: AsyncSemaphore | null;
   }) {
     this.toolExecutor = options.toolExecutor;
     this.toolResultNormalizer = options.toolResultNormalizer ?? new ToolResultNormalizer();
     this.toolOutputStore = options.toolOutputStore ?? null;
     this.userQuestionResponder = options.userQuestionResponder ?? null;
     this.taskNotifications = options.taskNotifications ?? null;
+    const maxParallelCalls = Math.max(1, Math.trunc(options.maxParallelCalls ?? MAX_PARALLEL_TOOL_CALLS));
+    this.parallelSemaphore = new AsyncSemaphore(maxParallelCalls);
+    this.globalToolSemaphore = options.globalToolSemaphore ?? null;
+  }
+
+  close(): void {
+    // Session-scoped processor cleanup hook (no persistent worker threads in Node runtime).
   }
 
   setUserQuestionResponder(responder: UserQuestionResponder | null): void {
@@ -715,29 +732,54 @@ export class ToolCallProcessor {
   }): Promise<ToolCallOutcome> {
     const { call, parsedArgs, sessionId, cancellationToken, turnId } = options;
     try {
-      const executionArgs: Record<string, unknown> = {
-        ...parsedArgs,
-        _session_id: sessionId,
-        _cancellation_token: cancellationToken,
-        _idempotency_key: call.call_id,
-        _output_store: this.toolOutputStore,
-        _origin_turn_id: turnId,
-        _request_id:
-          this.taskNotifications && this.taskNotifications.requestId
-            ? this.taskNotifications.requestId(sessionId)
-            : null,
-      };
+      if (!(await tryAcquireSlot(this.parallelSemaphore, cancellationToken))) {
+        return {
+          status: "cancelled",
+          error_type: "Cancelled",
+          result: toolCancelled(
+            call.name,
+            cancellationToken?.reason || "Tool execution cancelled",
+          ),
+        };
+      }
       let result: ToolExecutionResult;
-      if (this.toolExecutor.isAsyncTool(call.name)) {
-        result = await this.toolExecutor.executeAsync(call.name, executionArgs);
-      } else {
-        const cancellation = new CancellationTokenSource(cancellationToken);
-        executionArgs._cancellation_token = cancellation.token;
-        try {
-          result = this.toolExecutor.executeSync(call.name, executionArgs);
-        } finally {
-          cancellation.dispose();
+      try {
+        const executionArgs: Record<string, unknown> = {
+          ...parsedArgs,
+          _session_id: sessionId,
+          _cancellation_token: cancellationToken,
+          _idempotency_key: call.call_id,
+          _output_store: this.toolOutputStore,
+          _origin_turn_id: turnId,
+          _request_id:
+            this.taskNotifications && this.taskNotifications.requestId
+              ? this.taskNotifications.requestId(sessionId)
+              : null,
+        };
+        if (this.toolExecutor.isAsyncTool(call.name)) {
+          result = await this.toolExecutor.executeAsync(call.name, executionArgs);
+        } else {
+          if (!(await tryAcquireSlot(this.globalToolSemaphore, cancellationToken))) {
+            return {
+              status: "cancelled",
+              error_type: "Cancelled",
+              result: toolCancelled(
+                call.name,
+                cancellationToken?.reason || "Tool execution cancelled",
+              ),
+            };
+          }
+          const cancellation = new CancellationTokenSource(cancellationToken);
+          executionArgs._cancellation_token = cancellation.token;
+          try {
+            result = await this.toolExecutor.executeAsync(call.name, executionArgs);
+          } finally {
+            cancellation.dispose();
+            this.globalToolSemaphore?.release();
+          }
         }
+      } finally {
+        this.parallelSemaphore.release();
       }
 
       if (result.status === "ok") {

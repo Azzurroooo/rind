@@ -210,12 +210,16 @@ export async function startSharedServer(options) {
   ready.catch(() => {});
   const server = net.createServer(socket => {
     socket.setEncoding("utf8"); let buffer = "";
-    const peer = { socket, sessions: new Set(), prompts: new Map(), observe: false, oneShot: false, window: false, workspace: "", send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
+    const peer = { socket, sessions: new Set(), prompts: new Map(), requestPrompts: new Map(), observe: false, oneShot: false, window: false, workspace: "", send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
     peers.add(peer); touchActivity(); socket.on("error", () => {});
     socket.on("close", () => {
       peers.delete(peer); live.leave(peer);
-      if (peer.oneShot && initialized) {
-        for (const sessionId of peer.prompts.keys()) void client.request("session/cancel", { session_id: sessionId }).catch(() => {});
+      if (initialized) {
+        const toCancel = new Set([
+          ...(peer.oneShot ? peer.prompts.keys() : []),
+          ...peer.requestPrompts.keys(),
+        ]);
+        for (const sessionId of toCancel) void client.request("session/cancel", { session_id: sessionId }).catch(() => {});
       }
       for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); }
       if (peer.window && remoteHost && ![...peers].some(other => other.window)) {
@@ -347,6 +351,7 @@ export async function startSharedServer(options) {
             }
             holdPrompt(prompts, params.session_id);
             holdPrompt(peer.prompts, params.session_id);
+            if (workerParams.completion_scope === "request") holdPrompt(peer.requestPrompts, params.session_id);
             viewIfOpen(peer, params.session_id);
           }
           if (method === "rind/auth/login") { if (authOwner) throw new Error("Another connection is signing in."); authOwner = peer; }
@@ -361,6 +366,7 @@ export async function startSharedServer(options) {
               pendingPromptTexts.delete(params.session_id);
               releasePrompt(prompts, params.session_id);
               releasePrompt(peer.prompts, params.session_id);
+              if (workerParams.completion_scope === "request") releasePrompt(peer.requestPrompts, params.session_id);
               if (!result?.steered && !prompts.has(params.session_id)) live.settle(params.session_id, promptFailed);
             }
           }

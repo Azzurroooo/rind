@@ -125,3 +125,70 @@ export class CancellationTokenSource {
     }
   }
 }
+
+export class AsyncSemaphore {
+  private available: number;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(maxConcurrent: number) {
+    this.available = Math.max(1, Math.trunc(maxConcurrent));
+  }
+
+  get locked(): boolean {
+    return this.available <= 0;
+  }
+
+  tryAcquire(token?: CancellationToken | null): Promise<boolean> {
+    if (token?.isCancelled) {
+      return Promise.resolve(false);
+    }
+    if (this.available > 0) {
+      this.available -= 1;
+      return Promise.resolve(true);
+    }
+    return new Promise<boolean>(resolve => {
+      let unsubscribe: (() => void) | null = null;
+      const waiter = (): void => {
+        unsubscribe?.();
+        if (token?.isCancelled) {
+          this.release();
+          resolve(false);
+          return;
+        }
+        resolve(true);
+      };
+      this.waiters.push(waiter);
+      if (token) {
+        unsubscribe = token.registerCallback(() => {
+          const idx = this.waiters.indexOf(waiter);
+          if (idx !== -1) {
+            this.waiters.splice(idx, 1);
+            resolve(false);
+          }
+        });
+      }
+    });
+  }
+
+  release(): void {
+    const next = this.waiters.shift();
+    if (next) {
+      next();
+    } else {
+      this.available += 1;
+    }
+  }
+}
+
+export async function tryAcquireSlot(
+  semaphore: AsyncSemaphore | null | undefined,
+  token?: CancellationToken | null,
+): Promise<boolean> {
+  if (token?.isCancelled) {
+    return false;
+  }
+  if (!semaphore) {
+    return true;
+  }
+  return await semaphore.tryAcquire(token);
+}

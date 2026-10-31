@@ -526,7 +526,6 @@ function killProcessTreeNow(proc: ChildProcess): void {
 export class ProcessSupervisor {
   static readonly TERMINATION_GRACE_SECONDS = 1.0;
 
-  readonly maxTotalTasks: number;
   readonly maxTasks: number;
   readonly journal: TaskJournal | null;
   private readonly processes = new Map<string, ProcessRecord>();
@@ -535,9 +534,8 @@ export class ProcessSupervisor {
   private readonly closedSessions = new Set<string>();
   private observer: ((event: Record<string, unknown>) => void) | null = null;
 
-  constructor(options?: { maxTasks?: number; maxTotalTasks?: number; journal?: TaskJournal | null }) {
-    this.maxTasks = options?.maxTasks ?? 8;
-    this.maxTotalTasks = options?.maxTotalTasks ?? 32;
+  constructor(options?: { maxTasks?: number; journal?: TaskJournal | null }) {
+    this.maxTasks = options?.maxTasks ?? 64;
     this.journal = options?.journal ?? null;
   }
 
@@ -596,11 +594,9 @@ export class ProcessSupervisor {
       return errorResult(new Error("Worker is shutting down."));
     }
     let sessionRunning = 0;
-    let totalRunning = 0;
     for (const r of this.processes.values()) {
-      if (!TERMINAL_STATES.has(r.status)) {
-        totalRunning += 1;
-        if (r.session_id === sessionId) sessionRunning += 1;
+      if (r.session_id === sessionId && !TERMINAL_STATES.has(r.status)) {
+        sessionRunning += 1;
       }
     }
     if (sessionRunning >= this.maxTasks) {
@@ -609,14 +605,6 @@ export class ProcessSupervisor {
         result_str: "",
         error_type: "TaskLimitExceeded",
         error_msg: `Running task limit reached (${this.maxTasks}).`,
-      };
-    }
-    if (totalRunning >= this.maxTotalTasks) {
-      return {
-        status: "error",
-        result_str: "",
-        error_type: "TaskLimitExceeded",
-        error_msg: `Global running task limit reached (${this.maxTotalTasks}).`,
       };
     }
 

@@ -19,7 +19,7 @@ import {
   ToolExecutor,
   type UserQuestionResponder,
 } from "../application/tool-processor.js";
-import type { CancellationToken } from "../domain/cancellation.js";
+import { AsyncSemaphore, type CancellationToken } from "../domain/cancellation.js";
 import {
   BoundaryError,
   CancelledError,
@@ -1456,7 +1456,6 @@ export class AgentRuntime {
     resume?: boolean;
     compact?: string | null;
     delivery?: boolean;
-    beforeExecution?: (() => Promise<void> | void) | null;
   }): AsyncGenerator<RuntimeEventBase, void, void> {
     const query = options?.query ?? null;
     const cancellationToken = options?.cancellationToken ?? null;
@@ -1464,7 +1463,6 @@ export class AgentRuntime {
     let resume = options?.resume ?? false;
     const compact = options?.compact ?? null;
     const delivery = options?.delivery ?? false;
-    const beforeExecution = options?.beforeExecution ?? null;
 
     await this.initialize();
     if (compact && (this.turnActive || this.turnLock.locked)) {
@@ -1512,9 +1510,6 @@ export class AgentRuntime {
         if (compact) {
           yield startedEvent;
           try {
-            if (beforeExecution) {
-              await beforeExecution();
-            }
             const record = await this.turnRunner.compactContext(this.sessionStore, {
               reason: compact,
               phase: "manual",
@@ -1574,41 +1569,6 @@ export class AgentRuntime {
         try {
           if (!compact) {
             yield startedEvent;
-            if (beforeExecution) {
-              try {
-                await beforeExecution();
-              } catch (exc) {
-                if (exc instanceof CancelledError || cancellationToken?.isCancelled) {
-                  const cancelledEv = turnCancelledEvent({
-                    ...eventMeta(this.sessionStore, turnId),
-                    reason:
-                      (cancellationToken?.isCancelled
-                        ? cancellationToken.reason
-                        : (exc as Error).message) || "Turn cancelled.",
-                  });
-                  this.acceptingInputs = false;
-                  this.discardPendingInputs();
-                  await this.stopActiveGoal("paused");
-                  await this.persistTurnState(cancelledEv);
-                  terminalPersisted = true;
-                  yield cancelledEv;
-                  return;
-                }
-                const err = exc as Error;
-                const failedEv = turnFailedEvent({
-                  ...eventMeta(this.sessionStore, turnId),
-                  error: err.message || String(exc),
-                  error_type: err.name || "Error",
-                });
-                this.acceptingInputs = false;
-                this.discardPendingInputs();
-                await this.stopActiveGoal("blocked");
-                await this.persistTurnState(failedEv);
-                terminalPersisted = true;
-                yield failedEv;
-                return;
-              }
-            }
           }
 
           let totalDurationMs = 0;
@@ -1856,11 +1816,14 @@ export class AgentRuntime {
   }
 }
 
+export const GLOBAL_TOOL_CONCURRENCY_LIMIT = 512;
+
 export class SharedRuntimeResources {
   readonly toolResultNormalizer: ToolResultNormalizer;
   readonly streamParser: MessageStreamParser;
   readonly compactionService: CompactionService;
   readonly toolOutputStore: ToolOutputStore;
+  readonly toolSemaphore: AsyncSemaphore;
   readonly fileMutationQueue: FileMutationQueue;
 
   constructor(options: {
@@ -1868,13 +1831,17 @@ export class SharedRuntimeResources {
     streamParser: MessageStreamParser;
     compactionService: CompactionService;
     toolOutputStore?: ToolOutputStore;
+    toolSemaphore?: AsyncSemaphore;
     fileMutationQueue?: FileMutationQueue;
   }) {
     this.toolResultNormalizer = options.toolResultNormalizer;
     this.streamParser = options.streamParser;
     this.compactionService = options.compactionService;
     this.toolOutputStore = options.toolOutputStore ?? new ToolOutputStore();
-    this.fileMutationQueue = options.fileMutationQueue ?? new FileMutationQueue();
+    this.toolSemaphore =
+      options.toolSemaphore ?? new AsyncSemaphore(GLOBAL_TOOL_CONCURRENCY_LIMIT);
+    this.fileMutationQueue =
+      options.fileMutationQueue ?? new FileMutationQueue(this.toolSemaphore);
   }
 }
 
@@ -2002,6 +1969,7 @@ export function buildAgentContainer(options: {
     toolResultNormalizer,
     toolOutputStore,
     taskNotifications,
+    globalToolSemaphore: options.sharedResources ? options.sharedResources.toolSemaphore : null,
   });
   const streamParser = options.sharedResources
     ? options.sharedResources.streamParser
