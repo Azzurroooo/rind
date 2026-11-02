@@ -105,7 +105,6 @@ test("delegate({ wait: true }) collects settled results in-turn, supports timeou
   assert.equal(firstWait.timedOut, false);
   assert.equal(firstWait.settled.length, 1);
   assert.equal(firstWait.settled[0].taskId, first.taskId);
-  assert.equal(firstWait.settled[0].reply, "Part A ready");
   assert.equal(firstWait.running.length, 1);
   assert.equal(firstWait.running[0].taskId, second.taskId);
   assert.match(firstWait.output, /ui · task .* · delivered: Part A ready/);
@@ -113,7 +112,7 @@ test("delegate({ wait: true }) collects settled results in-turn, supports timeou
   // Re-reading a specific settled task by ID still returns its result.
   const reread = await f.call("delegate", { wait: true, task: first.taskId }, actor);
   assert.equal(reread.settled.length, 1);
-  assert.equal(reread.settled[0].reply, "Part A ready");
+  assert.match(reread.output, /delivered: Part A ready/);
 
   // Finish the second delegation while the turn is active, then call wait({ wait: true }) which returns immediately (0ms).
   await finishDelegation(f, second.taskId, "Part B ready");
@@ -169,7 +168,7 @@ test("entry task owner can delegate, wait in-turn, and report in a single run; r
   // Leader collects the sub-agent result in-turn using delegate({ wait: true }).
   const waited = await f.call("delegate", { wait: true }, leaderActor);
   assert.equal(waited.settled.length, 1);
-  assert.equal(waited.settled[0].reply, "Widget implemented");
+  assert.match(waited.output, /delivered: Widget implemented/);
 
   // Now leader can report and finish in the very same run!
   await f.call("report", { outcome: "done", summary: "Feature delivered in one turn", evidence: ["Widget implemented"] }, leaderActor);
@@ -263,4 +262,32 @@ test("concurrent single-turn delegate calls start existing and newly registered 
   await eventually(() => f.delivered.length === 1);
   assert.match(f.delivered[0].text, /ui · task .* · delivered: UI component ready/);
   assert.match(f.delivered[0].text, /qa · task .* · delivered: Test plan ready/);
+});
+
+test("a delivery stays within its budget: long reports are previewed and read in full by task", async t => {
+  const f = await fixture(t);
+  const members = await Promise.all(["a", "b", "c", "d", "e", "f", "g", "h"].map(name => f.member(name)));
+  const { session, actor } = await leaderConversation(f);
+  const delegated = [];
+  for (const member of members) delegated.push(await f.call("delegate", { to: member.id, brief: "Survey" }, actor));
+  const report = (index) => `Report ${index}\n` + `第${index}段：详细的调研结论与证据 evidence line\n`.repeat(900);
+  for (const [index, d] of delegated.entries()) await finishDelegation(f, d.taskId, report(index));
+  await eventually(() => f.delivered.length === 1);
+  const text = f.delivered[0].text;
+  const bytes = Buffer.byteLength(text);
+  assert.ok(bytes <= 48 * 1024 + delegated.length * 200, `delivery is ${bytes} bytes`);
+  assert.ok(Buffer.byteLength(report(0)) > 8 * 1024, "each report alone exceeds its preview");
+  const first = delegated[0].taskId;
+  assert.match(text, new RegExp(`task ${first} · delivered: Report 0\\n`));
+  assert.match(text, new RegExp(`\\[truncated · full report \\(\\d+\\.\\d KB\\): delegate\\(\\{wait: true, task: "${first}"\\}\\)\\]`));
+  assert.match(text, /evidence line\n  \[truncated/, "a preview ends at a line break");
+  const pointerOnly = [...text.matchAll(/^- (.+?) · task (\S+) · delivered · full report \(\d+\.\d KB\): delegate\(\{wait: true, task: "\2"\}\)$/gm)];
+  assert.equal(pointerOnly.length, 2, "past the budget, each report takes one line");
+
+  await f.call("hostTurnStart", { sessionId: session.id, runtimeSessionId: "leader-chat" });
+  const [, name, taskId] = pointerOnly[0];
+  const full = await f.call("delegate", { wait: true, task: taskId }, actor);
+  const index = delegated.findIndex(d => d.taskId === taskId);
+  assert.equal(full.output, `Delegated work settled:\n- ${name} · task ${taskId} · delivered: ${report(index).trim()}`);
+  assert.deepEqual(Object.keys(full.settled[0]).sort(), ["assignee", "status", "taskId"], "the report travels once, in output");
 });
