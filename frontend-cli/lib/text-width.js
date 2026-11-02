@@ -16,6 +16,13 @@ const SEGMENT_WINDOW_MAX = 1024;
 // tag characters and conjoining Hangul jamo.
 const JOINS_PREVIOUS_RE = /^[\p{M}\p{Emoji_Modifier}\u200d\ufe00-\ufe0f\u1100-\u11ff\ua960-\ua97f\ud7b0-\ud7ff\u{e0020}-\u{e007f}\u{e0100}-\u{e01ef}]/u;
 const REGIONAL_INDICATOR_RE = /^[\u{1f1e6}-\u{1f1ff}]$/u;
+// Code points that can join a grapheme cluster with a neighbour: CR (before LF),
+// joiners and extenders, spacing marks (including Thai and Lao AM), emoji
+// modifiers, regional indicators, conjoining Hangul jamo and prepended
+// concatenation marks. Text without any of them is one grapheme per code
+// point, and skips Intl.Segmenter entirely; each call into the segmenter
+// costs far more than reading the code points.
+const CLUSTERING_RE = /[\r\u200d\p{Grapheme_Extend}\p{Mc}\u0e33\u0eb3\p{Emoji_Modifier}\p{Regional_Indicator}\u1100-\u11ff\ua960-\ua97f\ud7b0-\ud7ff\u0600-\u0605\u06dd\u070f\u0890\u0891\u08e2\u0d4e\u{110bd}\u{110cd}\u{111c2}\u{111c3}\u{1193f}\u{11941}\u{11a3a}\u{11a84}-\u{11a89}\u{11d46}\u{11f02}\u{113d1}\u{16d63}\u{16d67}-\u{16d6a}]/u;
 
 export const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 
@@ -342,7 +349,7 @@ function* eachGrapheme(text, start, end) {
     const cut = windowEnd(text, start, end);
     const chunk = text.slice(start, cut);
     let windowStart = true;
-    const segments = !segmenter || PRINTABLE_ASCII_RE.test(chunk)
+    const segments = !segmenter || !CLUSTERING_RE.test(chunk)
       ? chunk
       : Array.from(segmenter.segment(chunk), ({ segment }) => segment);
     for (const segment of segments) {
@@ -420,6 +427,9 @@ function nearbyBoundary(text, index, floor) {
 
 function segmentWidth(segment) {
   if (segment.length === 1 && segment >= " " && segment <= "~") return 1;
+  // A lone wide character (CJK, Hangul, fullwidth forms) is two cells, emoji or not.
+  const code = segment.codePointAt(0);
+  if (segment.length === (code > 0xffff ? 2 : 1) && isWideCodePoint(code)) return 2;
   const text = stripAnsi(segment);
   if (!text || isZeroWidth(text)) {
     return 0;

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, truncateToWidth, wrapTextCells } from "../lib/text-width.js";
 
-test("printable ASCII bypasses segmentation; Unicode and controls retain their semantics", (t) => {
+test("text that cannot cluster bypasses segmentation; Unicode and controls retain their semantics", (t) => {
   const segment = t.mock.method(Intl.Segmenter.prototype, "segment");
   const ascii = Array.from({ length: 95 }, (_, i) => String.fromCharCode(i + 32)).join("");
   assert.equal(textWidth(ascii), 95);
@@ -13,7 +13,7 @@ test("printable ASCII bypasses segmentation; Unicode and controls retain their s
   for (const [text, width] of [["中文", 4], ["e\u0301", 1], ["👩‍💻", 2], ["✈️", 2], ["\u200b", 0], ["\t", 1], ["\x07", 1]]) {
     assert.equal(textWidth(text), width);
   }
-  assert.ok(segment.mock.callCount() >= 7);
+  assert.equal(segment.mock.callCount(), 3, "only the combining mark, the ZWJ sequence and the variation selector need the segmenter");
   assert.deepEqual(graphemes("\r\n"), ["\r\n"]);
 });
 
@@ -139,4 +139,24 @@ test("clipping reads only as far as the cut", (t) => {
   });
   clipCells(longMixedText(280_000), 66);
   assert.ok(seen <= 2048, `clip segmented ${seen} code units`);
+});
+
+test("every code point that skips the segmenter is a grapheme of its own", () => {
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const check = (chunk) => {
+    const text = chunk.join("");
+    assert.deepEqual(graphemes(text), Array.from(segmenter.segment(text), (s) => s.segment), `near U+${chunk[0].codePointAt(0).toString(16)}`);
+  };
+  // All of the BMP and the emoji planes: 64 consecutive code points at a time,
+  // then each one beside ASCII, CJK and Hangul bases.
+  for (const [from, to] of [[0, 0xffff], [0x1f000, 0x1faff]]) {
+    let run = [], mixed = [];
+    for (let cp = from; cp <= to; cp += 1) {
+      if (cp >= 0xd800 && cp <= 0xdfff) continue;
+      run.push(String.fromCodePoint(cp));
+      mixed.push(String.fromCodePoint(cp), ["a", "中", "한"][cp % 3]);
+      if (run.length >= 64) { check(run); check(mixed); run = []; mixed = []; }
+    }
+    if (run.length) { check(run); check(mixed); }
+  }
 });
