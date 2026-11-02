@@ -1,11 +1,21 @@
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
-const ANSI_SPLIT_RE = /(\x1b\[[0-?]*[ -/]*[@-~])/;
-const ANSI_WHOLE_RE = /^\x1b\[[0-?]*[ -/]*[@-~]$/;
+const CSI_AT = /\x1b\[[0-?]*[ -/]*[@-~]/y;
 const LINE_BREAK_RE = /\r\n|\r|\n/;
 const PRINTABLE_ASCII_RE = /^[\x20-\x7e]*$/;
 const segmenter = typeof Intl?.Segmenter === "function"
   ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
   : null;
+
+// Intl.Segmenter only ever sees short windows of text. On some runtimes
+// (Node 20) each step of a segment iterator costs time proportional to the
+// whole input, so segmenting one long string is quadratic in time and memory.
+const SEGMENT_WINDOW = 256;
+const SEGMENT_WINDOW_MAX = 1024;
+// Code points that always attach to the one before them, so a window never
+// ends right before one: marks, emoji modifiers, joiners, variation selectors,
+// tag characters and conjoining Hangul jamo.
+const JOINS_PREVIOUS_RE = /^[\p{M}\p{Emoji_Modifier}\u200d\ufe00-\ufe0f\u1100-\u11ff\ua960-\ua97f\ud7b0-\ud7ff\u{e0020}-\u{e007f}\u{e0100}-\u{e01ef}]/u;
+const REGIONAL_INDICATOR_RE = /^[\u{1f1e6}-\u{1f1ff}]$/u;
 
 export const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 
@@ -16,9 +26,7 @@ export function stripAnsi(value) {
 export function graphemes(value) {
   const text = String(value || "");
   if (PRINTABLE_ASCII_RE.test(text)) return text.split("");
-  return segmenter
-    ? Array.from(segmenter.segment(text), (segment) => segment.segment)
-    : Array.from(text);
+  return Array.from(eachGrapheme(text, 0, text.length));
 }
 
 const WIDTH_CACHE_MAX = 4096;
@@ -31,7 +39,8 @@ export function textWidth(value) {
     const cached = widthCache.get(text);
     if (cached !== undefined) return cached;
   }
-  const width = graphemes(text).reduce((sum, segment) => sum + segmentWidth(segment), 0);
+  let width = 0;
+  for (const segment of eachGrapheme(text, 0, text.length)) width += segmentWidth(segment);
   if (text.length <= 512) {
     if (widthCache.size >= WIDTH_CACHE_MAX) {
       widthCache.delete(widthCache.keys().next().value);
@@ -79,31 +88,32 @@ export function wrapTextCells(value, firstWidth, continuationWidth = firstWidth)
   return chunks;
 }
 
-export function clipCells(value, maxWidth) {
+// Cuts text to maxWidth visible cells, ending in the ellipsis when anything is
+// left out. Reads only as far as the cut, however long the text is.
+export function truncateToWidth(value, maxWidth, ellipsis = "...") {
   const text = String(value || "");
-  if (textWidth(text) <= maxWidth) {
+  const ellipsisWidth = textWidth(ellipsis);
+  if (maxWidth <= ellipsisWidth) {
+    return scanPrefix(text, maxWidth).overflow ? ellipsis.slice(0, Math.max(0, maxWidth)) : text;
+  }
+  const { kept, overflow } = scanPrefix(text, maxWidth - ellipsisWidth, maxWidth);
+  return overflow ? closeAnsi(`${kept}${ellipsis}`) : text;
+}
+
+export function clipCells(value, maxWidth) {
+  return truncateToWidth(value, maxWidth);
+}
+
+export function middleClipCells(value, maxWidth) {
+  const text = String(value || "");
+  if (!scanPrefix(text, maxWidth).overflow) {
     return text;
   }
   const suffix = "...";
-  const suffixWidth = textWidth(suffix);
-  if (maxWidth <= suffixWidth) {
-    return suffix.slice(0, Math.max(0, maxWidth));
-  }
-  return closeAnsi(`${takeStartCells(text, maxWidth - suffixWidth)}${suffix}`);
+  const available = Math.max(0, maxWidth - textWidth(suffix));
+  const head = scanPrefix(text, Math.ceil(available / 2)).kept;
+  return closeAnsi(`${closeAnsi(head)}${suffix}${takeEndCells(text, Math.floor(available / 2))}`);
 }
-
-export function truncateToWidth(value, maxWidth, ellipsis = "...") {
-  const text = String(value || "");
-  if (textWidth(text) <= maxWidth) {
-    return text;
-  }
-  const suffixWidth = textWidth(ellipsis);
-  if (maxWidth <= suffixWidth) {
-    return ellipsis.slice(0, Math.max(0, maxWidth));
-  }
-  return closeAnsi(`${takeStartCells(text, maxWidth - suffixWidth)}${ellipsis}`);
-}
-
 
 export function wrapTextWithAnsi(value, firstWidth, continuationWidth = firstWidth) {
   const source = String(value ?? "");
@@ -154,18 +164,18 @@ function wrapLogicalLine(line, firstWidth, contWidth, out) {
         break;
       }
       if (!hasContent && width === 0 && tokenWidth > available) {
-        const take = takeStartCells(text, available);
-        if (!take || take === text) {
+        const { kept, keptWidth } = scanPrefix(text, available);
+        if (!kept || kept === text) {
           body += text;
           width += tokenWidth;
           hasContent = true;
           break;
         }
-        body += take;
-        width += textWidth(take);
+        body += kept;
+        width += keptWidth;
         hasContent = true;
-        text = text.slice(take.length);
-        tokenWidth -= textWidth(take);
+        text = text.slice(kept.length);
+        tokenWidth -= keptWidth;
         finishLine();
         continue;
       }
@@ -256,39 +266,50 @@ function applyAnsiToState(sequence, activeCodes) {
   activeCodes.push(sequence);
 }
 
-export function middleClipCells(value, maxWidth) {
-  const text = String(value || "");
-  if (textWidth(text) <= maxWidth) {
-    return text;
+// One pass over the start of the text: graphemes are kept while they fit in
+// keepWidth, and the walk stops once the visible width exceeds limit. Escape
+// sequences stay whole and take no cells.
+function scanPrefix(text, keepWidth, limit = keepWidth) {
+  let kept = "";
+  let keptWidth = 0;
+  let total = 0;
+  let keeping = true;
+  for (const token of eachToken(text)) {
+    const width = segmentWidth(token);
+    if (keeping && keptWidth + width <= keepWidth) {
+      kept += token;
+      keptWidth += width;
+    } else {
+      keeping = false;
+    }
+    total += width;
+    if (total > limit) {
+      return { kept, keptWidth, overflow: true };
+    }
   }
-  const suffix = "...";
-  const available = Math.max(0, maxWidth - textWidth(suffix));
-  const headWidth = Math.ceil(available / 2);
-  const tailWidth = Math.floor(available / 2);
-  return closeAnsi(`${closeAnsi(takeStartCells(text, headWidth))}${suffix}${takeEndCells(text, tailWidth)}`);
+  return { kept, keptWidth, overflow: false };
 }
 
-// Escape sequences are kept whole and take no cells, so styled text is cut
-// at its visible width instead of at its raw length.
-function takeStartCells(value, maxWidth) {
-  let output = "";
-  let width = 0;
-  for (const part of String(value).split(ANSI_SPLIT_RE)) {
-    if (!part) continue;
-    if (ANSI_WHOLE_RE.test(part)) {
-      output += part;
-      continue;
-    }
-    for (const segment of graphemes(part)) {
-      const nextWidth = segmentWidth(segment);
+// The last maxWidth cells of the text. Only a tail window is read; it doubles
+// until it holds enough cells or reaches the start.
+function takeEndCells(text, maxWidth) {
+  for (let span = maxWidth * 4 + 16; ; span *= 2) {
+    const from = alignedStart(text, text.length - span);
+    const tokens = Array.from(eachToken(text.slice(from)));
+    let output = "";
+    let width = 0;
+    for (let index = tokens.length - 1; index >= 0; index -= 1) {
+      const nextWidth = segmentWidth(tokens[index]);
       if (width + nextWidth > maxWidth) {
         return output;
       }
-      output += segment;
+      output = `${tokens[index]}${output}`;
       width += nextWidth;
     }
+    if (from === 0) {
+      return output;
+    }
   }
-  return output;
 }
 
 // A cut can leave a style open; reset it so it cannot bleed into padding.
@@ -296,26 +317,105 @@ function closeAnsi(text) {
   return text.includes("\x1b[") && !text.endsWith("\x1b[0m") ? text + "\x1b[0m" : text;
 }
 
-// Mirrors takeStartCells: escape sequences stay whole and take no cells.
-function takeEndCells(value, maxWidth) {
-  let output = "";
-  let width = 0;
-  for (const part of String(value).split(ANSI_SPLIT_RE).reverse()) {
-    if (!part) continue;
-    if (ANSI_WHOLE_RE.test(part)) {
-      output = part + output;
-      continue;
+// Escape sequences, whole, and the graphemes between them, lazily.
+function* eachToken(text) {
+  let start = 0;
+  while (start < text.length) {
+    const escape = text.indexOf("\x1b", start);
+    const end = escape === -1 ? text.length : escape;
+    yield* eachGrapheme(text, start, end);
+    if (escape === -1) {
+      return;
     }
-    for (const segment of graphemes(part).reverse()) {
-      const nextWidth = segmentWidth(segment);
-      if (width + nextWidth > maxWidth) {
-        return output;
+    CSI_AT.lastIndex = escape;
+    start = CSI_AT.test(text) ? CSI_AT.lastIndex : escape + 1;
+    yield text.slice(escape, start);
+  }
+}
+
+// Graphemes of text[start, end), segmented one bounded window at a time. A
+// window only ends inside a cluster when no boundary exists nearby (one cluster
+// longer than a window); the pieces after such a cut are joined back on.
+function* eachGrapheme(text, start, end) {
+  let pending = "";
+  while (start < end) {
+    const cut = windowEnd(text, start, end);
+    const chunk = text.slice(start, cut);
+    let windowStart = true;
+    const segments = !segmenter || PRINTABLE_ASCII_RE.test(chunk)
+      ? chunk
+      : Array.from(segmenter.segment(chunk), ({ segment }) => segment);
+    for (const segment of segments) {
+      if (windowStart && pending && JOINS_PREVIOUS_RE.test(segment)) {
+        pending += segment;
+      } else {
+        if (pending) yield pending;
+        pending = segment;
       }
-      output = `${segment}${output}`;
-      width += nextWidth;
+      windowStart = false;
+    }
+    start = cut;
+  }
+  if (pending) yield pending;
+}
+
+function windowEnd(text, start, end) {
+  if (end - start <= SEGMENT_WINDOW_MAX) {
+    return end;
+  }
+  for (let index = start + SEGMENT_WINDOW; index < start + SEGMENT_WINDOW_MAX; index += 1) {
+    if (isGraphemeBoundary(text, index)) return index;
+  }
+  return nearbyBoundary(text, start + SEGMENT_WINDOW_MAX, start + SEGMENT_WINDOW);
+}
+
+// The first boundary at or after index that does not fall inside an escape sequence.
+function alignedStart(text, index) {
+  if (index <= 0) {
+    return 0;
+  }
+  const lookback = Math.max(0, index - 64);
+  const found = text.slice(lookback, index).lastIndexOf("\x1b");
+  if (found !== -1) {
+    const escape = lookback + found;
+    CSI_AT.lastIndex = escape;
+    if (CSI_AT.test(text) && CSI_AT.lastIndex > index) {
+      return CSI_AT.lastIndex;
     }
   }
-  return output;
+  const limit = Math.min(text.length, index + SEGMENT_WINDOW_MAX);
+  for (let at = index; at < limit; at += 1) {
+    if (text[at] === "\x1b" || isGraphemeBoundary(text, at)) return at;
+  }
+  return limit === text.length ? text.length : nearbyBoundary(text, limit, index);
+}
+
+// Unicode grapheme rules break here whatever surrounds it: after a line feed,
+// and between two base characters that never combine (printable ASCII, CJK
+// ideographs, Hangul syllables).
+function isGraphemeBoundary(text, index) {
+  const before = text.charCodeAt(index - 1);
+  return before === 0x0a || (isPlainBase(before) && isPlainBase(text.charCodeAt(index)));
+}
+
+function isPlainBase(code) {
+  return (code >= 0x20 && code <= 0x7e)
+    || (code >= 0x4e00 && code <= 0x9fff)
+    || (code >= 0xac00 && code <= 0xd7a3);
+}
+
+// For long runs without a guaranteed boundary: step back from index past
+// positions that would split a surrogate pair, an emoji sequence, a flag or a
+// combining sequence.
+function nearbyBoundary(text, index, floor) {
+  for (let at = index; at > floor; at -= 1) {
+    const before = text.charCodeAt(at - 1);
+    if ((before >= 0xd800 && before <= 0xdbff) || before === 0x200d || before === 0x0d) continue;
+    if (JOINS_PREVIOUS_RE.test(text.slice(at, at + 2))) continue;
+    if (REGIONAL_INDICATOR_RE.test(text.slice(at, at + 2)) && REGIONAL_INDICATOR_RE.test(text.slice(at - 2, at))) continue;
+    return at;
+  }
+  return index;
 }
 
 function segmentWidth(segment) {
