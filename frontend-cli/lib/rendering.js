@@ -512,16 +512,52 @@ export function delegatedWaitingLine(names = []) {
   return `${dim("─")} ${bold(label)}\n  ${dim("The results are delivered to this conversation when they settle. You can keep typing.")}`;
 }
 
-// A turn that runs on a delivered result: show what arrived, one page, wrapped.
-export function deliveryBlockText(text, width = 80) {
+// A turn that runs on a delivered result: show what arrived. A long delivery
+// shows its first lines until ctrl+o expands it; only then is all of it wrapped.
+const DELIVERY_PREVIEW_LINES = 12;
+
+export function deliveryBlockText(text, width = 80, { expanded = false } = {}) {
   const room = Math.max(8, width - 2);
   const content = String(text || "").replace(/\r\n?/g, "\n").trimEnd();
+  const heading = `${dim("─")} ${bold("Delivery")}`;
   if (isBriefMode()) {
     const summary = clipSingleLine(content, Math.max(8, width - 14));
-    return [summary ? `${dim("─")} ${bold("Delivery")} ${dim(`· ${summary}`)}` : `${dim("─")} ${bold("Delivery")}`];
+    return [summary ? `${heading} ${dim(`· ${summary}`)}` : heading];
   }
-  const lines = content ? wrapTextWithAnsi(content, room).map(line => "  " + line) : [];
-  return [`${dim("─")} ${bold("Delivery")}`, ...lines];
+  if (!content) {
+    return [heading];
+  }
+  const { lines, hidden } = expanded
+    ? { lines: wrapTextWithAnsi(content, room), hidden: 0 }
+    : leadingWrappedLines(content, room, DELIVERY_PREVIEW_LINES);
+  const footer = hidden ? [dim(`  … (${hidden} more lines · ctrl+o to expand)`)] : [];
+  return [heading, ...lines.map(line => "  " + line), ...footer];
+}
+
+// The first count wrapped lines of text, and how many of its lines are not
+// shown in full. Reads only the lines it shows, plus a count of the rest.
+function leadingWrappedLines(text, width, count) {
+  const lines = [];
+  let start = 0;
+  while (start <= text.length && lines.length < count) {
+    const newline = text.indexOf("\n", start);
+    const end = newline === -1 ? text.length : newline;
+    // A line longer than the preview can show is wrapped only as far as it is shown.
+    const shown = text.slice(start, Math.min(end, start + width * count * 2));
+    const wrapped = wrapTextWithAnsi(shown, width);
+    const room = count - lines.length;
+    lines.push(...wrapped.slice(0, room));
+    if (wrapped.length > room || shown.length < end - start) {
+      break;
+    }
+    start = end + 1;
+  }
+  let hidden = 0;
+  for (let at = start; at <= text.length; hidden += 1) {
+    const newline = text.indexOf("\n", at);
+    at = newline === -1 ? text.length + 1 : newline + 1;
+  }
+  return { lines, hidden };
 }
 
 export function promptHintLine(state = {}) {
@@ -574,7 +610,7 @@ export function helpText(commands = []) {
     helpRow("home / end", "line edges", "del / backspace", "edit text"),
     helpRow("ctrl+c", "stop · clear · leave", "?", "show shortcuts"),
     helpRow("ctrl+b", "task monitor", "esc", "close monitor"),
-    helpRow("ctrl+o", "toggle tool detail", "← empty", "agents"),
+    helpRow("ctrl+o", "toggle details", "← empty", "agents"),
   ];
   const deckItems = Array.isArray(commands)
     ? commands.filter((item) => item && typeof item === "object")

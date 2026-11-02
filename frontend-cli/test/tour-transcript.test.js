@@ -77,7 +77,7 @@ test("tour matches live turn events line for line, including every blank line", 
   await live.emit({ type: "turn_completed", duration_ms: 3400 });
   apply(stage, { kind: "turn-done", durationMs: 3400, completed: 2, failed: 0 });
   compare("completion separator");
-  live.output.setToolsExpanded(true);
+  live.output.setDetailsExpanded(true);
   compare("expanded output", true);
 
   const lines = plain(live.transcript.render(76));

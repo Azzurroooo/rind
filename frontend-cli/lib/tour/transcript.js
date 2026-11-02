@@ -55,7 +55,7 @@ export function renderTourTranscript(rind, width, expanded = false) {
         break;
     }
   }
-  output.setToolsExpanded(expanded);
+  output.setDetailsExpanded(expanded);
   return transcript.render(width);
 }
 

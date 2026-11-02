@@ -318,8 +318,7 @@ export function createCliInputActions({
     }
     disarmLeave?.();
     if (event.ctrl && !event.alt && !event.shift && event.name === "o") {
-      state.display.toolDetailsExpanded = !state.display.toolDetailsExpanded;
-      output.setToolsExpanded?.(state.display.toolDetailsExpanded);
+      output.setDetailsExpanded?.(!state.display.detailsExpanded);
       return;
     }
     if (event.ctrl && !event.alt && !event.shift && event.name === "t") {

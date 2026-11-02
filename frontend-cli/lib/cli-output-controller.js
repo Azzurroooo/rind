@@ -30,6 +30,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   let blockCount = 0;
   const toolBlocks = new Map();
   const toolGroups = new Set();
+  const deliveryBlocks = new Set();
   const legacyBegunTools = new Set();
   let questionBlock = null;
   let startupBlock = null;
@@ -169,7 +170,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         animate: animateTools,
         now: () => frameTime,
       });
-      activeToolGroup.setExpanded(Boolean(state.display?.toolDetailsExpanded));
+      activeToolGroup.setExpanded(detailsExpanded());
       toolGroups.add(activeToolGroup);
       transcript.addChild(activeToolGroup);
       blockCount += 1;
@@ -306,15 +307,17 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     }
     settleToolGroup();
     if (!terminalUi) {
-      process.stdout.write(outputBlockText(deliveryBlockText(value, 1000).join("\n"), state.display.outputStarted));
+      process.stdout.write(outputBlockText(deliveryBlockText(value, 1000, { expanded: true }).join("\n"), state.display.outputStarted));
       state.display.outputStarted = true;
       return;
     }
     const leading = blockCount > 0;
-    appendBlock(new DynamicBlock((width) => {
-      const lines = deliveryBlockText(value, width);
+    const block = new DynamicBlock((width) => {
+      const lines = deliveryBlockText(value, width, { expanded: detailsExpanded() });
       return leading ? ["", ...lines] : lines;
-    }));
+    });
+    deliveryBlocks.add(block);
+    appendBlock(block);
   }
 
   function writeError(text) {
@@ -495,6 +498,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     transcript.clear();
     toolBlocks.clear();
     toolGroups.clear();
+    deliveryBlocks.clear();
     runningTools.clear();
     questionBlock = null;
     startupBlock = null;
@@ -502,12 +506,21 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     blockCount = 0;
   }
 
-  function setToolsExpanded(expanded) {
+  function detailsExpanded() {
+    return Boolean(state.display?.detailsExpanded);
+  }
+
+  // ctrl+o: tool groups and long deliveries open or fold together.
+  function setDetailsExpanded(expanded) {
+    state.display.detailsExpanded = Boolean(expanded);
     if (!terminalUi) {
       return;
     }
     for (const group of toolGroups) {
       group.setExpanded(expanded);
+    }
+    for (const block of deliveryBlocks) {
+      block.invalidate();
     }
     transcript.changed();
     redraw();
@@ -645,7 +658,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     settleTools,
     beginQuestion,
     finishQuestion,
-    setToolsExpanded,
+    setDetailsExpanded,
     setTurnContext,
     renderHistory,
     showStartup,
