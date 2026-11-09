@@ -33,6 +33,6 @@ npm --prefix desktop run dev
 
 Enable sharing in Desktop's Remote access, then scan the code from the same trusted network or use the sign-in link. Remote access is off by default at every startup, and Generate new code revokes existing connections and unused tickets. External network access relies on an existing VPN or an HTTPS reverse proxy; Desktop does not create a public tunnel. Closing the browser disconnects only that client; only closing Desktop ends the remote entry it hosts.
 
-Source: [runtime management](../../../desktop/src/main/runtime.ts), [main IPC](../../../desktop/src/main/index.ts), [preload allowlist](../../../desktop/src/preload/index.ts), [remote Gateway](../../../desktop/src/main/gateway/server.ts), [build scripts](../../../desktop/package.json). Verification: [runtime lifecycle](../../../desktop/scripts/runtime-lifecycle.test.mjs), [preload](../../../desktop/scripts/preload-runtime.test.mjs), [Gateway](../../../desktop/scripts/gateway.test.mjs).
+Source: [runtime management](../../../desktop/src/main/runtime.ts), [main IPC](../../../desktop/src/main/index.ts), [preload allowlist](../../../desktop/src/preload/index.ts), [remote Gateway](../../../rind-runtime-client/remote/server.js), [build scripts](../../../desktop/package.json). Verification: [runtime lifecycle](../../../desktop/scripts/runtime-lifecycle.test.mjs), [preload](../../../desktop/scripts/preload-runtime.test.mjs), [Gateway](../../../desktop/scripts/gateway.test.mjs).
 
 [Back to the series map](../README.md)

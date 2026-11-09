@@ -33,6 +33,6 @@ build 会先构建 Web；package 还要求 desktop/resources/runtime 中有已�
 
 在 Desktop 的 Remote access 中启用共享，再从同一可信网络扫码或使用登录链接。每次启动默认关闭远程访问；Generate new code 会撤销已有连接和未使用票据。外网接入依赖已有 VPN 或 HTTPS 反向代理，Desktop 不创建公网隧道。关闭浏览器只断开该客户端；关闭 Desktop 才结束它托管的远程入口。
 
-源码：[runtime 管理](../../../desktop/src/main/runtime.ts)、[main IPC](../../../desktop/src/main/index.ts)、[preload allowlist](../../../desktop/src/preload/index.ts)、[远程 Gateway](../../../desktop/src/main/gateway/server.ts)、[构建脚本](../../../desktop/package.json)。验证：[runtime 生命周期](../../../desktop/scripts/runtime-lifecycle.test.mjs)、[preload](../../../desktop/scripts/preload-runtime.test.mjs)、[Gateway](../../../desktop/scripts/gateway.test.mjs)。
+源码：[runtime 管理](../../../desktop/src/main/runtime.ts)、[main IPC](../../../desktop/src/main/index.ts)、[preload allowlist](../../../desktop/src/preload/index.ts)、[远程 Gateway](../../../rind-runtime-client/remote/server.js)、[构建脚本](../../../desktop/package.json)。验证：[runtime 生命周期](../../../desktop/scripts/runtime-lifecycle.test.mjs)、[preload](../../../desktop/scripts/preload-runtime.test.mjs)、[Gateway](../../../desktop/scripts/gateway.test.mjs)。
 
 [返回系列地图](../README.zh-CN.md)

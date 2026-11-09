@@ -188,3 +188,50 @@ def test_python_module_dependencies_have_no_cycles() -> None:
 
     for name in sorted(modules):
         visit(name)
+
+
+def test_internals_docs_bilingual_pairs_and_relative_links() -> None:
+    import re
+
+    internals_root = PROJECT_ROOT / "docs" / "internals"
+    assert internals_root.is_dir(), f"Internals docs directory not found: {internals_root}"
+
+    all_md_files = list(internals_root.rglob("*.md"))
+    assert all_md_files, "No markdown files found under docs/internals"
+
+    # 1. Verify bilingual pairs
+    missing_zh = []
+    missing_en = []
+    for md_path in all_md_files:
+        if md_path.name.endswith(".zh-CN.md"):
+            en_name = md_path.name.removesuffix(".zh-CN.md") + ".md"
+            en_path = md_path.with_name(en_name)
+            if not en_path.exists():
+                missing_en.append(str(md_path.relative_to(PROJECT_ROOT)))
+        else:
+            zh_name = md_path.stem + ".zh-CN.md"
+            zh_path = md_path.with_name(zh_name)
+            if not zh_path.exists():
+                missing_zh.append(str(md_path.relative_to(PROJECT_ROOT)))
+
+    assert not missing_zh, "Missing matching .zh-CN.md files for:\n" + "\n".join(sorted(missing_zh))
+    assert not missing_en, "Missing matching English .md files for:\n" + "\n".join(sorted(missing_en))
+
+    # 2. Verify relative Markdown links
+    link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+    broken_links = []
+    for md_path in all_md_files:
+        content = md_path.read_text(encoding="utf-8")
+        for match in link_pattern.finditer(content):
+            target = match.group(2).strip()
+            if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            # Strip anchor suffix if present
+            file_target = target.split("#", 1)[0]
+            if not file_target:
+                continue
+            resolved = (md_path.parent / file_target).resolve()
+            if not resolved.exists():
+                broken_links.append(f"{md_path.relative_to(PROJECT_ROOT)}: [{match.group(1)}]({target}) -> {resolved}")
+
+    assert not broken_links, "Broken relative links found in docs/internals:\n" + "\n".join(sorted(broken_links))
