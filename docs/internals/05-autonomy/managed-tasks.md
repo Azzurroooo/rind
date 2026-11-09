@@ -27,7 +27,7 @@ stateDiagram-v2
 
 notify=on_exit is for commands whose results still need handling after they end; notify=manual suits services and watchers, which must check readiness themselves and cannot treat a still-running process as proof that the service is available. The UI's background_wait counts only the on_exit tasks the current Worker has committed and handed to the background, and is bounded by interruption, Goal, and request scope; it is not a count of "all background processes".
 
-ProcessSupervisor keeps at most 8 managed-process records by default; once a process ends, eligible records are retired, while the durable facts remain in the journal. Task monitoring runs separately from the model turn, so output and the terminal state can still arrive while the model is idle.
+ProcessSupervisor keeps at most 64 managed-process records per session by default; once a process ends, eligible records are retired, while the durable facts remain in the journal. Task monitoring runs separately from the model turn, so output and the terminal state can still arrive while the model is idle.
 
 Code entry points: [supervisor](../../../agent/infrastructure/tools/shell/supervisor.py), [task state](../../../agent/domain/tasks.py), [background_wait](../../../agent/runtime/server/execution.py). Verification: [Shell tasks](../../../test/test_shell_tasks.py), [background wait](../../../test/test_bash_background_wait.py).
 

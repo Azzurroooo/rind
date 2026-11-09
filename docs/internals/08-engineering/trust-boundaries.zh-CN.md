@@ -31,6 +31,6 @@ Python Web server 支持 Bearer、token/ticket 等认证路径，Origin 检查�
 
 供应商凭证存于本机 auth.json，界面拿到的是公开设置和认证状态；原始 LLM trace 会保留普通提示与模型文本，仅对图片数据做特殊省略。诊断材料不能一概视为已经脱敏。
 
-源码：[Python Web 认证](../../../agent/runtime/server/websocket.py)、[Desktop Gateway](../../../desktop/src/main/gateway/server.ts)、[凭证](../../../agent/infrastructure/credentials.py)、[任务通知](../../../agent/application/task_notifications.py)。验证：[Web 运行时](../../../test/test_web_runtime.py)、[网关安全](../../../test/test_gateway_security.py)。细节：[文件工具](../04-tools/file-tools.zh-CN.md)、[Team](../05-autonomy/teams.zh-CN.md)、[观测](observability.zh-CN.md)。
+源码：[Python Web 认证](../../../agent/runtime/server/websocket.py)、[Desktop Gateway](../../../rind-runtime-client/remote/server.js)、[凭证](../../../agent/infrastructure/credentials.py)、[任务通知](../../../agent/application/task_notifications.py)。验证：[Web 运行时](../../../test/test_web_runtime.py)、[网关安全](../../../test/test_gateway_security.py)。细节：[文件工具](../04-tools/file-tools.zh-CN.md)、[Team](../05-autonomy/teams.zh-CN.md)、[观测](observability.zh-CN.md)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -27,7 +27,7 @@ stateDiagram-v2
 
 notify=on_exit 用于结束后还要处理结果的命令；notify=manual 适合服务或 watcher，需自行检查就绪，不能靠进程还活着证明服务可用。UI 的 background_wait 只统计当前 Worker 已提交并交给后台的 on_exit 任务，且受中断、Goal 和请求作用域约束；它不是“所有后台进程个数”。
 
-默认 ProcessSupervisor 最多保留 8 个受管理的进程记录，结束后符合条件的记录会退休，持久事实仍在日志中。任务监视与模型回合分开，因此模型空闲时仍能收到输出和终态。
+默认 ProcessSupervisor 每个会话最多保留 64 个受管理的进程记录，结束后符合条件的记录会退休，持久事实仍在日志中。任务监视与模型回合分开，因此模型空闲时仍能收到输出和终态。
 
 代码入口：[监督器](../../../agent/infrastructure/tools/shell/supervisor.py)、[任务状态](../../../agent/domain/tasks.py)、[background_wait](../../../agent/runtime/server/execution.py)。验证：[Shell 任务](../../../test/test_shell_tasks.py)、[后台等待](../../../test/test_bash_background_wait.py)。
 

@@ -31,6 +31,6 @@ The file rewrite queue coordinates only the current Worker's managed writes. A p
 
 Provider credentials live in the local auth.json, and the interface receives only public settings and authentication status. The raw LLM trace keeps ordinary prompts and model text, applying a special omission only to image data. Diagnostic material must not be assumed to be already redacted.
 
-Source code: [Python Web authentication](../../../agent/runtime/server/websocket.py), [Desktop Gateway](../../../desktop/src/main/gateway/server.ts), [credentials](../../../agent/infrastructure/credentials.py), [task notifications](../../../agent/application/task_notifications.py). Verification: [Web runtime](../../../test/test_web_runtime.py), [gateway security](../../../test/test_gateway_security.py). Details: [file tools](../04-tools/file-tools.md), [Team](../05-autonomy/teams.md), [observability](observability.md).
+Source code: [Python Web authentication](../../../agent/runtime/server/websocket.py), [Desktop Gateway](../../../rind-runtime-client/remote/server.js), [credentials](../../../agent/infrastructure/credentials.py), [task notifications](../../../agent/application/task_notifications.py). Verification: [Web runtime](../../../test/test_web_runtime.py), [gateway security](../../../test/test_gateway_security.py). Details: [file tools](../04-tools/file-tools.md), [Team](../05-autonomy/teams.md), [observability](observability.md).
 
 [Back to the series map](../README.md)
