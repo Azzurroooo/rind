@@ -1,0 +1,260 @@
+name: Jules Autopilot (CI Doctor & Scheduled Audit)
+
+on:
+  workflow_run:
+    workflows:
+      - "Verify agents management and CLI"
+      - "Verify web and desktop"
+      - "Verify mobile app"
+      - "Verify frozen Python worker"
+    types: [completed]
+    branches: [main]
+  schedule:
+    # Runs daily at 02:00 UTC (10:00 CST)
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: jules-autopilot-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  ci-failure-doctor:
+    name: Dispatch Jules on CI failure
+    if: >-
+      github.event_name == 'workflow_run' &&
+      (github.event.workflow_run.conclusion == 'failure' ||
+       github.event.workflow_run.conclusion == 'timed_out')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.JULES_PAT || github.token }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract failure logs and create surgical Jules issue
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TITLE="fix(ci): repair failing workflow '${WORKFLOW_NAME}' (${HEAD_SHA:0:7})"
+          EXISTING=$(gh issue list --repo "$REPO" --label "jules" --state open --search "repair failing workflow '${WORKFLOW_NAME}'" --json number --jq 'length')
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "An open Jules issue already exists for '${WORKFLOW_NAME}'. Skipping duplicate creation."
+            exit 0
+          fi
+
+          LOG_SNIPPET=$(gh run view "$RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -n 120 || true)
+          if [ -z "$LOG_SNIPPET" ]; then
+            JOB_ID=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs" --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | .id' | head -n 1)
+            if [ -n "$JOB_ID" ]; then
+              LOG_SNIPPET=$(gh run view --job="$JOB_ID" --repo "$REPO" --log 2>/dev/null | grep -E "not ok|error:|Error:|FAILED|ModuleNotFoundError|AssertionError|timed out" -C 4 | tail -n 120 || true)
+            fi
+          fi
+
+          COMMIT_INFO=$(git log -1 --stat "$HEAD_SHA" || true)
+
+          BODY=$(cat <<EOF
+          ## Objective
+
+          The CI workflow **${WORKFLOW_NAME}** ended with status \`${CONCLUSION}\` on \`main\` at commit \`${HEAD_SHA}\`.
+          Diagnose and fix the root cause with minimal, surgical changes following \`AGENTS.md\`.
+
+          - **Workflow Run**: ${RUN_URL}
+          - **Commit**: \`${HEAD_SHA}\`
+
+          ---
+
+          ## Environment Setup
+
+          \`\`\`bash
+          python -m pip install -r requirements.txt
+          npm --prefix agent-management ci && npm --prefix agent-management run build
+          npm --prefix frontend-cli ci
+          \`\`\`
+
+          ---
+
+          ## Recent Commit Context
+
+          \`\`\`text
+          ${COMMIT_INFO}
+          \`\`\`
+
+          ## Extracted Failure Log
+
+          \`\`\`text
+          ${LOG_SNIPPET:-No failed step log captured; inspect the workflow run and reproduce locally.}
+          \`\`\`
+
+          ---
+
+          ## Constraints & Verification
+
+          1. Follow \`AGENTS.md\`: prefer the simplest implementation, avoid speculative abstractions, and only modify files directly required to fix the failure.
+          2. Run the corresponding deterministic regression suite (\`python -m pytest test/ -q\`, \`npm --prefix agent-management test\`, \`npm --prefix frontend-cli test\`) and verify \`0\` failures before opening the PR.
+          EOF
+          )
+
+          gh issue create \
+            --repo "$REPO" \
+            --label "jules" \
+            --label "bug" \
+            --title "$TITLE" \
+            --body "$BODY"
+
+  scheduled-audit:
+    name: Gatekeeper audit & conditional Jules dispatch
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.JULES_PAT || github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run deterministic gatekeeper checks
+        shell: python
+        run: |
+          import ast
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          repo = os.environ["REPO"]
+          findings: list[str] = []
+          files_to_fix: list[str] = []
+
+          # 1. Check for undeclared direct third-party imports in agent/ and gateway/
+          req_text = Path("requirements-runtime.txt").read_text(encoding="utf-8")
+          declared_pkgs = {
+              re.split(r"[><=!~\s]", line.strip(), maxsplit=1)[0].lower()
+              for line in req_text.splitlines()
+              if line.strip() and not line.strip().startswith(("#", "-"))
+          }
+          import_to_pkg = {
+              "pil": "pillow",
+              "bs4": "beautifulsoup4",
+              "yaml": "pyyaml",
+              "google": "google-genai",
+              "curl_cffi": "curl_cffi",
+          }
+          stdlib = sys.stdlib_module_names
+          local_pkgs = {"agent", "gateway", "main", "test"}
+          missing_deps: dict[str, list[str]] = {}
+
+          for root_name in ("agent", "gateway"):
+              for py_path in sorted(Path(root_name).rglob("*.py")):
+                  tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=str(py_path))
+                  for node in ast.walk(tree):
+                      names: list[str] = []
+                      if isinstance(node, ast.Import):
+                          names = [alias.name.split(".")[0] for alias in node.names]
+                      elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                          names = [node.module.split(".")[0]]
+                      for top in names:
+                          if top in stdlib or top in local_pkgs:
+                              continue
+                          pkg_name = import_to_pkg.get(top.lower(), top.lower().replace("_", "-"))
+                          if pkg_name not in declared_pkgs and top.lower() not in declared_pkgs:
+                              missing_deps.setdefault(top, []).append(py_path.as_posix())
+
+          if missing_deps:
+              lines = [
+                  f"- `{mod}` imported in `{', '.join(sorted(set(paths))[:3])}` is not explicitly declared in `requirements-runtime.txt`."
+                  for mod, paths in sorted(missing_deps.items())
+              ]
+              findings.append(
+                  "### 1. Undeclared direct runtime dependencies in `requirements-runtime.txt`\n"
+                  "Upstream SDK updates (e.g. `openai`/`anthropic`/`google-genai` migrating from `httpx` to `httpx2`) can drop transitive dependencies and break runtime startup in clean CI environments:\n"
+                  + "\n".join(lines)
+                  + "\n\n**Action required**:\n"
+                  "- Explicitly declare the missing runtime packages (`httpx>=0.27.0`, `cryptography>=42.0.0`, etc.) in `requirements-runtime.txt`.\n"
+                  "- Add a structural guard test `test_runtime_third_party_imports_are_declared_in_requirements()` in `test/test_agent_architecture.py` so any future direct third-party import in `agent/` or `gateway/` must be present in `requirements-runtime.txt`."
+              )
+              files_to_fix.extend(["requirements-runtime.txt", "test/test_agent_architecture.py"])
+
+          # 2. Run architecture & documentation guard tests
+          arch_run = subprocess.run(
+              [sys.executable, "-m", "pytest", "test/test_agent_architecture.py", "test/test_rind_docs.py", "-q"],
+              capture_output=True,
+              text=True,
+          )
+          if arch_run.returncode != 0:
+              output = (arch_run.stdout + "\n" + arch_run.stderr).strip()[-2000:]
+              findings.append(
+                  "### 2. Architecture or documentation guard test failure\n"
+                  f"```text\n{output}\n```\n"
+                  "**Action required**: Fix the reported broken links, missing bilingual `.zh-CN.md` pairs, or architecture violations."
+              )
+
+          if not findings:
+              print("All gatekeeper checks passed with 0 issues. Exiting cleanly without waking Jules.")
+              sys.exit(0)
+
+          # Check if an open scheduled-audit Jules issue already exists
+          existing_proc = subprocess.run(
+              ["gh", "issue", "list", "--repo", repo, "--label", "jules", "--state", "open", "--json", "title"],
+              capture_output=True,
+              text=True,
+              check=True,
+          )
+          open_issues = json.loads(existing_proc.stdout or "[]")
+          if any("[Autopilot Audit]" in item.get("title", "") for item in open_issues):
+              print("An open [Autopilot Audit] Jules issue already exists. Skipping duplicate creation.")
+              sys.exit(0)
+
+          scope_note = (
+              f"Only modify: {', '.join(f'`{f}`' for f in dict.fromkeys(files_to_fix))}."
+              if files_to_fix
+              else "Only modify the files directly implicated by the findings below."
+          )
+          body = "\n\n".join([
+              "## Objective",
+              "The scheduled Gatekeeper Audit detected actionable dependency/architecture drift on `main`. Fix the items below with minimal, surgical changes.",
+              "---",
+              "## Environment Setup",
+              "```bash\npython -m pip install -r requirements.txt\n```",
+              "---",
+              "## Scope & Findings",
+              f"> **Constraint**: {scope_note} Follow `AGENTS.md`.",
+              *findings,
+              "---",
+              "## Verification (Must Pass Before Opening PR)",
+              "```bash\npython -m pytest test/test_agent_architecture.py test/test_rind_docs.py -q\n```",
+          ])
+
+          title = "fix(deps): [Autopilot Audit] declare direct runtime dependencies and add architecture guard"
+          created = subprocess.run(
+              [
+                  "gh", "issue", "create",
+                  "--repo", repo,
+                  "--label", "jules",
+                  "--title", title,
+                  "--body", body,
+              ],
+              capture_output=True,
+              text=True,
+              check=True,
+          )
+          print("Created Jules issue:", created.stdout.strip())
