@@ -202,7 +202,7 @@ export function providerError(
     if (exc.code !== "context_length_exceeded" && isContextOverflow(exc.message)) {
       return new ProviderError(exc.message, {
         status: "rejected",
-        errorType: exc.error_type,
+        errorType: exc.errorType,
         code: "context_length_exceeded",
       });
     }

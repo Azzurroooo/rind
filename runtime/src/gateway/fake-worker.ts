@@ -1,3 +1,4 @@
+import { type Deferred, createDeferred } from "../domain/cancellation.js";
 import type { Transport } from "./transports.js";
 
 export const WORKER_CAPABILITY = "rind/session-subscriptions";
@@ -17,41 +18,6 @@ export const TERMINAL_EVENT_TYPES: ReadonlySet<string> = new Set([
   "turn_failed",
   "turn_cancelled",
 ]);
-
-interface Deferred<T> {
-  readonly promise: Promise<T>;
-  readonly done: boolean;
-  resolve(value: T): void;
-  reject(err: Error): void;
-}
-
-function createDeferred<T>(): Deferred<T> {
-  let done = false;
-  let resolveFn!: (value: T) => void;
-  let rejectFn!: (err: Error) => void;
-  const promise = new Promise<T>((resolve, reject) => {
-    resolveFn = resolve;
-    rejectFn = reject;
-  });
-  return {
-    promise,
-    get done() {
-      return done;
-    },
-    resolve(value: T) {
-      if (!done) {
-        done = true;
-        resolveFn(value);
-      }
-    },
-    reject(err: Error) {
-      if (!done) {
-        done = true;
-        rejectFn(err);
-      }
-    },
-  };
-}
 
 export class FakeSession {
   readonly session_id: string;
@@ -390,34 +356,4 @@ export class MemoryTransport implements Transport {
     this.connection?.close();
     this.connection = null;
   }
-}
-
-export async function serveStdio(worker: FakeWorker = new FakeWorker()): Promise<void> {
-  const connection = worker.openConnection();
-  let buffer = "";
-  await new Promise<void>(resolve => {
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk: string) => {
-      buffer += chunk;
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const req: unknown = JSON.parse(line);
-          if (req && typeof req === "object" && !Array.isArray(req)) {
-            void worker.dispatch(connection, req as Record<string, unknown>).then(() => {
-              for (const payload of connection.drain()) {
-                process.stdout.write(`${JSON.stringify(payload)}\n`);
-              }
-            });
-          }
-        } catch {
-          // ignore malformed line
-        }
-      }
-    });
-    process.stdin.on("end", () => resolve());
-    process.stdin.resume();
-  });
 }

@@ -1,15 +1,21 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { FailureStatus, ToolEventStatus } from "./errors.js";
 
-export function makeEventId(): string {
-  return randomUUID().replace(/-/g, "");
+const ID_POOL_BYTES = 16 * 64;
+let idPool = Buffer.alloc(0);
+let idPoolOffset = ID_POOL_BYTES;
+
+function makeEventId(): string {
+  if (idPoolOffset + 16 > idPool.length) {
+    idPool = randomBytes(ID_POOL_BYTES);
+    idPoolOffset = 0;
+  }
+  const id = idPool.toString("hex", idPoolOffset, idPoolOffset + 16);
+  idPoolOffset += 16;
+  return id;
 }
 
-export function nowUnixString(): string {
-  return String(Date.now() / 1000);
-}
-
-export interface SessionEventContext {
+interface SessionEventContext {
   session_id?: string | null;
   sessionId?: string | null;
   now_iso?: () => string;
@@ -22,12 +28,14 @@ export function eventMeta(session?: SessionEventContext | null, turnId = ""): {
   turn_id: string;
 } {
   let ts = "";
-  try {
-    const fn = session?.now_iso || session?.nowIso;
-    if (typeof fn === "function") ts = fn.call(session);
-  } catch {}
-  if (!ts) ts = nowUnixString();
-  const sessionId = String(session?.session_id || session?.sessionId || "");
+  const fn = session?.nowIso ?? session?.now_iso;
+  if (typeof fn === "function") {
+    try {
+      ts = fn.call(session);
+    } catch {}
+  }
+  if (!ts) ts = new Date().toISOString();
+  const sessionId = String(session?.sessionId || session?.session_id || "");
   return {
     ts,
     session_id: sessionId,
@@ -44,17 +52,17 @@ export interface RuntimeEventBase {
   [key: string]: unknown;
 }
 
-export type TypedRuntimeEvent<K extends string, T extends Record<string, unknown>> =
+type TypedRuntimeEvent<K extends string, T extends Record<string, unknown>> =
   RuntimeEventBase & { type: K } & T;
 
-export function createEvent<K extends string, T extends Record<string, unknown>>(
+function createEvent<K extends string, T extends Record<string, unknown>>(
   type: K,
   fields: T,
   meta?: { ts?: string; event_id?: string; session_id?: string | null; turn_id?: string | null },
 ): TypedRuntimeEvent<K, T> {
   return {
     type,
-    ts: meta?.ts || (typeof fields.ts === "string" && fields.ts ? fields.ts : nowUnixString()),
+    ts: meta?.ts || (typeof fields.ts === "string" && fields.ts ? fields.ts : new Date().toISOString()),
     event_id: meta?.event_id || (typeof fields.event_id === "string" && fields.event_id ? fields.event_id : makeEventId()),
     session_id: meta?.session_id ?? (typeof fields.session_id === "string" ? fields.session_id : ""),
     turn_id: meta?.turn_id ?? (typeof fields.turn_id === "string" ? fields.turn_id : ""),

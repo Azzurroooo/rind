@@ -1,3 +1,4 @@
+import { AsyncMutex } from "../domain/cancellation.js";
 import type { ReplyPosition } from "./types.js";
 
 export const QUEUED_EMOJI = "👀";
@@ -45,23 +46,13 @@ export function toolEmoji(name: string): string {
   return DEFAULT_TOOL_EMOJI;
 }
 
-class AsyncSlotLock {
-  private chain: Promise<void> = Promise.resolve();
-
-  run(fn: () => Promise<void>): Promise<void> {
-    const next = this.chain.then(fn, fn);
-    this.chain = next.catch(() => {});
-    return next;
-  }
-}
-
 class ReactionSlot {
   readonly position: ReplyPosition;
   state: SlotState = "idle";
   emoji = "";
   lastProgress: number;
   paused = false;
-  readonly lock = new AsyncSlotLock();
+  readonly lock = new AsyncMutex();
   debounceTimer: ReturnType<typeof setTimeout> | null = null;
   stallTimer: ReturnType<typeof setInterval> | null = null;
   holdTimer: ReturnType<typeof setTimeout> | null = null;
@@ -308,7 +299,7 @@ export class ReactionController {
     if (emoji === slot.emoji) {
       return;
     }
-    await slot.lock.run(async () => {
+    await slot.lock.runExclusive(async () => {
       try {
         await this.react(slot.position, emoji);
       } catch {

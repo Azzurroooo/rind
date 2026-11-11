@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ModelSelection } from "../domain/models.js";
-import { __version__ } from "../version.js";
+import { RIND_VERSION } from "../version.js";
 import { resolveRindHome } from "./paths.js";
 
 export const DEFAULT_PROVIDER = "openai";
@@ -81,7 +81,7 @@ export function buildDefaultUserAgent(): string {
   const osName = sanitizeHeaderSegment(osType || "unknown");
   const osVersion = sanitizeHeaderSegment(os.release() || "unknown");
   const machine = sanitizeHeaderSegment((os.machine ? os.machine() : process.arch) || "unknown");
-  const version = sanitizeUserAgentToken(__version__) || "unknown";
+  const version = sanitizeUserAgentToken(RIND_VERSION) || "unknown";
   const terminal = terminalUserAgentToken();
   return `rind/${version} (${osName} ${osVersion}; ${machine}) ${terminal}`;
 }

@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { CancellationToken } from "../../domain/cancellation.js";
+import { AsyncMutex, type CancellationToken } from "../../domain/cancellation.js";
 import {
   classifyToolError,
   classifyToolPayload,
   COMPACT_CONTINUATION_USER_CONTENT,
   COMPACT_HANDOFF_REASONING_CONTENT,
+  isCompactBoundaryMessage,
   looksLikeToolPayload,
   normalizeGoal,
   normalizeGoalObjective,
@@ -575,16 +576,6 @@ export function isInternalMessage(message: Record<string, unknown>): boolean {
   );
 }
 
-export function isCompactBoundaryMessage(message: Record<string, unknown>): boolean {
-  const meta = message.meta;
-  return Boolean(
-    meta &&
-      typeof meta === "object" &&
-      !Array.isArray(meta) &&
-      (meta as Record<string, unknown>).kind === "compact_boundary",
-  );
-}
-
 function hasValidHandoff(record: Record<string, unknown>): boolean {
   const handoff = record.handoff_message;
   if (!handoff || typeof handoff !== "object" || Array.isArray(handoff)) {
@@ -1035,25 +1026,6 @@ function normalizePathCase(p: string): string {
   return process.platform === "win32" ? p.toLowerCase() : p;
 }
 
-class AsyncMutex {
-  private chain: Promise<void> = Promise.resolve();
-
-  async run<T>(fn: () => Promise<T> | T): Promise<T> {
-    let release!: () => void;
-    const next = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    const prev = this.chain;
-    this.chain = prev.then(() => next);
-    await prev;
-    try {
-      return await fn();
-    } finally {
-      release();
-    }
-  }
-}
-
 export interface JsonlSessionStoreOptions {
   sessionDir?: string | null;
   sessionId?: string | null;
@@ -1134,7 +1106,7 @@ export class JsonlSessionStore {
   }
 
   async get_metadata(): Promise<Record<string, unknown>> {
-    return this._writeLock.run(() => structuredClone(this._sessionMeta ?? {}));
+    return this._writeLock.runExclusive(() => structuredClone(this._sessionMeta ?? {}));
   }
 
   get model(): string | null {
@@ -1812,7 +1784,7 @@ export class JsonlSessionStore {
 
   async initialize(options: { persistSystemPrompt?: boolean } = {}): Promise<void> {
     const persistSystemPrompt = options.persistSystemPrompt ?? true;
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       const messages = this._ensureSessionSync();
       if (persistSystemPrompt) {
         this._initializeHistorySync(messages);
@@ -1821,7 +1793,7 @@ export class JsonlSessionStore {
   }
 
   async discard_if_empty(): Promise<void> {
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       this._discardIfEmptySync();
     });
   }
@@ -1839,7 +1811,7 @@ export class JsonlSessionStore {
   }
 
   async switch_session(sessionId: string): Promise<Record<string, unknown>> {
-    return this._writeLock.run(() => {
+    return this._writeLock.runExclusive(() => {
       const messages = this._switchSessionSync(sessionId);
       this._initializeHistorySync(messages);
       return this._sessionInfoSync();
@@ -1850,7 +1822,7 @@ export class JsonlSessionStore {
     const clean = options.sessionId !== undefined && options.sessionId !== null
       ? validateSessionId(options.sessionId)
       : null;
-    return this._writeLock.run(() => {
+    return this._writeLock.runExclusive(() => {
       this._setupPaths();
       if (clean !== null && fs.existsSync(this._getSessionPaths(clean).base)) {
         throw new Error(`Session already exists: ${clean}`);
@@ -1865,7 +1837,7 @@ export class JsonlSessionStore {
     if (!clean) {
       throw new Error("Model name is required.");
     }
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       this._model = clean;
       if (!this._sessionMeta || !this._sessionPaths.meta) return;
       this._sessionMeta.model = clean;
@@ -1875,7 +1847,7 @@ export class JsonlSessionStore {
 
   async set_name(name: string | null): Promise<{ name: string | null; title: string }> {
     const clean = name !== null && name !== undefined ? normalizeName(name) : null;
-    return this._writeLock.run(() => {
+    return this._writeLock.runExclusive(() => {
       const meta = this._sessionMeta ?? {};
       if (clean === null) {
         delete meta.name;
@@ -1898,7 +1870,7 @@ export class JsonlSessionStore {
       throw new Error("Provider and model are required.");
     }
     const source = options.source ?? "session";
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       this._provider = cleanProvider;
       this._model = cleanModel;
       this._selectionSource = { ...this._selectionSource, model: source };
@@ -1917,7 +1889,7 @@ export class JsonlSessionStore {
       throw new Error("Reasoning effort is required.");
     }
     const source = options.source ?? "session";
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       this._reasoningEffort = clean;
       this._selectionSource = { ...this._selectionSource, effort: source };
       if (!this._sessionMeta || !this._sessionPaths.meta) return;
@@ -1928,14 +1900,14 @@ export class JsonlSessionStore {
   }
 
   async get_skill_catalog(): Promise<{ name: string; description: string; location: string }[]> {
-    return this._writeLock.run(() =>
+    return this._writeLock.runExclusive(() =>
       normalizeSkillCatalog(this._sessionMeta ? this._sessionMeta.skill_catalog : []),
     );
   }
 
   async set_skill_catalog(entries: { name: string; description: string; location: string }[]): Promise<void> {
     const normalized = normalizeSkillCatalog(entries);
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       if (!this._sessionMeta || !this._sessionPaths.meta) return;
       const current = normalizeSkillCatalog(this._sessionMeta.skill_catalog);
       if ("skill_catalog" in this._sessionMeta && JSON.stringify(current) === JSON.stringify(normalized)) {
@@ -1947,14 +1919,14 @@ export class JsonlSessionStore {
   }
 
   async get_skill_sources(): Promise<Record<string, boolean>> {
-    return this._writeLock.run(() =>
+    return this._writeLock.runExclusive(() =>
       normalizeSkillSources(this._sessionMeta ? this._sessionMeta.skill_sources : null),
     );
   }
 
   async set_skill_sources(sources: Record<string, boolean>): Promise<void> {
     const normalized = normalizeSkillSources(sources);
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       const meta = this._sessionMeta ?? {};
       meta.skill_sources = normalized;
       this._sessionMeta = meta;
@@ -1978,7 +1950,7 @@ export class JsonlSessionStore {
   }
 
   async persist_user_input(content: string, options: { meta?: Record<string, unknown> } = {}): Promise<void> {
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       const paths = uploadPaths(content, this.workspace_root);
       checkImageBudget(paths.map(() => ({ path: "", mime_type: "", width: 0, height: 0, size_bytes: 0 })));
       const processed = paths.map(p => processImage(p));
@@ -2051,7 +2023,7 @@ export class JsonlSessionStore {
     reasoningContent?: string | null,
     attachments?: unknown[] | null,
   ): Promise<void> {
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       this._persistMessageSync(role, content, toolCallId, toolName, meta, reasoningContent, attachments);
     });
   }
@@ -2121,7 +2093,7 @@ export class JsonlSessionStore {
     modelContentPolicy?: Record<string, unknown> | null,
     attachments?: unknown[] | null,
   ): Promise<void> {
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       if (!this._toolRepo || !this._sessionMeta) return;
       const toolPath = this._sessionPaths.tool_calls;
       const priorCache = this._toolRecordsCache;
@@ -2215,7 +2187,7 @@ export class JsonlSessionStore {
   }
 
   async persist_sampling_usage(usage: Record<string, unknown>): Promise<void> {
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       if (!this._sessionMeta || !this._sessionPaths.meta) return;
       const latest: Record<string, unknown> = { ...(usage || {}), updated_at: this.now_iso() };
       this._sessionMeta.latest_sampling_usage = latest;
@@ -2231,7 +2203,7 @@ export class JsonlSessionStore {
   }
 
   async persist_context_breakdown(snapshot: Record<string, unknown>): Promise<void> {
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       if (!this._sessionMeta || !this._sessionPaths.meta) return;
       this._sessionMeta.latest_context_breakdown = { ...(snapshot || {}) };
       this._persistMetaSync();
@@ -2261,7 +2233,7 @@ export class JsonlSessionStore {
     if (!cleanTurnId || !cleanStatus) {
       throw new Error("Turn state requires turn_id and status.");
     }
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       if (!this._sessionMeta) return;
       const state: Record<string, unknown> = {
         turn_id: cleanTurnId,
@@ -2297,7 +2269,7 @@ export class JsonlSessionStore {
 
   async set_goal(objective: string): Promise<GoalRecord> {
     const normalized = normalizeGoalObjective(objective);
-    return this._writeLock.run(() => {
+    return this._writeLock.runExclusive(() => {
       if (!this._sessionMeta) {
         throw new Error("Send a message before setting a goal for this draft session.");
       }
@@ -2311,7 +2283,7 @@ export class JsonlSessionStore {
 
   async set_goal_status(status: string): Promise<GoalRecord> {
     const normalizedStatus = normalizeGoalStatus(status);
-    return this._writeLock.run(() => {
+    return this._writeLock.runExclusive(() => {
       if (!this._sessionMeta) {
         throw new Error("Session is not initialized.");
       }
@@ -2327,7 +2299,7 @@ export class JsonlSessionStore {
   }
 
   async clear_goal(): Promise<void> {
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       if (this._sessionMeta) {
         delete this._sessionMeta.goal;
         this._persistMetaSync();
@@ -2336,11 +2308,11 @@ export class JsonlSessionStore {
   }
 
   async get_compact_generation(): Promise<number> {
-    return this._writeLock.run(() => Number(this._autoCompactWindowSync().ordinal || 1));
+    return this._writeLock.runExclusive(() => Number(this._autoCompactWindowSync().ordinal || 1));
   }
 
   async persist_compaction(compaction: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this._writeLock.run(() => {
+    return this._writeLock.runExclusive(() => {
       if (!this._compactionRepo || !this._msgRepo || !this._sessionMeta) {
         throw new Error("Send a message before compacting this draft session.");
       }
@@ -2508,7 +2480,7 @@ export class JsonlSessionStore {
       await this.clear_goal();
       return;
     }
-    await this._writeLock.run(() => {
+    await this._writeLock.runExclusive(() => {
       this._materializeDraftSync();
       if (this._sessionMeta) {
         this._sessionMeta.goal = normalized;

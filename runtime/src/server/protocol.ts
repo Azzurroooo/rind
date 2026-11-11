@@ -1,11 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ModelSelection } from "../domain/models.js";
+import { isCompactBoundaryMessage, type ModelSelection } from "../domain/models.js";
 import { LEGACY_IMAGE_NOTICE, hasLegacyImages } from "../infrastructure/images.js";
 import { validateWorkspaceRoot } from "../infrastructure/paths.js";
 import {
   INTERNAL_MESSAGE_KINDS,
-  isCompactBoundaryMessage,
   projectToolReplayFields,
 } from "../infrastructure/persistence/session-store.js";
 import {

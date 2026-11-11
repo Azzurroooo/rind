@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { CURRENT_FILE_TOOL_RULES_BLOCK } from "./domain/models.js";
 
 function escapeXml(value: string): string {
   return value
@@ -97,7 +96,13 @@ export function buildCompactPrompt(compressionCorpusJson: string): Array<{ role:
   ];
 }
 
-export const FILE_TOOL_RULES = CURRENT_FILE_TOOL_RULES_BLOCK;
+const FILE_TOOL_RULES = `<rind_file_tool_rules>
+   - All file tools use \`path\` for the absolute or workspace-relative file path.
+   - \`read_file\`: Read local images (PNG/JPEG/WebP/GIF/BMP) as attachments, or consecutive complete UTF-8 lines. Omit offset/limit for images. Continue text reads at \`next_offset\`; a LineTooLong error requires a local character-slice read with bash/Python.
+   - \`write_file\`: Atomically create or completely overwrite a UTF-8 text file. Use for new files or complete rewrites.
+   - \`edit_file\`: Atomically replace one unique, exact text block. Read the target, then supply \`old_str\` and \`new_str\`. No hash parameter is required.
+   - Edits and writes to the same file run in call order. Each edit sees earlier changes; a later write replaces the whole file.
+</rind_file_tool_rules>`;
 
 const CURRENT_FILE_SECTION = `   - \`read_file\`: Read UTF-8 text file ranges with line numbers, truncation status, and the next offset.
    - \`write_file\`: Atomically create or completely overwrite a UTF-8 text file.
@@ -130,7 +135,7 @@ const BUILTIN_PROMPT_DIGESTS = new Set([
   "22c6b0229aacaef91d2e2eb92d4ef81e4bb55a28b658366c2eadfe181aff2667",
 ]);
 
-export const SYSTEM_PROMPT_TEMPLATE = `
+const SYSTEM_PROMPT_TEMPLATE = `
 You are Rind, an advanced AI software engineer and coding agent.
 You are autonomous, efficient, and capable of solving complex programming tasks using tools.
 The tools sent with each request define their own contracts; this prompt covers how to work.
@@ -192,7 +197,20 @@ The tools sent with each request define their own contracts; this prompt covers 
 </operational_guidelines>
 `;
 
+let lastPromptIn: string | null = null;
+let lastPromptOut = "";
+
 export function refreshSystemPrompt(content: string): string {
+  if (content === lastPromptIn) {
+    return lastPromptOut;
+  }
+  const refreshed = computeRefreshedSystemPrompt(content);
+  lastPromptIn = content;
+  lastPromptOut = refreshed;
+  return refreshed;
+}
+
+function computeRefreshedSystemPrompt(content: string): string {
   if (!content.trimStart().startsWith("You are Rind, an advanced AI software engineer and coding agent.\n")) {
     return content;
   }

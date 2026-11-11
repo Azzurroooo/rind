@@ -1,4 +1,4 @@
-export { RIND_VERSION, __version__, VERSION } from "./version.js";
+export { RIND_VERSION } from "./version.js";
 export * from "./domain/errors.js";
 export * from "./domain/cancellation.js";
 export * from "./domain/events.js";
@@ -35,4 +35,3 @@ export * from "./server/execution.js";
 export * from "./server/worker.js";
 export * from "./server/dispatcher.js";
 export * from "./server/transports.js";
-export * from "./cli.js";

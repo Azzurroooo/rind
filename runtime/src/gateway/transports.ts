@@ -1,7 +1,9 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { WebSocket as UndiciWebSocket } from "undici";
+import { AsyncQueue } from "../domain/cancellation.js";
 
 const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const RUNTIME_ROOT = path.resolve(THIS_DIR, "..", "..");
@@ -45,50 +47,13 @@ export function serializeJsonFrame(payload: Record<string, unknown>): string {
   return JSON.stringify(payload);
 }
 
-class AsyncMessageQueue<T> {
-  private readonly items: T[] = [];
-  private readonly waiters: Array<(item: T | null) => void> = [];
-  private ended = false;
-
-  push(item: T): void {
-    if (this.ended) return;
-    const waiter = this.waiters.shift();
-    if (waiter) {
-      waiter(item);
-    } else {
-      this.items.push(item);
-    }
-  }
-
-  end(): void {
-    if (this.ended) return;
-    this.ended = true;
-    while (this.waiters.length > 0) {
-      const waiter = this.waiters.shift();
-      waiter?.(null);
-    }
-  }
-
-  async shift(): Promise<T | null> {
-    if (this.items.length > 0) {
-      return this.items.shift()!;
-    }
-    if (this.ended) {
-      return null;
-    }
-    return await new Promise<T | null>(resolve => {
-      this.waiters.push(resolve);
-    });
-  }
-}
-
 export class WebSocketTransport implements Transport {
   private readonly url: string;
   private readonly wsFactory: WebSocketFactory;
   private readonly openTimeoutMs: number;
   private readonly maxPayloadBytes: number;
   private ws: WebSocketLike | null = null;
-  private queue: AsyncMessageQueue<Record<string, unknown>> | null = null;
+  private queue: AsyncQueue<Record<string, unknown>> | null = null;
 
   constructor(
     url: string,
@@ -105,7 +70,7 @@ export class WebSocketTransport implements Transport {
   }
 
   async open(): Promise<void> {
-    const queue = new AsyncMessageQueue<Record<string, unknown>>();
+    const queue = new AsyncQueue<Record<string, unknown>>();
     const ws = this.wsFactory(this.url);
     this.queue = queue;
     this.ws = ws;
@@ -141,7 +106,7 @@ export class WebSocketTransport implements Transport {
               : "WebSocket connection error";
           reject(new Error(msg));
         }
-        queue.end();
+        queue.close();
       };
 
       const onClose = (): void => {
@@ -150,7 +115,7 @@ export class WebSocketTransport implements Transport {
           clearTimeout(timer);
           reject(new Error("WebSocket closed before opening"));
         }
-        queue.end();
+        queue.close();
       };
 
       const onMessage = (ev: { data?: unknown }): void => {
@@ -163,7 +128,7 @@ export class WebSocketTransport implements Transport {
             } catch {
               // ignore
             }
-            queue.end();
+            queue.close();
             return;
           }
           text = data;
@@ -174,7 +139,7 @@ export class WebSocketTransport implements Transport {
             } catch {
               // ignore
             }
-            queue.end();
+            queue.close();
             return;
           }
           text = Buffer.from(data).toString("utf8");
@@ -185,7 +150,7 @@ export class WebSocketTransport implements Transport {
             } catch {
               // ignore
             }
-            queue.end();
+            queue.close();
             return;
           }
           text = Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
@@ -220,7 +185,7 @@ export class WebSocketTransport implements Transport {
   async close(): Promise<void> {
     const ws = this.ws;
     this.ws = null;
-    this.queue?.end();
+    this.queue?.close();
     this.queue = null;
     if (!ws) return;
     if (ws.readyState === 3) return;
@@ -246,7 +211,7 @@ export class StdioTransport implements Transport {
   private readonly cwd: string;
   private readonly shutdownTimeoutSeconds: number;
   private proc: ChildProcessWithoutNullStreams | null = null;
-  private queue: AsyncMessageQueue<Record<string, unknown>> | null = null;
+  private queue: AsyncQueue<Record<string, unknown>> | null = null;
   private exitPromise: Promise<number | null> | null = null;
   private exited = false;
 
@@ -273,7 +238,7 @@ export class StdioTransport implements Transport {
     if (!exe) {
       throw new Error("StdioTransport command must not be empty");
     }
-    const queue = new AsyncMessageQueue<Record<string, unknown>>();
+    const queue = new AsyncQueue<Record<string, unknown>>();
     this.queue = queue;
     this.exited = false;
 
@@ -284,39 +249,59 @@ export class StdioTransport implements Transport {
     this.proc = child;
     child.stderr.resume();
 
+    const decoder = new StringDecoder("utf8");
     let buffer = "";
-    child.stdout.on("data", (chunk: Buffer) => {
-      buffer += chunk.toString("utf8");
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        const parsed = parseJsonObject(line);
-        if (parsed !== null) {
-          queue.push(parsed);
-        }
+    const pushLine = (rawLine: string): void => {
+      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+      if (!line.trim()) return;
+      const parsed = parseJsonObject(line);
+      if (parsed !== null) {
+        queue.push(parsed);
       }
+    };
+    const consumeDecoded = (decoded: string): void => {
+      if (!decoded) return;
+      if (!decoded.includes("\n")) {
+        buffer += decoded;
+        return;
+      }
+      let offset = 0;
+      let nl = decoded.indexOf("\n");
+      while (nl !== -1) {
+        const segment = decoded.slice(offset, nl);
+        const fullLine = buffer ? buffer + segment : segment;
+        buffer = "";
+        pushLine(fullLine);
+        offset = nl + 1;
+        nl = decoded.indexOf("\n", offset);
+      }
+      if (offset < decoded.length) {
+        buffer += decoded.slice(offset);
+      }
+    };
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      consumeDecoded(decoder.write(chunk));
     });
 
     child.stdout.on("end", () => {
+      consumeDecoded(decoder.end());
       if (buffer.trim()) {
-        const parsed = parseJsonObject(buffer);
+        const remainder = buffer;
         buffer = "";
-        if (parsed !== null) {
-          queue.push(parsed);
-        }
+        pushLine(remainder);
       }
-      queue.end();
+      queue.close();
     });
 
     child.on("error", () => {
-      queue.end();
+      queue.close();
     });
 
     this.exitPromise = new Promise<number | null>(resolve => {
       child.once("close", code => {
         this.exited = true;
-        queue.end();
+        queue.close();
         resolve(code);
       });
     });
@@ -422,8 +407,5 @@ export function buildTransport(
       shutdownTimeoutSeconds: options?.shutdownTimeoutSeconds,
     });
   }
-  const authedUrl = token && !url.includes("token=")
-    ? `${url}${url.includes("?") ? "&" : "?"}token=${token}`
-    : url;
-  return new WebSocketTransport(authedUrl, { wsFactory: options?.wsFactory });
+  return new WebSocketTransport(appendTokenToUrl(url, token), { wsFactory: options?.wsFactory });
 }

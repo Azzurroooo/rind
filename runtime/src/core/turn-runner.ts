@@ -19,7 +19,7 @@ import {
   ToolExecutor,
   type UserQuestionResponder,
 } from "../application/tool-processor.js";
-import { AsyncSemaphore, type CancellationToken } from "../domain/cancellation.js";
+import { AsyncMutex, AsyncSemaphore, type CancellationToken } from "../domain/cancellation.js";
 import {
   BoundaryError,
   CancelledError,
@@ -1160,49 +1160,12 @@ interface QueuedInput {
   text: string;
 }
 
-class SimpleMutex {
-  private lockedFlag = false;
-  private waiters: Array<() => void> = [];
-
-  get locked(): boolean {
-    return this.lockedFlag;
-  }
-
-  async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-    await this.acquire();
-    try {
-      return await fn();
-    } finally {
-      this.release();
-    }
-  }
-
-  async acquire(): Promise<void> {
-    if (!this.lockedFlag) {
-      this.lockedFlag = true;
-      return;
-    }
-    await new Promise<void>(resolve => {
-      this.waiters.push(resolve);
-    });
-  }
-
-  release(): void {
-    const next = this.waiters.shift();
-    if (next) {
-      next();
-    } else {
-      this.lockedFlag = false;
-    }
-  }
-}
-
 export class AgentRuntime {
   private readonly turnRunner: TurnRunner;
   private readonly sessionStore: JsonlSessionStore;
   private initialized = false;
-  private readonly initializeLock = new SimpleMutex();
-  private readonly turnLock = new SimpleMutex();
+  private readonly initializeLock = new AsyncMutex();
+  private readonly turnLock = new AsyncMutex();
   private _activeTurnId = "";
   private acceptingInputs = false;
   private readonly steeringQueue: QueuedInput[] = [];

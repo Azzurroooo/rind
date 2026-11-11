@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { renameSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { CancellationToken } from "../../domain/cancellation.js";
+import { AsyncEvent, type CancellationToken } from "../../domain/cancellation.js";
 import {
   TERMINAL_STATES,
   publicTask,
@@ -299,31 +299,6 @@ export class ShellSessionPool {
 
   clear(): void {
     this.states.clear();
-  }
-}
-
-class AsyncEvent {
-  private flag = false;
-  private resolvers = new Set<() => void>();
-
-  isSet(): boolean {
-    return this.flag;
-  }
-
-  set(): void {
-    if (this.flag) return;
-    this.flag = true;
-    for (const resolve of this.resolvers) {
-      resolve();
-    }
-    this.resolvers.clear();
-  }
-
-  wait(): Promise<void> {
-    if (this.flag) return Promise.resolve();
-    return new Promise<void>(resolve => {
-      this.resolvers.add(resolve);
-    });
   }
 }
 

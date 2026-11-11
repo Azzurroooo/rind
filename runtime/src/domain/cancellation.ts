@@ -16,14 +16,6 @@ export class CancellationToken {
     return this._reason;
   }
 
-  get cancelReason(): string | null {
-    return this._reason;
-  }
-
-  get abortSignal(): AbortSignal {
-    return this._abortController.signal;
-  }
-
   get signal(): AbortSignal {
     return this._abortController.signal;
   }
@@ -191,4 +183,151 @@ export async function tryAcquireSlot(
     return true;
   }
   return await semaphore.tryAcquire(token);
+}
+
+export class AsyncMutex {
+  private lockedFlag = false;
+  private readonly waiters: Array<() => void> = [];
+
+  get locked(): boolean {
+    return this.lockedFlag;
+  }
+
+  async acquire(): Promise<void> {
+    if (!this.lockedFlag) {
+      this.lockedFlag = true;
+      return;
+    }
+    await new Promise<void>(resolve => {
+      this.waiters.push(resolve);
+    });
+  }
+
+  release(): void {
+    const next = this.waiters.shift();
+    if (next) {
+      next();
+    } else {
+      this.lockedFlag = false;
+    }
+  }
+
+  async runExclusive<T>(fn: () => Promise<T> | T): Promise<T> {
+    await this.acquire();
+    try {
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+}
+
+export class AsyncEvent {
+  private flag = false;
+  private readonly waiters = new Set<() => void>();
+
+  isSet(): boolean {
+    return this.flag;
+  }
+
+  set(): void {
+    if (this.flag) return;
+    this.flag = true;
+    for (const resolve of this.waiters) {
+      resolve();
+    }
+    this.waiters.clear();
+  }
+
+  clear(): void {
+    this.flag = false;
+  }
+
+  wait(): Promise<void> {
+    if (this.flag) return Promise.resolve();
+    return new Promise<void>(resolve => {
+      this.waiters.add(resolve);
+    });
+  }
+}
+
+export class AsyncQueue<T> {
+  private items: T[] = [];
+  private head = 0;
+  private readonly waiters: Array<(item: T | null) => void> = [];
+  private ended = false;
+
+  push(item: T): void {
+    if (this.ended) return;
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter(item);
+    } else {
+      this.items.push(item);
+    }
+  }
+
+  close(): void {
+    if (this.ended) return;
+    this.ended = true;
+    while (this.waiters.length > 0) {
+      this.waiters.shift()?.(null);
+    }
+  }
+
+  async shift(): Promise<T | null> {
+    if (this.head < this.items.length) {
+      const item = this.items[this.head]!;
+      this.head += 1;
+      if (this.head >= 64 && this.head * 2 >= this.items.length) {
+        this.items = this.items.slice(this.head);
+        this.head = 0;
+      } else if (this.head === this.items.length) {
+        this.items.length = 0;
+        this.head = 0;
+      }
+      return item;
+    }
+    if (this.ended) {
+      return null;
+    }
+    return await new Promise<T | null>(resolve => {
+      this.waiters.push(resolve);
+    });
+  }
+}
+
+export interface Deferred<T> {
+  readonly promise: Promise<T>;
+  readonly done: boolean;
+  resolve(value: T): void;
+  reject(err: Error): void;
+}
+
+export function createDeferred<T>(): Deferred<T> {
+  let done = false;
+  let resolveFn!: (value: T) => void;
+  let rejectFn!: (err: Error) => void;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolveFn = resolve;
+    rejectFn = reject;
+  });
+  return {
+    promise,
+    get done() {
+      return done;
+    },
+    resolve(value: T) {
+      if (!done) {
+        done = true;
+        resolveFn(value);
+      }
+    },
+    reject(err: Error) {
+      if (!done) {
+        done = true;
+        rejectFn(err);
+      }
+    },
+  };
 }

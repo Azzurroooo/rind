@@ -6,8 +6,12 @@ import {
   buildAgentContainer,
 } from "../core/turn-runner.js";
 import {
+  AsyncEvent,
+  AsyncMutex,
   type CancellationToken,
   CancellationTokenSource,
+  type Deferred,
+  createDeferred,
 } from "../domain/cancellation.js";
 import { CancelledError, ProviderError } from "../domain/errors.js";
 import type { userQuestionRequestedEvent } from "../domain/events.js";
@@ -35,94 +39,14 @@ export const UNUSABLE_CONNECTION_CODES: ReadonlySet<string> = new Set([
   "connection_missing",
 ]);
 
-class AsyncLock {
-  private locked = false;
-  private waiters: Array<() => void> = [];
-
-  async acquire(): Promise<void> {
-    if (!this.locked) {
-      this.locked = true;
-      return;
-    }
-    await new Promise<void>(resolve => {
-      this.waiters.push(resolve);
-    });
-  }
-
-  release(): void {
-    const next = this.waiters.shift();
-    if (next) {
-      next();
-    } else {
-      this.locked = false;
-    }
-  }
-
-  async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-    await this.acquire();
-    try {
-      return await fn();
-    } finally {
-      this.release();
-    }
-  }
-}
-
-interface PendingAnswerFuture {
-  promise: Promise<string>;
-  resolve: (value: string) => void;
-  done: boolean;
-}
-
-function createPendingAnswerFuture(): PendingAnswerFuture {
-  let resolveFn!: (value: string) => void;
-  const future: PendingAnswerFuture = {
-    promise: Promise.resolve(""),
-    resolve: (value: string) => {
-      if (!future.done) {
-        future.done = true;
-        resolveFn(value);
-      }
-    },
-    done: false,
-  };
-  future.promise = new Promise<string>(resolve => {
-    resolveFn = resolve;
-  });
-  return future;
-}
-
-class AsyncEvent {
-  private setFlag = false;
-  private waiters: Array<() => void> = [];
-
-  set(): void {
-    this.setFlag = true;
-    const current = this.waiters.splice(0, this.waiters.length);
-    for (const waiter of current) {
-      waiter();
-    }
-  }
-
-  clear(): void {
-    this.setFlag = false;
-  }
-
-  async wait(): Promise<void> {
-    if (this.setFlag) return;
-    await new Promise<void>(resolve => {
-      this.waiters.push(resolve);
-    });
-  }
-}
 
 interface ActiveExecution {
   container: AgentContainer;
   chatClient: ChatClient | null;
   selection: ModelSelection | null;
-  turnSlot: AsyncLock;
+  turnSlot: AsyncMutex;
   currentCancel: CancellationTokenSource | null;
-  pendingAnswers: Map<string, PendingAnswerFuture>;
+  pendingAnswers: Map<string, Deferred<string>>;
   queuedTurnStarts: number;
 }
 
@@ -164,7 +88,7 @@ export class ExecutionCoordinator {
   private readonly providerService: ProviderServiceImpl;
   private readonly defaultExternalTool: ExternalTool | null;
   private readonly sessionOptions = new Map<string, [ExternalTool | null, boolean]>();
-  private readonly lock = new AsyncLock();
+  private readonly lock = new AsyncMutex();
 
   constructor(options: {
     sharedResources: SharedRuntimeResources;
@@ -1178,7 +1102,7 @@ export class ExecutionCoordinator {
     if (!value) return;
     const execution = this.active.get(validateSessionId(sessionId));
     if (execution && !execution.pendingAnswers.has(value)) {
-      execution.pendingAnswers.set(value, createPendingAnswerFuture());
+      execution.pendingAnswers.set(value, createDeferred<string>());
     }
   }
 
@@ -1190,7 +1114,7 @@ export class ExecutionCoordinator {
     if (!execution) return "";
     let future = execution.pendingAnswers.get(event.tool_call_id);
     if (!future) {
-      future = createPendingAnswerFuture();
+      future = createDeferred<string>();
       execution.pendingAnswers.set(event.tool_call_id, future);
     }
     try {
@@ -1286,7 +1210,7 @@ export class ExecutionCoordinator {
       container,
       chatClient,
       selection,
-      turnSlot: new AsyncLock(),
+      turnSlot: new AsyncMutex(),
       currentCancel: null,
       pendingAnswers: new Map(),
       queuedTurnStarts: 0,

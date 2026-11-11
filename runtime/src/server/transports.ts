@@ -4,6 +4,7 @@ import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import type { Socket } from "node:net";
+import { AsyncMutex } from "../domain/cancellation.js";
 import { expandTilde, validateSessionId } from "../infrastructure/paths.js";
 import { JsonlSessionStore } from "../infrastructure/persistence/session-store.js";
 import { ensureUserSettings, loadSettings } from "../infrastructure/settings.js";
@@ -17,35 +18,10 @@ import {
 import { errorMessage, validateRequest } from "./protocol.js";
 import { RuntimeWorker, type WorkerLock, acquireWorkerLock } from "./worker.js";
 
-class AsyncLock {
-  private locked = false;
-  private waiters: Array<() => void> = [];
-
-  async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.locked) {
-      await new Promise<void>(resolve => {
-        this.waiters.push(resolve);
-      });
-    } else {
-      this.locked = true;
-    }
-    try {
-      return await fn();
-    } finally {
-      const next = this.waiters.shift();
-      if (next) {
-        next();
-      } else {
-        this.locked = false;
-      }
-    }
-  }
-}
-
 // --- Stdio Transport (from agent/runtime/server/stdio.py) ---
 
 export class JsonlWriter implements TransportWriter {
-  private readonly lock = new AsyncLock();
+  private readonly lock = new AsyncMutex();
 
   async send(payload: Record<string, unknown>): Promise<void> {
     const line = `${JSON.stringify(payload)}\n`;
@@ -347,7 +323,7 @@ export class WebSocketConnection {
 
 export class WebSocketWriter implements TransportWriter {
   private readonly ws: WebSocketConnection;
-  private readonly lock = new AsyncLock();
+  private readonly lock = new AsyncMutex();
   private closed = false;
 
   constructor(ws: WebSocketConnection) {

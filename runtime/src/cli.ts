@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-import { configureHttpDispatcher } from "./infrastructure/http-dispatcher.js";
-import { appServerMain } from "./server/transports.js";
-import { VERSION } from "./version.js";
+import { RIND_VERSION } from "./version.js";
 
 function printHelp(): void {
   const text = [
@@ -32,23 +30,25 @@ function printHelp(): void {
 }
 
 export async function runCli(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
-  configureHttpDispatcher();
   const args = [...argv];
+  if (args[0] !== "gateway") {
+    if (args.includes("--version")) {
+      process.stdout.write(`rind ${RIND_VERSION}\n`);
+      return 0;
+    }
+    if (args.includes("-h") || args.includes("--help")) {
+      printHelp();
+      return 0;
+    }
+  }
+  const { configureHttpDispatcher } = await import("./infrastructure/http-dispatcher.js");
+  configureHttpDispatcher();
   if (args[0] === "gateway") {
-    const gatewayMod = (await import("./gateway/main.js")) as {
-      gatewayMain: (argv: readonly string[]) => Promise<number>;
-    };
-    return await gatewayMod.gatewayMain(args.slice(1));
-  }
-  if (args.includes("--version")) {
-    process.stdout.write(`rind ${VERSION}\n`);
-    return 0;
-  }
-  if (args.includes("-h") || args.includes("--help")) {
-    printHelp();
-    return 0;
+    const { gatewayMain } = await import("./gateway/main.js");
+    return await gatewayMain(args.slice(1));
   }
   if (args[0] === "app-server") {
+    const { appServerMain } = await import("./server/transports.js");
     return await appServerMain(args.slice(1));
   }
   if (args.length === 0) {

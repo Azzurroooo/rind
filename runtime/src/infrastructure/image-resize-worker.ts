@@ -38,7 +38,7 @@ parentPort?.on("message", (payload: { filePath?: unknown }) => {
         message: err.message,
         code: err.code,
         status: err.status,
-        errorType: err.error_type,
+        errorType: err.errorType,
       };
       parentPort?.postMessage(message);
       return;

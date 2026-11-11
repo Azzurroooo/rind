@@ -41,16 +41,8 @@ export class BoundaryError extends Error {
     }
   }
 
-  get failureStatus(): FailureStatus {
-    return this.status;
-  }
-
   get errorType(): string {
     return this._customErrorType || this.constructor.name;
-  }
-
-  get error_type(): string {
-    return this.errorType;
   }
 }
 
@@ -127,5 +119,12 @@ export class CancelledError extends Error {
 
   get reason(): string {
     return this.message;
+  }
+}
+
+export class LookupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LookupError";
   }
 }

@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { AsyncMutex, AsyncQueue, createDeferred, type Deferred } from "../domain/cancellation.js";
 import { InputQueueError } from "../domain/errors.js";
 import type { AuthInteraction } from "../infrastructure/chatgpt-oauth.js";
 import { validateSessionId } from "../infrastructure/paths.js";
 import { SkillRepository } from "../infrastructure/skills.js";
-import { VERSION } from "../version.js";
+import { RIND_VERSION } from "../version.js";
 import {
   type SlashCommandContext,
   SlashCommandResult,
@@ -13,6 +14,7 @@ import {
 import {
   CAPABILITIES,
   CORE_METHODS,
+  FOLDER_DEFAULT_METHODS,
   FileMethodError,
   PROTOCOL_VERSION,
   RuntimeMethod,
@@ -33,13 +35,6 @@ import {
   unsetFolderDefaults,
 } from "./protocol.js";
 import type { RuntimeWorker } from "./worker.js";
-
-const FOLDER_DEFAULT_METHODS = new Set<string>([
-  RuntimeMethod.RIND_FOLDER_DEFAULTS_GET,
-  RuntimeMethod.RIND_FOLDER_DEFAULTS_SET,
-  RuntimeMethod.RIND_FOLDER_DEFAULTS_UNSET,
-  RuntimeMethod.RIND_FOLDER_DEFAULTS_RESOLVE,
-]);
 
 export function protocolCapabilities(
   backgroundEnabledFlag: boolean,
@@ -144,34 +139,9 @@ export interface TransportWriter {
   close?(): void;
 }
 
-class AsyncLock {
-  private locked = false;
-  private waiters: Array<() => void> = [];
-
-  async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.locked) {
-      await new Promise<void>(resolve => {
-        this.waiters.push(resolve);
-      });
-    } else {
-      this.locked = true;
-    }
-    try {
-      return await fn();
-    } finally {
-      const next = this.waiters.shift();
-      if (next) {
-        next();
-      } else {
-        this.locked = false;
-      }
-    }
-  }
-}
-
 class EventWriter {
   private readonly writer: TransportWriter;
-  private readonly lock = new AsyncLock();
+  private readonly lock = new AsyncMutex();
   private sequence = 0;
 
   constructor(writer: TransportWriter) {
@@ -196,37 +166,10 @@ class EventWriter {
   }
 }
 
-interface AuthWaiter {
-  promise: Promise<string>;
-  resolve: (value: string) => void;
-  reject: (err: Error) => void;
-  done: boolean;
-}
+type AuthWaiter = Deferred<string>;
 
 function createAuthWaiter(): AuthWaiter {
-  let resolveFn!: (value: string) => void;
-  let rejectFn!: (err: Error) => void;
-  const waiter: AuthWaiter = {
-    promise: Promise.resolve(""),
-    resolve: (value: string) => {
-      if (!waiter.done) {
-        waiter.done = true;
-        resolveFn(value);
-      }
-    },
-    reject: (err: Error) => {
-      if (!waiter.done) {
-        waiter.done = true;
-        rejectFn(err);
-      }
-    },
-    done: false,
-  };
-  waiter.promise = new Promise<string>((resolve, reject) => {
-    resolveFn = resolve;
-    rejectFn = reject;
-  });
-  return waiter;
+  return createDeferred<string>();
 }
 
 class ProtocolAuthInteraction implements AuthInteraction {
@@ -299,33 +242,6 @@ class RepositoryGoalOps {
   }
 }
 
-class AsyncQueue<T> {
-  private items: T[] = [];
-  private waiters: Array<(item: T) => void> = [];
-
-  putNowait(item: T): void {
-    const waiter = this.waiters.shift();
-    if (waiter) {
-      waiter(item);
-    } else {
-      this.items.push(item);
-    }
-  }
-
-  async put(item: T): Promise<void> {
-    this.putNowait(item);
-  }
-
-  async get(): Promise<T> {
-    if (this.items.length > 0) {
-      return this.items.shift()!;
-    }
-    return await new Promise<T>(resolve => {
-      this.waiters.push(resolve);
-    });
-  }
-}
-
 export class RuntimeDispatcher {
   private readonly worker: RuntimeWorker;
   private readonly allowSessionConfiguration: boolean;
@@ -383,7 +299,7 @@ export class RuntimeDispatcher {
   }
 
   async submit(request: Record<string, unknown> | null): Promise<void> {
-    await this.requests.put(request);
+    this.requests.push(request);
   }
 
   async dispatch(request: Record<string, unknown>): Promise<void> {
@@ -396,7 +312,7 @@ export class RuntimeDispatcher {
 
   async serve(): Promise<number> {
     while (true) {
-      const request = await this.requests.get();
+      const request = await this.requests.shift();
       if (request === null) {
         if (!this.stopping) {
           this.stopping = true;
@@ -457,7 +373,7 @@ export class RuntimeDispatcher {
     for (const sessionId of this.worker.execution.activeSessionIds()) {
       this.worker.execution.interrupt(sessionId, "Worker shutting down");
     }
-    this.requests.putNowait(null);
+    this.requests.push(null);
     return true;
   }
 
@@ -812,7 +728,7 @@ export class RuntimeDispatcher {
       reasoning_effort: info.reasoning_effort,
       workspace_root: info.workspace_root,
       team_main: info.team_main,
-      version: VERSION,
+      version: RIND_VERSION,
       protocol_version: PROTOCOL_VERSION,
       capabilities: this.capabilities(),
       methods: this.methods(),
