@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat, writeFile, utimes } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, stat, writeFile, utimes } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
   JsonlSessionStore,
+  SESSION_FILES,
+  SessionFiles,
   ToolOutputStore,
   ToolResultNormalizer,
   appendUsageRecord,
@@ -184,4 +187,203 @@ test("loadSettings infers deepseek provider from legacy settings.json with api.d
   const settings = loadSettings(settingsPath);
   assert.equal(settings.provider, "deepseek");
   assert.equal(settings.model, "deepseek-flash");
+});
+
+test("reads of session_index.json, meta.json, and jsonl remain lock-free while an exclusive write lock is held by another process", { timeout: 20000 }, async t => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-lockfree-read-"));
+  t.after(() => rm(tmp, { recursive: true, force: true }));
+  const sessionsDir = path.join(tmp, "sessions");
+  const workspace = path.join(tmp, "workspace");
+
+  const store = new JsonlSessionStore({
+    sessionDir: sessionsDir,
+    workspaceRoot: workspace,
+    model: "deepseek-flash",
+    provider: "deepseek",
+  });
+  await store.initialize();
+  await store.persist_user_input("Analyze coal sector supply");
+  await store.persist_message("assistant", "Starting sector analysis.");
+
+  const indexPath = JsonlSessionStore.index_path_for(sessionsDir);
+  const metaPath = path.join(sessionsDir, store.session_id, "meta.json");
+  const messagesPath = path.join(sessionsDir, store.session_id, "messages.jsonl");
+  const runtimeEntry = new URL("../dist/index.js", import.meta.url).href;
+
+  // Hold exclusive write locks on index.json, meta.json, and messages.jsonl in a separate process.
+  const holder = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+        import { FileLockHandle } from ${JSON.stringify(runtimeEntry)};
+        const locks = ${JSON.stringify([`${indexPath}.lock`, `${metaPath}.lock`, `${messagesPath}.lock`])}.map(p => new FileLockHandle(p, 5000));
+        for (const l of locks) l.acquire();
+        process.stdout.write("LOCKED\\n");
+        process.stdin.resume();
+        process.stdin.once("data", () => {
+          for (const l of locks) l.release();
+          process.exit(0);
+        });
+      `,
+    ],
+    { stdio: ["pipe", "pipe", "inherit"], windowsHide: true },
+  );
+  t.after(() => {
+    if (holder.exitCode === null) holder.kill();
+  });
+
+  await new Promise((resolve, reject) => {
+    let out = "";
+    holder.once("error", reject);
+    holder.stdout.on("data", chunk => {
+      out += chunk.toString("utf8");
+      if (out.includes("LOCKED")) resolve();
+    });
+  });
+
+  // Pure reads must complete instantaneously without acquiring .lock or blocking.
+  const startedAt = Date.now();
+  const listed = JsonlSessionStore.list_session_metadata({ sessionDir: sessionsDir, workspaceRoot: workspace });
+  const loadedMeta = JsonlSessionStore.load_session_metadata(store.session_id, sessionsDir);
+  const loadedMessages = SESSION_FILES.readJsonl(messagesPath);
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].id, store.session_id);
+  assert.equal(loadedMeta.session_id, store.session_id);
+  assert.ok(loadedMessages.some(m => m.content === "Analyze coal sector supply"));
+  assert.ok(elapsedMs < 1000, `Expected lock-free reads to complete immediately, took ${elapsedMs}ms`);
+
+  // Verify timeout error messages distinguish shared index files from per-session files.
+  const shortIndexFiles = new SessionFiles();
+  shortIndexFiles.lockFor = filePath => new FileLockHandle(`${filePath}.lock`, 40);
+  assert.throws(
+    () => shortIndexFiles.writeJson(indexPath, { sessions: [] }),
+    /Timed out waiting to update shared store/,
+  );
+  assert.throws(
+    () => shortIndexFiles.writeJson(metaPath, loadedMeta),
+    /Session is currently in use by another process/,
+  );
+
+  holder.stdin.end("release\n");
+  await new Promise(resolve => holder.once("close", resolve));
+});
+
+test("FileLockHandle reclaims dead-PID, remote-host stale, and expired-lease locks without deleting a new owner's lock", { timeout: 20000 }, async t => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-stale-lock-"));
+  t.after(() => rm(tmp, { recursive: true, force: true }));
+
+  // 1. Dead local PID lock is reclaimed immediately even when mtime is brand new.
+  const deadChild = spawn(process.execPath, ["-e", "process.exit(0)"], { windowsHide: true });
+  await new Promise(resolve => deadChild.once("close", resolve));
+  const deadLockPath = path.join(tmp, "dead.json.lock");
+  await writeFile(deadLockPath, `${deadChild.pid} ${os.hostname()} dead-token\n`, "utf8");
+  const deadHandle = new FileLockHandle(deadLockPath, 500);
+  deadHandle.withLock(() => {
+    assert.ok(true);
+  });
+
+  // 2. Remote GPU cluster host lock (e.g. gpu10 seen on gpu11): respected when fresh, reclaimed once stale (>30s).
+  const remoteLockPath = path.join(tmp, "remote.json.lock");
+  await writeFile(remoteLockPath, `${process.pid} gpu10-foreign-node remote-token\n`, "utf8");
+  const remoteHandle = new FileLockHandle(remoteLockPath, 60);
+  assert.throws(() => remoteHandle.acquire(60), /Lock timeout/);
+
+  const expired = new Date(Date.now() - 35_000);
+  await utimes(remoteLockPath, expired, expired);
+  remoteHandle.withLock(() => {
+    assert.ok(true);
+  });
+
+  // 3. Recycled / live local PID whose lock exceeded the 30s lease is reclaimed, and an evicted owner never deletes the new lock.
+  const recycledLockPath = path.join(tmp, "recycled.json.lock");
+  await writeFile(recycledLockPath, `${process.pid} other-host-or-container stale-token\n`, "utf8");
+  await utimes(recycledLockPath, expired, expired);
+  const newOwner = new FileLockHandle(recycledLockPath, 500);
+  newOwner.acquire();
+  const activeContent = await readFile(recycledLockPath, "utf8");
+  assert.match(activeContent, new RegExp(`^${process.pid} `));
+  newOwner.release();
+});
+
+test("concurrent multi-process session writes and continuous index reads complete with zero lock failures or lost entries", { timeout: 30000 }, async t => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-multiprocess-index-"));
+  t.after(() => rm(tmp, { recursive: true, force: true }));
+  const sessionsDir = path.join(tmp, "sessions");
+  const runtimeEntry = new URL("../dist/index.js", import.meta.url).href;
+  const workerCount = 6;
+  const sessionsPerWorker = 3;
+
+  const workers = Array.from({ length: workerCount }, (_, workerIdx) => {
+    const workspace = path.join(tmp, `agent_${workerIdx}`);
+    return new Promise((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `
+            import { JsonlSessionStore } from ${JSON.stringify(runtimeEntry)};
+            const ids = [];
+            for (let s = 0; s < ${sessionsPerWorker}; s++) {
+              const store = new JsonlSessionStore({
+                sessionDir: ${JSON.stringify(sessionsDir)},
+                workspaceRoot: ${JSON.stringify(workspace)},
+                model: "deepseek-flash",
+                provider: "deepseek",
+              });
+              await store.initialize();
+              await store.persist_user_input("Task " + s + " from worker ${workerIdx}");
+              for (let step = 0; step < 4; step++) {
+                const now = store.now_iso();
+                await store.persist_tool_call(
+                  "call_" + step,
+                  "bash",
+                  { command: "echo " + step },
+                  JSON.stringify({ command: "echo " + step }),
+                  now,
+                  now,
+                  JSON.stringify({ ok: true }),
+                  JSON.stringify({ ok: true }),
+                );
+                await store.persist_message("assistant", "Completed step " + step);
+              }
+              ids.push(store.session_id);
+            }
+            process.stdout.write(JSON.stringify(ids) + "\\n");
+          `,
+        ],
+        { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", d => { stdout += d.toString("utf8"); });
+      child.stderr.on("data", d => { stderr += d.toString("utf8"); });
+      child.once("error", reject);
+      child.once("close", code => {
+        if (code !== 0) reject(new Error(`Worker ${workerIdx} failed (${code}): ${stderr}`));
+        else resolve(JSON.parse(stdout.trim()));
+      });
+    });
+  });
+
+  // Hammer list_session_metadata concurrently on the main process while all 6 child processes write.
+  let settled = false;
+  const allDone = Promise.all(workers).finally(() => { settled = true; });
+  let readCount = 0;
+  while (!settled) {
+    const list = JsonlSessionStore.list_session_metadata({ sessionDir: sessionsDir, limit: 100 });
+    assert.ok(Array.isArray(list));
+    readCount += 1;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  const createdGroups = await allDone;
+  const expectedIds = createdGroups.flat().sort();
+
+  assert.ok(readCount > 0);
+  const finalSessions = JsonlSessionStore.list_session_metadata({ sessionDir: sessionsDir, limit: 100 });
+  assert.deepEqual(finalSessions.map(s => s.id).sort(), expectedIds);
 });

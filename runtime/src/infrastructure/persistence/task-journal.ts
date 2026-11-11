@@ -185,7 +185,6 @@ export class TaskJournal {
   readonly worker_instance_id: string;
   private leasePath: string | null = null;
   private leaseFd: number | null = null;
-  private readonly fileLocks = new Map<string, FileLockHandle>();
   private readonly sessions = new Map<string, SessionJournalState>();
 
   constructor(sessionRoot: string) {
@@ -394,13 +393,7 @@ export class TaskJournal {
     if (!fs.existsSync(directory)) {
       fs.mkdirSync(directory, { recursive: true });
     }
-    const lockKey = `${filePath}.lock`;
-    let lock = this.fileLocks.get(lockKey);
-    if (!lock) {
-      lock = new FileLockHandle(lockKey, 5000);
-      this.fileLocks.set(lockKey, lock);
-    }
-    return lock.withLock(() => {
+    return new FileLockHandle(`${filePath}.lock`, 5000).withLock(() => {
       this.ensureLease();
       let state = this.sessions.get(sessionId);
       if (!state) {
@@ -561,7 +554,5 @@ export class TaskJournal {
 
   forget_session(sessionId: string): void {
     this.sessions.delete(sessionId);
-    const lockKey = `${path.join(resolveSessionBase(this.root, sessionId), "tasks.jsonl")}.lock`;
-    this.fileLocks.delete(lockKey);
   }
 }

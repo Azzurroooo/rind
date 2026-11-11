@@ -36,7 +36,7 @@ import {
 import { resolveProjectRoot, resolveRindHome, resolveSessionBase, validateSessionId } from "../paths.js";
 import { DEFAULT_PROVIDER, normalizeReasoningEffort } from "../settings.js";
 import { IMPORT_DEFAULTS } from "../skills.js";
-import { SessionFiles } from "./atomic-files.js";
+import { SESSION_FILES, type SessionFiles } from "./atomic-files.js";
 import { ToolResultNormalizer } from "./result-normalizer.js";
 
 export const NAME_LIMIT = 80;
@@ -139,10 +139,38 @@ export function sessionIndexEntry(
   };
 }
 
-export function sessionIndexSummary(entry: Record<string, unknown>): Record<string, unknown> {
-  const copy = { ...entry };
-  delete copy.updated_at;
-  return copy;
+function sameFlatRecord(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  for (const key of keys) {
+    if (left[key] !== right[key]) return false;
+  }
+  return true;
+}
+
+function sameIndexSummary(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+  for (const key of [
+    "id",
+    "title",
+    "name",
+    "preview",
+    "workspace_root",
+    "project_id",
+    "owner_agent_id",
+    "session_type",
+    "parent_session_id",
+    "provider",
+    "model",
+    "reasoning_effort",
+    "has_user_message",
+  ] as const) {
+    if (left[key] !== right[key]) return false;
+  }
+  return sameFlatRecord(left.size, right.size) && sameFlatRecord(left.selection_source, right.selection_source);
 }
 
 export function defaultAutoCompactWindow(): { ordinal: number } {
@@ -269,55 +297,44 @@ export function syncSessionCounts(
   return changed;
 }
 
-const INDEX_CACHE = new Map<string, [string, Record<string, unknown>]>();
+const INDEX_CACHE = new Map<string, [string, { sessions: Record<string, unknown>[] } & Record<string, unknown>]>();
 
 export class SessionIndexRepository {
   private readonly files: SessionFiles;
   private readonly indexPath: string;
 
-  constructor(files: SessionFiles, indexPath: string) {
+  constructor(files: SessionFiles = SESSION_FILES, indexPath: string) {
     this.files = files;
     this.indexPath = indexPath;
   }
 
-  loadIndex(): { sessions: Record<string, unknown>[] } {
-    if (!this.indexPath || !fs.existsSync(this.indexPath)) {
+  loadIndex(): { sessions: Record<string, unknown>[] } & Record<string, unknown> {
+    if (!this.indexPath) {
       return { sessions: [] };
     }
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(this.indexPath);
-    } catch {
+    const sig = this.statSignature();
+    if (!sig) {
       return { sessions: [] };
     }
     const key = path.resolve(this.indexPath);
-    const sig = `${stat.dev}:${stat.ino}:${stat.ctimeMs}:${stat.mtimeMs}:${stat.size}`;
     const cached = INDEX_CACHE.get(key);
     if (cached && cached[0] === sig) {
-      return cached[1] as { sessions: Record<string, unknown>[] };
+      return cached[1];
     }
     const data = this.readIndex();
-    try {
-      const after = fs.statSync(this.indexPath);
-      const afterSig = `${after.dev}:${after.ino}:${after.ctimeMs}:${after.mtimeMs}:${after.size}`;
-      if (sig === afterSig) {
-        if (INDEX_CACHE.size >= 8) {
-          INDEX_CACHE.clear();
-        }
-        INDEX_CACHE.set(key, [sig, data]);
-      }
-    } catch {
-      // ignore
+    const afterSig = this.statSignature();
+    if (afterSig === sig) {
+      this.storeCache(key, sig, data);
     }
     return data;
   }
 
-  private readIndex(): { sessions: Record<string, unknown>[] } {
+  private readIndex(): { sessions: Record<string, unknown>[] } & Record<string, unknown> {
     const data = this.files.loadJson(this.indexPath);
     if (!data || !Array.isArray(data.sessions)) {
       return { sessions: [] };
     }
-    return data as { sessions: Record<string, unknown>[] };
+    return data as { sessions: Record<string, unknown>[] } & Record<string, unknown>;
   }
 
   updateIndex(entry: Record<string, unknown>): boolean {
@@ -326,7 +343,7 @@ export class SessionIndexRepository {
     }
     try {
       this.files.lockFor(this.indexPath).withLock(() => {
-        const indexData = this.readIndex();
+        const indexData = this.loadIndex();
         const sessions = [...indexData.sessions];
         const idx = sessions.findIndex(s => s && s.id === entry.id);
         if (idx >= 0) {
@@ -334,8 +351,9 @@ export class SessionIndexRepository {
         } else {
           sessions.push(entry);
         }
-        this.files.writeJson(this.indexPath, { ...indexData, sessions });
-        this.invalidate();
+        const nextData = { ...indexData, sessions };
+        this.files.writeJson(this.indexPath, nextData);
+        this.syncCache(nextData);
       });
       return true;
     } catch {
@@ -344,27 +362,55 @@ export class SessionIndexRepository {
   }
 
   removeSession(sessionId: string): void {
-    if (!this.indexPath || !fs.existsSync(this.indexPath)) {
+    if (!this.indexPath || !this.statSignature()) {
       return;
     }
     try {
       this.files.lockFor(this.indexPath).withLock(() => {
-        const indexData = this.readIndex();
+        const indexData = this.loadIndex();
         const remaining = indexData.sessions.filter(s => !s || s.id !== sessionId);
         if (remaining.length === indexData.sessions.length) {
           return;
         }
-        this.files.writeJson(this.indexPath, { ...indexData, sessions: remaining });
-        this.invalidate();
+        const nextData = { ...indexData, sessions: remaining };
+        this.files.writeJson(this.indexPath, nextData);
+        this.syncCache(nextData);
       });
     } catch {
       // ignore
     }
   }
 
-  private invalidate(): void {
-    if (this.indexPath) {
-      INDEX_CACHE.delete(path.resolve(this.indexPath));
+  private statSignature(): string | null {
+    try {
+      const stat = fs.statSync(this.indexPath);
+      return `${stat.dev}:${stat.ino}:${stat.ctimeMs}:${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      return null;
+    }
+  }
+
+  private storeCache(
+    key: string,
+    sig: string,
+    data: { sessions: Record<string, unknown>[] } & Record<string, unknown>,
+  ): void {
+    if (!INDEX_CACHE.has(key) && INDEX_CACHE.size >= 8) {
+      const oldest = INDEX_CACHE.keys().next().value;
+      if (oldest !== undefined) {
+        INDEX_CACHE.delete(oldest);
+      }
+    }
+    INDEX_CACHE.set(key, [sig, data]);
+  }
+
+  private syncCache(data: { sessions: Record<string, unknown>[] } & Record<string, unknown>): void {
+    const key = path.resolve(this.indexPath);
+    const sig = this.statSignature();
+    if (sig) {
+      this.storeCache(key, sig, data);
+    } else {
+      INDEX_CACHE.delete(key);
     }
   }
 }
@@ -1051,7 +1097,7 @@ export class JsonlSessionStore {
   private _projectedCaches = new Map<string, [string, Record<string, unknown>[]]>();
   private _messagesCache: [string, Record<string, unknown>[]] | null = null;
   private _toolRecordsCache: [string, Record<string, unknown>[]] | null = null;
-  private readonly _files = new SessionFiles();
+  private readonly _files = SESSION_FILES;
   private _msgRepo: MessageRepository | null = null;
   private _toolRepo: ToolCallRepository | null = null;
   private _compactionRepo: CompactionRepository | null = null;
@@ -1162,8 +1208,7 @@ export class JsonlSessionStore {
       err.name = "LookupError";
       throw err;
     }
-    const files = new SessionFiles();
-    const meta = files.loadJson(metaPath);
+    const meta = SESSION_FILES.loadJson(metaPath);
     validateSessionMeta(meta, clean);
     return meta;
   }
@@ -1201,10 +1246,9 @@ export class JsonlSessionStore {
     excludeSessionIds?: readonly string[] | null;
     perWorkspaceLimit?: number | null;
   }): [Record<string, unknown>[], { workspace_root: string; count: number }[]] {
-    const limit = options.limit ?? 20;
+    const limit = Math.max(0, Math.trunc(options.limit ?? 20));
     const indexPath = JsonlSessionStore.index_path_for(options.sessionDir);
-    const files = new SessionFiles();
-    const index = new SessionIndexRepository(files, indexPath).loadIndex();
+    const index = new SessionIndexRepository(SESSION_FILES, indexPath).loadIndex();
     const roots = new Map<string, string>();
 
     const normalizedWorkspace = (value: string): string => {
@@ -1233,7 +1277,7 @@ export class JsonlSessionStore {
       (options.excludeSessionIds ?? []).filter((v): v is string => typeof v === "string" && Boolean(v)),
     );
 
-    const result: Record<string, unknown>[] = [];
+    const matched: Record<string, unknown>[] = [];
     const totals = new Map<string, [string, number]>();
 
     for (const entry of entries) {
@@ -1251,7 +1295,7 @@ export class JsonlSessionStore {
           continue;
         }
       }
-      result.push(structuredClone(entry));
+      matched.push(entry);
       if (options.perWorkspaceLimit !== undefined && options.perWorkspaceLimit !== null && typeof entryRoot === "string" && entryRoot) {
         const k = normalizedWorkspace(entryRoot);
         const bucket = totals.get(k) ?? [entryRoot, 0];
@@ -1260,15 +1304,15 @@ export class JsonlSessionStore {
       }
     }
 
-    result.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+    matched.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
     if (options.perWorkspaceLimit === undefined || options.perWorkspaceLimit === null) {
-      return [result.slice(0, Math.max(0, Math.trunc(limit))), []];
+      return [matched.slice(0, limit).map(entry => structuredClone(entry)), []];
     }
 
     const kept: Record<string, unknown>[] = [];
     const representatives = new Map<string, string>();
     const counts = new Map<string, number>();
-    for (const entry of result) {
+    for (const entry of matched) {
       const rawRoot = String(entry.workspace_root || "");
       const key = normalizedWorkspace(rawRoot);
       const curCount = counts.get(key) ?? 0;
@@ -1288,7 +1332,7 @@ export class JsonlSessionStore {
         workspaceTotals.push({ workspace_root: rep, count: totalEntry[1] });
       }
     }
-    return [kept.slice(0, Math.max(0, Math.trunc(limit))), workspaceTotals];
+    return [kept.slice(0, limit).map(entry => structuredClone(entry)), workspaceTotals];
   }
 
   private _resolveWorkspaceRoot(): string {
@@ -1610,10 +1654,7 @@ export class JsonlSessionStore {
       toolCallCount: Number(this._sessionMeta.tool_call_count || 0),
       preview: this._lastPreview,
     });
-    if (
-      this._indexEntry !== null &&
-      JSON.stringify(sessionIndexSummary(this._indexEntry)) === JSON.stringify(sessionIndexSummary(entry))
-    ) {
+    if (this._indexEntry !== null && sameIndexSummary(this._indexEntry, entry)) {
       return;
     }
     if (this._indexRepo.updateIndex(entry)) {
@@ -2684,7 +2725,7 @@ export function forkSession(
   const clean = validateSessionId(sourceId);
   const root = JsonlSessionStore.resolve_session_root(sessionDir);
   const sourceBase = resolveSessionBase(root, clean);
-  const files = new SessionFiles();
+  const files = SESSION_FILES;
 
   const meta = files.loadJson(path.join(sourceBase, "meta.json"));
   if (!meta) {

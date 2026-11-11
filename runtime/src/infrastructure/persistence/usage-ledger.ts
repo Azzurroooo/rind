@@ -1,14 +1,12 @@
 import path from "node:path";
 import { resolveRindHome } from "../paths.js";
-import { SessionFiles } from "./atomic-files.js";
+import { SESSION_FILES } from "./atomic-files.js";
 
 export const USAGE_LEDGER_FILENAME = "usage.jsonl";
 export const USAGE_SUMMARY_DEFAULT_DAYS = 7;
 export const USAGE_SUMMARY_MAX_DAYS = 365;
 export const USAGE_SUMMARY_MODEL_LIMIT = 5;
 export const USAGE_SUMMARY_SESSION_LIMIT = 5;
-
-const SESSION_FILES = new SessionFiles();
 
 export function defaultUsageLedgerPath(): string {
   return path.join(resolveRindHome(), USAGE_LEDGER_FILENAME);

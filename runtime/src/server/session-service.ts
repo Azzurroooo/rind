@@ -7,7 +7,7 @@ import {
   validateSessionId,
   validateWorkspaceRoot,
 } from "../infrastructure/paths.js";
-import { SessionFiles } from "../infrastructure/persistence/atomic-files.js";
+import { SESSION_FILES } from "../infrastructure/persistence/atomic-files.js";
 import {
   JsonlSessionStore,
   SessionIndexRepository,
@@ -212,7 +212,7 @@ export class SessionService {
       fs.rmSync(base, { recursive: true, force: true });
     }
     new SessionIndexRepository(
-      new SessionFiles(),
+      SESSION_FILES,
       JsonlSessionStore.index_path_for(this.sessionDir),
     ).removeSession(clean);
     return {

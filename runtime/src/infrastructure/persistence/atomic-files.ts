@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { resolveRindHome, resolveSessionBase, validateSessionId } from "../paths.js";
 
 const RETENTION_SECONDS = 7 * 24 * 60 * 60;
 const CALL_ID_PATTERN = /^[A-Za-z0-9_.-]{1,160}$/;
+const EMPTY_LOCK_STALE_MS = 500;
+const LOCK_STALE_MS = 30_000;
+const LOCAL_HOST = os.hostname();
 
 function sleepSync(ms: number): void {
   const buf = new SharedArrayBuffer(4);
@@ -12,117 +16,156 @@ function sleepSync(ms: number): void {
   Atomics.wait(arr, 0, 0, ms);
 }
 
-const PROCESS_LOCKS = new Map<string, FileLockHandle>();
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+interface ActiveLockState {
+  fd: number;
+  ownerRecord: string;
+  depth: number;
+}
+
+const ACTIVE_LOCKS = new Map<string, ActiveLockState>();
 
 export class FileLockHandle {
   readonly lockPath: string;
   private readonly timeoutMs: number;
-  private fd: number | null = null;
-  private depth = 0;
 
   constructor(lockPath: string, timeoutMs: number = 5000) {
-    const resolved = path.resolve(lockPath);
-    const existing = PROCESS_LOCKS.get(resolved);
-    if (existing) {
-      this.lockPath = existing.lockPath;
-      this.timeoutMs = existing.timeoutMs;
-      return existing;
-    }
-    this.lockPath = resolved;
+    this.lockPath = path.resolve(lockPath);
     this.timeoutMs = timeoutMs;
-    PROCESS_LOCKS.set(resolved, this);
   }
 
   acquire(timeoutMs: number = this.timeoutMs): void {
-    if (this.fd !== null) {
-      this.depth += 1;
+    const active = ACTIVE_LOCKS.get(this.lockPath);
+    if (active) {
+      active.depth += 1;
       return;
     }
     fs.mkdirSync(path.dirname(this.lockPath), { recursive: true });
     const deadline = Date.now() + timeoutMs;
     while (true) {
       try {
-        this.fd = fs.openSync(this.lockPath, "wx");
-        fs.writeFileSync(this.fd, `${process.pid}\n`, "utf8");
-        this.depth = 1;
+        const fd = fs.openSync(this.lockPath, "wx");
+        const ownerRecord = `${process.pid} ${LOCAL_HOST} ${randomUUID()}\n`;
+        try {
+          fs.writeFileSync(fd, ownerRecord, "utf8");
+        } catch (writeErr) {
+          try {
+            fs.closeSync(fd);
+          } catch {
+            // ignore
+          }
+          try {
+            fs.unlinkSync(this.lockPath);
+          } catch {
+            // ignore
+          }
+          throw writeErr;
+        }
+        ACTIVE_LOCKS.set(this.lockPath, { fd, ownerRecord, depth: 1 });
         return;
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
-        if (code !== "EEXIST" && code !== "EACCES") {
+        const winSharing = process.platform === "win32" && (code === "EPERM" || code === "EBUSY");
+        if (code !== "EEXIST" && code !== "EACCES" && !winSharing) {
           throw err;
         }
-        try {
-          const content = fs.readFileSync(this.lockPath, "utf8").trim();
-          const pid = Number.parseInt(content, 10);
-          if (Number.isInteger(pid) && pid > 0) {
-            if (pid === process.pid) {
-              try {
-                fs.unlinkSync(this.lockPath);
-                continue;
-              } catch {
-                // ignore race
-              }
-            } else {
-              try {
-                process.kill(pid, 0);
-              } catch (killErr) {
-                if ((killErr as NodeJS.ErrnoException).code === "ESRCH") {
-                  try {
-                    fs.unlinkSync(this.lockPath);
-                    continue;
-                  } catch {
-                    // ignore race
-                  }
-                }
-              }
-            }
-          } else {
-            const stat = fs.statSync(this.lockPath);
-            if (Date.now() - stat.mtimeMs > 50) {
-              try {
-                fs.unlinkSync(this.lockPath);
-                continue;
-              } catch {
-                // ignore race
-              }
-            }
-          }
-        } catch {
-          // ignore
+        if (this.tryReclaimStale()) {
+          continue;
         }
         if (Date.now() >= deadline) {
           const timeoutError = new Error(`Lock timeout: ${this.lockPath}`);
           timeoutError.name = "TimeoutError";
           throw timeoutError;
         }
-        sleepSync(15);
+        sleepSync(10 + Math.floor(Math.random() * 15));
       }
+    }
+  }
+
+  private tryReclaimStale(): boolean {
+    let stat: fs.Stats;
+    let raw: string;
+    try {
+      stat = fs.statSync(this.lockPath);
+      raw = fs.readFileSync(this.lockPath, "utf8");
+    } catch {
+      return false;
+    }
+    const ageMs = Date.now() - stat.mtimeMs;
+    const content = raw.trim();
+    let stale = false;
+    if (!content) {
+      stale = ageMs >= EMPTY_LOCK_STALE_MS;
+    } else {
+      const [pidPart, hostPart] = content.split(/\s+/);
+      const pid = Number.parseInt(pidPart, 10);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        stale = ageMs >= EMPTY_LOCK_STALE_MS;
+      } else if (!hostPart || hostPart === LOCAL_HOST) {
+        stale = pid === process.pid || !processAlive(pid) || ageMs >= LOCK_STALE_MS;
+      } else {
+        stale = ageMs >= LOCK_STALE_MS;
+      }
+    }
+    if (!stale) {
+      return false;
+    }
+    try {
+      if (fs.readFileSync(this.lockPath, "utf8") !== raw) {
+        return false;
+      }
+      fs.unlinkSync(this.lockPath);
+      return true;
+    } catch {
+      return false;
     }
   }
 
   release(): void {
-    if (this.depth > 1) {
-      this.depth -= 1;
+    const active = ACTIVE_LOCKS.get(this.lockPath);
+    if (!active) {
       return;
     }
-    this.depth = 0;
-    if (this.fd !== null) {
+    if (active.depth > 1) {
+      active.depth -= 1;
+      return;
+    }
+    ACTIVE_LOCKS.delete(this.lockPath);
+    const { fd, ownerRecord } = active;
+    let sameInode = true;
+    if (process.platform !== "win32") {
       try {
-        fs.closeSync(this.fd);
+        sameInode = fs.fstatSync(fd).ino === fs.statSync(this.lockPath).ino;
       } catch {
-        // ignore
+        sameInode = false;
       }
-      this.fd = null;
+    }
+    try {
+      fs.closeSync(fd);
+    } catch {
+      // ignore
+    }
+    if (sameInode) {
       try {
-        fs.unlinkSync(this.lockPath);
+        if (fs.readFileSync(this.lockPath, "utf8") === ownerRecord) {
+          fs.unlinkSync(this.lockPath);
+        }
       } catch {
         // ignore
       }
     }
   }
 
-  withLock<T>(fn: () => T): T {
-    this.acquire();
+  withLock<T>(fn: () => T, timeoutMs: number = this.timeoutMs): T {
+    this.acquire(timeoutMs);
     try {
       return fn();
     } finally {
@@ -132,30 +175,19 @@ export class FileLockHandle {
 }
 
 export class SessionFiles {
-  private readonly locks = new Map<string, FileLockHandle>();
-
   lockFor(filePath: string): FileLockHandle {
-    const lockPath = `${filePath}.lock`;
-    let handle = this.locks.get(lockPath);
-    if (!handle) {
-      handle = new FileLockHandle(lockPath, 5000);
-      this.locks.set(lockPath, handle);
-    }
-    return handle;
+    return new FileLockHandle(`${filePath}.lock`, 5000);
   }
 
   loadJson(filePath: string): Record<string, unknown> | null {
-    if (!fs.existsSync(filePath)) {
-      return null;
-    }
-    let raw: string;
+    let raw: string | null;
     try {
-      raw = this.lockFor(filePath).withLock(() => fs.readFileSync(filePath, "utf8"));
+      raw = this.readText(filePath);
     } catch (err) {
-      if ((err as Error).name === "TimeoutError") {
-        throw new Error(`Session is currently in use by another process. Failed to acquire lock for: ${filePath}`);
-      }
       throw new Error(`Failed to read JSON file: ${filePath}: ${(err as Error).message}`);
+    }
+    if (raw === null) {
+      return null;
     }
     try {
       return JSON.parse(raw) as Record<string, unknown>;
@@ -165,26 +197,7 @@ export class SessionFiles {
   }
 
   writeJson(filePath: string, data: unknown): void {
-    const tmp = `${filePath}.${randomUUID().replace(/-/g, "")}.tmp`;
-    try {
-      this.lockFor(filePath).withLock(() => {
-        fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        const fd = fs.openSync(tmp, "w");
-        try {
-          fs.writeFileSync(fd, JSON.stringify(data, null, 2), "utf8");
-          fs.fsyncSync(fd);
-        } finally {
-          fs.closeSync(fd);
-        }
-        this.replaceWithRetry(tmp, filePath);
-      });
-    } catch (err) {
-      this.removeTmp(tmp);
-      if ((err as Error).name === "TimeoutError") {
-        throw new Error(`Session is currently in use by another process. Failed to acquire lock for: ${filePath}`);
-      }
-      throw err;
-    }
+    this.writeAtomic(filePath, JSON.stringify(data, null, 2));
   }
 
   appendJsonl(filePath: string, data: unknown): void {
@@ -202,51 +215,88 @@ export class SessionFiles {
       });
     } catch (err) {
       if ((err as Error).name === "TimeoutError") {
-        throw new Error(`Session is currently in use by another process. Failed to acquire lock for: ${filePath}`);
+        throw this.lockTimeoutError(filePath);
       }
       throw err;
     }
   }
 
   readJsonl(filePath: string): Record<string, unknown>[] {
-    if (!fs.existsSync(filePath)) {
+    let content: string | null;
+    try {
+      content = this.readText(filePath);
+    } catch (err) {
+      throw new Error(`Failed to read JSONL file: ${filePath}: ${(err as Error).message}`);
+    }
+    if (content === null) {
       return [];
     }
     const items: Record<string, unknown>[] = [];
-    this.lockFor(filePath).withLock(() => {
-      const content = fs.readFileSync(filePath, "utf8");
-      for (const rawLine of content.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (!line) continue;
-        try {
-          items.push(JSON.parse(line) as Record<string, unknown>);
-        } catch {
-          continue;
-        }
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      try {
+        items.push(JSON.parse(line) as Record<string, unknown>);
+      } catch {
+        continue;
       }
-    });
+    }
     return items;
   }
 
   writeJsonl(filePath: string, records: readonly unknown[]): void {
-    const payload = records.map(r => `${JSON.stringify(r)}\n`).join("");
+    this.writeAtomic(filePath, records.map(r => `${JSON.stringify(r)}\n`).join(""));
+  }
+
+  private readText(filePath: string): string | null {
+    for (const delay of [10, 25, 50, null] as const) {
+      try {
+        return fs.readFileSync(filePath, "utf8");
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") {
+          return null;
+        }
+        const winSharing =
+          process.platform === "win32" && (code === "EPERM" || code === "EACCES" || code === "EBUSY");
+        if (!winSharing || delay === null) {
+          throw err;
+        }
+        sleepSync(delay);
+      }
+    }
+    return null;
+  }
+
+  private writeAtomic(filePath: string, payload: string): void {
+    const tmp = `${filePath}.${randomUUID().replace(/-/g, "")}.tmp`;
     try {
       this.lockFor(filePath).withLock(() => {
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        const fd = fs.openSync(filePath, "w");
+        const fd = fs.openSync(tmp, "w");
         try {
           fs.writeFileSync(fd, payload, "utf8");
           fs.fsyncSync(fd);
         } finally {
           fs.closeSync(fd);
         }
+        this.replaceWithRetry(tmp, filePath);
       });
     } catch (err) {
+      this.removeTmp(tmp);
       if ((err as Error).name === "TimeoutError") {
-        throw new Error(`Session is currently in use by another process. Failed to acquire lock for: ${filePath}`);
+        throw this.lockTimeoutError(filePath);
       }
       throw err;
     }
+  }
+
+  private lockTimeoutError(filePath: string): Error {
+    const name = path.basename(filePath);
+    if (name === "session_index.json" || name === "index.json" || name === "usage.jsonl") {
+      return new Error(`Timed out waiting to update shared store: ${filePath}`);
+    }
+    return new Error(`Session is currently in use by another process. Failed to acquire lock for: ${filePath}`);
   }
 
   private replaceWithRetry(source: string, destination: string): void {
@@ -274,6 +324,8 @@ export class SessionFiles {
     }
   }
 }
+
+export const SESSION_FILES = new SessionFiles();
 
 export class ToolOutputStore {
   readonly sessionRoot: string;
