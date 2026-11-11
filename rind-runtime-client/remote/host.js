@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveRindHome as canonicalResolveRindHome } from "../local-files.js";
+import { BUILTIN_PROVIDER_CATALOG } from "../provider-catalog.js";
 import { allowRemoteOnWindows } from "./firewall.js";
 import { createManagementBridge } from "./management.js";
 import { isRemoteRuntimeMethod } from "./policy.js";
@@ -32,38 +33,26 @@ export const VALID_PROVIDER_APIS = new Set([
   "google-generative-ai",
 ]);
 
-const KNOWN_PROVIDER_ENV_KEYS = [
-  "OPENAI_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "GEMINI_API_KEY",
-  "DEEPSEEK_API_KEY",
-  "GROQ_API_KEY",
-  "MISTRAL_API_KEY",
-  "OPENROUTER_API_KEY",
-  "XAI_API_KEY",
-  "TOGETHER_API_KEY",
-  "FIREWORKS_API_KEY",
-  "CEREBRAS_API_KEY",
-  "PERPLEXITY_API_KEY",
-  "COHERE_API_KEY",
-  "NVIDIA_API_KEY",
-  "SILICONFLOW_API_KEY",
-  "DASHSCOPE_API_KEY",
-  "MOONSHOT_API_KEY",
-  "KIMI_API_KEY",
-  "ZHIPU_API_KEY",
-  "ZAI_API_KEY",
-  "MINIMAX_API_KEY",
-  "ARK_API_KEY",
-  "VOLCENGINE_API_KEY",
-  "HUNYUAN_API_KEY",
-  "BAICHUAN_API_KEY",
-  "YI_API_KEY",
-  "STEPFUN_API_KEY",
-  "MIMO_API_KEY",
-  "XIAOMI_API_KEY",
-  "LONGCAT_API_KEY",
-];
+const KNOWN_PROVIDER_ENV_KEYS = Array.from(
+  new Set([
+    ...BUILTIN_PROVIDER_CATALOG.map((p) => p.envKey).filter(Boolean),
+    "GEMINI_API_KEY",
+    "TOGETHER_API_KEY",
+    "FIREWORKS_API_KEY",
+    "CEREBRAS_API_KEY",
+    "PERPLEXITY_API_KEY",
+    "COHERE_API_KEY",
+    "NVIDIA_API_KEY",
+    "SILICONFLOW_API_KEY",
+    "DASHSCOPE_API_KEY",
+    "KIMI_API_KEY",
+    "ARK_API_KEY",
+    "BAICHUAN_API_KEY",
+    "YI_API_KEY",
+    "STEPFUN_API_KEY",
+    "MIMO_API_KEY",
+  ]),
+);
 
 function asTrimmedString(value) {
   return typeof value === "string" ? value.trim() : "";

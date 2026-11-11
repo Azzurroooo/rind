@@ -67,8 +67,18 @@ function saveTaskDrawerWidth(width: number) {
 let lastSidebarHtml = ""
 let lastSurfaceHtml = ""
 let lastBreadcrumbHtml = ""
-let lastRefreshedSeq = -1
+let lastRefreshedSessionsKey = ""
 let refreshInFlight = false
+
+function agentSessionsRefreshKey(snapshot: typeof state.agentsSnapshot): string {
+  const teamsPart = (snapshot.teams || []).map((t) => `${t.id}:${t.name || ""}`).join(",")
+  const agentsPart = (snapshot.agents || []).map((a) => `${a.id}:${a.teamId || ""}:${a.canonicalWorkspace || ""}`).join(",")
+  const sessionsPart = (snapshot.sessions || [])
+    .map((s) => `${s.id}:${s.runtimeSessionId || ""}:${s.status || ""}:${s.title || ""}:${s.updatedAt || ""}`)
+    .join(",")
+  const runsPart = (snapshot.runs || []).map((r) => `${r.id}:${r.status || ""}`).join(",")
+  return `${teamsPart}|${agentsPart}|${sessionsPart}|${runsPart}`
+}
 let refreshPending = false
 let refreshDebounceTimer: ReturnType<typeof setTimeout> | undefined
 let taskDrawerWidth = loadInitialTaskDrawerWidth()
@@ -165,9 +175,12 @@ export async function refreshAgentSessions() {
 
 export function renderAgentsUI() {
   const snapshot = state.agentsSnapshot
-  if (snapshot.seq !== lastRefreshedSeq && window.api.agents) {
-    lastRefreshedSeq = snapshot.seq
-    scheduleRefreshAgentSessions()
+  if (window.api.agents) {
+    const refreshKey = agentSessionsRefreshKey(snapshot)
+    if (refreshKey !== lastRefreshedSessionsKey) {
+      lastRefreshedSessionsKey = refreshKey
+      scheduleRefreshAgentSessions()
+    }
   }
 
   const chatContext = currentSessionAgentContext()
@@ -220,34 +233,36 @@ export function renderAgentsUI() {
   }
   sessionAgentContext.hidden = !breadcrumbHtml || isAgentSurface
 
-  // Sidebar navigation — only update DOM when the actual rendered HTML changes, and preserve scroll position
-  const activeSidebarInput = sidebarAgents.querySelector<HTMLInputElement>("input:focus")
-  if (!activeSidebarInput) {
-    const nextSidebarHtml = renderSidebarAgentsHtml({
-      snapshot,
-      surface: state.agentSurface,
-      chatContext,
-      collapsedTeams: state.collapsedTeams,
-      expandedSidebarMembers: state.expandedSidebarMembers,
-      managerExpanded: state.managerExpanded,
-      teamSessionsByTeam: state.teamSessionsByTeam,
-      managerSessions: state.managerSessions,
-      viewedSessionId: state.viewedSessionId,
-      itemMenuKey: state.agentItemMenuKey,
-      sessionMenuId: state.sessionMenuId,
-      sessionDeleteConfirmId: state.sessionDeleteConfirmId,
-      sessionDeleteBusyId: state.sessionDeleteBusyId,
-      sessionLimits: state.agentSessionLimits,
-      newTeamOpen: state.newTeamOpen,
-      busy: state.agentsBusy && state.newTeamOpen,
-    })
-    if (nextSidebarHtml !== lastSidebarHtml) {
-      const prevScrollTop = sidebarAgents.querySelector<HTMLElement>(".sidebar-body")?.scrollTop ?? 0
-      lastSidebarHtml = nextSidebarHtml
-      sidebarAgents.innerHTML = nextSidebarHtml
-      const nextBody = sidebarAgents.querySelector<HTMLElement>(".sidebar-body")
-      if (nextBody && prevScrollTop > 0) {
-        nextBody.scrollTop = prevScrollTop
+  // Sidebar navigation — only compute & update DOM when visible and rendered HTML changes
+  if (isAgentsMode && state.sidebarOpen) {
+    const activeSidebarInput = sidebarAgents.querySelector<HTMLInputElement>("input:focus")
+    if (!activeSidebarInput) {
+      const nextSidebarHtml = renderSidebarAgentsHtml({
+        snapshot,
+        surface: state.agentSurface,
+        chatContext,
+        collapsedTeams: state.collapsedTeams,
+        expandedSidebarMembers: state.expandedSidebarMembers,
+        managerExpanded: state.managerExpanded,
+        teamSessionsByTeam: state.teamSessionsByTeam,
+        managerSessions: state.managerSessions,
+        viewedSessionId: state.viewedSessionId,
+        itemMenuKey: state.agentItemMenuKey,
+        sessionMenuId: state.sessionMenuId,
+        sessionDeleteConfirmId: state.sessionDeleteConfirmId,
+        sessionDeleteBusyId: state.sessionDeleteBusyId,
+        sessionLimits: state.agentSessionLimits,
+        newTeamOpen: state.newTeamOpen,
+        busy: state.agentsBusy && state.newTeamOpen,
+      })
+      if (nextSidebarHtml !== lastSidebarHtml) {
+        const prevScrollTop = sidebarAgents.querySelector<HTMLElement>(".sidebar-body")?.scrollTop ?? 0
+        lastSidebarHtml = nextSidebarHtml
+        sidebarAgents.innerHTML = nextSidebarHtml
+        const nextBody = sidebarAgents.querySelector<HTMLElement>(".sidebar-body")
+        if (nextBody && prevScrollTop > 0) {
+          nextBody.scrollTop = prevScrollTop
+        }
       }
     }
   }

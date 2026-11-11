@@ -3,6 +3,7 @@ FROM node:22-alpine AS web-build
 WORKDIR /src/frontend-web
 COPY frontend-web/package.json frontend-web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
+COPY rind-runtime-client/ /src/rind-runtime-client/
 COPY frontend-web/ ./
 RUN npm run build
 

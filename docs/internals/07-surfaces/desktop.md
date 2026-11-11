@@ -16,7 +16,7 @@ flowchart LR
 
 The main process maintains request_id values and pending promises; `runtimeGeneration` discards late replies from an old process; stderr is captured with a bound; and `shutdownPromise` waits for exit. Worker errors are returned in an envelope, which preload unpacks into Errors carrying `type`, preserving the renderer's try/catch semantics.
 
-preload also exposes capabilities such as runtime, auth, settings, models, sessions, workspaceFiles, background, goal, and notifications; the renderer cannot touch Node or the runtime directly. The remote Gateway reuses the local Worker and manages tickets, Origin/network policy, and Web static assets itself. Turning off remote access clears remote tickets but leaves the local Worker running.
+preload also exposes capabilities such as runtime, auth, settings, models, sessions, workspaceFiles, goal, and notifications; the renderer cannot touch Node or the runtime directly. The remote Gateway reuses the local Worker and manages tickets, Origin/network policy, and Web static assets itself. Turning off remote access clears remote tickets but leaves the local Worker running.
 
 ## Build and remote access
 

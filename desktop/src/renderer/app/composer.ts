@@ -4,7 +4,7 @@ import { restoreFailedDraft } from "../session-actions.ts"
 import { commandPrefill, revealSlashCommandOption, type SlashCommand, slashCommandMenu as buildSlashCommandMenu } from "../slash-commands.ts"
 import { addUserMessage } from "../timeline-model.ts"
 import { isTurnNotActive } from "../turn-state.ts"
-import { attachmentsFor, renderAttachments, waitForAttachments } from "./attachments-ui.ts"
+import { attachmentsFor, renderAttachments, revokeAttachmentUrl, waitForAttachments } from "./attachments-ui.ts"
 import { prompt, slashCommandMenu } from "./dom.ts"
 import { asRecord, escapeAttribute, escapeHtml } from "./html.ts"
 import { addPendingInput, syncCurrentPendingInputs } from "./pending-inputs.ts"
@@ -182,6 +182,7 @@ export async function submitPrompt(draftKey: string, mode: RunningSendMode = "qu
   let accepted = false
   const clearSentAttachments = () => {
     const sentIds = new Set(chips.map((chip) => chip.id))
+    for (const chip of chips) revokeAttachmentUrl(chip)
     state.attachments[projectPath] = attachmentsFor(projectPath).filter((chip) => !sentIds.has(chip.id))
   }
   try {

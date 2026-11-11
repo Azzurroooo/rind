@@ -35,9 +35,13 @@ function walkFiles(dir, predicate) {
 
 function parseModuleSpecifiers(tsSource) {
   const specs = new Set();
-  const importExportRe = /(?:import|export)\s+(?:[^"'`]*?\s+from\s+)?["']([^"']+)["']/g;
+  const sideEffectImportRe = /^\s*import\s+["']([^"']+)["']/gm;
+  const fromImportExportRe = /^\s*(?:import|export)\s+(?:type\s+)?(?:\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|\{[^}]*\}|[A-Za-z_$][\w$]*(?:\s*,\s*(?:\*\s+as\s+[A-Za-z_$][\w$]*|\{[^}]*\}))?)\s+from\s+["']([^"']+)["']/gm;
   const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
-  for (const match of tsSource.matchAll(importExportRe)) {
+  for (const match of tsSource.matchAll(sideEffectImportRe)) {
+    specs.add(match[1]);
+  }
+  for (const match of tsSource.matchAll(fromImportExportRe)) {
     specs.add(match[1]);
   }
   for (const match of tsSource.matchAll(dynamicImportRe)) {

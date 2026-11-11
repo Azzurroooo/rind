@@ -1,3 +1,8 @@
+import {
+  BUILTIN_PROVIDER_CATALOG,
+  type BuiltinProviderSpec,
+  type CatalogModelSpec,
+} from "../../../../rind-runtime-client/provider-catalog.js"
 import type { DesktopAuthPrompt, DesktopAuthProvider, DesktopCustomProvider } from "../../preload/types.ts"
 import { renderCustomSelectHtml } from "../custom-select.ts"
 import { authPromptDialog, authPromptField, authPromptForm, authPromptMessage, requiredElement, settingsProviders } from "./dom.ts"
@@ -6,231 +11,7 @@ import { loadAvailableModels } from "./settings.ts"
 import { render } from "./shell.ts"
 import { state } from "./state.ts"
 
-export type CatalogModelSpec = {
-  id: string
-  efforts: readonly string[]
-}
-
-export type BuiltinProviderSpec = {
-  id: string
-  name: string
-  api: string
-  methods: readonly string[]
-  envKey?: string
-  models: readonly CatalogModelSpec[]
-}
-
-export const BUILTIN_PROVIDER_CATALOG: readonly BuiltinProviderSpec[] = [
-  {
-    id: "openai",
-    name: "OpenAI",
-    api: "openai-responses",
-    methods: ["api_key", "oauth"],
-    envKey: "OPENAI_API_KEY",
-    models: [
-      { id: "gpt-5.5", efforts: ["low", "medium", "high", "xhigh"] },
-      { id: "gpt-5.4", efforts: ["low", "medium", "high", "xhigh"] },
-      { id: "gpt-5.4-mini", efforts: ["low", "medium", "high", "xhigh"] },
-      { id: "gpt-5", efforts: ["low", "medium", "high", "xhigh"] },
-      { id: "gpt-4o-mini", efforts: [] },
-      { id: "gpt-4.1", efforts: [] },
-      { id: "gpt-4o", efforts: [] },
-      { id: "o3", efforts: ["low", "medium", "high"] },
-      { id: "o4-mini", efforts: ["low", "medium", "high"] },
-    ],
-  },
-  {
-    id: "deepseek",
-    name: "DeepSeek",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "DEEPSEEK_API_KEY",
-    models: [
-      { id: "deepseek-flash", efforts: ["low", "high", "max"] },
-      { id: "deepseek-v4-pro", efforts: ["low", "high", "max"] },
-      { id: "deepseek-v4-flash", efforts: ["low", "high", "max"] },
-    ],
-  },
-  {
-    id: "anthropic",
-    name: "Anthropic",
-    api: "anthropic-messages",
-    methods: ["api_key"],
-    envKey: "ANTHROPIC_API_KEY",
-    models: [
-      { id: "claude-sonnet-5-5", efforts: [] },
-      { id: "claude-opus-5-5", efforts: [] },
-      { id: "claude-sonnet-4-6", efforts: [] },
-      { id: "claude-opus-4-6", efforts: [] },
-      { id: "claude-haiku-4-5", efforts: [] },
-    ],
-  },
-  {
-    id: "google",
-    name: "Google Gemini",
-    api: "google-generative-ai",
-    methods: ["api_key"],
-    envKey: "GEMINI_API_KEY",
-    models: [
-      { id: "gemini-3.5-flash", efforts: [] },
-      { id: "gemini-3.1-pro-preview", efforts: [] },
-      { id: "gemini-2.5-pro", efforts: [] },
-      { id: "gemini-2.5-flash", efforts: [] },
-    ],
-  },
-  {
-    id: "openrouter",
-    name: "OpenRouter",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "OPENROUTER_API_KEY",
-    models: [
-      { id: "openai/gpt-5.5", efforts: [] },
-      { id: "anthropic/claude-sonnet-4.6", efforts: [] },
-      { id: "deepseek/deepseek-v4.1-flash", efforts: [] },
-    ],
-  },
-  {
-    id: "xai",
-    name: "xAI (Grok)",
-    api: "openai-responses",
-    methods: ["api_key"],
-    envKey: "XAI_API_KEY",
-    models: [
-      { id: "grok-4.7", efforts: ["low", "medium", "high", "xhigh"] },
-      { id: "grok-4.6", efforts: ["low", "medium", "high", "xhigh"] },
-      { id: "grok-4.5", efforts: ["low", "medium", "high"] },
-    ],
-  },
-  {
-    id: "qwen",
-    name: "Qwen (DashScope)",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "DASHSCOPE_API_KEY",
-    models: [
-      { id: "qwen3-coder-plus", efforts: [] },
-      { id: "qwen3.8-max", efforts: ["low", "medium", "xhigh"] },
-      { id: "qwen3.8-flash", efforts: ["low", "medium", "xhigh"] },
-      { id: "qwen-max", efforts: [] },
-    ],
-  },
-  {
-    id: "kimi-coding",
-    name: "Kimi for Coding",
-    api: "anthropic-messages",
-    methods: ["api_key"],
-    envKey: "KIMI_API_KEY",
-    models: [
-      { id: "kimi-for-coding", efforts: [] },
-      { id: "k3", efforts: [] },
-    ],
-  },
-  {
-    id: "moonshot",
-    name: "Moonshot AI",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "MOONSHOT_API_KEY",
-    models: [
-      { id: "kimi-k3", efforts: ["low", "high", "max"] },
-      { id: "kimi-k2.7-code", efforts: [] },
-      { id: "kimi-k2.6", efforts: [] },
-    ],
-  },
-  {
-    id: "zai",
-    name: "Z.AI",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "ZAI_API_KEY",
-    models: [
-      { id: "glm-5.3", efforts: ["low", "high", "max"] },
-      { id: "glm-5.3-flash", efforts: ["low", "high", "max"] },
-      { id: "glm-4.7", efforts: [] },
-    ],
-  },
-  {
-    id: "zhipu",
-    name: "Zhipu AI (GLM)",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "ZHIPU_API_KEY",
-    models: [
-      { id: "glm-5.3", efforts: ["low", "high", "max"] },
-      { id: "glm-5.3-flash", efforts: ["low", "high", "max"] },
-      { id: "glm-4.7", efforts: [] },
-    ],
-  },
-  {
-    id: "minimax",
-    name: "MiniMax",
-    api: "anthropic-messages",
-    methods: ["api_key"],
-    envKey: "MINIMAX_API_KEY",
-    models: [{ id: "MiniMax-M3", efforts: [] }],
-  },
-  {
-    id: "volcengine",
-    name: "Volcengine (Ark)",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "ARK_API_KEY",
-    models: [{ id: "doubao-seed-2-1-pro-260628", efforts: [] }],
-  },
-  {
-    id: "xiaomi",
-    name: "Xiaomi MiMo",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "MIMO_API_KEY",
-    models: [
-      { id: "mimo-v2.6-pro", efforts: [] },
-      { id: "mimo-v2.6-flash", efforts: [] },
-    ],
-  },
-  {
-    id: "hunyuan",
-    name: "Tencent Hunyuan",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "HUNYUAN_API_KEY",
-    models: [{ id: "hunyuan-turbos-latest", efforts: [] }],
-  },
-  {
-    id: "groq",
-    name: "Groq",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "GROQ_API_KEY",
-    models: [
-      { id: "llama-3.3-70b-versatile", efforts: [] },
-      { id: "openai/gpt-oss-120b", efforts: ["low", "medium", "high"] },
-    ],
-  },
-  {
-    id: "mistral",
-    name: "Mistral",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "MISTRAL_API_KEY",
-    models: [
-      { id: "mistral-large-latest", efforts: [] },
-      { id: "codestral-latest", efforts: [] },
-    ],
-  },
-  {
-    id: "longcat",
-    name: "LongCat",
-    api: "openai-chat",
-    methods: ["api_key"],
-    envKey: "LONGCAT_API_KEY",
-    models: [
-      { id: "LongCat-2.5-Preview", efforts: [] },
-      { id: "LongCat-2.0", efforts: [] },
-    ],
-  },
-]
+export { BUILTIN_PROVIDER_CATALOG, type BuiltinProviderSpec, type CatalogModelSpec }
 
 const ALL_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 
@@ -368,9 +149,11 @@ export function getMergedProviders(): EnrichedProvider[] {
 
 export function getProviderModels(providerId: string): string[] {
   const models = new Set<string>()
+  let liveCount = 0
   for (const m of state.models) {
     if (m.providerId === providerId && m.id) {
       models.add(m.id)
+      liveCount += 1
     }
   }
   const custom = (state.settings.customProviders || []).find((c) => c.id === providerId)
@@ -379,10 +162,12 @@ export function getProviderModels(providerId: string): string[] {
       if (m) models.add(m)
     }
   }
-  const builtin = BUILTIN_PROVIDER_CATALOG.find((b) => b.id === providerId)
-  if (builtin) {
-    for (const m of builtin.models) {
-      models.add(m.id)
+  if (liveCount === 0) {
+    const builtin = BUILTIN_PROVIDER_CATALOG.find((b) => b.id === providerId)
+    if (builtin) {
+      for (const m of builtin.models) {
+        models.add(m.id)
+      }
     }
   }
   if (state.settings.provider === providerId && state.settings.model) {

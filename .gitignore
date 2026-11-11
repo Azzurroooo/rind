@@ -10,10 +10,6 @@ logs/
 build/
 dist/
 release/
-packaging/vendor/
-
-# Testing & Cache
-.coverage
 
 # IDEs
 .vscode/

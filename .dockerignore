@@ -10,7 +10,6 @@ release
 desktop
 frontend-cli
 test
-tests
 .docs
 .codex
 .agents

@@ -16,7 +16,7 @@ flowchart LR
 
 main 维护 request_id 与 pending promise，runtimeGeneration 丢弃旧进程的迟到回复；stderr 有界保存，shutdownPromise 等待退出。Worker 错误通过 envelope 返回，preload 解包成带 type 的 Error，保持 renderer 的 try/catch 语义。
 
-preload 同时暴露 runtime、auth、settings、models、sessions、workspaceFiles、background、goal、notifications 等能力；renderer 不能直接接触 Node 或运行时进程。远程 Gateway 复用本地 Worker，自己处理 ticket、Origin/网络策略与 Web 静态资源；关闭远程访问会清理远端票据，但不停止本地 Worker。
+preload 同时暴露 runtime、auth、settings、models、sessions、workspaceFiles、goal、notifications 等能力；renderer 不能直接接触 Node 或运行时进程。远程 Gateway 复用本地 Worker，自己处理 ticket、Origin/网络策略与 Web 静态资源；关闭远程访问会清理远端票据，但不停止本地 Worker。
 
 ## 构建与远程访问
 

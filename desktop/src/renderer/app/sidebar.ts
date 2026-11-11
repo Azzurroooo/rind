@@ -147,8 +147,35 @@ export function renderRecentSession(item: DesktopRecentSession) {
   return renderSessionRow(item, item.lastInteractedAt, `recent:${item.id}`)
 }
 
+let lastSyncedSelectionKey = ""
+let lastSyncedRunningKey = ""
+
+function activeSessionIdsKey(): string {
+  const active = new Set<string>()
+  for (const [id, pending] of Object.entries(state.runtimeTurnPending)) {
+    if (pending) active.add(id)
+  }
+  for (const [id, turnId] of Object.entries(state.activeTurnIds)) {
+    if (turnId) active.add(id)
+  }
+  if (state.viewedSessionId && state.conversation.activeTurnId) {
+    active.add(state.viewedSessionId)
+  }
+  for (const [id, conv] of Object.entries(state.conversationCache)) {
+    if (conv.activeTurnId) active.add(id)
+  }
+  return active.size ? [...active].sort().join(",") : ""
+}
+
 export function syncSidebarSelection() {
+  if (!state.sidebarOpen || state.sidebarMode === "agents") {
+    lastSyncedSelectionKey = ""
+    return
+  }
   const selectedId = state.viewedSessionId
+  const key = `${vars.renderedProjectListStructureKey}|${vars.renderedRecentListStructureKey}|${selectedId}`
+  if (key === lastSyncedSelectionKey) return
+  lastSyncedSelectionKey = key
   for (const button of sidebar.querySelectorAll<HTMLButtonElement>("[data-session-id]")) {
     const selected = button.dataset.sessionId === selectedId
     button.classList.toggle("selected", selected)
@@ -158,6 +185,13 @@ export function syncSidebarSelection() {
 }
 
 export function syncSidebarRunningState() {
+  if (!state.sidebarOpen || state.sidebarMode === "agents") {
+    lastSyncedRunningKey = ""
+    return
+  }
+  const key = `${vars.renderedProjectListStructureKey}|${vars.renderedRecentListStructureKey}|${activeSessionIdsKey()}`
+  if (key === lastSyncedRunningKey) return
+  lastSyncedRunningKey = key
   for (const button of sidebar.querySelectorAll<HTMLButtonElement>("[data-session-id]")) {
     const running = sessionTurnActive(button.dataset.sessionId || "")
     button.classList.toggle("running", running)

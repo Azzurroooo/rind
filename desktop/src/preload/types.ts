@@ -353,13 +353,7 @@ export type DesktopApi = {
     remove: (sessionId: string) => Promise<unknown>
   }
   workspaceFiles: {
-    list: (path?: string) => Promise<unknown>
-    read: (path: string) => Promise<unknown>
     write: (projectPath: string, path: string, contentBase64: string) => Promise<unknown>
-  }
-  background: {
-    list: (sessionId: string) => Promise<unknown>
-    output: (sessionId: string, bgId: string, maxOutputChars?: number) => Promise<unknown>
   }
   goal: {
     get: (sessionId: string) => Promise<unknown>

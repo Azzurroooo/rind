@@ -429,8 +429,10 @@ function registerIpc() {
       prefs.notificationsEnabled = input.notificationsEnabled
     }
     const overview = await projectStore().updatePrefs(prefs)
-    applyThemeSurface(overview.theme)
-    notifyThemeChanged(overview.theme)
+    if (prefs.theme !== undefined) {
+      applyThemeSurface(overview.theme)
+      notifyThemeChanged(overview.theme)
+    }
     return overview
   })
   ipcMain.handle("notify", async (_event, payload: unknown) => {

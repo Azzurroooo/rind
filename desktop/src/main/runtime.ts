@@ -1,6 +1,4 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
-import { existsSync } from "node:fs"
-import { createInterface } from "node:readline"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import log from "electron-log/main"
@@ -8,6 +6,7 @@ import { RuntimeInputs } from "./runtime-inputs.ts"
 import { runtimeRequestTimeout } from "./runtime-request-policy.ts"
 import { buildRuntimeEnv } from "../../../rind-runtime-client/runtime-env.js"
 import { resolveRindHome } from "../../../rind-runtime-client/local-files.js"
+import { createLineBuffer } from "../../../rind-runtime-client/ndjson.js"
 
 import { buildAuthReply, parseAuthPrompt, parseAuthUpdate, validateAuthReply } from "./auth-messages.ts"
 import {
@@ -167,16 +166,15 @@ function handleLine(source: ChildProcessWithoutNullStreams, line: string) {
   request.resolve(message.result)
 }
 
-function resolvePackagedRuntimePath() {
-  const jsEntry = join(process.resourcesPath, "runtime", "dist", "cli.js")
-  if (existsSync(jsEntry)) return jsEntry
-  const legacyExecutable = join(
-    process.resourcesPath,
-    "runtime",
-    process.platform === "win32" ? "rind-runtime.exe" : "rind-runtime",
-  )
-  if (existsSync(legacyExecutable)) return legacyExecutable
-  return jsEntry
+export function resolvePackagedRuntimePath() {
+  return join(process.resourcesPath, "runtime", "dist", "cli.js")
+}
+
+export function resolveDesktopRepoRoot() {
+  const isSource = Boolean(process.env.ELECTRON_RENDERER_URL)
+  return !isSource && process.resourcesPath
+    ? process.resourcesPath
+    : join(dirname(fileURLToPath(import.meta.url)), "../../..")
 }
 
 function runtimeLaunch() {
@@ -186,9 +184,7 @@ function runtimeLaunch() {
     return { command: configuredPath, args: [] }
   }
   if (!process.env.ELECTRON_RENDERER_URL) {
-    const packagedPath = resolvePackagedRuntimePath()
-    if (/\.(?:c|m)?js$/i.test(packagedPath)) return { command: process.execPath, args: [packagedPath] }
-    return { command: packagedPath, args: [] }
+    return { command: process.execPath, args: [resolvePackagedRuntimePath()] }
   }
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
   return { command: process.execPath, args: [join(repoRoot, "runtime", "dist", "cli.js")] }
@@ -212,17 +208,9 @@ function ensureSharedClient(): Promise<SharedRuntimeConnection> {
   if (worker.sharedClient) return Promise.resolve(worker.sharedClient)
   if (worker.sharedConnecting) return worker.sharedConnecting
   const isSource = Boolean(process.env.ELECTRON_RENDERER_URL)
-  const repoRoot = !isSource && process.resourcesPath
-    ? process.resourcesPath
-    : join(dirname(fileURLToPath(import.meta.url)), "../../..")
+  const repoRoot = resolveDesktopRepoRoot()
   const rindHome = resolveRindHome(process.env.RIND_HOME)
   const packagedRuntimePath = !isSource ? resolvePackagedRuntimePath() : undefined
-  const isJsRuntime = isSource || Boolean(packagedRuntimePath && /\.(?:c|m)?js$/i.test(packagedRuntimePath))
-  buildRuntimeEnv(repoRoot, process.env, {
-    sourceRuntime: isJsRuntime,
-    command: isJsRuntime ? process.execPath : packagedRuntimePath,
-    rindHome,
-  })
 
   worker.sharedConnecting = (async () => {
     const { connectSharedRuntime } = await loadSharedRuntimeModule(repoRoot)
@@ -330,7 +318,8 @@ export function startRuntime(workspace: string) {
   worker.child = current
   worker.shutdownPromise = undefined
   let stderr = ""
-  createInterface({ input: current.stdout }).on("line", (line) => handleLine(current, line))
+  const lineBuffer = createLineBuffer((line) => handleLine(current, line))
+  current.stdout.on("data", lineBuffer.push)
   current.stderr.on("data", (chunk) => {
     stderr = appendStderr(stderr, chunk)
     log.warn("runtime stderr", String(chunk).trimEnd())

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, Copy, GitFork, Info, Pencil, Quote, RefreshCw, X } from "lucide-react";
 import { MarkdownContent } from "../MarkdownContent.jsx";
 import { copyText } from "../../lib/clipboard.js";
@@ -9,7 +9,7 @@ const COPY_RESET_MS = 1600;
 
 // User message (spec section 4): a right-aligned bubble with Copy and
 // Edit & resend on hover. Team deliveries show a subtle provenance badge.
-export function UserMessage({ message, onEdit }) {
+export const UserMessage = memo(function UserMessage({ message, onEdit }) {
   return (
     <article className={`message user${message.delivery ? " is-delivery" : ""}`} data-message-id={message.id || ""}>
       {message.delivery && (
@@ -27,11 +27,11 @@ export function UserMessage({ message, onEdit }) {
       </div>
     </article>
   );
-}
+});
 
 // Assistant message: full-width prose with Copy, Quote, Fork from here and the time.
 // The action bar stays visible on the latest assistant message.
-export function AssistantMessage({ message, latest, onFork, onQuote }) {
+export const AssistantMessage = memo(function AssistantMessage({ message, latest, onFork, onQuote }) {
   return (
     <article className={`message assistant${latest ? " is-latest" : ""}`} data-message-id={message.id || ""}>
       <MarkdownContent value={message.content} className="assistant-content" />
@@ -48,20 +48,20 @@ export function AssistantMessage({ message, latest, onFork, onQuote }) {
       </div>
     </article>
   );
-}
+});
 
 // Streaming assistant text with the blinking caret.
-export function StreamingMessage({ text }) {
+export const StreamingMessage = memo(function StreamingMessage({ text }) {
   return (
     <article className="message assistant streaming" aria-busy="true">
       <MarkdownContent value={text} className="assistant-content streaming-content" />
       <span className="caret" aria-hidden="true" />
     </article>
   );
-}
+});
 
 // System entries: errors render as a block with Retry; notices are one quiet line.
-export function SystemNote({ message, onRetry }) {
+export const SystemNote = memo(function SystemNote({ message, onRetry }) {
   const error = message.tone === "error";
   return (
     <article className="message system" data-message-id={message.id || ""}>
@@ -82,7 +82,7 @@ export function SystemNote({ message, onRetry }) {
       </div>
     </article>
   );
-}
+});
 
 function ActionButton({ label, onClick, children }) {
   return (

@@ -32,6 +32,7 @@ import {
   rejectsPromptCacheKey,
   separateToolImages,
 } from "../dist/infrastructure/llm/sse.js";
+import { BUILTIN_PROVIDER_CATALOG } from "../../rind-runtime-client/provider-catalog.js";
 
 async function isLoopbackPortFree(port, host = "127.0.0.1") {
   return await new Promise(resolve => {
@@ -526,6 +527,26 @@ test("providers.ts & ProviderServiceImpl: built-in catalog, custom providers.jso
   assert.ok(provider("qwen").fallback_models.some(m => m.id === "qwen4-max-preview"));
   assert.ok(provider("qwen-coding").fallback_models.some(m => m.id === "qwen4-max-preview"));
   assert.throws(() => provider("nonexistent-provider"), /Unknown provider/);
+
+  // 1:1 parity between runtime PROVIDERS and shared UI BUILTIN_PROVIDER_CATALOG
+  assert.deepEqual(
+    BUILTIN_PROVIDER_CATALOG.map(entry => ({
+      id: entry.id,
+      name: entry.name,
+      api: entry.api,
+      methods: entry.methods,
+      envKey: entry.envKey ?? null,
+      models: entry.models.map(m => ({ id: m.id, efforts: m.efforts })),
+    })),
+    Object.values(PROVIDERS).map(def => ({
+      id: def.id,
+      name: def.name,
+      api: def.api,
+      methods: def.auth_methods,
+      envKey: def.environment_key,
+      models: def.fallback_models.map(m => ({ id: m.id, efforts: m.reasoning_efforts })),
+    })),
+  );
 
   // saveCustomProvider + custom providers.json override & model config merging
   const providersPath = path.join(tmp, "providers.json");

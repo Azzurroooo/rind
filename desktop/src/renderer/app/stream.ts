@@ -2,9 +2,9 @@ import { renderCommandResult } from "../command-results.ts"
 import { ChevronDown, ChevronRight, FileDiff, FileText, renderIcon } from "../icons.ts"
 import { isStreamingAssistant, latestAssistantId } from "../message-view.ts"
 import { questionCardMarkup, syncQuestionCard } from "../question-card.ts"
-import { type Entry } from "../timeline-model.ts"
+import { type Entry, type ToolEntry } from "../timeline-model.ts"
 import { summarizeTurnFileChanges } from "../tool-display.ts"
-import { foldWorkSegments, isWorkSegment, segmentOpenMode, type StreamItem } from "../work-segments.ts"
+import { foldWorkSegments, isWorkSegment, segmentOpenMode, type SegmentOpenMode, type StreamItem, type WorkSegment } from "../work-segments.ts"
 import { SegmentPresentation, reconcileToolElement } from "../segment-presentation.ts"
 import { canRetryLastPrompt } from "./composer.ts"
 import { jumpLatest, messageStream } from "./dom.ts"
@@ -26,6 +26,87 @@ let folds = new SegmentPresentation()
 let foldSession = ""
 let foldTimer: ReturnType<typeof setTimeout> | undefined
 const expandedChangeSummarySessions = new Set<string>()
+let lastMiniMapMarkup = ""
+
+type CachedEntryDom = { readonly entry: Entry; readonly stateKey: string }
+type CachedSegmentDom = {
+  readonly tools: readonly ToolEntry[]
+  readonly live: boolean
+  readonly awaiting: boolean
+  readonly mode: SegmentOpenMode
+  readonly flags: string
+}
+
+const entryHtmlCache = new WeakMap<Entry, { stateKey: string; html: string }>()
+const renderedEntryDom = new WeakMap<HTMLElement, CachedEntryDom>()
+const renderedSegmentDom = new WeakMap<HTMLElement, CachedSegmentDom>()
+
+function entryStateKey(entry: Entry, context: MessageContext): string {
+  switch (entry.kind) {
+    case "assistant":
+      return `${isStreamingAssistant(entry.id, context.openAssistantId, context.activeTurn) ? 1 : 0}:${entry.id === context.latestAssistantId ? 1 : 0}`
+    case "error":
+      return entry.retryable && canRetryLastPrompt() ? "1" : "0"
+    case "tool":
+      return `${state.expandedTools.has(entry.id) ? 1 : 0}:${state.revealedTools.has(entry.id) ? 1 : 0}:${state.toolBodiesShown.has(entry.id) ? 1 : 0}`
+    default:
+      return ""
+  }
+}
+
+function segmentToolFlags(tools: readonly ToolEntry[]): string {
+  let out = ""
+  for (let i = 0; i < tools.length; i += 1) {
+    const id = tools[i].id
+    if (i > 0) out += ","
+    out += `${state.expandedTools.has(id) ? 1 : 0}${state.revealedTools.has(id) ? 1 : 0}${state.toolBodiesShown.has(id) ? 1 : 0}`
+  }
+  return out
+}
+
+function isSameSegmentDom(cached: CachedSegmentDom | undefined, segment: WorkSegment, mode: SegmentOpenMode, flags: string): boolean {
+  if (!cached || cached.live !== segment.live || cached.awaiting !== segment.awaiting || cached.mode !== mode || cached.flags !== flags) {
+    return false
+  }
+  if (cached.tools.length !== segment.tools.length) return false
+  for (let i = 0; i < segment.tools.length; i += 1) {
+    if (cached.tools[i] !== segment.tools[i]) return false
+  }
+  return true
+}
+
+function reconcileAssistantElement(current: HTMLElement, next: HTMLElement) {
+  syncElementAttributes(current, next)
+  const currentBody = current.querySelector<HTMLElement>(":scope > .message-body")
+  const nextBody = next.querySelector<HTMLElement>(":scope > .message-body")
+  if (!currentBody || !nextBody) {
+    if (!current.isEqualNode(next)) replaceElementChildren(current, next)
+    return
+  }
+  syncElementAttributes(currentBody, nextBody)
+  const curChildren = Array.from(currentBody.childNodes)
+  const nextChildren = Array.from(nextBody.childNodes)
+  let prefix = 0
+  const minLen = Math.min(curChildren.length, nextChildren.length)
+  while (prefix < minLen && curChildren[prefix].isEqualNode(nextChildren[prefix])) {
+    prefix += 1
+  }
+  for (let i = curChildren.length - 1; i >= prefix; i -= 1) {
+    curChildren[i].remove()
+  }
+  for (let i = prefix; i < nextChildren.length; i += 1) {
+    currentBody.appendChild(nextChildren[i])
+  }
+  const currentActions = current.querySelector<HTMLElement>(":scope > .message-actions")
+  const nextActions = next.querySelector<HTMLElement>(":scope > .message-actions")
+  if (!nextActions) {
+    currentActions?.remove()
+  } else if (!currentActions) {
+    current.appendChild(nextActions)
+  } else if (!currentActions.isEqualNode(nextActions)) {
+    currentActions.replaceWith(nextActions)
+  }
+}
 
 export function toggleChangeSummaryExpanded(sessionId = state.viewedSessionId) {
   if (!sessionId) return
@@ -33,8 +114,8 @@ export function toggleChangeSummaryExpanded(sessionId = state.viewedSessionId) {
   else expandedChangeSummarySessions.add(sessionId)
 }
 
-export function renderStream() {
-  const stickToBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
+export function renderStream(sampledStickToBottom?: boolean) {
+  const stickToBottom = sampledStickToBottom ?? (messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80)
   const { conversation } = state
   const entries = conversation.entries
   const existing = new Map<string, HTMLElement>()
@@ -49,21 +130,59 @@ export function renderStream() {
   clearTimeout(foldTimer)
   const context: MessageContext = { openAssistantId: conversation.openAssistantId, activeTurn, latestAssistantId: latestAssistantId(entries) }
   for (const entry of items) {
+    const current = existing.get(entry.id)
+    if (isWorkSegment(entry)) {
+      const mode = folds.mode(entry.id, entry.tools.length === 1 ? "all" : segmentOpenMode(entry, state.segmentFolds.get(entry.id)), state.segmentFolds.has(entry.id), performance.now())
+      const flags = segmentToolFlags(entry.tools)
+      if (current && !entry.live && !entry.awaiting && isSameSegmentDom(renderedSegmentDom.get(current), entry, mode, flags)) {
+        nextNodes.push(current)
+        continue
+      }
+      const template = document.createElement("template")
+      template.innerHTML = renderWorkSegment(entry, mode)
+      const next = template.content.firstElementChild as HTMLElement | null
+      if (!next) continue
+      const segSnapshot: CachedSegmentDom = { tools: entry.tools, live: entry.live, awaiting: entry.awaiting, mode, flags }
+      if (current && current.tagName === next.tagName) {
+        reconcileToolElement(current, next)
+        renderedSegmentDom.set(current, segSnapshot)
+        nextNodes.push(current)
+      } else {
+        renderedSegmentDom.set(next, segSnapshot)
+        nextNodes.push(next)
+      }
+      continue
+    }
+
+    const stateKey = entryStateKey(entry, context)
+    if (current) {
+      const cachedDom = renderedEntryDom.get(current)
+      if (cachedDom && cachedDom.entry === entry && cachedDom.stateKey === stateKey) {
+        nextNodes.push(current)
+        continue
+      }
+    }
+    let cachedHtml = entryHtmlCache.get(entry)
+    if (!cachedHtml || cachedHtml.stateKey !== stateKey) {
+      cachedHtml = { stateKey, html: renderEntry(entry, context) }
+      entryHtmlCache.set(entry, cachedHtml)
+    }
     const template = document.createElement("template")
-    template.innerHTML = isWorkSegment(entry)
-      ? renderWorkSegment(entry, folds.mode(entry.id, entry.tools.length === 1 ? "all" : segmentOpenMode(entry, state.segmentFolds.get(entry.id)), state.segmentFolds.has(entry.id), performance.now()))
-      : renderStreamItem(entry, context)
+    template.innerHTML = cachedHtml.html
     const next = template.content.firstElementChild as HTMLElement | null
     if (!next) continue
-    const current = existing.get(entry.id)
+    const domRecord: CachedEntryDom = { entry, stateKey }
     if (current && current.tagName === next.tagName) {
-      if (isWorkSegment(entry)) reconcileToolElement(current, next)
-      else {
+      if (entry.kind === "assistant") {
+        reconcileAssistantElement(current, next)
+      } else {
         syncElementAttributes(current, next)
         if (!current.isEqualNode(next)) replaceElementChildren(current, next)
       }
+      renderedEntryDom.set(current, domRecord)
       nextNodes.push(current)
     } else {
+      renderedEntryDom.set(next, domRecord)
       nextNodes.push(next)
     }
   }
@@ -216,20 +335,28 @@ function syncChatMiniMap(entries: readonly Entry[]) {
   const userTurns = entries.filter((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && Boolean(entry.id))
   let nav = wrap.querySelector<HTMLElement>(".chat-minimap")
   if (userTurns.length < 2) {
-    nav?.remove()
+    if (nav) {
+      nav.remove()
+      lastMiniMapMarkup = ""
+    }
     return
   }
+  let created = false
   if (!nav) {
     nav = document.createElement("nav")
     nav.className = "chat-minimap"
     nav.setAttribute("aria-label", "Turn landmarks")
     wrap.append(nav)
+    created = true
   }
   const markup = userTurns.map((turn, index) => {
     const preview = turn.content.replace(/\s+/g, " ").trim().slice(0, 72) || `Turn ${index + 1}`
     return `<button type="button" class="chat-minimap-tick${turn.delivery ? " is-delivery" : ""}" data-turn-jump="${escapeAttribute(turn.id)}" title="${escapeAttribute(`${index + 1}. ${preview}`)}" aria-label="${escapeAttribute(`Jump to turn ${index + 1}: ${preview}`)}"><span class="chat-minimap-bar"></span></button>`
   }).join("")
-  if (nav.innerHTML !== markup) nav.innerHTML = markup
+  if (created || lastMiniMapMarkup !== markup) {
+    lastMiniMapMarkup = markup
+    nav.innerHTML = markup
+  }
 }
 
 export function toolHeaderOffset(id: string) {

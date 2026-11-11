@@ -26,17 +26,39 @@ function activeWorkspacePath(): string {
   return ""
 }
 
+let lastTreeWorkspace = ""
+let lastTreeListings: typeof state.fileListings | null = null
+let lastTreeExpanded: ReadonlySet<string> | null = null
+let lastTreeSelectedPath = ""
+let lastPreviewRef: typeof state.filePreview | symbol = Symbol("unrendered")
+
 /** Inspector Files tab: the project tree, or a preview that replaces it. */
 export function renderFiles() {
   const workspacePath = activeWorkspacePath()
   const available = Boolean(workspacePath)
   const preview = available ? state.filePreview : undefined
   filesUnavailable.hidden = available
-  filesUnavailable.textContent = "Choose an available project to browse its files."
+  if (!available && filesUnavailable.textContent !== "Choose an available project to browse its files.") {
+    filesUnavailable.textContent = "Choose an available project to browse its files."
+  }
   fileTree.hidden = !available || Boolean(preview)
   filePreview.hidden = !preview
   if (!available) return
-  fileTree.innerHTML = renderDirectory("")
+  const selectedPath = preview?.path || ""
+  if (
+    lastTreeWorkspace !== workspacePath ||
+    lastTreeListings !== state.fileListings ||
+    lastTreeExpanded !== state.expandedDirectories ||
+    lastTreeSelectedPath !== selectedPath
+  ) {
+    lastTreeWorkspace = workspacePath
+    lastTreeListings = state.fileListings
+    lastTreeExpanded = state.expandedDirectories
+    lastTreeSelectedPath = selectedPath
+    fileTree.innerHTML = renderDirectory("")
+  }
+  if (lastPreviewRef === preview) return
+  lastPreviewRef = preview
   if (!preview) {
     filePreview.innerHTML = ""
   } else if (preview.kind === "text") {

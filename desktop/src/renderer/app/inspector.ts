@@ -15,21 +15,28 @@ import { loadGoal, renderGoalTab } from "./inspector-goal.ts"
 import { pollTasks, renderTaskBadge, renderTasksSection, syncTaskPolling } from "./inspector-tasks.ts"
 import { request, requestForSession, runAction } from "./runtime.ts"
 import { applyOverview, currentRuntimeSnapshot, viewedProject } from "./sessions.ts"
-import { render } from "./shell.ts"
+import { render, scheduleRender } from "./shell.ts"
 import { emptyLoad, state, vars } from "./state.ts"
 import { type InspectorLoad } from "./types.ts"
 
 const USAGE_DAYS = 7
+let lastUsageLoadRef: typeof state.inspectorUsage | null = null
+let lastContextLoadRef: typeof state.inspectorContext | null = null
+let lastContextEmpty = ""
+let lastPlanRef: typeof state.conversation.plan | symbol = Symbol("unrendered")
 
 /** Open when there is room left for the conversation. */
-export function inspectorShown() {
+export function inspectorShown(viewportWidth = window.innerWidth) {
   if (!state.inspectorOpen || state.agentSurface.kind !== "chat") return false
-  return inspectorFits(window.innerWidth, state.sidebarOpen ? state.sidebarWidth : 0, state.inspectorWidth)
+  return inspectorFits(viewportWidth, state.sidebarOpen ? state.sidebarWidth : 0, state.inspectorWidth)
 }
 
-export function renderInspector() {
+export function renderInspector(viewportWidth = window.innerWidth) {
   const usageDialog = requiredElement<HTMLDialogElement>("usage-dialog")
-  if (usageDialog.open) inspectorUsageBody.innerHTML = renderLoad(state.inspectorUsage, "Loading usage…", renderUsageSummary, "Usage appears once the runtime is ready.")
+  if (usageDialog.open && lastUsageLoadRef !== state.inspectorUsage) {
+    lastUsageLoadRef = state.inspectorUsage
+    inspectorUsageBody.innerHTML = renderLoad(state.inspectorUsage, "Loading usage…", renderUsageSummary, "Usage appears once the runtime is ready.")
+  }
   const activeFolderName =
     viewedProject()?.name ||
     (state.agentChatContext && state.agentChatContext.kind !== "independent"
@@ -37,12 +44,12 @@ export function renderInspector() {
       : "") ||
     "No folder selected"
   requiredElement("inspector-scope").textContent = state.inspectorTab === "files" ? `Workspace · ${activeFolderName}` : "Current session"
-  const shown = inspectorShown()
+  const shown = inspectorShown(viewportWidth)
   appRoot.classList.toggle("inspector-open", shown)
   appRoot.classList.toggle("inspector-maximized", shown && state.inspectorMaximized)
   const effectiveWidth = shown
     ? state.inspectorMaximized
-      ? Math.max(state.inspectorWidth, Math.min(720, Math.round(window.innerWidth * 0.55)))
+      ? Math.max(state.inspectorWidth, Math.min(720, Math.round(viewportWidth * 0.55)))
       : state.inspectorWidth
     : 0
   appRoot.style.setProperty("--inspector-width", `${effectiveWidth}px`)
@@ -69,7 +76,13 @@ export function renderInspector() {
   }
   if (!shown) return
   const renderers: Record<InspectorTab, () => void> = {
-    context: () => { inspectorContextBody.innerHTML = renderLoad(state.inspectorContext, "Loading context…", (display) => renderContextDisplay(display), contextEmptyText()) },
+    context: () => {
+      const emptyText = contextEmptyText()
+      if (lastContextLoadRef === state.inspectorContext && lastContextEmpty === emptyText) return
+      lastContextLoadRef = state.inspectorContext
+      lastContextEmpty = emptyText
+      inspectorContextBody.innerHTML = renderLoad(state.inspectorContext, "Loading context…", (display) => renderContextDisplay(display), emptyText)
+    },
     activity: renderActivityTab,
     files: renderFiles,
   }
@@ -129,8 +142,11 @@ export function resetInspectorData() {
 
 /** The Activity column: plan section, yielded tasks, then the goal panel. */
 function renderActivityTab() {
-  activityPlan.innerHTML = renderPlanSection(state.conversation)
-  activityPlan.hidden = !activityPlan.childElementCount
+  if (lastPlanRef !== state.conversation.plan) {
+    lastPlanRef = state.conversation.plan
+    activityPlan.innerHTML = renderPlanSection(state.conversation)
+    activityPlan.hidden = !activityPlan.childElementCount
+  }
   renderTasksSection()
   renderGoalTab()
 }
@@ -202,7 +218,7 @@ function bindResize() {
     const width = Math.round(start.width + start.x - event.clientX)
     vars.resizeStart = { ...start, lastWidth: width }
     state.inspectorWidth = Math.max(INSPECTOR_CLOSE_WIDTH, Math.min(INSPECTOR_WIDTH.max, width))
-    render()
+    scheduleRender()
   })
   inspectorResizeHandle.addEventListener("pointerup", (event) => {
     const start = vars.resizeStart

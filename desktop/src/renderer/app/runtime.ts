@@ -27,10 +27,6 @@ export function questionSelectionFor(question: NonNullable<ConversationState["qu
   return selection
 }
 
-export function runtimeConversation() {
-  return conversationFor(state.viewedSessionId)
-}
-
 export function activeTurnIdFor(sessionId: string) {
   return state.activeTurnIds[sessionId] || conversationFor(sessionId).activeTurnId || ""
 }

@@ -49,18 +49,29 @@ export function useAppController() {
     drawerOpen: () => Boolean(layout.drawer),
   };
 
-  const view = conversationView(state.conversation);
+  const actions = useMemo(() => {
+    const stable = {};
+    for (const key of Object.keys(call.current)) {
+      if (typeof call.current[key] === "function") {
+        stable[key] = (...args) => call.current[key](...args);
+      }
+    }
+    return stable;
+  }, []);
+
+  const view = useMemo(() => conversationView(state.conversation), [state.conversation]);
   useRuntimeClient(ctx);
   useGlobalKeys(ctx, view.active);
 
   const request = useCallback((method, params = {}) => state.refs.client.current?.request(method, params), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A tool row's path opens the Files tab and previews that file.
+  const openInspector = layout.openInspector;
   const openFile = useCallback((path) => {
     if (!path) return;
     setFileRequest((current) => ({ path, seq: (current?.seq || 0) + 1 }));
-    layout.openInspector("files");
-  }, [layout]);
+    openInspector("files");
+  }, [openInspector]);
 
-  return { ctx, actions: call.current, view, agents, request, fileRequest, openFile };
+  return { ctx, actions, view, agents, request, fileRequest, openFile };
 }

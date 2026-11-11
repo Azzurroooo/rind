@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, RefreshCw, X } from "lucide-react";
 import { FILE_LIMIT_BYTES, base64ToDataUrl, decodeBase64ToText, formatBytes, isImageMime, isTextMime } from "../lib/files.js";
 import { tokenizeCode } from "../lib/syntaxHighlight.js";
@@ -86,6 +86,11 @@ export function FileTree({ workspace, listFiles, readFile, embedded = false, ope
     }
   }
 
+  const closePreview = useCallback(() => {
+    ++previewRequest.current;
+    setPreview(null);
+  }, []);
+
   return (
     <div className={`file-tree ${embedded ? "embedded" : ""}`.trim()}>
       {!embedded && (
@@ -101,7 +106,7 @@ export function FileTree({ workspace, listFiles, readFile, embedded = false, ope
           {!workspace && <div className="tree-state">No workspace selected</div>}
           {workspace && <DirLevel path="" depth={0} state={dirs[""]} expanded={expanded} dirs={dirs} selectedPath={preview?.path} onToggleDir={toggleDir} onOpenFile={openPreview} onRetry={loadDir} />}
           </div>
-          {preview && <PreviewPanel preview={preview} onClose={() => { ++previewRequest.current; setPreview(null); }} />}
+          {preview && <PreviewPanel preview={preview} onClose={closePreview} />}
         </div>
       )}
     </div>
@@ -165,8 +170,11 @@ function DirLevel({ path, depth, state, expanded, dirs, selectedPath, onToggleDi
   );
 }
 
-function PreviewPanel({ preview, onClose }) {
-  const tokens = preview.status === "text" ? tokenizeCode(preview.text, preview.path) : [];
+const PreviewPanel = memo(function PreviewPanel({ preview, onClose }) {
+  const tokens = useMemo(
+    () => (preview.status === "text" ? tokenizeCode(preview.text, preview.path) : []),
+    [preview.status, preview.text, preview.path],
+  );
   return (
     <div className="tree-preview" role="region" aria-label={`File preview ${preview.path}`}>
       <div className="tree-preview-head">
@@ -205,7 +213,7 @@ function PreviewPanel({ preview, onClose }) {
       </div>
     </div>
   );
-}
+});
 
 // ---- helpers ----
 

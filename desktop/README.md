@@ -7,7 +7,7 @@ Worker and serves the production Web interface.
 ## Develop and build
 
 Use Node.js 22.19+ (22.x) or Node.js 24+, and build the TypeScript runtime described in
-[CLI source setup](../docs/internals/07-surfaces/interactive-cli.md#从源码运行). From the repository root:
+[CLI source setup](../docs/internals/07-surfaces/interactive-cli.md#running-from-source). From the repository root:
 
 ```bash
 npm --prefix frontend-web ci
@@ -60,6 +60,6 @@ and invalidates unused tickets. **Turn off remote access** leaves the local Work
 closing Desktop ends remote access. An existing VPN or HTTPS reverse proxy can be used for
 access outside the local network; Rind does not create a public tunnel.
 
-See [Desktop internals](../docs/internals/07-surfaces/desktop.md#构建与远程访问) for network setup
+See [Desktop internals](../docs/internals/07-surfaces/desktop.md#build-and-remote-access) for network setup
 and implementation details, and [verification](../docs/internals/08-engineering/verification.md)
 for the boundaries between simulated regression and device acceptance.

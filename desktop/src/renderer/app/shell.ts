@@ -6,7 +6,7 @@ import { currentSessionAgentContext, renderAgentsUI } from "./agents-ui.ts"
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
 import { renderSlashCommandMenu } from "./composer.ts"
-import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, prompt, retry, send, sidebar, sidebarToggle, slashCommandMenu, steer, topbarUpdateButton } from "./dom.ts"
+import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, messageStream, newSessionButton, notice, noticeText, pendingInputDock, prompt, retry, send, sidebar, sidebarToggle, slashCommandMenu, steer, topbarUpdateButton } from "./dom.ts"
 import { renderInspector } from "./inspector.ts"
 import { renderPalette } from "./palette-ui.ts"
 import { discardPendingInput, promoteFollowUp, recallPendingInput } from "./pending-inputs.ts"
@@ -22,12 +22,14 @@ import { renderStream } from "./stream.ts"
 
 
 export function render() {
+  const viewportWidth = window.innerWidth
+  const stickToBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
   const runtime = currentRuntimeSnapshot()
   state.runtime = runtime
   connectionText.textContent = runtimeStatusLabel(runtime.status)
   connection.className = `connection connection-${runtime.status}`
   connection.hidden = runtime.status === "starting"
-  const maxSidebar = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, window.innerWidth - 420))
+  const maxSidebar = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, viewportWidth - 420))
   const effectiveSidebarWidth = state.sidebarOpen ? Math.min(state.sidebarWidth, maxSidebar) : 0
   appRoot.classList.toggle("sidebar-open", state.sidebarOpen)
   appRoot.style.setProperty("--sidebar-panel-width", `${effectiveSidebarWidth}px`)
@@ -48,7 +50,7 @@ export function render() {
   renderProjects()
   renderModels()
   renderEffortMenu()
-  renderInspector()
+  renderInspector(viewportWidth)
   renderPalette()
   syncPendingInputDock(
     pendingInputDock,
@@ -57,7 +59,7 @@ export function render() {
     (inputId) => runAction(() => recallPendingInput(inputId), state.viewedSessionId),
     (inputId) => runAction(() => discardPendingInput(inputId), state.viewedSessionId),
   )
-  renderStream()
+  renderStream(stickToBottom)
   renderComposerState()
   renderSlashCommandMenu()
   renderAttachments()
@@ -241,7 +243,7 @@ export function bindSidebarResize(handle: HTMLElement) {
     vars.resizeStart = { ...start, lastWidth: width }
     const maxSidebar = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, window.innerWidth - 420))
     state.sidebarWidth = Math.max(0, Math.min(maxSidebar, width))
-    render()
+    scheduleRender()
   })
   handle.addEventListener("pointerup", (event) => finishSidebarResize(handle, event))
   handle.addEventListener("lostpointercapture", () => { vars.resizeStart = undefined; document.body.classList.remove("resizing-panel") })

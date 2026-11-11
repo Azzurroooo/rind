@@ -11,7 +11,7 @@ Manual address and access-code entry is available in the desktop dialog as a fal
 
 Remote access is off by default. Keep Desktop running. **Generate new code** disconnects
 previous devices; **Turn off remote access** stops sharing without stopping local tasks.
-See [Desktop remote access](../docs/internals/07-surfaces/desktop.md#构建与远程访问) for HTTPS/private-network setup
+See [Desktop remote access](../docs/internals/07-surfaces/desktop.md#build-and-remote-access) for HTTPS/private-network setup
 and [verification](../docs/internals/08-engineering/verification.md) for validation boundaries.
 
 ## One-command deployment
@@ -57,7 +57,7 @@ The default worker bind host is loopback. Use a reverse proxy with authenticatio
 
 ## Typography & contrast rulebook
 
-Codified from the shipped UI (`src/styles.css`). New components must follow these rules; if a rule does not fit, change the rule here first — not just the CSS.
+Codified from the shipped UI (`src/styles/index.css`). New components must follow these rules; if a rule does not fit, change the rule here first — not just the CSS.
 
 ### Token tiers
 

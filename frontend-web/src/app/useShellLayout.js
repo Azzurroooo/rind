@@ -127,6 +127,22 @@ export function useShellLayout() {
     setInspectorMaximized((prev) => !prev);
   }, []);
 
+  const setSidebarWidth = useCallback(
+    (width) => update({ sidebarWidth: clampWidth(width, SIDEBAR_WIDTH) }),
+    [update],
+  );
+  const setInspectorWidth = useCallback(
+    (width) => {
+      setInspectorMaximized(false);
+      update({ inspectorWidth: clampWidth(width, INSPECTOR_WIDTH) });
+    },
+    [update],
+  );
+  const setInspectorTab = useCallback(
+    (tab) => INSPECTOR_TABS.includes(tab) && update({ inspectorTab: tab }),
+    [update],
+  );
+
   const sidebarVisible = narrow ? drawer === "sidebar" : !layout.sidebarCollapsed;
   const inspectorVisible = narrow ? drawer === "inspector" : layout.inspectorOpen;
 
@@ -149,12 +165,9 @@ export function useShellLayout() {
     closeInspector,
     closeDrawers,
     closeDrawersSilently,
-    setSidebarWidth: (width) => update({ sidebarWidth: clampWidth(width, SIDEBAR_WIDTH) }),
-    setInspectorWidth: (width) => {
-      setInspectorMaximized(false);
-      update({ inspectorWidth: clampWidth(width, INSPECTOR_WIDTH) });
-    },
-    setInspectorTab: (tab) => INSPECTOR_TABS.includes(tab) && update({ inspectorTab: tab }),
+    setSidebarWidth,
+    setInspectorWidth,
+    setInspectorTab,
   };
 }
 

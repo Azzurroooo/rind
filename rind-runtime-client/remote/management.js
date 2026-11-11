@@ -23,6 +23,7 @@ export function emptyAgentsSnapshot() {
     folderDefaultsVersion: 0,
     notices: [],
     approvals: [],
+    archivedTeams: [],
     notes: [],
     artifacts: [],
   };
@@ -84,6 +85,7 @@ export function createManagementBridge({
   ensureRuntimeForWorkspace = async () => {},
   isSharedRuntime = () => true,
   allowSharedObserver = false,
+  autoStartOnGetState = false,
 } = {}) {
   let managementModulePromise;
   let sharedRuntimeModulePromise;
@@ -528,7 +530,7 @@ export function createManagementBridge({
       }
     }
 
-    if (!manager && !teamId && !agentId && explicitWorkspace) {
+    if (!manager && !teamId && !agentId && explicitWorkspace && typeof requestRuntime === "function") {
       await ensureRuntimeForWorkspace(explicitWorkspace);
       const opened = await requestRuntime(runtimeMethods.sessionOpen, {
         workspace_root: explicitWorkspace,
@@ -564,7 +566,7 @@ export function createManagementBridge({
       ...(runtimeSessionId ? { runtimeSessionId } : {}),
       shared: isSharedRuntime(),
     });
-    const externalTools = await active.request("sessionTools", { sessionId: attached.id });
+    const externalTools = await active.request("sessionTools", { sessionId: attached.id }).catch(() => null);
     let snap = await active.request("snapshot");
     acceptSnapshot(snap);
 
@@ -574,13 +576,48 @@ export function createManagementBridge({
       agentRecord?.canonicalWorkspace ||
         (manager ? managementPaths(launchOptions().home).manager : explicitWorkspace),
     );
-    if (!workspaceRoot) {
+    if (!workspaceRoot && typeof requestRuntime === "function") {
       throw new Error("Could not resolve workspace for this agent.");
     }
 
     if (await reconcileStaleWorkspaceRuns(active, snap, String(attached.agentId || agentId), workspaceRoot)) {
       snap = await active.request("snapshot");
       acceptSnapshot(snap);
+    }
+
+    if (typeof requestRuntime !== "function") {
+      if (runtimeSessionId && !attached.runtimeSessionId) {
+        await active
+          .request("bindSession", {
+            sessionId: attached.id,
+            runtimeSessionId,
+          })
+          .catch(() => {});
+        acceptSnapshot(await active.request("snapshot"));
+      }
+      const resolvedId = String(runtimeSessionId || attached.runtimeSessionId || "");
+      const attachment = {
+        managementSessionId: String(attached.id),
+        agentId: String(attached.agentId || agentId),
+        teamId: String(attached.teamId || teamId),
+        manager,
+        workspaceRoot,
+        runtimeSessionId: resolvedId,
+        externalTools,
+      };
+      attachmentsByManagementId.set(attachment.managementSessionId, attachment);
+      if (resolvedId) {
+        attachmentsByRuntimeId.set(resolvedId, attachment);
+      }
+      return {
+        managementSessionId: attachment.managementSessionId,
+        agentId: attachment.agentId,
+        teamId: attachment.teamId,
+        manager: attachment.manager,
+        workspaceRoot: attachment.workspaceRoot,
+        runtimeSessionId: resolvedId,
+        externalTools: externalTools || null,
+      };
     }
 
     await ensureRuntimeForWorkspace(workspaceRoot);
@@ -736,7 +773,7 @@ export function createManagementBridge({
   async function requestManagement(method, params = {}) {
     if (method === "getState") {
       if (!client && !explicitlyStopped) {
-        await ensureManagementConnected({ start: hasInitializedManagementState() }).catch(() => {});
+        await ensureManagementConnected({ start: autoStartOnGetState || hasInitializedManagementState() }).catch(() => {});
       }
       return getManagementState();
     }
@@ -754,7 +791,7 @@ export function createManagementBridge({
     }
     if (method === "listSessions") {
       if (!client && !explicitlyStopped) {
-        await ensureManagementConnected({ start: hasInitializedManagementState() }).catch(() => {});
+        await ensureManagementConnected({ start: autoStartOnGetState || hasInitializedManagementState() }).catch(() => {});
       }
       return listManagedSessionsLocal(params);
     }

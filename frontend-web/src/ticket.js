@@ -1,6 +1,6 @@
 // Ticket exchange + browser credential storage for the rind web surface.
 //
-// Storage rules (web-ui.md §5):
+// Storage rules:
 //   - sessionStorage ONLY. localStorage must never hold any credential.
 //   - The page keeps a short-lived ticket (`rind_ticket`) for the
 //     refresh-without-relogin path, plus the server token so a fresh ticket
@@ -65,15 +65,6 @@ export function readStoredTicket(scope = "") {
   return storage ? String(storage.getItem(TICKET_KEY) || "").trim() : "";
 }
 
-export function storeTicket(ticket) {
-  const clean = String(ticket || "").trim();
-  const storage = sessionStorageSafe();
-  if (storage) {
-    if (clean) storage.setItem(TICKET_KEY, clean);
-    else storage.removeItem(TICKET_KEY);
-  }
-}
-
 export function dropCredentials() {
   memoryToken = "";
   memoryScope = "";
@@ -88,9 +79,7 @@ export function hasStoredCredential(scope = "") {
   return Boolean(readStoredToken(scope) || readStoredTicket(scope));
 }
 
-// Exchanges a server token for a one-time WS ticket (worker-core.md §4).
-// GET by necessity: websockets 16's HTTP parser rejects non-GET before
-// process_request, so the worker endpoint is GET /ticket + Bearer header.
+// Exchanges a server token for a one-time WS ticket via GET /ticket + Bearer header.
 // Rejects with `error.status` set (401 → bad token, 0 → network failure).
 export async function fetchTicket(serverToken, { endpoint = "/ticket", fetchImpl } = {}) {
   const doFetch = fetchImpl || (typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : null);
