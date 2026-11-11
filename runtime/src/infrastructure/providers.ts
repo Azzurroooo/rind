@@ -419,6 +419,7 @@ export const PROVIDERS: Readonly<Record<string, ProviderDefinition>> = {
     "openai-chat",
     "https://dashscope.aliyuncs.com/compatible-mode/v1",
     makeModels("qwen", "openai-chat", [
+      ["qwen4-max-preview", ["low", "medium", "xhigh"], true, 1000000],
       ["qwen3.8-max", ["low", "medium", "xhigh"], true, 1000000],
       ["qwen3.8-flash", ["low", "medium", "xhigh"], true, 1000000],
       ["qwen3.7-max", [], false, 1000000],
@@ -438,6 +439,7 @@ export const PROVIDERS: Readonly<Record<string, ProviderDefinition>> = {
     "openai-chat",
     "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
     makeModels("qwen-coding", "openai-chat", [
+      ["qwen4-max-preview", ["low", "medium", "xhigh"], true, 1000000],
       ["qwen3.8-max", ["low", "medium", "xhigh"], true, 1000000],
       ["qwen3.8-flash", ["low", "medium", "xhigh"], true, 1000000],
       ["qwen3.7-max", [], false, 1000000],

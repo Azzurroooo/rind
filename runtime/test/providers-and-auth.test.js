@@ -522,6 +522,8 @@ test("providers.ts & ProviderServiceImpl: built-in catalog, custom providers.jso
   assert.ok(openaiDef.fallback_models.some(m => m.id === "gpt-6.1-terra"));
   assert.ok(provider("anthropic").fallback_models.some(m => m.id === "claude-fable-5-2"));
   assert.ok(provider("google").fallback_models.some(m => m.id === "gemini-4-carbon"));
+  assert.ok(provider("qwen").fallback_models.some(m => m.id === "qwen4-max-preview"));
+  assert.ok(provider("qwen-coding").fallback_models.some(m => m.id === "qwen4-max-preview"));
   assert.throws(() => provider("nonexistent-provider"), /Unknown provider/);
 
   // saveCustomProvider + custom providers.json override & model config merging
