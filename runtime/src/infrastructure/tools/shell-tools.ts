@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { statSync } from "node:fs";
+import { renameSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { CancellationToken } from "../../domain/cancellation.js";
@@ -327,6 +327,14 @@ class AsyncEvent {
   }
 }
 
+const PRE_HANDOFF_BUFFER_LIMIT = 512 * 1024;
+
+interface BufferedChunk {
+  stream: "stdout" | "stderr";
+  raw: Buffer;
+  text: string;
+}
+
 interface ProcessRecord {
   task_id: string;
   session_id: string;
@@ -354,10 +362,15 @@ interface ProcessRecord {
   waiters: Set<AsyncEvent>;
   saveChain: Promise<void>;
   handed_off: boolean;
+  release_requested: boolean;
   readersPromise: Promise<void> | null;
   monitorPromise: Promise<void> | null;
   deadlineTimer: ReturnType<typeof setTimeout> | null;
+  output_store: ToolOutputStore | null;
+  output_init: Promise<void> | null;
   output: TaskOutput | null;
+  buffered_chunks: BufferedChunk[];
+  buffered_bytes: number;
   termination_status: string | null;
 }
 
@@ -393,11 +406,10 @@ export function outputPreview(stdout: string, stderr: string, limit: number): [s
   ];
 }
 
-function taskPayload(
+function previewAndMeta(
   record: ProcessRecord,
-  returnReason: string,
-  maxChars = 20000,
-): [Record<string, unknown>, Record<string, unknown>] {
+  maxChars: number,
+): [string, string, Record<string, unknown>] {
   let stdout = record.stdout.render();
   let stderr = record.stderr.render();
   const truncated =
@@ -420,6 +432,15 @@ function taskPayload(
   if (record.persistence_error) {
     meta.persistence_error = record.persistence_error;
   }
+  return [stdout, stderr, meta];
+}
+
+function taskPayload(
+  record: ProcessRecord,
+  returnReason: string,
+  maxChars = 20000,
+): [Record<string, unknown>, Record<string, unknown>] {
+  const [stdout, stderr, meta] = previewAndMeta(record, maxChars);
   let recordsSize = 0;
   if (record.output) {
     try {
@@ -437,6 +458,38 @@ function taskPayload(
     start_cursor: encodeCursor(record.task_id, 0),
   };
   return [data, meta];
+}
+
+function foregroundPayload(
+  record: ProcessRecord,
+  returnReason: string,
+  maxChars = 20000,
+  spilledPath: string | null = null,
+): [Record<string, unknown>, Record<string, unknown>] {
+  const [stdout, stderr, meta] = previewAndMeta(record, maxChars);
+  if (spilledPath) {
+    meta.output_path = spilledPath;
+  }
+  const nowSec = Date.now() / 1000;
+  return [
+    {
+      command: record.command.slice(0, 2000),
+      cwd: record.cwd,
+      shell_backend: record.shell_backend,
+      shell_executable: record.shell_executable,
+      status: record.status,
+      handoff: false,
+      exit_code: record.exit_code,
+      started_at: record.started_at,
+      finished_at: record.finished_at,
+      elapsed_ms: Math.max(0, Math.trunc(((record.finished_at ?? nowSec) - record.started_at) * 1000)),
+      reason: record.reason,
+      return_reason: returnReason,
+      stdout,
+      stderr,
+    },
+    meta,
+  ];
 }
 
 function notFoundResult(taskId: string): ToolExecutionResult {
@@ -583,11 +636,26 @@ export class ProcessSupervisor {
       const existing = this.processes.get(existingId);
       if (existing) {
         await existing.started.wait();
-        return await this.buildResult(
-          "bash",
-          existing,
-          existing.finished.isSet() ? "finished" : "yield_timeout",
-        );
+        if (existing.handed_off) {
+          return await this.buildResult(
+            "bash",
+            existing,
+            existing.finished.isSet() ? "finished" : "yield_timeout",
+          );
+        }
+        if (existing.finished.isSet()) {
+          return await this.finishForeground(existing, "finished", originKey);
+        }
+        if (!(await this.promoteToBackground(existing))) {
+          throw new Error(existing.persistence_error);
+        }
+        return await this.buildResult("bash", existing, "yield_timeout");
+      }
+    }
+    if (callId && this.journal) {
+      const persisted = await this.journal.findByOrigin(sessionId, callId);
+      if (persisted) {
+        return ProcessSupervisor.storedResult("bash", persisted);
       }
     }
     if (this.closed || this.closedSessions.has(sessionId)) {
@@ -635,82 +703,67 @@ export class ProcessSupervisor {
       waiters: new Set(),
       saveChain: Promise.resolve(),
       handed_off: false,
+      release_requested: false,
       readersPromise: null,
       monitorPromise: null,
       deadlineTimer: null,
+      output_store: outputStore,
+      output_init: null,
       output: null,
+      buffered_chunks: [],
+      buffered_bytes: 0,
       termination_status: null,
     };
     this.processes.set(record.task_id, record);
     if (callId) {
       this.origins.set(originKey, record.task_id);
     }
-    let intentSaved = false;
     try {
-      if (this.journal) {
-        const intent = await this.journal.save(
-          sessionId,
-          {
-            ...taskSnapshot(record),
-            worker_instance_id: this.journal.worker_instance_id,
-            committed: false,
-            delivered: false,
-          },
-          { create: true },
-        );
-        intentSaved = true;
-        if (intent.task_id !== record.task_id) {
-          this.processes.delete(record.task_id);
-          if (callId) this.origins.delete(originKey);
-          record.started.set();
-          return ProcessSupervisor.storedResult("bash", intent);
-        }
-      }
-      if (outputStore !== null) {
-        record.output = new TaskOutput(outputStore.pathFor(sessionId, record.task_id), record.task_id);
-        await record.output.start();
-      }
       await this.spawnProcess(record, command, state, timeoutMs);
-      if (!(await this.save(record))) {
-        throw new Error(record.persistence_error);
-      }
       const elapsedMs = performance.now() - record.spawned_at;
       const remainingMs = Math.max(0, yieldTimeMs - elapsedMs);
-      const reason = record.handed_off
+      let reason = record.release_requested
         ? "released"
         : await this.waitRecord(record, remainingMs, cancellationToken);
-      if (reason === "interrupted" && !record.handed_off) {
+      if (reason === "interrupted" && !record.release_requested) {
         await this.terminateRecord(
           record,
           "cancelled",
           cancellationToken?.reason || "User interrupted",
         );
       }
-      record.handed_off = record.handed_off || !record.finished.isSet();
-      const result = await this.buildResult("bash", record, reason);
-      await this.save(record);
-      return result;
+      if (TERMINAL_STATES.has(record.status)) {
+        await record.finished.wait();
+        if (reason !== "interrupted") {
+          reason = "finished";
+        }
+      }
+      if (!record.finished.isSet()) {
+        if (!(await this.promoteToBackground(record))) {
+          throw new Error(record.persistence_error);
+        }
+        return await this.buildResult("bash", record, reason);
+      }
+      if (record.handed_off) {
+        return await this.buildResult("bash", record, reason);
+      }
+      return await this.finishForeground(record, reason, originKey);
     } catch (exc) {
       if (record.process !== null) {
         await this.terminateRecord(record, "failed", (exc as Error).message || String(exc));
-        return await this.buildResult(
-          "bash",
-          record,
-          record.finished.isSet() ? "finished" : "interrupted",
-        );
-      } else {
-        record.status = "failed";
-        record.reason = (exc as Error).message || String(exc);
-        record.finished_at = Date.now() / 1000;
-        record.finished.set();
-        if (record.output) {
-          await record.output.close();
+        const termReason = record.finished.isSet() ? "finished" : "interrupted";
+        if (record.handed_off) {
+          return await this.buildResult("bash", record, termReason);
         }
-        if (intentSaved) {
-          await this.save(record);
-        }
+        return await this.finishForeground(record, termReason, originKey);
       }
-      if (!intentSaved) {
+      record.status = "failed";
+      record.reason = (exc as Error).message || String(exc);
+      record.finished_at = Date.now() / 1000;
+      record.finished.set();
+      record.buffered_chunks.length = 0;
+      record.buffered_bytes = 0;
+      if (!record.handed_off) {
         this.processes.delete(record.task_id);
         if (callId) this.origins.delete(originKey);
       }
@@ -718,6 +771,106 @@ export class ProcessSupervisor {
     } finally {
       record.started.set();
     }
+  }
+
+  private async ensureOutput(record: ProcessRecord): Promise<void> {
+    if (record.output || !record.output_store) return;
+    if (record.output_init) {
+      await record.output_init;
+      return;
+    }
+    record.output_init = (async () => {
+      const out = new TaskOutput(
+        record.output_store!.pathFor(record.session_id, record.task_id),
+        record.task_id,
+      );
+      await out.start();
+      while (record.buffered_chunks.length > 0) {
+        const batch = record.buffered_chunks.splice(0);
+        record.buffered_bytes = 0;
+        for (const item of batch) {
+          await out.append(item.stream, item.raw, item.text);
+        }
+      }
+      record.output = out;
+    })();
+    await record.output_init;
+  }
+
+  private async promoteToBackground(record: ProcessRecord): Promise<boolean> {
+    record.handed_off = true;
+    return await this.save(
+      record,
+      this.journal
+        ? {
+            worker_instance_id: this.journal.worker_instance_id,
+            committed: false,
+            delivered: false,
+          }
+        : undefined,
+      true,
+    );
+  }
+
+  private async finishForeground(
+    record: ProcessRecord,
+    reason: string,
+    originKey: string,
+  ): Promise<ToolExecutionResult> {
+    if (record.output_init) {
+      await record.output_init;
+    }
+    const spillId = /^[A-Za-z0-9_-]{1,120}$/.test(record.call_id)
+      ? record.call_id
+      : record.task_id.replace(/^task_/, "fg_");
+    let spilledPath: string | null = null;
+    if (record.output) {
+      await record.output.flush();
+      try {
+        unlinkSync(record.output.recordsPath);
+      } catch {
+        // ignore if already absent
+      }
+      if (record.output_store) {
+        try {
+          const targetPath = record.output_store.pathFor(record.session_id, spillId);
+          renameSync(record.output.path, targetPath);
+          spilledPath = targetPath;
+        } catch {
+          spilledPath = record.output.path;
+        }
+      } else {
+        spilledPath = record.output.path;
+      }
+    } else if (
+      record.output_store &&
+      record.buffered_chunks.length > 0 &&
+      (record.stdout.truncated ||
+        record.stderr.truncated ||
+        record.stdout.byteCount + record.stderr.byteCount > 20000 ||
+        record.stdout.lineCount + record.stderr.lineCount > 2000)
+    ) {
+      try {
+        spilledPath = await record.output_store.write(
+          record.session_id,
+          spillId,
+          record.buffered_chunks.map(chunk => chunk.text).join(""),
+        );
+      } catch {
+        spilledPath = null;
+      }
+    }
+    record.buffered_chunks.length = 0;
+    record.buffered_bytes = 0;
+    this.processes.delete(record.task_id);
+    if (record.call_id) {
+      this.origins.delete(originKey);
+    }
+    const [data, meta] = foregroundPayload(record, reason, 20000, spilledPath);
+    return {
+      status: "ok",
+      result_str: toolOk("bash", data, meta),
+    };
   }
 
   private async spawnProcess(
@@ -888,12 +1041,9 @@ export class ProcessSupervisor {
       }
     }
     const visible = Object.values(records).filter(
-      r => !TERMINAL_STATES.has(String(r.status ?? "")) || (Boolean(r.handoff) && !r.delivered),
+      r => !TERMINAL_STATES.has(String(r.status ?? "")),
     );
     visible.sort((a, b) => {
-      const aTerm = TERMINAL_STATES.has(String(a.status ?? "")) ? 1 : 0;
-      const bTerm = TERMINAL_STATES.has(String(b.status ?? "")) ? 1 : 0;
-      if (aTerm !== bTerm) return aTerm - bTerm;
       const aStart = Number(a.started_at ?? 0);
       const bStart = Number(b.started_at ?? 0);
       if (bStart !== aStart) return bStart - aStart;
@@ -936,13 +1086,29 @@ export class ProcessSupervisor {
     };
   }
 
-  private async save(record: ProcessRecord, changes?: Record<string, unknown>): Promise<boolean> {
-    if (!this.journal) return true;
+  private async save(
+    record: ProcessRecord,
+    changes?: Record<string, unknown>,
+    create = false,
+  ): Promise<boolean> {
+    if (!record.handed_off) return true;
     let ok = true;
     const runSave = async (): Promise<void> => {
-      if (!this.journal) return;
+      if (create) {
+        await this.ensureOutput(record);
+      }
       if (record.output) {
         await record.output.flush();
+      }
+      if (!this.journal) {
+        if (this.observer) {
+          const [data, meta] = taskPayload(
+            record,
+            TERMINAL_STATES.has(record.status) ? "finished" : "yield_timeout",
+          );
+          this.observer({ ...data, meta, ...(changes || {}) });
+        }
+        return;
       }
       const [data, meta] = taskPayload(
         record,
@@ -960,7 +1126,7 @@ export class ProcessSupervisor {
         snapshot.event_id = `${record.task_id}:1`;
       }
       try {
-        const saved = await this.journal.save(record.session_id, snapshot);
+        const saved = await this.journal.save(record.session_id, snapshot, { create });
         record.persistence_error = "";
         if (this.observer) {
           this.observer(saved);
@@ -992,7 +1158,6 @@ export class ProcessSupervisor {
   }
 
   private retireFinished(): void {
-    if (!this.journal) return;
     for (const [taskId, record] of Array.from(this.processes.entries())) {
       if (
         record.finished.isSet() &&
@@ -1056,12 +1221,12 @@ export class ProcessSupervisor {
         continue;
       }
       if (!record.handed_off && !TERMINAL_STATES.has(record.status)) {
-        record.handed_off = true;
+        record.release_requested = true;
         released = true;
       }
       if (!TERMINAL_STATES.has(record.status)) {
         for (const waiter of record.waiters) {
-          record.handed_off = true;
+          record.release_requested = true;
           waiter.set();
           released = true;
         }
@@ -1166,12 +1331,17 @@ export class ProcessSupervisor {
         });
       });
       record.exit_code = exitCode;
-      await terminateProcessTree(proc, ProcessSupervisor.TERMINATION_GRACE_SECONDS * 1000);
+      if (!(process.platform === "win32" && record.termination_status !== null)) {
+        await terminateProcessTree(proc, ProcessSupervisor.TERMINATION_GRACE_SECONDS * 1000);
+      }
     } catch (exc) {
       failureStatus = "lost";
       record.reason = `Process cleanup failed: ${(exc as Error).message || String(exc)}`;
     } finally {
       await this.settleReaders(record);
+      if (record.output_init) {
+        await record.output_init;
+      }
       if (record.output) {
         await record.output.close();
       }
@@ -1180,12 +1350,43 @@ export class ProcessSupervisor {
         record.termination_status ||
         (record.exit_code === 0 ? "completed" : "failed");
       record.finished_at = Date.now() / 1000;
-      await this.save(record);
+      if (record.handed_off) {
+        await this.save(record);
+      }
       record.finished.set();
       if (record.deadlineTimer) {
         clearTimeout(record.deadlineTimer);
         record.deadlineTimer = null;
       }
+    }
+  }
+
+  private async appendChunk(
+    record: ProcessRecord,
+    streamName: "stdout" | "stderr",
+    raw: Buffer,
+    text: string,
+  ): Promise<void> {
+    if (!raw.length && !text) return;
+    if (record.output_init && !record.output) {
+      await record.output_init;
+    }
+    if (record.output) {
+      await record.output.append(streamName, raw, text);
+      return;
+    }
+    if (
+      !record.handed_off &&
+      (record.output_store === null || record.buffered_bytes + raw.length <= PRE_HANDOFF_BUFFER_LIMIT)
+    ) {
+      record.buffered_chunks.push({ stream: streamName, raw, text });
+      record.buffered_bytes += raw.length;
+      return;
+    }
+    if (record.output_store !== null) {
+      record.buffered_chunks.push({ stream: streamName, raw, text });
+      record.buffered_bytes += raw.length;
+      await this.ensureOutput(record);
     }
   }
 
@@ -1202,11 +1403,9 @@ export class ProcessSupervisor {
         const raw = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         const text = decoder.write(raw);
         capture.append(raw, text);
-        if (record.output) {
-          await record.output.append(streamName, raw, text);
-        }
+        await this.appendChunk(record, streamName, raw, text);
         const now = performance.now();
-        if (this.observer && now - record.last_output_event_at >= 100) {
+        if (record.handed_off && this.observer && now - record.last_output_event_at >= 100) {
           record.last_output_event_at = now;
           this.observer({
             ...taskSnapshot(record),
@@ -1218,8 +1417,8 @@ export class ProcessSupervisor {
       }
       const rem = decoder.end();
       capture.append(Buffer.alloc(0), rem);
-      if (rem && record.output) {
-        await record.output.append(streamName, Buffer.alloc(0), rem);
+      if (rem) {
+        await this.appendChunk(record, streamName, Buffer.alloc(0), rem);
       }
     } catch {}
   }
@@ -1310,12 +1509,16 @@ export class ProcessSupervisor {
         ProcessSupervisor.TERMINATION_GRACE_SECONDS * 1000,
       );
     }
+    let confirmTimer: ReturnType<typeof setTimeout> | null = null;
     const confirmed = await Promise.race([
       record.finished.wait().then(() => true),
-      new Promise<boolean>(resolve =>
-        setTimeout(() => resolve(false), ProcessSupervisor.TERMINATION_GRACE_SECONDS * 2000),
-      ),
+      new Promise<boolean>(resolve => {
+        confirmTimer = setTimeout(() => resolve(false), ProcessSupervisor.TERMINATION_GRACE_SECONDS * 2000);
+      }),
     ]);
+    if (confirmTimer !== null) {
+      clearTimeout(confirmTimer);
+    }
     if (!confirmed) {
       record.reason = `Termination not confirmed: ${reason}`;
       await this.save(record);

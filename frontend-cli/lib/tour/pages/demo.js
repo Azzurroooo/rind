@@ -64,6 +64,7 @@ export const TEST_TASK = {
   task_id: "task-demo",
   bg_id: "task-demo",
   status: "running",
+  handoff: true,
   notify: "on_exit",
   elapsed_ms: 1000,
   command: "npm test",

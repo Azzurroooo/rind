@@ -56,27 +56,33 @@ test("task status styling maps to pip classes", () => {
   assert.equal(runningTaskCount(createTaskMonitorState().tasks), 0)
 })
 
-test("refreshTasks loads one page and drops the expanded row when it finishes", async () => {
+test("refreshTasks loads one page, prunes stale cached outputs, and drops the expanded row when it finishes", async () => {
   const state = createTaskMonitorState()
   state.expandedId = "bg-done"
+  state.outputs["bg-done"] = { bg_id: "bg-done", status: "running", stdout: "stale" }
+  state.cursors["bg-done"] = "c1"
   await refreshTasks(state, async () => ({ tasks: [
-    { task_id: "bg-run", status: "running", handoff: true, command: "npm test" },
+    { task_id: "bg-run", status: "running", handoff: true, notify: "manual", command: "npm run dev" },
     { task_id: "bg-done", status: "completed", handoff: true },
   ] }))
   assert.deepEqual(state.tasks.map((task) => task.bg_id), ["bg-run"])
+  assert.equal(state.tasks[0].notify, "manual")
   assert.equal(state.expandedId, "")
+  assert.equal("bg-done" in state.outputs, false)
+  assert.equal("bg-done" in state.cursors, false)
   assert.equal(state.error, "")
   await refreshTasks(state, async () => { throw new Error("offline") })
   assert.equal(state.error, "offline")
 })
 
-test("renderTaskMonitor shows commands and the running count", () => {
+test("renderTaskMonitor shows commands, role labels, and the running count", () => {
   const state = createTaskMonitorState()
-  state.tasks = [{ bg_id: "bg-1", status: "running", handoff: true, command: "npm test", elapsed_ms: 4200 }]
+  state.tasks = [{ bg_id: "bg-1", status: "running", handoff: true, notify: "manual", command: "npm run dev", elapsed_ms: 4200 }]
   state.expandedId = "bg-1"
   const dock = new JSDOM("<main></main>").window.document.querySelector("main")
   renderTaskMonitor(dock, state)
-  assert.match(dock.innerHTML, /npm test/)
+  assert.match(dock.innerHTML, /npm run dev/)
+  assert.match(dock.innerHTML, /service/)
   assert.match(dock.innerHTML, /1 running/)
   assert.match(dock.innerHTML, /4s/)
   assert.match(dock.innerHTML, /Stop task/)

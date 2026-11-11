@@ -196,3 +196,50 @@ test("one-shot signal during initialization aborts startup and still shuts down 
   assert.match(errors.join(""), /Request interrupted/);
 });
 
+test("one-shot suppresses task_updated spam, logs background_wait once, and never overwrites intermediate notices on TTY", async (t) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "rind-oneshot-quiet-"));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+
+  const ttyChunks = [];
+  const progress = createOneShotProgress({
+    stderr: (text) => ttyChunks.push(text),
+    stream: { isTTY: true },
+  });
+  progress.toolStarted("call_1", "bash");
+  progress.note("waiting for 1 background task");
+  progress.toolFinished("call_1", { ok: true, durationMs: 42 });
+  assert.equal(
+    ttyChunks.some((chunk) => chunk.includes("\x1b[1A")),
+    false,
+    "toolFinished must not cursor-up over an intermediate note line",
+  );
+
+  const stderrOut = [];
+  const stdoutOut = [];
+  await runOneShot({
+    args: ["run", "--prompt", "check time"],
+    cwd: workspace,
+    stdout: (text) => stdoutOut.push(text),
+    stderr: (text) => stderrOut.push(text),
+    clientFactory: ({ onMessage }) => ({
+      start() {},
+      async request(method) {
+        if (method === "initialize") {
+          return { protocol_version: "2", capabilities: ["rind/tasks", "rind/request-completion"], methods: [], session_id: "s1" };
+        }
+        onMessage({ event: { type: "tool_requested", tool_call_id: "c1", tool_name: "bash" } });
+        onMessage({ event: { type: "task_updated", task: { task_id: "task_noisy", status: "running" } } });
+        onMessage({ event: { type: "tool_result", tool_call_id: "c1", tool_name: "bash", status: "completed", duration_ms: 15 } });
+        onMessage({ event: { type: "turn_completed", background_wait: { count: 1 } } });
+        onMessage({ event: { type: "task_updated", task: { task_id: "task_noisy", status: "completed" } } });
+        return { answer: "12:00", turn_id: "t1" };
+      },
+      async shutdown() {},
+    }),
+  });
+  const combinedErr = stderrOut.join("");
+  assert.doesNotMatch(combinedErr, /task_noisy/);
+  assert.match(combinedErr, /waiting for 1 background task/);
+  assert.deepEqual(stdoutOut, ["12:00"]);
+});
+

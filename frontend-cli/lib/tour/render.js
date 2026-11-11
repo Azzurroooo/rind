@@ -2,7 +2,6 @@ import { prepareComposerFrame } from "../composer-terminal.js";
 import {
   choiceDialogFrame,
   authSecretFrame,
-  backgroundMonitorText,
   choiceMenuText,
   contextBoardText,
   inputHintText,
@@ -13,7 +12,7 @@ import {
   sessionMenuText,
   settingsMenuText,
   slashMenuText,
-  taskMonitorTabs,
+  taskMonitorFrame,
   usageBoardText,
 } from "../rendering.js";
 import { paint, currentTheme, setTheme } from "../theme.js";
@@ -352,8 +351,26 @@ function menuFrame(menu, inner, budget) {
       return { text: sessionMenuText(menu.items, selected) };
     case "choice":
       return { text: choiceMenuText(menu.items, selected) };
-    case "monitor":
-      return { text: taskMonitorTabs("background", menu.tasks.length, 0, inner) + "\n" + backgroundMonitorText(menu.tasks, selected, menu.task, inner) };
+    case "monitor": {
+      const items = Array.isArray(menu.tasks) ? menu.tasks : [];
+      const current = menu.task || items[selected] || null;
+      return {
+        text: taskMonitorFrame({
+          backgroundCount: items.filter((item) => item?.handoff !== false).length,
+          items,
+          index: selected,
+          selected: current,
+          preview: current ? {
+            id: current.bg_id || current.task_id,
+            stdout: String(current.stdout || ""),
+            stderr: String(current.stderr || ""),
+            limited: Boolean(current.truncated),
+          } : null,
+          width: inner,
+          height: Number.isFinite(budget) ? Math.max(8, budget - 5) : 14,
+        }).lines.join("\n"),
+      };
+    }
     case "board": {
       const page = menu.pages[selected] || {};
       return { text: page.breakdown ? contextBoardText(page, inner) : usageBoardText(page, inner) };

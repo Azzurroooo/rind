@@ -299,7 +299,12 @@ test("/remote two-view menu: Off picks the scope to turn on with, On connects, x
     },
   });
 
-  const flush = () => new Promise((resolve) => setTimeout(resolve, 25));
+  const flush = async (predicate = null) => {
+    const deadline = Date.now() + 2000;
+    do {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    } while (predicate && !predicate() && Date.now() < deadline);
+  };
   const menu = () => cliState.input.session.remoteState;
 
   // 1. Subcommands are rejected, and a non-TTY explains the requirement
@@ -323,7 +328,7 @@ test("/remote two-view menu: Off picks the scope to turn on with, On connects, x
 
   // 2. Off view offers the two scopes; Esc closes without side effects
   const browse = commandController.handle("/remote");
-  await flush();
+  await flush(() => frame !== "");
   assert.match(frame, /Remote access · Off/);
   assert.match(frame, /› Local network\s+Phones and computers on the same Wi-Fi/);
   assert.match(frame, /· This computer\s+A browser on this machine only/);
@@ -336,10 +341,10 @@ test("/remote two-view menu: Off picks the scope to turn on with, On connects, x
 
   // 3. Choosing "This computer" turns remote on and switches to the On view in place
   const session = commandController.handle("/remote");
-  await flush();
+  await flush(() => frame !== "");
   inputActions.handleTerminalInput("\x1b[B");
   inputActions.handleTerminalInput("\r");
-  await flush();
+  await flush(() => remoteController.state().running);
   assert.equal(remoteController.state().running, true);
   assert.equal(remoteController.state().scope, "loopback");
   assert.match(promptText(sessionState.info).split("\n")[1], /gpt-test · medium · .* · ⚯$/);
@@ -357,14 +362,14 @@ test("/remote two-view menu: Off picks the scope to turn on with, On connects, x
   // 4. r issues a new code in place
   const oldCode = remoteController.state().accessCode;
   inputActions.handleTerminalInput("r");
-  await flush();
+  await flush(() => remoteController.state().accessCode !== oldCode);
   assert.notEqual(remoteController.state().accessCode, oldCode);
   assert.match(frame, /New access code\. Previous devices were disconnected\./);
   assert.equal(frame.includes(menu().connection().link), true);
 
   // 5. x turns remote off and returns to the Off view with the last scope selected
   inputActions.handleTerminalInput("x");
-  await flush();
+  await flush(() => !remoteController.state().running);
   assert.equal(remoteController.state().running, false);
   assert.equal(promptText(sessionState.info).includes("⚯"), false, "⚯ must disappear when remote is turned off");
   assert.match(frame, /Remote access · Off/);
@@ -374,7 +379,7 @@ test("/remote two-view menu: Off picks the scope to turn on with, On connects, x
   // 6. Changing scope is simply choosing the other one
   inputActions.handleTerminalInput("\x1b[A");
   inputActions.handleTerminalInput(" ");
-  await flush();
+  await flush(() => remoteController.state().running);
   assert.equal(remoteController.state().scope, "lan");
   assert.match(frame, /Remote access · On · Local network/);
   const lan = menu().connection();
@@ -390,7 +395,7 @@ test("/remote two-view menu: Off picks the scope to turn on with, On connects, x
   assert.equal(frame, "");
   assert.equal(remoteController.state().running, true);
   const reopen = commandController.handle("/remote");
-  await flush();
+  await flush(() => frame !== "");
   assert.match(frame, /Remote access · On · Local network/);
   inputActions.handleTerminalInput("\x1b");
   await reopen;

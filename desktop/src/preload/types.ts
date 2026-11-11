@@ -250,6 +250,7 @@ export type DesktopBackgroundTask = {
   status: string
   /** True once the agent yielded the call; the process keeps running. */
   handoff?: boolean
+  notify?: string
   command?: string
   elapsed_ms?: number
   exit_code?: number

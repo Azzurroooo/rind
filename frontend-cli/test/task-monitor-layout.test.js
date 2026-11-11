@@ -4,26 +4,35 @@ import { taskMonitorFrame } from "../lib/rendering.js";
 import { stripAnsi, textWidth } from "../lib/text-width.js";
 
 function fixture(count = 100) {
-  const items = Array.from({ length: count }, (_, i) => ({ bg_id: `task-${i}`, id: `d${i}`,
-    agent_id: `worker-${i}`, status: "completed", command: "中文回测 👩‍💻 é".repeat(30), task: "检查结果",
-    summary: "验证完成" }));
-  return { page: "background", backgroundCount: count, delegateCount: count, items, index: count - 3,
-    selected: items[count - 3], focus: "list", width: 80, height: 18, previewOffset: 0,
-    preview: { stdout: Array.from({ length: 60 }, (_, i) => `output-${i}`).join("\n"), stderr: "" } };
+  const items = Array.from({ length: count }, (_, i) => ({
+    bg_id: `task-${i}`,
+    status: "running",
+    handoff: true,
+    notify: i % 2 === 0 ? "on_exit" : "manual",
+    command: `cmd-${i} ` + "中文回测 👩‍💻 é".repeat(20),
+  }));
+  return {
+    backgroundCount: count,
+    items,
+    index: count - 3,
+    selected: items[count - 3],
+    width: 80,
+    height: 18,
+    previewOffset: 0,
+    preview: { stdout: Array.from({ length: 60 }, (_, i) => `output-${i}`).join("\n"), stderr: "" },
+  };
 }
 
-test("both monitor pages obey every height budget and keep their selected row", () => {
-  for (const page of ["background"]) {
-    for (const width of [4, 16, 32, 80, 100, 160]) {
-      for (let height = 0; height <= 50; height += 1) {
-        const params = { ...fixture(), page, width, height };
-        const { lines } = taskMonitorFrame(params);
-        assert.ok(lines.length <= height, `${page} ${width}x${height}: ${lines.length} rows`);
-        assert.ok(lines.every((line) => textWidth(line) <= width), `${page} ${width}x${height}: width overflow`);
-        if (width >= 32 && height) {
-          assert.match(stripAnsi(lines.join("\n")), page === "background" ? /task-97/ : /worker-97/);
-          assert.match(stripAnsi(lines.at(-1)), /esc/);
-        }
+test("monitor frame obeys every height and width budget and keeps its selected row", () => {
+  for (const width of [4, 16, 32, 80, 100, 160]) {
+    for (let height = 0; height <= 50; height += 1) {
+      const params = { ...fixture(), width, height };
+      const { lines } = taskMonitorFrame(params);
+      assert.ok(lines.length <= height, `${width}x${height}: ${lines.length} rows`);
+      assert.ok(lines.every((line) => textWidth(line) <= width), `${width}x${height}: width overflow`);
+      if (width >= 32 && height) {
+        assert.match(stripAnsi(lines.join("\n")), /cmd-97/);
+        assert.match(stripAnsi(lines.at(-1)), /esc/);
       }
     }
   }
@@ -32,7 +41,7 @@ test("both monitor pages obey every height budget and keep their selected row", 
 test("normal monitor height reserves six output lines before growing the list", () => {
   for (const [width, height] of [[80, 18], [100, 24], [160, 44]]) {
     const lines = taskMonitorFrame({ ...fixture(), width, height }).lines.map(stripAnsi);
-    const rows = lines.filter((line) => /^\s+[›·] task-/.test(line));
+    const rows = lines.filter((line) => /^\s+[›·] cmd-/.test(line));
     assert.ok(rows.length <= 5 && rows.length >= 1);
     assert.ok(lines.filter((line) => /^\s+output-/.test(line)).length >= 6);
     assert.ok(lines.some((line) => line.includes("98/100")));
@@ -40,14 +49,22 @@ test("normal monitor height reserves six output lines before growing the list", 
   }
 });
 
-test("foreground action is rendered once and survives small heights", () => {
+test("foreground waiting item shows r background hint and survives small heights", () => {
+  const fg = { bg_id: "front", command: "waiting-command", status: "running", handoff: false };
   for (const height of [1, 2, 3, 4, 5, 8, 18]) {
-    const params = { ...fixture(), height, focus: "foreground", foreground: { bg_id: "front", command: "waiting-command" },
-      foregroundIndex: 1, foregroundCount: 3 };
-    const lines = taskMonitorFrame(params).lines.map(stripAnsi);
+    const base = fixture(2);
+    const items = [fg, ...base.items];
+    const lines = taskMonitorFrame({
+      ...base,
+      items,
+      index: 0,
+      selected: fg,
+      height,
+    }).lines.map(stripAnsi);
     assert.ok(lines.length <= height);
-    assert.equal(lines.filter((line) => line.includes("Waiting 2/3")).length, 1);
-    assert.match(lines.join("\n"), /r background/);
+    if (height >= 2) {
+      assert.match(lines.join("\n"), /r background/);
+    }
     assert.match(lines.at(-1), /esc/);
   }
 });
@@ -63,17 +80,17 @@ test("preview reports bounded and expired output and scrolls inside its retained
   assert.match(text({ preview: { ...params.preview, expired: true } }), /Output expired; preview incomplete/);
 });
 
-test("formatting work stays bounded as background history grows", () => {
-  for (const page of ["background"]) {
-    for (const count of [100, 10000]) {
-      const params = { ...fixture(count), page };
-      let reads = 0;
-      for (const item of params.items) Object.defineProperty(item, page === "background" ? "command" : "task", {
+test("formatting work stays bounded as task count grows", () => {
+  for (const count of [100, 10000]) {
+    const params = fixture(count);
+    let reads = 0;
+    for (const item of params.items) {
+      Object.defineProperty(item, "command", {
         get() { reads += 1; return "formatted"; },
       });
-      taskMonitorFrame(params);
-      assert.ok(reads <= 7, `${page}, ${count} tasks: ${reads} formatted details`);
     }
+    taskMonitorFrame(params);
+    assert.ok(reads <= 7, `${count} tasks: ${reads} formatted details`);
   }
 });
 

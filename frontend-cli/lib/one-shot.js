@@ -261,7 +261,10 @@ export async function runOneShot({ args, repoRoot, runtimePath, cwd = process.cw
         if (type === "assistant_delta") assistant += String(event.text || "");
         if (type === "assistant_message_completed") completed = String(event.content || "");
         if (type === "turn_failed" || type === "turn_cancelled" || type === "task_continuation_failed") turnFailure = String(event.error || event.reason || "Request interrupted.");
-        if (type === "task_updated") progress.note(`task ${event.task?.task_id}: ${event.task?.status}`);
+        if (type === "turn_completed" && Number(event.background_wait?.count) > 0) {
+          const count = Number(event.background_wait.count);
+          progress.note(`waiting for ${count} background ${count === 1 ? "task" : "tasks"}`);
+        }
         if (type === "assistant_message_completed" && sessionInfo?.capabilities?.includes("rind/request-completion")) progress.note(String(event.content || ""));
         if (type === "context_built" && event.decisions?.image_notice) progress.systemNotice(String(event.decisions.image_notice), event.decisions.image_notice_level);
         const toolCallId = String(event?.tool_call_id || "");

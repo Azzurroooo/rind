@@ -2,14 +2,14 @@
 
 English | [简体中文](managed-tasks.zh-CN.md)
 
-A command can still be running after the tool call that started it has already returned. Rind tracks the process itself with task_id, handoff records whether it has been moved to the background, and notify decides how to continue once it ends.
+A command can still be running after the tool call that started it has already returned. Short foreground commands that finish within `yield_time_ms` return inline in memory without creating `tasks.jsonl` or `TaskOutput` files; only processes that outlive their foreground wait window (or are explicitly released to the background) are promoted into persistent tasks with `task_id` and `handoff=true`, while `notify` decides how to continue once they end.
 
 ~~~mermaid
 stateDiagram-v2
-    [*] --> Starting: Persist the startup intent first
+    [*] --> Starting: Start in memory
     Starting --> Running: Startup succeeded
     Starting --> Failed: Startup failed
-    Running --> Running: Wait timeout or release_wait hands back control
+    Running --> Running: Wait timeout or release_wait promotes handoff=true to TaskJournal
     Running --> Completed: Exit code is 0
     Running --> Failed: Non-zero exit or execution error
     Running --> Cancelled: Explicit cancellation

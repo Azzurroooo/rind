@@ -463,7 +463,8 @@ export function startupText(info = {}, width) {
 }
 
 export function promptText(info = {}, _stats = {}, state = {}, frameWidth) {
-  return inputPromptFrame(promptHeaderLine(info, frameWidth), state, frameWidth);
+  const backgroundCount = Number(info.background_count) || Number(state.backgroundCount) || 0;
+  return inputPromptFrame(promptHeaderLine(info, frameWidth), { ...state, backgroundCount }, frameWidth);
 }
 
 export function promptActivityLine(state = {}) {
@@ -564,15 +565,17 @@ export function promptHintLine(state = {}) {
   if (state.menuOpen) {
     return "";
   }
+  const hasBackground = (Number(state.backgroundCount) || 0) > 0;
+  const hasTasks = hasBackground || Boolean(state.hasActiveBash);
   const text = state.leaveArmed
     ? "  ctrl+c again to leave Rind · agents keep running in the background"
     : state.inputMode === "question"
     ? "  ↑↓ choose · enter confirm · esc cancel"
     : state.emptyInput
-      ? "  ← agents · / commands · ↑↓ history"
+      ? `  ← agents · / commands · ↑↓ history${hasTasks ? " · ctrl+b tasks" : ""}`
     : state.running
-      ? "  enter steer · tab queue · ctrl+c stop · ctrl+b tasks"
-      : "  enter send · ↑↓ history · / commands · ? help";
+      ? `  enter steer · tab queue · ctrl+c stop${hasTasks ? " · ctrl+b tasks" : ""}`
+      : `  enter send · ↑↓ history · / commands · ? help${hasBackground ? " · ctrl+b tasks" : ""}`;
   return dim(clipCells(text, composerWidth(state.frameWidth)));
 }
 
@@ -882,10 +885,6 @@ function fittedTerminalQr(text, columns, rows) {
     : [];
 }
 
-export function taskMonitorTabs(_page = "background", backgroundCount = 0) {
-  return `${bold(accent("› Background"))} ${dim(`[${Math.max(0, Number(backgroundCount) || 0)}]`)}`;
-}
-
 export function choiceMenuText(options, selectedIndex = 0) {
   return choiceMenuTextWithTitle(options, selectedIndex, "Choices");
 }
@@ -1074,75 +1073,33 @@ function authFrameTitle(title, box) {
   return dim(`┌─ ${label} ${"─".repeat(dashes)}┐`);
 }
 
-export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTask = null, width = 76) {
-  const items = Array.isArray(tasks) ? tasks : [];
-  const lines = [dim("  ←→ page · ↑↓/j/k select · esc/ctrl+b close")];
-  if (items.some((task) => task.task_id)) lines.push(dim("  r release wait · c cancel task"));
-  if (!items.length) {
-    lines.push(dim("  No background tasks."));
-    return lines.join("\n");
-  }
-  for (const [index, task] of items.entries()) {
-    const active = index === selectedIndex;
-    const marker = active ? accent("›") : dim("·");
-    const status = singleLine(task?.status) || "unknown";
-    const bgId = singleLine(task?.bg_id) || "unknown";
-    const command = clipSingleLine(task?.command, Math.max(12, width - 34));
-    lines.push(`  ${marker} ${padRight(bgId, 12)} ${padRight(status, 10)} ${dim(command)}`.trimEnd());
-  }
-  lines.push("");
-  const task = selectedTask || items[selectedIndex];
-  if (!task) {
-    return lines.join("\n");
-  }
-  const heading = `${singleLine(task.task_id || task.bg_id) || "unknown"} · ${singleLine(task.status) || "unknown"}${task.notify ? ` · ${task.notify} · ${Math.round((Number(task.elapsed_ms) || 0) / 1000)}s` : ""}`;
-  lines.push(dim(`  ${heading}`));
-  const rawOutput = [task.stdout, task.stderr]
-    .filter((value) => String(value || ""))
-    .join("\n")
-  const visibleOutput = rawOutput ? rawOutput.split(/\r?\n/).slice(-18) : [];
-  if (!rawOutput) {
-    lines.push(dim("  (no output)"));
-  } else {
-    lines.push(...visibleOutput.map((line) => `  ${clipSingleLine(line, width)}`));
-  }
-  if (task.truncated) {
-    lines.push(dim("  … output truncated"));
-  }
-  return lines.join("\n");
-}
-
-export function taskMonitorFrame({ page, backgroundCount, items, index, selected,
-  foreground, foregroundIndex, foregroundCount, focus, preview, previewOffset, loading, error, width, height }) {
+export function taskMonitorFrame({ backgroundCount = 0, items = [], index = 0, selected = null,
+  preview = null, previewOffset = 0, loading = false, error = "", width = 80, height = 24 } = {}) {
   const columns = Math.max(1, Math.floor(Number(width) || 80));
   const rows = Math.max(0, Math.floor(Number(height ?? 24) || 0));
   if (!rows) return { lines: [] };
   const inner = Math.max(1, columns - 4);
-  const tabs = taskMonitorTabs(page, backgroundCount).split("\n");
-  const foregroundLine = foreground && page === "background"
-    ? `  ${focus === "foreground" ? accent("›") : dim("·")} ${dim(`Waiting ${foregroundIndex + 1}/${foregroundCount} · r background ·`)} ${clipSingleLine(foreground.command || foreground.bg_id, inner)}`
-    : "";
+  const header = `${bold(accent("› Background"))} ${dim(`[${Math.max(0, Number(backgroundCount) || 0)}]`)}`;
+  const actionHint = !selected ? "" : !selected.handoff ? " · r background" : " · c stop";
   const footer = (rows >= 14 && columns >= 65 ? [
-    "  ↑↓ select · tab focus · r release · c cancel",
+    `  ↑↓ select${actionHint}`,
     "  PgUp/PgDn output · End tail · esc/ctrl+b close",
-  ] : [rows >= 7 && columns >= 60 ? "  ↑↓ select · tab focus · r release · c cancel · esc close" : "  esc close"]).map(dim);
+  ] : [rows >= 7 && columns >= 56 ? `  ↑↓ select${actionHint} · esc close` : "  esc close"]).map(dim);
   const list = Array.isArray(items) ? items : [];
-  const emptyRow = dim("  No background tasks.");
+  const current = selected || list[index] || null;
+  const emptyRow = dim("  No active tasks.");
   if (rows <= 2) {
-    const selectedRow = focus === "foreground" && foregroundLine ? foregroundLine
-      : list.length ? taskMonitorRow(page, selected, focus === "list", inner) : emptyRow;
+    const selectedRow = list.length ? taskMonitorRow(current, true, inner) : emptyRow;
     return { lines: rows === 1
       ? [columns > 4 ? `${clipCells(selectedRow, columns - 4)} ${dim("esc")}` : clipCells(dim("esc"), columns)]
       : [clipCells(selectedRow, columns), clipCells(footer[0], columns)] };
   }
   const lines = [];
-  if (rows >= 8) lines.push(...tabs);
-  else if (rows >= 5) lines.push(tabs.length === 1 ? tabs[0] : tabs[0]);
-  if (foregroundLine) lines.push(foregroundLine);
+  if (rows >= 5) lines.push(header);
   const status = error ? dim(`  ${error}`) : loading ? dim("  Loading tasks…") : "";
   const statusRows = status && rows - lines.length - footer.length >= 2 ? 1 : 0;
   const capacity = Math.max(0, rows - lines.length - footer.length - statusRows);
-  const detailRows = selected && capacity >= 3 ? 1 : 0;
+  const detailRows = current && capacity >= 3 ? 1 : 0;
   const positionRows = list.length > 1 && capacity >= 4 ? 1 : 0;
   const previewReserve = detailRows ? Math.min(6, Math.max(0, capacity - detailRows - positionRows - 1)) : 0;
   const listSize = Math.min(5, list.length || 1,
@@ -1151,32 +1108,41 @@ export function taskMonitorFrame({ page, backgroundCount, items, index, selected
   if (positionRows) lines.push(dim(`  ${index + 1}/${list.length}`));
   if (list.length) {
     for (const [offset, item] of list.slice(start, start + listSize).entries()) {
-      lines.push(taskMonitorRow(page, item, focus === "list" && start + offset === index, inner));
+      lines.push(taskMonitorRow(item, start + offset === index, inner));
     }
   } else if (listSize) lines.push(emptyRow);
   if (detailRows) {
     const available = Math.max(0, rows - lines.length - footer.length - statusRows);
-    lines.push(...(focus === "foreground"
-      ? [dim("  ↑↓ select task · r release waiting task")]
-      : taskMonitorDetail(page, selected, preview, previewOffset, inner, available)));
+    lines.push(...taskMonitorDetail(current, preview, previewOffset, inner, available));
   }
   if (statusRows) lines.push(status);
   lines.push(...footer);
   return { lines: lines.map((line) => clipCells(line, columns)) };
 }
 
-function taskMonitorRow(page, item, active, width) {
-  const marker = active ? accent("›") : dim("·");
-  const label = item?.bg_id;
-  const detail = item?.command;
-  const prefix = `  ${marker} ${clipSingleLine(label, 14)}  ${clipSingleLine(item?.status, 10)}`;
-  const rest = Math.max(0, width - visibleLength(prefix) - 2);
-  return clipCells(`${prefix}  ${dim(clipSingleLine(detail, rest))}`.trimEnd(), width + 4);
+function taskRoleLabel(item) {
+  if (!item?.handoff) return "foreground · r background";
+  if (item.status === "cancelling") return "cancelling";
+  return item.notify === "manual" ? "service" : "auto-resume";
 }
 
-function taskMonitorDetail(page, selected, preview, offset, width, maxRows) {
+function taskMonitorRow(item, active, width) {
+  const marker = active ? accent("›") : dim("·");
+  const primary = singleLine(item?.command) || singleLine(item?.bg_id) || "task";
+  const tag = taskRoleLabel(item);
+  if (width < 36) {
+    const label = clipSingleLine(primary, Math.max(1, width - 4));
+    return clipCells(`  ${marker} ${active ? bold(label) : label}`, width + 4);
+  }
+  const cmdBudget = Math.max(12, width - visibleLength(tag) - 6);
+  const cmdText = clipSingleLine(primary, cmdBudget);
+  return clipCells(`  ${marker} ${active ? bold(cmdText) : cmdText}  ${dim(tag)}`.trimEnd(), width + 4);
+}
+
+function taskMonitorDetail(selected, preview, offset, width, maxRows) {
   if (!selected) return [];
-  const heading = dim(`  ${clipSingleLine(`${selected.bg_id} · ${selected.status}`, width)}`);
+  const role = !selected.handoff ? "foreground" : selected.notify === "manual" ? "service" : "auto-resume";
+  const heading = dim(`  ${clipSingleLine(`${selected.bg_id} · ${selected.status} · ${role}`, width)}`);
   if (!preview) return [heading, dim("  Loading output…")].slice(0, maxRows);
   if (preview.error) return [heading, dim(`  Output unavailable: ${clipSingleLine(preview.error, width - 22)}`)].slice(0, maxRows);
   const output = [preview.stdout, preview.stderr].filter(Boolean).join("\n");
@@ -2245,18 +2211,10 @@ function visibleLength(text) {
 
 function promptHeaderLine(info, frameWidth) {
   const backgroundCount = Number(info.background_count);
-  const taskHints = [];
-  if (backgroundCount > 0) {
-    taskHints.push(`[bg:${backgroundCount}]`);
-  }
   const width = composerWidth(frameWidth);
   const badge = info.management_label ? `${bold(paint.notice(`[${singleLine(info.management_label)}]`))} ` : info.team_main ? `${teamBadge()} ` : "";
   const available = Math.max(0, width - visibleLength(badge));
-  const counts = taskHints.length ? ` · ${taskHints.join(" ")}` : "";
-  let taskHint = counts ? `${counts} (ctrl+b monitor)` : "";
-  if (visibleLength(taskHint) + 20 > available) {
-    taskHint = counts;
-  }
+  let taskHint = backgroundCount > 0 ? ` · [bg:${backgroundCount}]` : "";
   if (visibleLength(taskHint) + 8 > available) {
     taskHint = "";
   }

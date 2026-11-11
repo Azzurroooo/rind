@@ -155,11 +155,11 @@ export const startPages = [
         tasks: [TEST_TASK],
         task: TEST_TASK,
       }, [
-        "Background monitor: ↑↓ selects a job, c cancels, r releases wait, Esc hides.",
+        "Background monitor: ↑↓ selects an active command, r moves a foreground wait to background, c stops, Esc hides.",
         "These shell jobs are separate from the team tasks and reports in Agents.",
       ]),
       note([
-        "Background monitor: ↑↓ selects a job, c cancels, r releases wait, Esc hides.",
+        "Background monitor: ↑↓ selects an active command, r moves a foreground wait to background, c stops, Esc hides.",
         "These shell jobs are separate from the team tasks and reports in Agents.",
       ]),
       closeMenu(),

@@ -208,7 +208,7 @@ export class TaskJournal {
     if (!owner || !/^[A-Za-z0-9]+$/.test(owner)) {
       return false;
     }
-    if (owner === this.worker_instance_id && this.leaseFd !== null) {
+    if (owner === this.worker_instance_id) {
       return true;
     }
     const lockPath = path.join(this.root, ".task-workers", `${owner}.lock`);
@@ -245,6 +245,14 @@ export class TaskJournal {
 
   async get(sessionId: string, taskId: string): Promise<Record<string, unknown> | null> {
     return this.transaction(sessionId, "get", taskId) as Record<string, unknown> | null;
+  }
+
+  async findByOrigin(
+    sessionId: string,
+    originToolCallId: string,
+  ): Promise<Record<string, unknown> | null> {
+    if (!originToolCallId) return null;
+    return this.transaction(sessionId, "origin", originToolCallId) as Record<string, unknown> | null;
   }
 
   async save(
@@ -380,21 +388,30 @@ export class TaskJournal {
 
   private transaction(
     sessionId: string,
-    action: "all" | "relevant" | "get" | "save" | "maintain",
+    action: "all" | "relevant" | "get" | "origin" | "save" | "maintain",
     taskId?: string,
     changes?: Record<string, unknown>,
     create: boolean = false,
   ): unknown {
     const directory = resolveSessionBase(this.root, sessionId);
     const filePath = path.join(directory, "tasks.jsonl");
-    if ((action === "all" || action === "relevant" || action === "get" || action === "maintain") && !fs.existsSync(filePath)) {
+    if (
+      (action === "all" ||
+        action === "relevant" ||
+        action === "get" ||
+        action === "origin" ||
+        action === "maintain") &&
+      !fs.existsSync(filePath)
+    ) {
       return action === "all" || action === "relevant" ? {} : null;
     }
     if (!fs.existsSync(directory)) {
       fs.mkdirSync(directory, { recursive: true });
     }
     return new FileLockHandle(`${filePath}.lock`, 5000).withLock(() => {
-      this.ensureLease();
+      if (action === "save") {
+        this.ensureLease();
+      }
       let state = this.sessions.get(sessionId);
       if (!state) {
         state = { maintainedAt: null };
@@ -410,6 +427,17 @@ export class TaskJournal {
         }
         const rec = this.recover(filePath, { [taskId]: allRecords[taskId] })[taskId];
         return rec ?? null;
+      }
+      if (action === "origin") {
+        if (!taskId) {
+          return null;
+        }
+        const found = Object.values(allRecords).find(r => r.origin_tool_call_id === taskId);
+        if (!found) {
+          return null;
+        }
+        const eid = String(found.task_id);
+        return this.recover(filePath, { [eid]: found })[eid] ?? null;
       }
       if (action === "relevant") {
         const rel: Record<string, Record<string, unknown>> = {};

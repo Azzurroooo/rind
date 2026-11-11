@@ -94,7 +94,7 @@ export class ToolResultNormalizer {
     const dataObj = payloadObj && payloadObj.data && typeof payloadObj.data === "object" && !Array.isArray(payloadObj.data)
       ? (payloadObj.data as Record<string, unknown>)
       : null;
-    const isTask = Boolean(dataObj && dataObj.task_id);
+    const isTask = this.isShellPayload(payloadObj, dataObj, identity[1]);
     let shellOutput = "";
     if (isTask && dataObj) {
       const parts: string[] = [];
@@ -111,7 +111,7 @@ export class ToolResultNormalizer {
     const needsPreview = previewRequired || existingTruncated;
     let outputPath = existingPath;
     if (needsPreview && !isRead && !isMutation && !outputPath && outputStore && sessionId && callId) {
-      outputPath = await outputStore.write(sessionId, callId, rendered);
+      outputPath = await outputStore.write(sessionId, callId, isTask ? shellOutput || rendered : rendered);
     }
     const readPayload = isRead ? this.readPayload(payload) : null;
     const readContent = readPayload ? this.projectReadForModel(readPayload) : null;
@@ -182,6 +182,17 @@ export class ToolResultNormalizer {
     return [payload, rendered, attachments];
   }
 
+  private isShellPayload(
+    payloadObj: Record<string, unknown> | null,
+    dataObj: Record<string, unknown> | null,
+    toolName: string,
+  ): boolean {
+    if (!payloadObj || !dataObj) return false;
+    if (dataObj.task_id) return true;
+    const tool = typeof payloadObj.tool === "string" && payloadObj.tool ? payloadObj.tool : toolName;
+    return (tool === "bash" || tool === "bash_output") && ("stdout" in dataObj || "stderr" in dataObj);
+  }
+
   private projectTerminal(
     payload: unknown,
     rendered: string,
@@ -189,16 +200,16 @@ export class ToolResultNormalizer {
     outputPath: string | null,
     readContent: string | null,
   ): string {
-    if (
-      payload &&
-      typeof payload === "object" &&
-      !Array.isArray(payload) &&
-      (payload as Record<string, unknown>).data &&
-      typeof (payload as Record<string, unknown>).data === "object" &&
-      !Array.isArray((payload as Record<string, unknown>).data) &&
-      ((payload as Record<string, unknown>).data as Record<string, unknown>).task_id
-    ) {
-      return this.projectTask(payload as Record<string, unknown>, this.terminalMaxBytes, outputPath);
+    const payloadObj =
+      payload && typeof payload === "object" && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : null;
+    const dataObj =
+      payloadObj && payloadObj.data && typeof payloadObj.data === "object" && !Array.isArray(payloadObj.data)
+        ? (payloadObj.data as Record<string, unknown>)
+        : null;
+    if (this.isShellPayload(payloadObj, dataObj, identity[1]) && payloadObj) {
+      return this.projectTask(payloadObj, this.terminalMaxBytes, outputPath);
     }
     if (readContent !== null) {
       try {
@@ -254,8 +265,9 @@ export class ToolResultNormalizer {
       if (outputPath) {
         meta.output_path = outputPath;
       }
-      meta.paging_notice =
-        "Preview was shortened. Read the output_path with file paging, or restart task_control read from start_cursor with a smaller max_output_chars.";
+      meta.paging_notice = data.task_id
+        ? "Preview was shortened. Read the output_path with file paging, or restart task_control read from start_cursor with a smaller max_output_chars."
+        : "Preview was shortened. Read the output_path with file paging.";
       text = render();
     }
     const shrinkableKeys = new Set([
@@ -309,7 +321,7 @@ export class ToolResultNormalizer {
     if (typeof exitCode === "number" && Number.isInteger(exitCode) && exitCode !== 0) {
       notes.push(`Command exited with code ${exitCode}.`);
     }
-    if (status === "running") {
+    if (status === "running" && data.task_id) {
       notes.push(
         `Command is still running as task ${String(data.task_id)}. Continue it with ` +
           `task_control (action read, task_id ${String(data.task_id)}, cursor ${String(data.next_cursor)}), or end your turn and rely on ` +
@@ -319,7 +331,7 @@ export class ToolResultNormalizer {
     if (meta.truncated) {
       notes.push(TRUNCATION_MARKER.replace("{output_path}", outputPath || "the output file").trim());
       const cursor = "records" in data ? data.next_cursor : data.start_cursor;
-      if (cursor) {
+      if (cursor && data.task_id) {
         notes.push(`Read more output with task_control (action read, task_id ${String(data.task_id)}, cursor ${String(cursor)}).`);
       }
     }
@@ -343,7 +355,11 @@ export class ToolResultNormalizer {
     if (!meta.truncated) {
       notes.push(TRUNCATION_MARKER.replace("{output_path}", outputPath || "the output file").trim());
     }
-    notes.push("Preview was shortened. Inspect the full output file for omitted content before advancing a task cursor.");
+    notes.push(
+      data.task_id
+        ? "Preview was shortened. Inspect the full output file for omitted content before advancing a task cursor."
+        : "Preview was shortened. Inspect the full output file for omitted content.",
+    );
     let low = 0;
     let high = Math.min(output.length, this.maxPreviewBytes);
     let best = render("");

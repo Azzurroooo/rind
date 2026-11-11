@@ -1,39 +1,75 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-
+import { stripAnsi } from "../lib/text-width.js";
 import { createTaskMonitorController } from "../lib/task-monitor-controller.js";
 
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 
-test("task events preserve input and use release/cancel without model polling", async () => {
+test("Ctrl+B opens monitor without implicit release; r promotes foreground task, c cancels background task, and completion evicts & auto-closes", async () => {
   const calls = [];
   let released = false;
+  let status = "running";
   const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: true, input: "中文 pending" };
-  const controller = createTaskMonitorController({ terminalUi: true, state,
+  const controller = createTaskMonitorController({
+    terminalUi: true,
+    state,
     request: async (method, params) => {
       calls.push([method, params]);
-      if (method === "rind/task/release_wait") { released = true; return { released }; }
-      return method === "rind/task/list" ? { tasks: [{ task_id: "task_1", status: "running", handoff: released }] } : {};
+      if (method === "rind/task/release_wait") {
+        released = true;
+        return { released: true };
+      }
+      if (method === "rind/task/cancel") {
+        status = "cancelled";
+        return { task_id: params.task_id, status, handoff: true };
+      }
+      if (method === "rind/task/list") {
+        return {
+          tasks: status === "running"
+            ? [{ task_id: "task_1", command: "pytest -q", status, handoff: released, notify: "on_exit" }]
+            : [],
+        };
+      }
+      if (method === "rind/task/read") {
+        return { task_id: params.task_id, command: "pytest -q", status, handoff: released, notify: "on_exit", stdout: "running tests" };
+      }
+      return {};
     },
   });
-  controller.recordTask({ type: "task_updated", session_id: "s1", task: { task_id: "task_1", status: "running", notify: "on_exit" } });
-  assert.equal(state.input, "中文 pending");
-  assert.equal(state.inputActive, true);
+
+  // Opening Ctrl+B strictly opens monitor and lists foreground command without releasing it
   controller.enterMonitor();
-  await new Promise((resolve) => setImmediate(resolve));
-  controller.handleInput({ text: "r" });
-  await new Promise((resolve) => setImmediate(resolve));
-  controller.handleInput({ text: "c" });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.ok(calls.some(([method]) => method === "rind/task/release_wait"));
-  assert.ok(calls.some(([method]) => method === "rind/task/cancel"));
-  controller.recordTask({ type: "task_updated", session_id: "s1", task: { task_id: "task_1", status: "completed" } });
+  await settled();
+  assert.equal(controller.isMonitoring(), true);
+  assert.equal(calls.some(([method]) => method === "rind/task/release_wait"), false);
   assert.equal(state.sessionInfo.background_count, 0);
+  assert.match(stripAnsi(controller.frame(80).lines.join("\n")), /pytest -q.*foreground · r background/);
+  assert.equal(state.input, "中文 pending");
+
+  // Pressing c on a foreground command is ignored (Ctrl+C owns turn interruption)
+  controller.handleInput({ text: "c" });
+  await settled();
+  assert.equal(calls.some(([method]) => method === "rind/task/cancel"), false);
+
+  // Pressing r inside Ctrl+B promotes foreground wait to background
+  controller.handleInput({ text: "r" });
+  await settled();
+  assert.ok(calls.some(([method]) => method === "rind/task/release_wait"));
+  assert.equal(state.sessionInfo.background_count, 1);
+  assert.match(stripAnsi(controller.frame(80).lines.join("\n")), /Background \[1\]/);
+  assert.match(stripAnsi(controller.frame(80).lines.join("\n")), /pytest -q.*auto-resume/);
+
+  // Pressing c stops the background task, evicts it immediately, and auto-closes the now-empty monitor
+  controller.handleInput({ text: "c" });
+  await settled();
+  assert.ok(calls.some(([method]) => method === "rind/task/cancel"));
+  assert.equal(state.sessionInfo.background_count, 0);
+  assert.equal(controller.isMonitoring(), false);
   assert.equal(state.input, "中文 pending");
   controller.stop();
 });
 
-test("task monitor merges background commands and results", () => {
+test("task monitor merges legacy background commands and results", () => {
   const state = {
     runtimeClosing: false,
     sessionInfo: { background_count: 0 },
@@ -127,225 +163,231 @@ test("task monitor ignores responses from a cleared session", async () => {
   controller.stop();
 });
 
-test("only handed-off tasks enter Background and completed results remain", async () => {
+test("completed and cancelled tasks are immediately evicted so dead tasks never accumulate", async () => {
   const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
-  let released = false;
-  const controller = createTaskMonitorController({ state, terminalUi: true,
-    request: async (method) => {
-      if (method === "rind/task/release_wait") { released = true; return { released }; }
-      return method === "rind/task/list" ? { tasks: released ? [{ task_id: "front", status: "running", handoff: true }] : [] } : {};
-    },
-  });
-  controller.recordTask({ session_id: "s1", task: { task_id: "front", command: "slow command", status: "running", handoff: false } });
-  controller.enterMonitor();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[0\]/);
-  assert.match(controller.frame(80).lines.join("\n"), /Waiting 1\/1.*r background.*slow command/);
-  assert.equal(state.sessionInfo.background_count, 0);
-  controller.handleInput({ text: "r" });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
-  assert.equal(state.sessionInfo.background_count, 1);
-  controller.recordTask({ session_id: "s1", task: { task_id: "front", status: "completed", finished_at: 2, handoff: true } });
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
-  assert.equal(state.sessionInfo.background_count, 0);
-  controller.recordTask({ session_id: "s1", task: { task_id: "quick", status: "completed", handoff: false } });
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
-  controller.stop();
-});
-
-test("reopening a session keeps only tasks seen during the current opening", async () => {
-  const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
-  let listed = [{ task_id: "old", status: "running", handoff: true }];
-  const controller = createTaskMonitorController({ state, terminalUi: true,
-    request: async () => ({ tasks: listed }),
-  });
-  await controller.refresh();
-  controller.recordTask({ session_id: "s1", task: { task_id: "old", status: "completed", handoff: true } });
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
-  controller.clear();
-  listed = [];
-  await controller.refresh();
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[0\]/);
-  controller.recordTask({ session_id: "s1", task: { task_id: "new", status: "running", handoff: true } });
-  controller.recordTask({ session_id: "s1", task: { task_id: "new", status: "completed", handoff: true } });
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
-  controller.stop();
-});
-
-test("foreground selection releases only the chosen task", async () => {
-  const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
-  const releases = [];
-  const controller = createTaskMonitorController({ state, terminalUi: true,
+  const live = new Map([
+    ["bg-exit", { task_id: "bg-exit", command: "cargo test", status: "running", handoff: true, notify: "on_exit", started_at: 2 }],
+    ["bg-svc", { task_id: "bg-svc", command: "npm run dev", status: "running", handoff: true, notify: "manual", started_at: 1 }],
+  ]);
+  const controller = createTaskMonitorController({
+    state,
+    terminalUi: true,
     request: async (method, params) => {
-      if (method === "rind/task/list") return { tasks: releases.map((task_id) => ({ task_id, status: "running", handoff: true })) };
-      if (method === "rind/task/release_wait") releases.push(params.task_id);
-      return { released: true };
+      if (method === "rind/task/list") return { tasks: [...live.values()] };
+      if (method === "rind/task/read") return live.get(params.task_id) || {};
+      return {};
     },
   });
-  for (let i = 1; i <= 3; i += 1) controller.recordTask({ session_id: "s1",
-    task: { task_id: `front-${i}`, command: `command-${i}`, status: "running", started_at: i } });
-  controller.enterMonitor();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.match(controller.frame(80).lines.join("\n"), /1\/3.*command-3/);
-  controller.handleInput({ name: "down" });
-  controller.handleInput({ text: "r" });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(releases, ["front-2"]);
-  assert.match(controller.frame(80).lines.join("\n"), /› front-2/);
-  controller.stop();
-});
+  for (const t of live.values()) controller.recordTask({ session_id: "s1", task: t });
+  assert.equal(state.sessionInfo.background_count, 2);
 
-test("arrow navigation crosses waiting and handed-off background tasks", async () => {
-  const state = { sessionInfo: { capabilities: ["rind/tasks"] }, inputActive: false };
-  const controller = createTaskMonitorController({ state, terminalUi: true,
-    request: async (method) => method === "rind/task/list" ? { tasks: [] } : {} });
-  controller.recordTask({ task: { task_id: "waiting-1", command: "wait one", status: "running", handoff: false, started_at: 2 } });
-  controller.recordTask({ task: { task_id: "waiting-2", command: "wait two", status: "running", handoff: false, started_at: 1 } });
-  controller.recordTask({ task: { task_id: "background-1", command: "background one", status: "running", handoff: true, started_at: 3 } });
-  controller.recordTask({ task: { task_id: "finished", status: "completed", handoff: true } });
   controller.enterMonitor();
   await settled();
-  assert.match(controller.frame(100).lines.join("\n"), /Waiting 1\/2.*wait one/);
+  const initialText = stripAnsi(controller.frame(90).lines.join("\n"));
+  assert.match(initialText, /Background \[2\]/);
+  assert.match(initialText, /cargo test.*auto-resume/);
+  assert.match(initialText, /npm run dev.*service/);
+
+  // Finish bg-exit: immediately evicted from list, bg-svc remains
+  live.delete("bg-exit");
+  controller.recordTask({ session_id: "s1", type: "task_updated", task: { task_id: "bg-exit", status: "completed", handoff: true } });
+  await settled();
+  assert.equal(state.sessionInfo.background_count, 1);
+  assert.equal(controller.isMonitoring(), true);
+  const afterFirst = stripAnsi(controller.frame(90).lines.join("\n"));
+  assert.doesNotMatch(afterFirst, /cargo test/);
+  assert.match(afterFirst, /› npm run dev.*service/);
+
+  // Finish bg-svc: last active task gone -> monitor auto-closes
+  live.delete("bg-svc");
+  controller.recordTask({ session_id: "s1", type: "task_updated", task: { task_id: "bg-svc", status: "cancelled", handoff: true } });
+  await settled();
+  assert.equal(state.sessionInfo.background_count, 0);
+  assert.equal(controller.isMonitoring(), false);
+  controller.stop();
+});
+
+test("foreground selection releases only the chosen task and keeps selection on it", async () => {
+  const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
+  const releases = [];
+  const items = new Map([
+    ["front-1", { task_id: "front-1", command: "command-1", status: "running", handoff: false, started_at: 1 }],
+    ["front-2", { task_id: "front-2", command: "command-2", status: "running", handoff: false, started_at: 2 }],
+    ["front-3", { task_id: "front-3", command: "command-3", status: "running", handoff: false, started_at: 3 }],
+  ]);
+  const controller = createTaskMonitorController({
+    state,
+    terminalUi: true,
+    request: async (method, params) => {
+      if (method === "rind/task/list") return { tasks: [...items.values()] };
+      if (method === "rind/task/release_wait") {
+        releases.push(params.task_id);
+        items.set(params.task_id, { ...items.get(params.task_id), handoff: true, notify: "on_exit" });
+        return { released: true };
+      }
+      if (method === "rind/task/read") return { ...items.get(params.task_id), stdout: `out:${params.task_id}` };
+      return {};
+    },
+  });
+  controller.enterMonitor();
+  await settled();
+  assert.match(stripAnsi(controller.frame(80).lines.join("\n")), /› command-3.*foreground/);
   controller.handleInput({ name: "down" });
-  assert.match(controller.frame(100).lines.join("\n"), /Waiting 2\/2.*wait two/);
+  await settled();
+  assert.match(stripAnsi(controller.frame(80).lines.join("\n")), /› command-2.*foreground/);
+  controller.handleInput({ text: "r" });
+  await settled();
+  assert.deepEqual(releases, ["front-2"]);
+  assert.equal(state.sessionInfo.background_count, 1);
+  const frameText = stripAnsi(controller.frame(80).lines.join("\n"));
+  assert.match(frameText, /› command-2.*auto-resume/);
+  assert.match(frameText, /out:front-2/);
+  controller.stop();
+});
+
+test("arrow navigation crosses foreground waiting and handed-off background tasks in one unified list", async () => {
+  const state = { sessionInfo: { capabilities: ["rind/tasks"] }, inputActive: false };
+  const listed = [
+    { task_id: "waiting-1", command: "wait one", status: "running", handoff: false, started_at: 2 },
+    { task_id: "waiting-2", command: "wait two", status: "running", handoff: false, started_at: 1 },
+    { task_id: "background-1", command: "background one", status: "running", handoff: true, notify: "on_exit", started_at: 3 },
+  ];
+  const controller = createTaskMonitorController({
+    state,
+    terminalUi: true,
+    request: async (method, params) => {
+      if (method === "rind/task/list") return { tasks: listed };
+      if (method === "rind/task/read") return listed.find((item) => item.task_id === params.task_id) || {};
+      return {};
+    },
+  });
+  controller.enterMonitor();
+  await settled();
+  assert.match(stripAnsi(controller.frame(100).lines.join("\n")), /› wait one.*foreground/);
   controller.handleInput({ name: "down" });
-  assert.match(controller.frame(100).lines.join("\n"), /› background-1/);
-  controller.handleInput({ name: "up" });
-  assert.match(controller.frame(100).lines.join("\n"), /› Waiting 2\/2.*wait two/);
-  controller.handleInput({ name: "up" });
-  controller.handleInput({ name: "up" });
-  assert.match(controller.frame(100).lines.join("\n"), /› finished/);
+  assert.match(stripAnsi(controller.frame(100).lines.join("\n")), /› wait two.*foreground/);
   controller.handleInput({ name: "down" });
-  assert.match(controller.frame(100).lines.join("\n"), /› Waiting 1\/2.*wait one/);
+  assert.match(stripAnsi(controller.frame(100).lines.join("\n")), /› background one.*auto-resume/);
+  controller.handleInput({ name: "down" });
+  assert.match(stripAnsi(controller.frame(100).lines.join("\n")), /› wait one.*foreground/);
   controller.stop();
 });
 
 test("opening refresh does not reset a task selected with arrows", async () => {
   let finishList;
+  const listed = [
+    { task_id: "waiting", command: "wait cmd", status: "running", handoff: false },
+    { task_id: "background", command: "bg cmd", status: "running", handoff: true },
+  ];
   const state = { sessionInfo: { capabilities: ["rind/tasks"] } };
-  const controller = createTaskMonitorController({ state, terminalUi: true,
-    request: async (method) => method === "rind/task/list"
-      ? new Promise((resolve) => { finishList = resolve; }) : {} });
-  controller.recordTask({ task: { task_id: "waiting", status: "running" } });
-  controller.recordTask({ task: { task_id: "background", status: "running", handoff: true } });
+  const controller = createTaskMonitorController({
+    state,
+    terminalUi: true,
+    request: async (method, params) => {
+      if (method === "rind/task/list") return new Promise((resolve) => { finishList = resolve; });
+      if (method === "rind/task/read") return listed.find((item) => item.task_id === params.task_id) || {};
+      return {};
+    },
+  });
+  for (const item of listed) controller.recordTask({ task: item });
   controller.enterMonitor();
   controller.handleInput({ name: "down" });
-  finishList({ tasks: [] });
+  finishList({ tasks: listed });
   await settled();
-  assert.match(controller.frame(100).lines.join("\n"), /› background/);
+  assert.match(stripAnsi(controller.frame(100).lines.join("\n")), /› bg cmd/);
   controller.stop();
 });
 
-test("paged list merges all tasks and reports incomplete pages", async () => {
+test("paged list merges active tasks and reports incomplete pages without pruning", async () => {
   const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
   let fail = false;
-  const controller = createTaskMonitorController({ state, terminalUi: true,
+  const controller = createTaskMonitorController({
+    state,
+    terminalUi: true,
     request: async (method, params) => {
       if (method !== "rind/task/list") return {};
       if (params.page_token && fail) throw new Error("page unavailable");
       const start = Number(params.page_token || 0);
-      return { tasks: Array.from({ length: start ? 1 : 50 }, (_, i) => ({
-        task_id: `task-${start + i}`, status: "completed", handoff: true, started_at: start + i,
-      })), next_page_token: start ? null : "50" };
+      return {
+        tasks: Array.from({ length: start ? 1 : 50 }, (_, i) => ({
+          task_id: `task-${start + i}`,
+          command: `job-${start + i}`,
+          status: "running",
+          handoff: true,
+          started_at: start + i,
+        })),
+        next_page_token: start ? null : "50",
+      };
     },
   });
   await controller.refresh();
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[51\]/);
+  assert.equal(state.sessionInfo.background_count, 51);
   controller.enterMonitor();
-  await new Promise((resolve) => setImmediate(resolve));
+  await settled();
   fail = true;
   await controller.refresh();
-  assert.match(controller.frame(80).lines.join("\n"), /Task list incomplete: page unavailable/);
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[51\]/);
+  assert.match(stripAnsi(controller.frame(80).lines.join("\n")), /Task list incomplete: page unavailable/);
+  assert.match(stripAnsi(controller.frame(80).lines.join("\n")), /Background \[51\]/);
   controller.stop();
 });
 
 test("selection stays on task ID across reorder and stale preview reads", async () => {
   const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
   const reads = [];
-  const controller = createTaskMonitorController({ state, terminalUi: true,
+  const live = new Map([
+    ["task-1", { task_id: "task-1", command: "cmd-1", status: "running", handoff: true, started_at: 1 }],
+    ["task-2", { task_id: "task-2", command: "cmd-2", status: "running", handoff: true, started_at: 2 }],
+  ]);
+  const controller = createTaskMonitorController({
+    state,
+    terminalUi: true,
     request: async (method, params) => {
-      if (method === "rind/task/list") return { tasks: [] };
+      if (method === "rind/task/list") return { tasks: [...live.values()] };
       if (method === "rind/task/read") return new Promise((resolve) => reads.push({ id: params.task_id, resolve }));
       return {};
     },
   });
-  for (let i = 1; i <= 2; i += 1) controller.recordTask({ session_id: "s1",
-    task: { task_id: `task-${i}`, status: "running", handoff: true, started_at: i } });
+  for (const item of live.values()) controller.recordTask({ session_id: "s1", task: item });
   controller.enterMonitor();
-  await new Promise((resolve) => setImmediate(resolve));
+  await settled();
   assert.equal(reads[0].id, "task-2");
   controller.handleInput({ name: "down" });
-  controller.recordTask({ session_id: "s1", task: { task_id: "task-3", status: "running", handoff: true, started_at: 3 } });
-  assert.match(controller.frame(80).lines.join("\n"), /› task-1/);
-  reads[0].resolve({ task_id: "task-2", stdout: "stale text", status: "running", handoff: true });
-  await new Promise((resolve) => setImmediate(resolve));
+  const third = { task_id: "task-3", command: "cmd-3", status: "running", handoff: true, started_at: 3 };
+  live.set("task-3", third);
+  controller.recordTask({ session_id: "s1", task: third });
+  assert.match(stripAnsi(controller.frame(80).lines.join("\n")), /› cmd-1/);
+  reads[0].resolve({ task_id: "task-2", command: "cmd-2", stdout: "stale text", status: "running", handoff: true });
+  await settled();
   assert.equal(reads[1].id, "task-1");
-  assert.doesNotMatch(controller.frame(80).lines.join("\n"), /stale text/);
-  reads[1].resolve({ task_id: "task-1", stdout: "current text", status: "running", handoff: true });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.match(controller.frame(80).lines.join("\n"), /current text/);
+  assert.doesNotMatch(stripAnsi(controller.frame(80).lines.join("\n")), /stale text/);
+  reads[1].resolve({ task_id: "task-1", command: "cmd-1", stdout: "current text", status: "running", handoff: true });
+  await settled();
+  assert.match(stripAnsi(controller.frame(80).lines.join("\n")), /current text/);
   controller.stop();
 });
 
-test("release waits for Runtime handoff confirmation and follows the same task", async () => {
-  const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] } };
-  let confirm;
-  let released = false;
-  const reads = [];
-  const controller = createTaskMonitorController({ state, terminalUi: true,
-    request: async (method, params) => {
-      if (method === "rind/task/list") return released ? new Promise((resolve) => { confirm = resolve; }) : { tasks: [] };
-      if (method === "rind/task/release_wait") { released = true; return { released: true }; }
-      if (method === "rind/task/read") { reads.push(params.task_id); return { task_id: params.task_id, status: "completed", handoff: true, stdout: "released output" }; }
-      return {};
-    },
+test("foreground tool_result evicts inline-completed command by origin_tool_call_id and blocks stale list resurrection", async () => {
+  const state = { sessionInfo: { capabilities: ["rind/tasks"] } };
+  let finishList;
+  const controller = createTaskMonitorController({
+    state,
+    terminalUi: true,
+    request: async (method) => method === "rind/task/list"
+      ? new Promise((resolve) => { finishList = resolve; })
+      : {},
   });
-  controller.recordTask({ task: { task_id: "front", status: "running", handoff: false } });
   controller.enterMonitor();
-  await settled();
-  controller.handleInput({ text: "r" });
-  await settled();
-  assert.equal(state.sessionInfo.background_count, 0);
-  assert.match(controller.frame(80).lines.join("\n"), /Loading tasks/);
-  assert.deepEqual(reads, []);
-  confirm({ tasks: [{ task_id: "front", status: "completed", handoff: true }] });
-  await settled();
-  assert.match(controller.frame(80).lines.join("\n"), /› front/);
-  assert.match(controller.frame(80).lines.join("\n"), /released output/);
-  assert.deepEqual(reads, ["front"]);
-  assert.equal(state.sessionInfo.background_count, 0);
-  controller.stop();
-});
-
-test("terminal events invalidate pending reads and reject late running output", async () => {
-  const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] } };
-  const reads = [];
-  const controller = createTaskMonitorController({ state, terminalUi: true,
-    request: async (method) => method === "rind/task/list" ? { tasks: [] }
-      : new Promise((resolve) => reads.push(resolve)),
+  // Foreground bash finishes inline (no task_id in result) while rind/task/list was in flight!
+  controller.recordResult({
+    tool_call_id: "call_quick",
+    result: JSON.stringify({ ok: true, tool: "bash", data: { status: "completed", handoff: false, stdout: "hi" } }),
   });
-  controller.recordTask({ task: { task_id: "bg", status: "running", handoff: true } });
-  controller.enterMonitor();
+  finishList({
+    tasks: [{ task_id: "task_quick", origin_tool_call_id: "call_quick", command: "date", status: "running", handoff: false }],
+  });
   await settled();
-  controller.recordTask({ type: "task_updated", task: { task_id: "bg", status: "completed", handoff: true } });
-  assert.equal(reads.length, 1, "only one output request in flight");
-  reads[0]({ task_id: "bg", status: "running", handoff: true, stdout: "stale" });
-  await settled();
-  assert.equal(reads.length, 2);
-  reads[1]({ task_id: "bg", status: "completed", handoff: true, stdout: "finished" });
-  await settled();
-  controller.recordTask({ type: "task_output", task: { task_id: "bg", status: "running", handoff: true, stdout: "late stale" } });
-  const text = controller.frame(80).lines.join("\n");
-  assert.match(text, /completed/);
-  assert.match(text, /finished/);
-  assert.doesNotMatch(text, /stale/);
+  assert.equal(controller.isMonitoring(), false);
   assert.equal(state.sessionInfo.background_count, 0);
-  controller.exitMonitor();
-  controller.recordTask({ type: "task_updated", task: { task_id: "other", status: "completed", handoff: true } });
-  await settled();
-  assert.equal(reads.length, 2, "closed monitor does not fetch previews");
   controller.stop();
 });
 
@@ -353,13 +395,20 @@ test("session switch ignores a pending release and foreign events", async () => 
   const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] } };
   let release;
   let lists = 0;
-  const controller = createTaskMonitorController({ state, terminalUi: true,
+  const controller = createTaskMonitorController({
+    state,
+    terminalUi: true,
     request: async (method) => {
-      if (method === "rind/task/list") { lists += 1; return { tasks: [] }; }
-      return new Promise((resolve) => { release = resolve; });
+      if (method === "rind/task/list") {
+        lists += 1;
+        return { tasks: [{ task_id: "front", command: "sleep 5", status: "running", handoff: false }] };
+      }
+      if (method === "rind/task/release_wait") {
+        return new Promise((resolve) => { release = resolve; });
+      }
+      return {};
     },
   });
-  controller.recordTask({ session_id: "s1", task: { task_id: "front", status: "running" } });
   controller.enterMonitor();
   await settled();
   controller.handleInput({ text: "r" });
@@ -369,67 +418,36 @@ test("session switch ignores a pending release and foreign events", async () => 
   controller.recordTask({ session_id: "s1", task: { task_id: "foreign", status: "running", handoff: true } });
   await settled();
   assert.equal(lists, 1);
-  assert.doesNotMatch(controller.frame(80).lines.join("\n"), /foreign|front/);
+  assert.doesNotMatch(stripAnsi(controller.frame(80).lines.join("\n")), /foreign|sleep 5/);
   controller.stop();
 });
 
-test("natural completion leaves no foreground row and automatic yield loads its preview", async () => {
-  const state = { sessionInfo: { capabilities: ["rind/tasks"] } };
-  const reads = [];
-  const controller = createTaskMonitorController({ state, terminalUi: true,
-    request: async (method, params) => {
-      if (method === "rind/task/list") return { tasks: [] };
-      reads.push(params.task_id);
-      return { task_id: params.task_id, status: "running", handoff: true, stdout: "auto yielded" };
-    },
-  });
-  controller.recordTask({ task: { task_id: "quick", status: "running" } });
-  controller.enterMonitor();
-  await settled();
-  controller.recordTask({ task: { task_id: "quick", status: "completed", handoff: false } });
-  assert.doesNotMatch(controller.frame(80).lines.join("\n"), /quick|r background/);
-  controller.recordTask({ task: { task_id: "slow", status: "running", handoff: true } });
-  await settled();
-  assert.deepEqual(reads, ["slow"]);
-  assert.match(controller.frame(80).lines.join("\n"), /auto yielded/);
-  controller.stop();
-});
-
-test("a stale list cannot resurrect a synchronously completed command", async () => {
-  const state = { sessionInfo: { capabilities: ["rind/tasks"] } };
-  let finishList;
-  const controller = createTaskMonitorController({ state, terminalUi: true,
-    request: async () => new Promise((resolve) => { finishList = resolve; }),
-  });
-  const listing = controller.refresh();
-  controller.recordTask({ task: { task_id: "quick", status: "completed", handoff: false } });
-  finishList({ tasks: [{ task_id: "quick", status: "running", handoff: false }] });
-  await listing;
-  assert.doesNotMatch(controller.frame(80).lines.join("\n"), /quick|r background/);
-  assert.equal(state.sessionInfo.background_count, 0);
-  controller.stop();
-});
-
-test("task monitor emits system notices via notify with info and error levels", async () => {
+test("task monitor emits non-TUI notices only for handed-off tasks and reports empty/error states cleanly", async () => {
   const notices = [];
   const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
 
-  // Non-TUI task_updated notice (info)
   const nonTuiController = createTaskMonitorController({
     state,
     terminalUi: false,
     notify: (text, opts) => notices.push({ text, level: opts?.level ?? "info" }),
     request: async () => ({}),
   });
+  // Foreground task updates never spam non-TUI output
   nonTuiController.recordTask({
     type: "task_updated",
     session_id: "s1",
-    task: { task_id: "task_42", status: "running", notify: "on_exit" },
+    task: { task_id: "task_fg", status: "running", handoff: false },
+  });
+  assert.deepEqual(notices, []);
+  // Handed-off background task emits concise notice
+  nonTuiController.recordTask({
+    type: "task_updated",
+    session_id: "s1",
+    task: { task_id: "task_42", status: "running", handoff: true, notify: "on_exit" },
   });
   assert.deepEqual(notices, [{ text: "Task task_42: running (on_exit)", level: "info" }]);
   nonTuiController.stop();
 
-  // Empty background tasks on enterMonitor -> info, and controlSelected failure -> error
   notices.length = 0;
   let listTasks = [];
   const tuiController = createTaskMonitorController({
@@ -449,7 +467,7 @@ test("task monitor emits system notices via notify with info and error levels", 
   ]);
 
   notices.length = 0;
-  listTasks = [{ task_id: "bg-9", status: "running", handoff: true }];
+  listTasks = [{ task_id: "bg-9", command: "sleep 30", status: "running", handoff: true }];
   tuiController.recordTask({ session_id: "s1", task: listTasks[0] });
   tuiController.enterMonitor();
   await settled();
@@ -460,4 +478,3 @@ test("task monitor emits system notices via notify with info and error levels", 
   ]);
   tuiController.stop();
 });
-

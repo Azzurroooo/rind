@@ -75,6 +75,8 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       menuOpen: Boolean(inputSession?.menuState?.matches?.()?.length),
       emptyInput: inputSession?.mode === "prompt" && inputSession.editor?.input() === "",
       leaveArmed: Boolean(state.display.leaveArmed),
+      backgroundCount: Number(state.session?.info?.background_count) || 0,
+      hasActiveBash: [...runningTools].some((tool) => tool.name === "bash"),
     };
   }
 
@@ -181,6 +183,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function settleToolGroup() {
+    runningTools.clear();
     if (!activeToolGroup) {
       return false;
     }
@@ -482,8 +485,8 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       toolBlocks.set(key, block);
       appendToolBlock(block);
     }
-    block.finish(event, fileChange);
     runningTools.delete(block);
+    block.finish(event, fileChange);
   }
 
   // Another conversation replaces this one on screen; none of its blocks are kept.

@@ -2,14 +2,14 @@
 
 English | [简体中文](managed-tasks.md)
 
-一个命令可以仍在运行，而调用它的工具已经返回。Rind 用 task_id 跟踪同一进程，handoff 记录它是否已交给后台，notify 决定结束后怎样继续。
+一个命令可以仍在运行，而调用它的工具已经返回。在 `yield_time_ms` 内同步结束的短命令直接在内存中返回，不写入 `tasks.jsonl` 也不创建 `TaskOutput` 文件；只有超过前台等待窗口或被显式释放到后台的进程，才会升格为带 `task_id` 与 `handoff=true` 的持久化任务，并由 `notify` 决定结束后怎样继续。
 
 ~~~mermaid
 stateDiagram-v2
-    [*] --> Starting: 先保存启动意图
+    [*] --> Starting: 内存态启动
     Starting --> Running: 启动成功
     Starting --> Failed: 启动失败
-    Running --> Running: 等待超时或 release_wait，交回控制权
+    Running --> Running: 等待超时或 release_wait，升格 handoff=true 写入 TaskJournal
     Running --> Completed: 退出码为 0
     Running --> Failed: 非零退出或执行错误
     Running --> Cancelled: 显式取消

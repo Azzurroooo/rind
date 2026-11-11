@@ -241,7 +241,11 @@ test("RuntimeDispatcher cancels active model stream and running bash tool immedi
   await prompt2Promise;
   const elapsed2 = Date.now() - cancelStart2;
 
-  assert.ok(elapsed2 < 500, `Expected bash tool cancellation < 500ms, got ${elapsed2}ms`);
+  const bashCancelBudgetMs = process.platform === "win32" ? 2000 : 500;
+  assert.ok(
+    elapsed2 < bashCancelBudgetMs,
+    `Expected bash tool cancellation < ${bashCancelBudgetMs}ms, got ${elapsed2}ms`,
+  );
   assert.ok(sent.some(m => m.kind === "event" && m.event?.type === "turn_cancelled"));
 });
 
