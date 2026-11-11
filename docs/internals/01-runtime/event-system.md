@@ -2,7 +2,7 @@
 
 English | [简体中文](event-system.zh-CN.md)
 
-The kernel produces RuntimeEvents; the protocol layer only wraps them uniformly. Interfaces subscribe to "what happened" instead of reading Python objects or polling the session file again and again.
+The kernel produces RuntimeEvents; the protocol layer only wraps them uniformly. Interfaces subscribe to "what happened" instead of reading runtime objects or polling the session file again and again.
 
 ~~~mermaid
 flowchart LR

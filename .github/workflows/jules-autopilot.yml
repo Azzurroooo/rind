@@ -58,7 +58,7 @@ jobs:
           if [ -z "$LOG_SNIPPET" ]; then
             JOB_ID=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs" --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | .id' | head -n 1)
             if [ -n "$JOB_ID" ]; then
-              LOG_SNIPPET=$(gh run view --job="$JOB_ID" --repo "$REPO" --log 2>/dev/null | grep -E "not ok|error:|Error:|FAILED|ModuleNotFoundError|AssertionError|timed out" -C 4 | tail -n 120 || true)
+              LOG_SNIPPET=$(gh run view --job="$JOB_ID" --repo "$REPO" --log 2>/dev/null | grep -E "not ok|error:|Error:|FAILED|ERR_MODULE_NOT_FOUND|AssertionError|timed out" -C 4 | tail -n 120 || true)
             fi
           fi
 
@@ -128,136 +128,155 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - name: Build TypeScript runtime for gatekeeper tests
         run: |
           npm --prefix runtime install
           npm --prefix runtime run build
       - name: Run deterministic gatekeeper checks
-        shell: python
+        shell: bash
         run: |
-          import ast
-          import json
-          import os
-          import re
-          import subprocess
-          import sys
-          from pathlib import Path
+          node --input-type=module - <<'EOF'
+          import fs from "node:fs";
+          import path from "node:path";
+          import { spawnSync } from "node:child_process";
+          import { builtinModules } from "node:module";
 
-          repo = os.environ["REPO"]
-          findings: list[str] = []
-          files_to_fix: list[str] = []
+          const repo = process.env.REPO;
+          const findings = [];
+          const filesToFix = [];
 
-          # 1. Check for undeclared direct third-party imports in gateway/
-          req_text = Path("requirements-gateway.txt").read_text(encoding="utf-8")
-          declared_pkgs = {
-              re.split(r"[><=!~\s]", line.strip(), maxsplit=1)[0].lower()
-              for line in req_text.splitlines()
-              if line.strip() and not line.strip().startswith(("#", "-"))
+          // 1. Ensure zero tracked Python files or requirements*.txt files remain
+          const lsFiles = spawnSync("git", ["ls-files"], { encoding: "utf8" });
+          if (lsFiles.status !== 0) {
+            throw new Error(`git ls-files failed: ${lsFiles.stderr}`);
           }
-          import_to_pkg = {
-              "pil": "pillow",
-              "bs4": "beautifulsoup4",
-              "yaml": "pyyaml",
-              "discord": "discord.py",
-              "lark_oapi": "lark-oapi",
-              "dingtalk_stream": "dingtalk-stream",
+          const trackedPyOrReq = lsFiles.stdout
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((file) => file && fs.existsSync(file) && (/\.py$/i.test(file) || /(?:^|\/)requirements[^/]*\.txt$/i.test(file)));
+          if (trackedPyOrReq.length > 0) {
+            findings.push(
+              "### 1. Tracked legacy Python or requirements files detected\n" +
+                trackedPyOrReq.map((file) => `- \`${file}\``).join("\n") +
+                "\n\n**Action required**:\n- Remove or migrate any tracked `.py` or `requirements*.txt` files."
+            );
+            filesToFix.push(...trackedPyOrReq);
           }
-          stdlib = sys.stdlib_module_names
-          local_pkgs = {"gateway"}
-          missing_deps: dict[str, list[str]] = {}
 
-          for py_path in sorted(Path("gateway").rglob("*.py")):
-              tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=str(py_path))
-              for node in ast.walk(tree):
-                  names: list[str] = []
-                  if isinstance(node, ast.Import):
-                      names = [alias.name.split(".")[0] for alias in node.names]
-                  elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                      names = [node.module.split(".")[0]]
-                  for top in names:
-                      if top in stdlib or top in local_pkgs:
-                          continue
-                      pkg_name = import_to_pkg.get(top.lower(), top.lower().replace("_", "-"))
-                      if pkg_name not in declared_pkgs and top.lower() not in declared_pkgs:
-                          missing_deps.setdefault(top, []).append(py_path.as_posix())
+          // 2. Ensure third-party imports match declared package.json dependencies
+          const nodeBuiltins = new Set(
+            builtinModules.flatMap((m) => (m.startsWith("node:") ? [m, m.slice(5)] : [m, `node:${m}`]))
+          );
+          function walkSourceFiles(dir) {
+            if (!fs.existsSync(dir)) return [];
+            const out = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory() && entry.name !== "node_modules") {
+                out.push(...walkSourceFiles(full));
+              } else if (entry.isFile() && /\.(?:[cm]?js|ts)$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
+                out.push(full);
+              }
+            }
+            return out.sort();
+          }
+          function parseModuleSpecifiers(source) {
+            const specs = new Set();
+            const importExportRe = /^\s*(?:import|export)\s+(?:[^"'`]*?\s+from\s+)?["']([^"']+)["']/gm;
+            const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+            for (const match of source.matchAll(importExportRe)) specs.add(match[1]);
+            for (const match of source.matchAll(dynamicImportRe)) specs.add(match[1]);
+            return [...specs];
+          }
+          const packageTargets = [
+            ["runtime/src", "runtime/package.json"],
+            ["agent-management/src", "agent-management/package.json"],
+            ["frontend-cli/lib", "frontend-cli/package.json"],
+            ["rind-runtime-client", "rind-runtime-client/package.json"],
+          ];
+          const undeclaredLines = [];
+          for (const [srcDir, pkgPath] of packageTargets) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+            const declared = new Set(Object.keys(pkg.dependencies || {}));
+            for (const file of walkSourceFiles(srcDir)) {
+              const relFile = file.replace(/\\/g, "/");
+              for (const spec of parseModuleSpecifiers(fs.readFileSync(file, "utf8"))) {
+                if (spec.startsWith(".") || spec.startsWith("/") || nodeBuiltins.has(spec)) continue;
+                const pkgName = spec.startsWith("@")
+                  ? spec.split("/").slice(0, 2).join("/")
+                  : spec.split("/")[0];
+                if (!declared.has(pkgName)) {
+                  undeclaredLines.push(`- \`${pkgName}\` imported in \`${relFile}\` is not declared in \`${pkgPath}\`.`);
+                  filesToFix.push(pkgPath);
+                }
+              }
+            }
+          }
+          if (undeclaredLines.length > 0) {
+            findings.push(
+              "### 2. Undeclared direct third-party imports\n" +
+                undeclaredLines.join("\n") +
+                "\n\n**Action required**:\n- Declare missing runtime dependencies in the owning `package.json`."
+            );
+          }
 
-          if missing_deps:
-              lines = [
-                  f"- `{mod}` imported in `{', '.join(sorted(set(paths))[:3])}` is not explicitly declared in `requirements-gateway.txt`."
-                  for mod, paths in sorted(missing_deps.items())
-              ]
-              findings.append(
-                  "### 1. Undeclared direct gateway dependencies in `requirements-gateway.txt`\n"
-                  + "\n".join(lines)
-                  + "\n\n**Action required**:\n"
-                  "- Explicitly declare the missing packages in `requirements-gateway.txt`."
-              )
-              files_to_fix.append("requirements-gateway.txt")
+          // 3. Run TypeScript runtime architecture, RIND.md, and docs/internals guard tests
+          const archRun = spawnSync("node", ["--test", "runtime/test/architecture.test.js"], { encoding: "utf8" });
+          if (archRun.status !== 0) {
+            const output = `${archRun.stdout || ""}\n${archRun.stderr || ""}`.trim().slice(-2000);
+            findings.push(
+              "### 3. Architecture or documentation guard test failure\n" +
+                `\`\`\`text\n${output}\n\`\`\`\n` +
+                "**Action required**: Fix the reported broken links, missing bilingual `.zh-CN.md` pairs, undeclared runtime imports, or layer architecture violations."
+            );
+          }
 
-          # 2. Run TypeScript runtime architecture, RIND.md, and docs/internals guard tests
-          arch_run = subprocess.run(
-              ["node", "--test", "runtime/test/architecture.test.js"],
-              capture_output=True,
-              text=True,
-          )
-          if arch_run.returncode != 0:
-              output = (arch_run.stdout + "\n" + arch_run.stderr).strip()[-2000:]
-              findings.append(
-                  "### 2. Architecture or documentation guard test failure\n"
-                  f"```text\n{output}\n```\n"
-                  "**Action required**: Fix the reported broken links, missing bilingual `.zh-CN.md` pairs, undeclared runtime imports, or layer architecture violations."
-              )
+          if (findings.length === 0) {
+            console.log("All gatekeeper checks passed with 0 issues. Exiting cleanly without waking Jules.");
+            process.exit(0);
+          }
 
-          if not findings:
-              print("All gatekeeper checks passed with 0 issues. Exiting cleanly without waking Jules.")
-              sys.exit(0)
+          const existingProc = spawnSync(
+            "gh",
+            ["issue", "list", "--repo", repo, "--label", "jules", "--state", "open", "--json", "title"],
+            { encoding: "utf8" }
+          );
+          if (existingProc.status !== 0) {
+            throw new Error(`gh issue list failed: ${existingProc.stderr}`);
+          }
+          const openIssues = JSON.parse(existingProc.stdout || "[]");
+          if (openIssues.some((item) => String(item.title || "").includes("[Autopilot Audit]"))) {
+            console.log("An open [Autopilot Audit] Jules issue already exists. Skipping duplicate creation.");
+            process.exit(0);
+          }
 
-          # Check if an open scheduled-audit Jules issue already exists
-          existing_proc = subprocess.run(
-              ["gh", "issue", "list", "--repo", repo, "--label", "jules", "--state", "open", "--json", "title"],
-              capture_output=True,
-              text=True,
-              check=True,
-          )
-          open_issues = json.loads(existing_proc.stdout or "[]")
-          if any("[Autopilot Audit]" in item.get("title", "") for item in open_issues):
-              print("An open [Autopilot Audit] Jules issue already exists. Skipping duplicate creation.")
-              sys.exit(0)
+          const uniqueFiles = [...new Set(filesToFix)];
+          const scopeNote = uniqueFiles.length > 0
+            ? `Only modify: ${uniqueFiles.map((f) => `\`${f}\``).join(", ")}.`
+            : "Only modify the files directly implicated by the findings below.";
+          const body = [
+            "## Objective",
+            "The scheduled Gatekeeper Audit detected actionable dependency/architecture drift on `main`. Fix the items below with minimal, surgical changes.",
+            "---",
+            "## Environment Setup",
+            "```bash\nnpm --prefix runtime install && npm --prefix runtime run build\n```",
+            "---",
+            "## Scope & Findings",
+            `> **Constraint**: ${scopeNote} Follow \`AGENTS.md\`.`,
+            ...findings,
+            "---",
+            "## Verification (Must Pass Before Opening PR)",
+            "```bash\nnpm --prefix runtime run build && node --test runtime/test/architecture.test.js\n```",
+          ].join("\n\n");
 
-          scope_note = (
-              f"Only modify: {', '.join(f'`{f}`' for f in dict.fromkeys(files_to_fix))}."
-              if files_to_fix
-              else "Only modify the files directly implicated by the findings below."
-          )
-          body = "\n\n".join([
-              "## Objective",
-              "The scheduled Gatekeeper Audit detected actionable dependency/architecture drift on `main`. Fix the items below with minimal, surgical changes.",
-              "---",
-              "## Environment Setup",
-              "```bash\nnpm --prefix runtime install && npm --prefix runtime run build\n```",
-              "---",
-              "## Scope & Findings",
-              f"> **Constraint**: {scope_note} Follow `AGENTS.md`.",
-              *findings,
-              "---",
-              "## Verification (Must Pass Before Opening PR)",
-              "```bash\nnpm --prefix runtime run build && node --test runtime/test/architecture.test.js\n```",
-          ])
-
-          title = "fix(deps): [Autopilot Audit] declare direct dependencies and fix architecture drift"
-          created = subprocess.run(
-              [
-                  "gh", "issue", "create",
-                  "--repo", repo,
-                  "--label", "jules",
-                  "--title", title,
-                  "--body", body,
-              ],
-              capture_output=True,
-              text=True,
-              check=True,
-          )
-          print("Created Jules issue:", created.stdout.strip())
+          const title = "fix(deps): [Autopilot Audit] declare direct dependencies and fix architecture drift";
+          const created = spawnSync(
+            "gh",
+            ["issue", "create", "--repo", repo, "--label", "jules", "--title", title, "--body", body],
+            { encoding: "utf8" }
+          );
+          if (created.status !== 0) {
+            throw new Error(`gh issue create failed: ${created.stderr}`);
+          }
+          console.log("Created Jules issue:", created.stdout.trim());
+          EOF

@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
-        node: [18, 22]
+        node: [20, 22]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -38,4 +38,6 @@ jobs:
       - run: npm --prefix frontend-cli test
       - name: Stage distributable CLI components
         shell: bash
-        run: node agent-management/stage.mjs "$RUNNER_TEMP/rind-cli-stage"
+        run: |
+          node agent-management/stage.mjs "$RUNNER_TEMP/rind-cli-stage"
+          node "$RUNNER_TEMP/rind-cli-stage/frontend-cli/bin/rind.js" --version

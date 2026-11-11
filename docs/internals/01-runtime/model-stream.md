@@ -14,7 +14,7 @@ flowchart LR
     R --> SURFACE["Surface"]
 ~~~
 
-stream_pump.py splits text and tool arguments at character boundaries, and the queue bounds both the item count and the serialized byte count; an oversized non-text event fails explicitly. Adjacent assistant text waits at most 25 ms or accumulates up to 8 KiB; tool arguments, usage, and termination boundaries are never reordered. When the consumer is slow, the producer waits for space rather than piling up events without limit.
+The stream pump in `turn-runner.ts` splits text and tool arguments at character boundaries, and the queue bounds both the item count and the serialized byte count; an oversized non-text event fails explicitly. Adjacent assistant text waits at most 25 ms or accumulates up to 8 KiB; tool arguments, usage, and termination boundaries are never reordered. When the consumer is slow, the producer waits for space rather than piling up events without limit.
 
 Cancellation interrupts the model stream as it is being read; the end of production and cancellation are signaled to the consumer with separate wake-up signals, not by stuffing an end marker into a queue that is already full. The parser collects the complete text, tool calls, reasoning, and finish reason, and the usage record is written only after usage has been normalized.
 

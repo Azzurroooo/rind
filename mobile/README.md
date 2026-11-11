@@ -1,7 +1,7 @@
 # Rind Mobile
 
 Android and iOS **remote clients** for Rind Desktop or an authenticated Web Worker.
-The app bundles Rind's Web UI and native connection controls. No Python runtime,
+The app bundles Rind's Web UI and native connection controls. No local runtime,
 model keys or local command execution are included.
 
 ## Connect

@@ -469,7 +469,7 @@ test("E2E CLI /remote: user turns remote on from the Off view, signs in over HTT
   await writeFile(path.join(workspace, "HELLO.md"), "Workspace file for remote E2E test", "utf8");
   await writeFile(path.join(webDir, "index.html"), "<!doctype html><title>Rind Remote</title>", "utf8");
 
-  // Local fake OpenAI-compatible provider so the real Python runtime and CLI run end-to-end
+  // Local fake OpenAI-compatible provider so the real Runtime worker and CLI run end-to-end
   const provider = http.createServer((req, res) => {
     if (req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });

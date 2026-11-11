@@ -640,3 +640,93 @@ test("runUpdate supports --check, npm channel update, and linux-portable atomic 
     "0.11.0",
   );
 });
+
+test("checkLatestRelease on npm channel handles pure-TS @rind-ai/cli without optionalDependencies and legacy optionalDependencies", async () => {
+  const npmInstallation = {
+    channel: "npm",
+    label: "npm (npm)",
+    packageManager: "npm",
+    installRoot: "/opt/rind",
+    frontendRoot: "/opt/rind/frontend-cli",
+    runtimeBinary: "",
+    version: "0.10.0",
+    platform: "linux",
+    arch: "x64",
+  };
+
+  // 1. Pure-TS @rind-ai/cli (no optionalDependencies / dependencies on @rind-ai/runtime-*):
+  //    succeeds without querying @rind-ai/runtime-linux-x64 on npm.
+  const pureTsUrls = [];
+  const pureTsRelease = await checkLatestRelease({
+    installation: npmInstallation,
+    npmRegistryUrl: "https://registry.example.test",
+    fetchImpl: async (url) => {
+      pureTsUrls.push(String(url));
+      if (String(url).includes("runtime-")) {
+        return { ok: false, status: 404, json: async () => ({}) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ name: "@rind-ai/cli", version: "0.12.0", dependencies: { yaml: "^2.8.1" } }),
+      };
+    },
+  });
+  assert.deepEqual(pureTsRelease, { version: "0.12.0", channel: "npm", asset: null });
+  assert.deepEqual(pureTsUrls, ["https://registry.example.test/@rind-ai%2fcli/latest"]);
+
+  // 2. Legacy @rind-ai/cli with optionalDependencies on @rind-ai/runtime-linux-x64:
+  //    rejects if platform runtime tarball is not published yet, and succeeds once published.
+  await assert.rejects(
+    () =>
+      checkLatestRelease({
+        installation: npmInstallation,
+        npmRegistryUrl: "https://registry.example.test",
+        fetchImpl: async (url) => {
+          if (String(url).includes("runtime-")) {
+            return { ok: false, status: 404, json: async () => ({}) };
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              name: "@rind-ai/cli",
+              version: "0.11.0",
+              optionalDependencies: { "@rind-ai/runtime-linux-x64": "0.11.0" },
+            }),
+          };
+        },
+      }),
+    /Platform runtime package @rind-ai\/runtime-linux-x64@0\.11\.0 is not published on npm yet/,
+  );
+
+  const legacyUrls = [];
+  const legacyRelease = await checkLatestRelease({
+    installation: npmInstallation,
+    npmRegistryUrl: "https://registry.example.test",
+    fetchImpl: async (url) => {
+      legacyUrls.push(String(url));
+      if (String(url).includes("runtime-")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ version: "0.11.0", dist: { tarball: "https://registry.example.test/runtime.tgz" } }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          name: "@rind-ai/cli",
+          version: "0.11.0",
+          optionalDependencies: { "@rind-ai/runtime-linux-x64": "0.11.0" },
+        }),
+      };
+    },
+  });
+  assert.deepEqual(legacyRelease, { version: "0.11.0", channel: "npm", asset: null });
+  assert.deepEqual(legacyUrls, [
+    "https://registry.example.test/@rind-ai%2fcli/latest",
+    "https://registry.example.test/@rind-ai%2fruntime-linux-x64/0.11.0",
+  ]);
+});

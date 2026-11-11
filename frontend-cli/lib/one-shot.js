@@ -1,6 +1,9 @@
+import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { buildRuntimeEnv } from "../../rind-runtime-client/runtime-env.js";
+import { resolveRuntimeExecutable } from "../../rind-runtime-client/runtime-client.js";
 import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
 import { createOneShotProgress } from "./one-shot-progress.js";
@@ -29,6 +32,14 @@ export const tourHelp = [
   "Example: rind tour start.hello",
 ].join("\n");
 
+export const gatewayHelp = [
+  "Usage: rind gateway [options | doctor]",
+  "",
+  "Runs the messaging gateway daemon (Lark/Feishu, Email) against the shared Runtime.",
+  "  --config <path>  Path to gateway.json (default: ~/.rind/gateway.json)",
+  "  doctor           Validate gateway configuration and connectivity",
+].join("\n");
+
 export const cliHelp = [
   "Usage: rind [options]",
   "",
@@ -42,10 +53,63 @@ export const cliHelp = [
   "",
   configHelp,
   "",
+  gatewayHelp,
+  "",
   tourHelp,
   "",
   updateHelp,
 ].join("\n");
+
+export function runGateway({
+  args = [],
+  repoRoot,
+  runtimePath = "",
+  cwd = process.cwd(),
+  env = process.env,
+  spawnImpl = spawn,
+  processObj = process,
+} = {}) {
+  const executable = resolveRuntimeExecutable(repoRoot, runtimePath);
+  const childEnv = buildRuntimeEnv(repoRoot, env, {
+    sourceRuntime: !runtimePath || /\.(?:c|m)?js$/i.test(runtimePath),
+    command: executable.command,
+  });
+  return new Promise((resolve, reject) => {
+    const child = spawnImpl(executable.command, [...executable.args, "gateway", ...args], {
+      cwd,
+      env: childEnv,
+      stdio: "inherit",
+    });
+    const forwardSigint = () => {
+      if (child && !child.killed && child.exitCode === null) {
+        try { child.kill("SIGINT"); } catch {}
+      }
+    };
+    const forwardSigterm = () => {
+      if (child && !child.killed && child.exitCode === null) {
+        try { child.kill("SIGTERM"); } catch {}
+      }
+    };
+    const cleanup = () => {
+      processObj.off("SIGINT", forwardSigint);
+      processObj.off("SIGTERM", forwardSigterm);
+    };
+    processObj.on("SIGINT", forwardSigint);
+    processObj.on("SIGTERM", forwardSigterm);
+    child.once("error", (error) => {
+      cleanup();
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      cleanup();
+      if (typeof code === "number") {
+        resolve(code);
+        return;
+      }
+      resolve(signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 1);
+    });
+  });
+}
 
 export function parseOneShotArgs(args) {
   if (args[0] !== "run") return null;

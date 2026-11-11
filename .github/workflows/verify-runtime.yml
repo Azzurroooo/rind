@@ -1,6 +1,15 @@
 name: Verify TypeScript runtime
 
 on:
+  pull_request:
+    paths:
+      - "runtime/**"
+      - ".github/workflows/verify-runtime.yml"
+  push:
+    branches: [main]
+    paths:
+      - "runtime/**"
+      - ".github/workflows/verify-runtime.yml"
   workflow_dispatch:
 
 permissions:

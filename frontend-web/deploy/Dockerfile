@@ -9,10 +9,10 @@ RUN npm run build
 FROM node:22-alpine AS runtime-build
 
 WORKDIR /src/runtime
-COPY runtime/package.json ./
-RUN npm install --no-audit --no-fund
+COPY runtime/package*.json ./
+RUN npm ci --no-audit --no-fund
 COPY runtime/ ./
-RUN npm run build
+RUN npm run build && npm prune --omit=dev
 
 FROM node:22-slim AS runtime
 
@@ -24,9 +24,10 @@ ENV HOME=/root \
 WORKDIR /app
 RUN sed -i "s|deb.debian.org|$DEBIAN_MIRROR|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git bash \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git bash ripgrep \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=runtime-build /src/runtime/dist ./runtime/dist
+COPY --from=runtime-build /src/runtime/node_modules ./runtime/node_modules
 COPY runtime/skills ./runtime/skills
 COPY runtime/package.json ./runtime/package.json
 COPY frontend-web/deploy/healthcheck.mjs ./deploy/healthcheck.mjs

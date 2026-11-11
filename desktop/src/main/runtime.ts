@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { existsSync } from "node:fs"
 import { createInterface } from "node:readline"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -166,6 +167,18 @@ function handleLine(source: ChildProcessWithoutNullStreams, line: string) {
   request.resolve(message.result)
 }
 
+function resolvePackagedRuntimePath() {
+  const jsEntry = join(process.resourcesPath, "runtime", "dist", "cli.js")
+  if (existsSync(jsEntry)) return jsEntry
+  const legacyExecutable = join(
+    process.resourcesPath,
+    "runtime",
+    process.platform === "win32" ? "rind-runtime.exe" : "rind-runtime",
+  )
+  if (existsSync(legacyExecutable)) return legacyExecutable
+  return jsEntry
+}
+
 function runtimeLaunch() {
   const configuredPath = process.env.RIND_RUNTIME_PATH
   if (configuredPath) {
@@ -173,8 +186,9 @@ function runtimeLaunch() {
     return { command: configuredPath, args: [] }
   }
   if (!process.env.ELECTRON_RENDERER_URL) {
-    const executable = process.platform === "win32" ? "rind-runtime.exe" : "rind-runtime"
-    return { command: join(process.resourcesPath, "runtime", executable), args: [] }
+    const packagedPath = resolvePackagedRuntimePath()
+    if (/\.(?:c|m)?js$/i.test(packagedPath)) return { command: process.execPath, args: [packagedPath] }
+    return { command: packagedPath, args: [] }
   }
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
   return { command: process.execPath, args: [join(repoRoot, "runtime", "dist", "cli.js")] }
@@ -197,19 +211,24 @@ function loadSharedRuntimeModule(repoRoot: string) {
 function ensureSharedClient(): Promise<SharedRuntimeConnection> {
   if (worker.sharedClient) return Promise.resolve(worker.sharedClient)
   if (worker.sharedConnecting) return worker.sharedConnecting
-  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
-  const rindHome = resolveRindHome(process.env.RIND_HOME)
   const isSource = Boolean(process.env.ELECTRON_RENDERER_URL)
-  const packagedRuntimePath = !isSource
-    ? join(process.resourcesPath, "runtime", process.platform === "win32" ? "rind-runtime.exe" : "rind-runtime")
-    : undefined
-  buildRuntimeEnv(repoRoot, process.env, { sourceRuntime: isSource, rindHome })
+  const repoRoot = !isSource && process.resourcesPath
+    ? process.resourcesPath
+    : join(dirname(fileURLToPath(import.meta.url)), "../../..")
+  const rindHome = resolveRindHome(process.env.RIND_HOME)
+  const packagedRuntimePath = !isSource ? resolvePackagedRuntimePath() : undefined
+  const isJsRuntime = isSource || Boolean(packagedRuntimePath && /\.(?:c|m)?js$/i.test(packagedRuntimePath))
+  buildRuntimeEnv(repoRoot, process.env, {
+    sourceRuntime: isJsRuntime,
+    command: isJsRuntime ? process.execPath : packagedRuntimePath,
+    rindHome,
+  })
 
   worker.sharedConnecting = (async () => {
     const { connectSharedRuntime } = await loadSharedRuntimeModule(repoRoot)
     const conn = (await connectSharedRuntime({
       rindHome,
-      repoRoot: isSource ? repoRoot : undefined,
+      repoRoot,
       runtimePath: packagedRuntimePath,
       onMessage(message: unknown) {
         dispatchRuntimeEnvelope(message)

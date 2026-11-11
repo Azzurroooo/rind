@@ -1,11 +1,4 @@
-# Python & Environment
-__pycache__/
-*.py[cod]
-*$py.class
-venv/
-env/
-.venv/
-.venv-build/
+# Environment & Dependencies
 .env
 node_modules/
 
@@ -20,11 +13,7 @@ release/
 packaging/vendor/
 
 # Testing & Cache
-.pytest_cache/
-.pytest-basetemp/
-.pytest-*/
 .coverage
-.tox/
 
 # IDEs
 .vscode/
@@ -37,14 +26,11 @@ packaging/vendor/
 /cheer.txt
 /poem.txt
 /session_index.json
-/test_image.py
-/test_pdf.py
 /*.pdf
 plan/
 claude_code_system_prompt_analysis.md
 claude_code_system_prompt_cn.md
 prompt.txt
-test_web.py
 test.txt
 src/
 !runtime/src/
@@ -75,7 +61,6 @@ figs/
 # Local scratch artifacts
 /.tmp_crops/
 /.feishu_oauth_code
-/preview_themes.py
 
 # Local exploratory QA harness and runs; never tracked
 /qa/

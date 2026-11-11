@@ -2,7 +2,7 @@
 
 ## Direction
 
-Operational multi-agent workbench: dense enough for repeated agent engineering and multi-agent team coordination, calm enough for long sessions, and explicit about the boundary between surface connections, the shared Python runtime, and the Team Agents Management daemon. The product surface is code-native and preserves the restrained **Warm Botanical Paper & Deep Forest Ink** aesthetic (`Manrope Variable` + `DM Mono`).
+Operational multi-agent workbench: dense enough for repeated agent engineering and multi-agent team coordination, calm enough for long sessions, and explicit about the boundary between surface connections, the shared TypeScript runtime, and the Team Agents Management daemon. The product surface is code-native and preserves the restrained **Warm Botanical Paper & Deep Forest Ink** aesthetic (`Manrope Variable` + `DM Mono`).
 
 ## Layout & Native Multi-Agent Workbench
 
@@ -19,7 +19,7 @@ Inspired by **Orca**, **Paperclip**, **Jan**, and **LobeHub**, Team Agents Manag
     - `Organization & Hierarchy`: Interactive reporting tree (`Leader -> Specialists -> Sub-reports`) with live task cards, workspace/worktree badges, and inline member/leader management.
     - `Tasks & Deliveries`: 4-column semantic Kanban board (`Queued`, `In Progress`, `Needs Review / Input`, `Completed`) and grouped list view with assignee filter chips and slide-over `TaskReportDrawer` for delivery acceptance/rework, blocker answers, and artifact previews.
   - **Inbox Surface (`inbox`)**: Unified human-in-the-loop triage for approvals (`deleteTeam`, `cancelRun`), blocked user questions, completed task deliveries awaiting review, unconfirmed runs, and team notices.
-  - **Background Surface (`background`)**: Shared Python Runtime and Management Service health cards, active and recent delegated runs, and live service/runtime/run log inspection.
+  - **Background Surface (`background`)**: Shared Runtime and Management Service health cards, active and recent delegated runs, and live service/runtime/run log inspection.
 - **Right rail (Inspector with Glide-Maximize)**:
   - Dismissible, resizable, and expandable (`Maximize2` / `Minimize2`) right column with `Context`, `Activity` (live plan, background commands, session goal, and active team roster), `Files`, and `Team` (in Web) tabs, plus the global `Usage` dialog.
 

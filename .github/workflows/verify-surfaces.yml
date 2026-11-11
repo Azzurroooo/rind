@@ -6,6 +6,8 @@ on:
       - "frontend-web/**"
       - "desktop/**"
       - "runtime/**"
+      - "rind-runtime-client/**"
+      - "agent-management/**"
       - ".github/workflows/verify-surfaces.yml"
   push:
     branches: [main]
@@ -13,6 +15,8 @@ on:
       - "frontend-web/**"
       - "desktop/**"
       - "runtime/**"
+      - "rind-runtime-client/**"
+      - "agent-management/**"
       - ".github/workflows/verify-surfaces.yml"
   workflow_dispatch:
 

@@ -43,7 +43,7 @@ import { createCliState } from "./cli-state.js";
 import { createCliRuntimeController } from "./cli-runtime-controller.js";
 import { createCliOutputController } from "./cli-output-controller.js";
 import { createCliInputActions } from "./cli-input-actions.js";
-import { cliHelp, oneShotHelp, runOneShot, tourHelp } from "./one-shot.js";
+import { cliHelp, oneShotHelp, runGateway, runOneShot, tourHelp } from "./one-shot.js";
 import { runSend, sendHelp } from "./send.js";
 import { configHelp, runConfig } from "./config-command.js";
 import { createWindowLog, guardStartup } from "./window-startup.js";
@@ -128,6 +128,15 @@ if (cliArgs[0] === "send" && cliArgs.some((arg) => arg === "--help" || arg === "
 if (cliArgs[0] === "send") {
   try {
     process.exitCode = await runSend({ args: cliArgs });
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 2;
+  }
+  return;
+}
+if (cliArgs[0] === "gateway") {
+  try {
+    process.exitCode = await runGateway({ args: cliArgs.slice(1), repoRoot, runtimePath });
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 2;

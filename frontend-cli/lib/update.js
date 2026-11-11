@@ -516,7 +516,10 @@ export async function checkLatestRelease({
       throw new Error("npm registry returned an invalid @rind-ai/cli version.");
     }
     const runtimePkg = npmRuntimePackageName(installation.platform, installation.arch);
-    if (runtimePkg) {
+    const requiresRuntimePkg = Boolean(
+      runtimePkg && (cliMeta?.optionalDependencies?.[runtimePkg] || cliMeta?.dependencies?.[runtimePkg]),
+    );
+    if (requiresRuntimePkg) {
       const encodedRuntime = runtimePkg.replace("/", "%2f");
       const runtimeMeta = await fetchJson(`${cleanRegistry}/${encodedRuntime}/${encodeURIComponent(resolvedVersion)}`, {
         fetchImpl,

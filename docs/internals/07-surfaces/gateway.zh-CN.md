@@ -31,14 +31,14 @@ node runtime/dist/cli.js app-server --web --host 127.0.0.1 --port 8765 --cwd /ab
 ~~~
 
 ~~~sh
-python -m gateway init --workspace /absolute/path/to/project
-python -m gateway --config /absolute/path/to/project/.rind/gateway.yaml
+node frontend-cli/bin/rind.js gateway init --workspace /absolute/path/to/project
+node frontend-cli/bin/rind.js gateway --config /absolute/path/to/project/.rind/gateway.yaml
 ~~~
 
-向导写入所选工作区的 .rind/gateway.yaml；渠道 SDK、平台账号和回调要求由相应适配器决定。Worker 启用认证时还需配置连接 token。`gateway doctor` 检查配置和依赖，`gateway approve <CODE>` 批准配对；两者应使用与运行实例相同的配置/工作区。
+向导写入所选工作区的 .rind/gateway.yaml；渠道 SDK、平台账号和回调要求由相应适配器决定。Worker 启用认证时还需配置连接 token。`rind gateway doctor` 检查配置和依赖，`rind gateway approve <CODE>` 批准配对；两者应使用与运行实例相同的配置/工作区。
 
-这里的 gateway/ 是消息渠道进程，与 Desktop 内部 HTTP/WebSocket Gateway 不同。前者把聊天消息转为会话输入，后者把同一个图形 Surface 暴露给远端设备。
+这里的 `runtime/src/gateway/` 是消息渠道命令（`rind gateway`），与 Desktop 内部 HTTP/WebSocket Gateway 不同。前者把聊天消息转为会话输入，后者把同一个图形 Surface 暴露给远端设备。
 
-源码：[路由](../../../gateway/router.py)、[pump](../../../gateway/pump.py)、[安全门](../../../gateway/security.py)、[传输](../../../gateway/transports.py)。验证：[路由](../../../gateway/router.py)、[安全](../../../gateway/security.py)、[pump](../../../gateway/fake_worker.py)、[stdio 关闭](../../../gateway/transports.py)。
+源码：[路由](../../../runtime/src/gateway/router.ts)、[pump](../../../runtime/src/gateway/pump.ts)、[安全门](../../../runtime/src/gateway/security.ts)、[传输](../../../runtime/src/gateway/transports.ts)。验证：[路由](../../../runtime/src/gateway/router.ts)、[安全](../../../runtime/src/gateway/security.ts)、[pump](../../../runtime/src/gateway/fake-worker.ts)、[stdio 关闭](../../../runtime/src/gateway/transports.ts)。
 
 [返回系列地图](../README.zh-CN.md)

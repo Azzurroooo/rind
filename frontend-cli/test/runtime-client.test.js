@@ -196,3 +196,38 @@ test("the Worker never opens a console window of its own", () => {
   assert.equal(spawned.length, 1);
   assert.equal(spawned[0].windowsHide, true);
 });
+
+test("Electron sets ELECTRON_RUN_AS_NODE=1 for both source and packaged .js runtimes, not native binaries", (t) => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(process.versions, "electron");
+  Object.defineProperty(process.versions, "electron", { value: "42.0.0", configurable: true });
+  t.after(() => {
+    if (originalDescriptor) {
+      Object.defineProperty(process.versions, "electron", originalDescriptor);
+    } else {
+      delete process.versions.electron;
+    }
+  });
+
+  const captureSpawnEnv = (runtimePath) => {
+    let captured = null;
+    const fakeSpawn = (command, args, options) => {
+      captured = { command, args, env: options.env };
+      throw Object.assign(new Error("spawn recorded"), { code: "ENOENT" });
+    };
+    const client = createRuntimeClient({ repoRoot: tmpdir(), runtimePath, spawnProcess: fakeSpawn });
+    assert.throws(() => client.start(), /spawn recorded/);
+    return captured;
+  };
+
+  const sourceLaunch = captureSpawnEnv("");
+  assert.equal(sourceLaunch.command, process.execPath);
+  assert.equal(sourceLaunch.env.ELECTRON_RUN_AS_NODE, "1");
+
+  const packagedJsLaunch = captureSpawnEnv(path.join(tmpdir(), "resources", "runtime", "dist", "cli.js"));
+  assert.equal(packagedJsLaunch.command, process.execPath);
+  assert.equal(packagedJsLaunch.env.ELECTRON_RUN_AS_NODE, "1");
+
+  const nativeBinaryLaunch = captureSpawnEnv("C:\\Rind\\rind-runtime.exe");
+  assert.equal(nativeBinaryLaunch.command, "C:\\Rind\\rind-runtime.exe");
+  assert.equal(nativeBinaryLaunch.env.ELECTRON_RUN_AS_NODE, undefined);
+});

@@ -2,7 +2,7 @@
 
 English | [简体中文](event-system.md)
 
-内核产出 RuntimeEvent；协议层只给它统一封装。界面订阅的是“发生了什么”，不需要读取 Python 对象或反复轮询会话文件。
+内核产出 RuntimeEvent；协议层只给它统一封装。界面订阅的是“发生了什么”，不需要读取运行时对象或反复轮询会话文件。
 
 ~~~mermaid
 flowchart LR

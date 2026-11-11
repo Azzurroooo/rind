@@ -448,7 +448,7 @@ test("one-shot leaves zero orphan processes across plain and registered folders,
   }
   assert.ok(sessions.every(s => s.turn === "idle" && !s.background), "background bash task from killed one-shot is cancelled");
   assert.equal((await existingHost.request("runtime/info")).pid, hostInfoBefore.pid, "existing shared host stays alive");
-  assert.equal((await existingHost.request("runtime/observe")).pid, workerBefore.pid, "existing python worker stays alive");
+  assert.equal((await existingHost.request("runtime/observe")).pid, workerBefore.pid, "existing runtime worker stays alive");
 
   // 5. Non-oneShot client (e.g. subagent adapter or bridge caller) running completion_scope="request"
   //    that abruptly disconnects mid-request also auto-cancels its turn and background processes.

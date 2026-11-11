@@ -19,7 +19,7 @@ import { errorText } from "./constants.js";
 // Native Team Agents Management controller for Rind Web.
 // Transparently uses the Desktop Gateway WebSocket RPC (`rind/agents/*`) when
 // advertised, or the Vite dev bridge (`/api/agents` + `/api/agents/stream`)
-// when running against a standalone Python runtime in a browser.
+// when running against a standalone runtime in a browser.
 export function useAgentsController(ctx) {
   const [snapshot, setSnapshot] = useState(emptyAgentsSnapshot);
   const [connection, setConnection] = useState("connecting");

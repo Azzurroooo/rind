@@ -12,7 +12,7 @@ footer lists secondary features. Commands are labels, not simulated terminal scr
 Regenerate both language editions from the repository root:
 
 ```bash
-python design/readme-overview/generate.py
+node design/readme-overview/generate.mjs
 ```
 
 Outputs: `assets/rind-overview.svg` and `assets/rind-overview.zh-CN.svg`.

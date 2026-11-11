@@ -2,7 +2,7 @@
 
 ## Tests
 
-Deterministic regression tests in `test/` and `frontend-cli/test/` run during normal development. This includes integration tests using local fake providers. User-scenario acceptance plans in [`test/manual/`](test/manual/README.md) run **only on explicit user request**, independently of regression commands and CI. Live-provider testing can consume tokens and must stay within the requested scope and budget. See the [testing guide](test/README.md) for the distinction and execution rules.
+Deterministic regression tests in `runtime/test/`, `agent-management/test/`, and `frontend-cli/test/` run during normal development. This includes integration tests using local fake providers. User-scenario acceptance plans in [`test/manual/`](test/manual/README.md) run **only on explicit user request**, independently of regression commands and CI. Live-provider testing can consume tokens and must stay within the requested scope and budget. See the [testing guide](test/README.md) for the distinction and execution rules.
 
 Manual acceptance must also clean up all artifacts and processes it creates, including failed or interrupted runs. Default to a sanitized report in the final response, with no retained test files; retain artifacts only on explicit user request. Follow the [cleanup procedure](test/manual/README.md#清理与零残留验收).
 

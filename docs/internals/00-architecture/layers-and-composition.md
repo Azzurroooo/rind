@@ -6,7 +6,7 @@ The execution kernel describes "how to complete a turn"; the concrete model SDK,
 
 ~~~mermaid
 flowchart TB
-    S["runtime/server<br/>protocol and coordination"] --> B["bootstrap/container.py<br/>the only production composition root"]
+    S["runtime/server<br/>protocol and coordination"] --> B["buildAgentContainer<br/>the only production composition root"]
     B --> C["runtime/core<br/>turns and streaming"]
     B --> I["infrastructure<br/>models / storage / tools"]
     C --> A["application<br/>context / tool orchestration / ports"]
@@ -15,7 +15,7 @@ flowchart TB
     I -. "implements ports" .-> A
 ~~~
 
-[AgentContainer](../../../runtime/src/core/turn-runner.ts) explicitly receives the session store, the model client, ShellTools, WebSessions, and shared resources, then assembles ContextManager, ToolCallProcessor, TurnRunner, and AgentRuntime. runtime/core does not import runtime/server, bootstrap, or concrete infrastructure in reverse, and a Surface does not hold Python business objects either.
+[AgentContainer](../../../runtime/src/core/turn-runner.ts) explicitly receives the session store, the model client, ShellTools, WebSessions, and shared resources, then assembles ContextManager, ToolCallProcessor, TurnRunner, and AgentRuntime. `runtime/core` does not import `runtime/server` or concrete infrastructure in reverse, and a Surface does not hold runtime business objects either.
 
 This makes the lifecycles legible: Worker-level resources are created by RuntimeWorker, a single active execution is assembled in ExecutionCoordinator, application depends on abstract ports, and infrastructure implements them outside the boundary. When adding a Provider or a tool, you usually change the adapter and the assembly rather than rewriting the turn loop.
 
@@ -23,8 +23,8 @@ This makes the lifecycles legible: Worker-level resources are created by Runtime
 
 The fact that a tool needs a session ID, a cancellation signal, and output storage does not mean it should go looking for a global Worker on its own. ToolSpec declares the invocation contract, the container injects dependencies, the executor fills in private runtime parameters, and the concrete handler performs the action. The source of a dependency can be traced along the constructor, and tests can replace the model and file boundaries with local implementations.
 
-The Server also carries execution mutual exclusion, cross-turn continuation, and connection subscription, so it cannot be abbreviated to "only forwarding requests". Core manages the sampling and tool loop inside one turn; application provides reusable services. The dependency graph shows module direction, not process isolation: in production these Python modules run in the same process.
+The Server also carries execution mutual exclusion, cross-turn continuation, and connection subscription, so it cannot be abbreviated to "only forwarding requests". Core manages the sampling and tool loop inside one turn; application provides reusable services. The dependency graph shows module direction, not process isolation: in production these TypeScript runtime modules run in the same Worker process.
 
-Code entry points: [composition root](../../../runtime/src/core/turn-runner.ts), [application ports](../../../agent/application/ports/), [domain events](../../../runtime/src/domain/events.ts). Verification: [dependency direction tests](../../../runtime/test/architecture.test.js), [container tests](../../../runtime/test/context-and-turn.test.js).
+Code entry points: [composition root](../../../runtime/src/core/turn-runner.ts), [domain models & ports](../../../runtime/src/domain/models.ts), [domain events](../../../runtime/src/domain/events.ts). Verification: [dependency direction tests](../../../runtime/test/architecture.test.js), [container tests](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

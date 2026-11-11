@@ -14,7 +14,7 @@
     "prebuild": "npm run build:web",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "prepackage": "npm run build",
+    "prepackage": "npm run build && node scripts/stage-resources.mjs",
     "package": "electron-builder --config electron-builder.config.ts"
   },
   "dependencies": {

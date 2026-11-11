@@ -42,16 +42,14 @@ Entering the tour from within a session pauses the main TUI; on leaving it, repl
 
 ## Running from source
 
-Python 3.12+ and Node.js 18+ are required. First create a virtual environment in the repository root:
+Node.js 20+ and Git are required. Build the TypeScript runtime and Agents Management in the repository root, then install and run the CLI:
 
 ~~~sh
-python -m venv .venv
-~~~
-
-Activate it with `.\.venv\Scripts\Activate.ps1` on Windows PowerShell or `source .venv/bin/activate` on macOS/Linux, then install and run:
-
-~~~sh
-python -m pip install -r requirements-runtime.txt
+npm install --prefix runtime
+npm run build --prefix runtime
+npm install --prefix agent-management
+npm run build --prefix agent-management
+npm install --prefix frontend-cli
 node frontend-cli/bin/rind.js
 ~~~
 

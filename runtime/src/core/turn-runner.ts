@@ -57,6 +57,7 @@ import {
   type ModelUsage,
   type ParsedToolCall,
 } from "../domain/models.js";
+import { configureHttpDispatcher } from "../infrastructure/http-dispatcher.js";
 import {
   checkImageBudget,
   imageBudgetExceeded,
@@ -1885,6 +1886,7 @@ export function buildAgentContainer(options: {
   externalTool?: ExternalTool | null;
   contextWindow?: number | null;
 }): AgentContainer {
+  configureHttpDispatcher();
   const promptWorkspace = path.resolve(expandTilde(options.workspaceRoot || process.cwd()));
   const settings = options.settings ?? loadSettings();
   const toolOutputStore = options.sharedResources

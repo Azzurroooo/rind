@@ -6,7 +6,7 @@
     "rind": "bin/rind.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "build": "npm --prefix ../runtime run build && npm --prefix ../agent-management run build",

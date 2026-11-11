@@ -14,7 +14,11 @@ import {
 
 const defaultRepoRoot = fileURLToPath(new URL("..", import.meta.url));
 
-function resolveRuntimeExecutable(repoRoot = defaultRepoRoot, runtimePath = "") {
+function isJsRuntimePath(runtimePath = "") {
+  return !runtimePath || /\.(?:c|m)?js$/i.test(runtimePath);
+}
+
+export function resolveRuntimeExecutable(repoRoot = defaultRepoRoot, runtimePath = "") {
   if (!runtimePath) {
     return { command: process.execPath, args: [path.join(repoRoot, "runtime", "dist", "cli.js")] };
   }
@@ -53,7 +57,10 @@ export function runHelpVersion({ repoRoot = defaultRepoRoot, runtimePath = "", c
   const executable = resolveRuntimeExecutable(repoRoot, runtimePath);
   const result = spawnSync(executable.command, [...executable.args, ...cliArgs], {
     cwd,
-    env: buildRuntimeEnv(repoRoot, process.env, { sourceRuntime: !runtimePath }),
+    env: buildRuntimeEnv(repoRoot, process.env, {
+      sourceRuntime: isJsRuntimePath(runtimePath),
+      command: executable.command,
+    }),
     stdio: "inherit",
   });
   return result.status ?? 1;
@@ -102,7 +109,8 @@ export function createRuntimeClient({
       // otherwise open a visible one for the Worker.
       windowsHide: true,
       env: buildRuntimeEnv(repoRoot, { ...process.env, ...env, RIND_EXTERNAL_TOOLS: externalTools ? JSON.stringify(externalTools) : "" }, {
-        sourceRuntime: !runtimePath,
+        sourceRuntime: isJsRuntimePath(runtimePath),
+        command: launch.command,
         rindHome,
       }),
       stdio: ["pipe", "pipe", "pipe"],

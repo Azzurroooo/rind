@@ -114,7 +114,7 @@ test("a hidden managed window renews its binding and tools after its conversatio
   await client.request("setLeader", { teamId: team.id, agentId: lead.id });
   const agent = await client.request("createWorkspace", { teamId: team.id, name: "Worker", reportsToAgentId: lead.id });
   management = await prepareManagement(["--cwd", lead.canonicalWorkspace, "--team", team.id], launch, { interactive: true });
-  window = createSharedRuntimeClient({ rindHome: home, python: launch.python, repoRoot: launch.repoRoot,
+  window = createSharedRuntimeClient({ rindHome: home, repoRoot: launch.repoRoot,
     cliArgs: management.args, externalTools: management.externalTools, onMessage(message) {
       if (message.event?.type === "session_deleted") management.sessionDeleted(message.session_id);
     } });

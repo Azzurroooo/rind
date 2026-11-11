@@ -18,7 +18,7 @@ flowchart TD
 
 | Design claim | Appropriate evidence |
 | --- | --- |
-| Multiple Surfaces understand the same event | Python protocol tests and Node golden fixtures read the same message samples |
+| Multiple Surfaces understand the same event | Runtime protocol tests and golden fixtures read the same message samples |
 | Cancellation can break a wait on a full queue | A fake stream fills the queue and then cancels, verifying task exit and resource cleanup |
 | Persisted tool results are not executed twice | Construct an unclosed call together with an existing result; after recovery, check the execution count and the message pairing |
 | CLI refreshes preserve input and the cursor | Virtual-terminal tests check the final screen, cursor position, width, and input buffer |
@@ -48,6 +48,6 @@ Plans under test/manual are executed only when the user explicitly asks for spec
 
 The documentation's own checks cover whether all 52 topics are present, whether source/test/cross-links exist, whether Mermaid parses and renders, and whether numbers and defaults have a basis in the source. Later code changes should update the corresponding mechanism article rather than create another legacy overview describing the same flow.
 
-Basis: [test classification](../../../test/README.md), [manual acceptance directory](../../../test/manual/README.md), [protocol samples](../../../runtime/test/fixtures/runtime_protocol.golden.jsonl), [Python protocol tests](../../../runtime/test/server-protocol.test.js), [CLI protocol tests](../../../frontend-cli/test/runtime-protocol.test.js), [virtual terminal integration](../../../frontend-cli/test/tui-integration.test.js).
+Basis: [test classification](../../../test/README.md), [manual acceptance directory](../../../test/manual/README.md), [protocol samples](../../../runtime/test/fixtures/runtime_protocol.golden.jsonl), [Runtime protocol tests](../../../runtime/test/server-protocol.test.js), [CLI protocol tests](../../../frontend-cli/test/runtime-protocol.test.js), [virtual terminal integration](../../../frontend-cli/test/tui-integration.test.js).
 
 [Back to the series map](../README.md)

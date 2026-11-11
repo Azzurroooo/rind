@@ -22,7 +22,7 @@ Install Docker Desktop or Docker Engine with Compose v2. Set `RIND_SERVER_TOKEN`
 docker compose up -d --build
 ```
 
-Open `http://localhost:8080`. The command builds the web surface and starts the long-lived WebSocket worker behind the same origin. The current directory is mounted as the workspace and `./.rind` stores settings and sessions. Set `RIND_WORKSPACE`, `RIND_HOME`, `RIND_WEB_PORT`, `RIND_WEB_BIND`, `RIND_PYPI_INDEX_URL`, or `RIND_DEBIAN_MIRROR` in a `.env` file to override them. The default bind is `127.0.0.1`.
+Open `http://localhost:8080`. The command builds the web surface and starts the long-lived WebSocket worker behind the same origin. The current directory is mounted as the workspace and `./.rind` stores settings and sessions. Set `RIND_WORKSPACE`, `RIND_HOME`, `RIND_WEB_PORT`, `RIND_WEB_BIND`, or `RIND_DEBIAN_MIRROR` in a `.env` file to override them. The default bind is `127.0.0.1`.
 
 Stop the deployment with:
 

@@ -22,7 +22,7 @@ flowchart TB
     E --> D --> P --> S
 ~~~
 
-The Server and the execution kernel live in the **same Python Worker process**; no second layer of RPC sits between them. The CLI and Desktop connect over stdio JSONL, Web and Mobile go over WebSocket, and the Gateway attaches to the same protocol through its own WorkerClient. The Surface is responsible for input, presentation, and connection state; Python is responsible for sessions, context, models, tools, and tasks.
+The Server and the execution kernel live in the **same TypeScript Worker process**; no second layer of RPC sits between them. The CLI and Desktop connect over stdio JSONL, Web and Mobile go over WebSocket, and the Gateway attaches to the same protocol through its own WorkerClient. The Surface is responsible for input, presentation, and connection state; the Runtime is responsible for sessions, context, models, tools, and tasks.
 
 The diagram also has a reverse edge that is easy to leave out: session facts are written to disk, and the next execution reads them back. A Worker can keep running tasks and shared services, but it does not keep a standing Agent for every historical session. As you read the articles that follow, keep the three states distinct: **persistent facts, current execution, and Surface view**.
 
@@ -36,6 +36,6 @@ The diagram also has a reverse edge that is easy to leave out: session facts are
 
 For example, refreshing the browser loses only the third layer: the Worker keeps executing, and once the client resubscribes, the view is rebuilt from history and snapshots. A Worker restart loses the second layer: the persistent session can still be opened, but the old process cannot automatically recover into a controllable process from a task_id alone. It is more accurate to judge problems along these three layers than to read "the session is still there" as "all state is still there".
 
-Code entry points: [main.py](../../../runtime/src/cli.ts), [RuntimeWorker](../../../runtime/src/server/worker.ts), [assembly root](../../../runtime/src/core/turn-runner.ts). Verification: [architecture boundary tests](../../../runtime/test/architecture.test.js).
+Code entry points: [cli.ts](../../../runtime/src/cli.ts), [RuntimeWorker](../../../runtime/src/server/worker.ts), [assembly root](../../../runtime/src/core/turn-runner.ts). Verification: [architecture boundary tests](../../../runtime/test/architecture.test.js).
 
 [Back to the series map](../README.md)

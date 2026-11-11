@@ -1,14 +1,19 @@
 #!/usr/bin/env node
+import { configureHttpDispatcher } from "./infrastructure/http-dispatcher.js";
 import { appServerMain } from "./server/transports.js";
 import { VERSION } from "./version.js";
 
 function printHelp(): void {
   const text = [
-    "usage: rind-runtime app-server [options]",
+    "usage: rind-runtime <command> [options]",
     "",
-    "Rind headless runtime server",
+    "Rind headless runtime & messaging gateway",
     "",
-    "options:",
+    "commands:",
+    "  app-server              Start the headless JSONL/WebSocket runtime server",
+    "  gateway                 Run or manage the multi-channel messaging gateway",
+    "",
+    "app-server options:",
     "  --version               Show version and exit",
     "  -h, --help              Show this help message and exit",
     "  --stdio                 Use the JSONL standard-stream transport",
@@ -27,7 +32,14 @@ function printHelp(): void {
 }
 
 export async function runCli(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
+  configureHttpDispatcher();
   const args = [...argv];
+  if (args[0] === "gateway") {
+    const gatewayMod = (await import("./gateway/main.js")) as {
+      gatewayMain: (argv: readonly string[]) => Promise<number>;
+    };
+    return await gatewayMod.gatewayMain(args.slice(1));
+  }
   if (args.includes("--version")) {
     process.stdout.write(`rind ${VERSION}\n`);
     return 0;
@@ -44,7 +56,7 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
     return 2;
   }
   process.stderr.write(
-    `rind-runtime: error: invalid choice: '${args[0]}' (choose from 'app-server')\n`,
+    `rind-runtime: error: invalid choice: '${args[0]}' (choose from 'app-server', 'gateway')\n`,
   );
   return 2;
 }

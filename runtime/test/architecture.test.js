@@ -106,21 +106,26 @@ test("TypeScript runtime layer dependencies point inward and prompts stay pure",
         violations.push(`${rel} -> ${targetRel}`);
       } else if (
         topLayer === "infrastructure" &&
-        ["application", "core", "server", "cli.ts", "index.ts"].includes(targetLayer)
+        ["application", "core", "server", "gateway", "cli.ts", "index.ts"].includes(targetLayer)
       ) {
         violations.push(`${rel} -> ${targetRel}`);
       } else if (
         topLayer === "application" &&
-        ["core", "server", "cli.ts", "index.ts"].includes(targetLayer)
+        ["core", "server", "gateway", "cli.ts", "index.ts"].includes(targetLayer)
       ) {
         violations.push(`${rel} -> ${targetRel}`);
       } else if (
         topLayer === "core" &&
-        ["server", "cli.ts", "index.ts"].includes(targetLayer)
+        ["server", "gateway", "cli.ts", "index.ts"].includes(targetLayer)
       ) {
         violations.push(`${rel} -> ${targetRel}`);
       } else if (
         topLayer === "server" &&
+        ["gateway", "cli.ts", "index.ts"].includes(targetLayer)
+      ) {
+        violations.push(`${rel} -> ${targetRel}`);
+      } else if (
+        topLayer === "gateway" &&
         ["cli.ts", "index.ts"].includes(targetLayer)
       ) {
         violations.push(`${rel} -> ${targetRel}`);
