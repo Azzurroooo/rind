@@ -639,8 +639,9 @@ export class ExecutionCoordinator {
       this.live.set(sessionId, current);
     }
     if (eventType === "assistant_delta") {
-      current.assistant_text = boundedLiveText(
-        String(current.assistant_text || "") + String(event.text || ""),
+      current.assistant_text = appendBoundedLiveText(
+        String(current.assistant_text || ""),
+        String(event.text || ""),
       );
     } else if (eventType === "turn_step_retry" || eventType === "assistant_message_completed") {
       current.assistant_text = "";
@@ -663,8 +664,9 @@ export class ExecutionCoordinator {
       });
     } else if (eventType === "tool_input_delta") {
       const tool = liveTool(current, event);
-      tool.args_preview = boundedLiveText(
-        String(tool.args_preview || "") + String(event.delta || ""),
+      tool.args_preview = appendBoundedLiveText(
+        String(tool.args_preview || ""),
+        String(event.delta || ""),
         120,
       );
     } else if (eventType === "tool_call_started") {
@@ -678,7 +680,7 @@ export class ExecutionCoordinator {
           : payload !== undefined && payload !== null
             ? JSON.stringify(payload)
             : "";
-      tool.output = boundedLiveText(String(tool.output || "") + progress);
+      tool.output = appendBoundedLiveText(String(tool.output || ""), progress);
     } else if (eventType === "tool_result") {
       const tool = liveTool(current, event);
       const result = String(event.result || "");
@@ -845,11 +847,7 @@ export class ExecutionCoordinator {
             compact: compact ? "manual" : null,
             delivery,
           })) {
-            const eventData: Record<string, unknown> = { ...event };
-            if (delivery && eventData.type === "turn_started") {
-              eventData.delivery = true;
-              eventData.delivery_text = String(query || "");
-            }
+            const eventData = event as Record<string, unknown>;
             if (eventData.type === "queued_input_delivered") {
               businessStarted = true;
             }
@@ -863,7 +861,7 @@ export class ExecutionCoordinator {
               eventData.type === "turn_cancelled"
             ) {
               terminalType = String(eventData.type);
-              terminalEvent = eventData;
+              terminalEvent = { ...eventData };
               continue;
             }
             this.updateLiveEvent(eventData);
@@ -1387,12 +1385,10 @@ export class ExecutionCoordinator {
 }
 
 async function closeContainer(container: AgentContainer): Promise<void> {
-  container.tool_processor.close();
   await container.chat_client.close();
 }
 
 async function closeExecution(execution: ActiveExecution): Promise<void> {
-  execution.container.tool_processor.close();
   await (execution.chatClient ?? execution.container.chat_client).close();
 }
 
@@ -1434,6 +1430,14 @@ function copyLiveTurn(snapshot: Record<string, unknown>): Record<string, unknown
   return result;
 }
 
+const LIVE_TRUNCATION_SUFFIX = "\n\n[Output truncated]";
+
 function boundedLiveText(value: string, limit = 30_000): string {
-  return value.length <= limit ? value : `${value.slice(0, limit)}\n\n[Output truncated]`;
+  return value.length <= limit ? value : `${value.slice(0, limit)}${LIVE_TRUNCATION_SUFFIX}`;
+}
+
+function appendBoundedLiveText(existing: string, delta: string, limit = 30_000): string {
+  if (!delta) return existing;
+  if (existing.endsWith(LIVE_TRUNCATION_SUFFIX)) return existing;
+  return boundedLiveText(existing + delta, limit);
 }

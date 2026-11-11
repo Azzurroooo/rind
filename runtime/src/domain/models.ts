@@ -414,7 +414,7 @@ export interface ParsedToolCall {
   readonly call_id: string;
   readonly name: string;
   readonly raw_args: string;
-  readonly parsed_args?: [Record<string, unknown>, string | null];
+  parsed_args?: [Record<string, unknown>, string | null];
 }
 
 export function looksLikeToolPayload(value: unknown): boolean {

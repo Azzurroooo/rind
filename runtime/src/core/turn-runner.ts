@@ -87,6 +87,14 @@ import { ShellTools } from "../infrastructure/tools/shell-tools.js";
 import { WebSessions } from "../infrastructure/tools/web-tools.js";
 import { buildGoalPolicyPrompt, buildSystemPrompt } from "../prompts.js";
 
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
 export class MessageStreamParser {
   async consumeAsyncStream(
     response: AsyncIterable<ModelStreamEvent>,
@@ -125,7 +133,8 @@ export class MessageStreamParser {
       }
       if (event.kind === "text_delta") {
         if (event.text) {
-          await onContentAsync(event.text);
+          const cbRes = onContentAsync(event.text);
+          if (isPromiseLike(cbRes)) await cbRes;
           textParts.push(event.text);
         }
       } else if (event.kind === "reasoning_delta") {
@@ -139,7 +148,8 @@ export class MessageStreamParser {
         if (!call.started) {
           call.started = true;
           if (onToolInputStartedAsync) {
-            await onToolInputStartedAsync(callId, call.name);
+            const cbRes = onToolInputStartedAsync(callId, call.name);
+            if (isPromiseLike(cbRes)) await cbRes;
           }
         }
       } else if (event.kind === "tool_arguments_delta") {
@@ -149,7 +159,8 @@ export class MessageStreamParser {
         const delta = event.arguments || "";
         call.arguments += delta;
         if (onToolInputDeltaAsync && delta) {
-          await onToolInputDeltaAsync(callId, call.name, delta);
+          const cbRes = onToolInputDeltaAsync(callId, call.name, delta);
+          if (isPromiseLike(cbRes)) await cbRes;
         }
       } else if (event.kind === "tool_end") {
         const callId = event.tool_call_id || "";
@@ -157,7 +168,8 @@ export class MessageStreamParser {
         if (call && !call.ended) {
           call.ended = true;
           if (onToolInputEndedAsync) {
-            await onToolInputEndedAsync(callId, call.name);
+            const cbRes = onToolInputEndedAsync(callId, call.name);
+            if (isPromiseLike(cbRes)) await cbRes;
           }
         }
       } else if (event.kind === "usage") {
@@ -172,7 +184,8 @@ export class MessageStreamParser {
     if (onToolInputEndedAsync) {
       for (const [callId, call] of toolCalls.entries()) {
         if (call.started && !call.ended) {
-          await onToolInputEndedAsync(callId, call.name);
+          const cbRes = onToolInputEndedAsync(callId, call.name);
+          if (isPromiseLike(cbRes)) await cbRes;
         }
       }
     }
@@ -199,6 +212,11 @@ export class ModelStreamResult {
   finish_reason: string | null = null;
 }
 
+type RawStreamItem =
+  | { kind: "assistant_delta"; text: string }
+  | { kind: "tool_input_delta"; callId: string; name: string; delta: string }
+  | { kind: "event"; event: RuntimeEventBase };
+
 export async function* pumpModelStreamEvents(options: {
   streamResponse: AsyncIterable<ModelStreamEvent>;
   streamParser: MessageStreamParser;
@@ -220,7 +238,8 @@ export async function* pumpModelStreamEvents(options: {
     result,
   } = options;
 
-  const eventQueue: RuntimeEventBase[] = [];
+  let rawQueue: RawStreamItem[] = [];
+  let head = 0;
   let notifyConsumer = null as (() => void) | null;
   let done = false;
   let error: unknown = null;
@@ -233,9 +252,22 @@ export async function* pumpModelStreamEvents(options: {
     }
   };
 
-  const pushEvent = (ev: RuntimeEventBase): void => {
-    eventQueue.push(ev);
+  const pushItem = (item: RawStreamItem): void => {
+    rawQueue.push(item);
     wakeConsumer();
+  };
+
+  const dequeueItem = (): RawStreamItem => {
+    const item = rawQueue[head]!;
+    head += 1;
+    if (head === rawQueue.length) {
+      rawQueue.length = 0;
+      head = 0;
+    } else if (head >= 64 && head * 2 >= rawQueue.length) {
+      rawQueue = rawQueue.slice(head);
+      head = 0;
+    }
+    return item;
   };
 
   const unsubscribeCancel = cancellationToken
@@ -250,59 +282,58 @@ export async function* pumpModelStreamEvents(options: {
 
   const consumePromise = (async (): Promise<void> => {
     try {
-      const onContentAsync = async (text: string): Promise<void> => {
+      const onContent = (text: string): void => {
+        if (text.length <= 2048) {
+          pushItem({ kind: "assistant_delta", text });
+          return;
+        }
         for (let start = 0; start < text.length; start += 2048) {
-          pushEvent(
-            assistantDeltaEvent({
-              ...eventMeta(session, turnId),
-              text: text.slice(start, start + 2048),
-            }),
-          );
+          pushItem({ kind: "assistant_delta", text: text.slice(start, start + 2048) });
         }
       };
-      const onToolInputStartedAsync = async (callId: string, name: string): Promise<void> => {
-        pushEvent(
-          toolInputStartedEvent({
+      const onToolInputStarted = (callId: string, name: string): void => {
+        pushItem({
+          kind: "event",
+          event: toolInputStartedEvent({
             ...eventMeta(session, turnId),
             tool_call_id: callId,
             tool_name: name,
           }),
-        );
+        });
       };
-      const onToolInputDeltaAsync = async (
-        callId: string,
-        name: string,
-        delta: string,
-      ): Promise<void> => {
+      const onToolInputDelta = (callId: string, name: string, delta: string): void => {
+        if (delta.length <= 2048) {
+          pushItem({ kind: "tool_input_delta", callId, name, delta });
+          return;
+        }
         for (let start = 0; start < delta.length; start += 2048) {
-          pushEvent(
-            toolInputDeltaEvent({
-              ...eventMeta(session, turnId),
-              tool_call_id: callId,
-              tool_name: name,
-              delta: delta.slice(start, start + 2048),
-            }),
-          );
+          pushItem({
+            kind: "tool_input_delta",
+            callId,
+            name,
+            delta: delta.slice(start, start + 2048),
+          });
         }
       };
-      const onToolInputEndedAsync = async (callId: string, name: string): Promise<void> => {
-        pushEvent(
-          toolInputEndedEvent({
+      const onToolInputEnded = (callId: string, name: string): void => {
+        pushItem({
+          kind: "event",
+          event: toolInputEndedEvent({
             ...eventMeta(session, turnId),
             tool_call_id: callId,
             tool_name: name,
           }),
-        );
+        });
       };
 
       const [content, calls, usage, reasoningContent, finishReason] =
         await streamParser.consumeAsyncStream(
           streamResponse,
-          onContentAsync,
+          onContent,
           cancellationToken,
-          onToolInputStartedAsync,
-          onToolInputDeltaAsync,
-          onToolInputEndedAsync,
+          onToolInputStarted,
+          onToolInputDelta,
+          onToolInputEnded,
         );
 
       result.content = String(content || "");
@@ -325,12 +356,13 @@ export async function* pumpModelStreamEvents(options: {
             compactGeneration: positiveInt(contextStats.auto_compact_compact_generation, 1),
           });
           await persistSamplingUsage(session, anchored);
-          pushEvent(
-            tokenStatsUpdatedEvent({
+          pushItem({
+            kind: "event",
+            event: tokenStatsUpdatedEvent({
               ...eventMeta(session, turnId),
               stats: anchored,
             }),
-          );
+          });
         }
       }
     } catch (exc) {
@@ -345,7 +377,7 @@ export async function* pumpModelStreamEvents(options: {
 
   try {
     while (true) {
-      if (eventQueue.length === 0) {
+      if (head >= rawQueue.length) {
         if (done) {
           if (error) throw error;
           break;
@@ -358,23 +390,57 @@ export async function* pumpModelStreamEvents(options: {
       if (cancellationToken?.isCancelled) {
         throw new CancelledError(cancellationToken.reason || "User interrupted");
       }
-      const event = eventQueue.shift()!;
-      if (event.type === "assistant_delta") {
-        const parts = [String(event.text || "")];
-        let textBytes = Buffer.byteLength(parts[0]!, "utf8");
-        while (textBytes < 8192 && eventQueue.length > 0) {
-          const next = eventQueue[0]!;
-          if (next.type !== "assistant_delta") break;
-          const nextText = String(next.text || "");
-          const size = Buffer.byteLength(nextText, "utf8");
-          if (textBytes + size > 8192) break;
-          eventQueue.shift();
-          parts.push(nextText);
-          textBytes += size;
+      const item = dequeueItem();
+      if (item.kind === "assistant_delta") {
+        let combined = item.text;
+        let textBytes = Buffer.byteLength(combined, "utf8");
+        if (head < rawQueue.length && rawQueue[head]!.kind === "assistant_delta") {
+          const parts = [combined];
+          while (textBytes < 8192 && head < rawQueue.length) {
+            const next = rawQueue[head]!;
+            if (next.kind !== "assistant_delta") break;
+            const size = Buffer.byteLength(next.text, "utf8");
+            if (textBytes + size > 8192) break;
+            dequeueItem();
+            parts.push(next.text);
+            textBytes += size;
+          }
+          combined = parts.join("");
         }
-        event.text = parts.join("");
+        yield assistantDeltaEvent({
+          ...eventMeta(session, turnId),
+          text: combined,
+        });
+      } else if (item.kind === "tool_input_delta") {
+        let combined = item.delta;
+        let name = item.name;
+        let deltaBytes = Buffer.byteLength(combined, "utf8");
+        if (head < rawQueue.length) {
+          const peek = rawQueue[head]!;
+          if (peek.kind === "tool_input_delta" && peek.callId === item.callId) {
+            const parts = [combined];
+            while (deltaBytes < 8192 && head < rawQueue.length) {
+              const next = rawQueue[head]!;
+              if (next.kind !== "tool_input_delta" || next.callId !== item.callId) break;
+              const size = Buffer.byteLength(next.delta, "utf8");
+              if (deltaBytes + size > 8192) break;
+              dequeueItem();
+              if (next.name) name = next.name;
+              parts.push(next.delta);
+              deltaBytes += size;
+            }
+            combined = parts.join("");
+          }
+        }
+        yield toolInputDeltaEvent({
+          ...eventMeta(session, turnId),
+          tool_call_id: item.callId,
+          tool_name: name,
+          delta: combined,
+        });
+      } else {
+        yield item.event;
       }
-      yield event;
     }
 
     await consumePromise;
@@ -408,7 +474,8 @@ export class TurnRunner {
   private chatClient: ChatClient;
   private readonly toolProcessor: ToolCallProcessor;
   private readonly streamParser: MessageStreamParser;
-  private readonly toolSchemas: ToolFunctionSchema[];
+  private readonly allToolSchemas: Array<Record<string, unknown>>;
+  private readonly nonGoalToolSchemas: Array<Record<string, unknown>> | null;
   private readonly contextManager: ContextManager;
   private readonly compactionService: CompactionService;
   private readonly skills: SkillTurnCoordinator | null;
@@ -443,7 +510,12 @@ export class TurnRunner {
     this.chatClient = options.chatClient;
     this.toolProcessor = options.toolProcessor;
     this.streamParser = options.streamParser;
-    this.toolSchemas = options.toolSchemas;
+    this.allToolSchemas = options.toolSchemas as unknown as Array<Record<string, unknown>>;
+    this.nonGoalToolSchemas = options.toolSchemas.some(t => t.function.name === "update_goal")
+      ? options.toolSchemas
+          .filter(t => t.function.name !== "update_goal")
+          .map(t => t as unknown as Record<string, unknown>)
+      : null;
     this.contextManager = options.contextManager;
     this.compactionService = options.compactionService ?? new CompactionService();
     this.skills = options.skills ?? null;
@@ -475,18 +547,11 @@ export class TurnRunner {
   private async toolsForSession(
     session: JsonlSessionStore,
   ): Promise<Array<Record<string, unknown>>> {
-    const rawSchemas = this.toolSchemas as unknown as Array<Record<string, unknown>>;
-    const hasUpdateGoal = this.toolSchemas.some(t => t.function.name === "update_goal");
-    if (!hasUpdateGoal) {
-      return rawSchemas;
+    if (!this.nonGoalToolSchemas) {
+      return this.allToolSchemas;
     }
     const goal = await session.getGoal();
-    if (goal && goal.status === "active") {
-      return rawSchemas;
-    }
-    return this.toolSchemas
-      .filter(t => t.function.name !== "update_goal")
-      .map(t => t as unknown as Record<string, unknown>);
+    return goal && goal.status === "active" ? this.allToolSchemas : this.nonGoalToolSchemas;
   }
 
   private async prepareForModel(
@@ -663,6 +728,7 @@ export class TurnRunner {
         let parsedToolCalls: ParsedToolCall[] = [];
         try {
           let recoveryAttempt = initialRecoveryAttempt;
+          let hadRecoveryAttempt = recoveryAttempt > 0;
           initialRecoveryAttempt = 0;
           let streamResult = new ModelStreamResult();
 
@@ -702,6 +768,7 @@ export class TurnRunner {
                 throw e;
               }
               recoveryAttempt += 1;
+              hadRecoveryAttempt = true;
               await this.persistRecoveryState(session, turnId, recoveryAttempt);
               yield turnStepRetryEvent({
                 ...eventMeta(session, turnId),
@@ -712,7 +779,9 @@ export class TurnRunner {
             }
           }
 
-          await this.persistRecoveryState(session, turnId, 0);
+          if (hadRecoveryAttempt) {
+            await this.persistRecoveryState(session, turnId, 0);
+          }
           const contentText = streamResult.content;
           parsedToolCalls = streamResult.tool_calls;
           const reasoningContent = streamResult.reasoning_content;
@@ -790,7 +859,9 @@ export class TurnRunner {
         if (parsedToolCalls.length > 0) {
           samplingIndex += 1;
           for (const call of parsedToolCalls) {
-            const [parsedArgs] = parseToolArgs(call.raw_args);
+            const parsedTuple = parseToolArgs(call.raw_args);
+            call.parsed_args = parsedTuple;
+            const [parsedArgs] = parsedTuple;
             yield toolRequestedEvent({
               ...eventMeta(session, turnId),
               tool_call_id: call.call_id,
@@ -1413,7 +1484,6 @@ export class AgentRuntime {
   }
 
   async *runTurn(options?: {
-    sessionId?: string | null;
     query?: string | null;
     cancellationToken?: CancellationToken | null;
     transientSystemMessages?: Record<string, unknown>[] | null;
@@ -1469,6 +1539,8 @@ export class AgentRuntime {
           ...eventMeta(this.sessionStore, turnId),
           user_message_chars: resume ? 0 : (query || "").length,
           operation: compact ? "compact" : "prompt",
+          delivery,
+          delivery_text: delivery ? String(query || "") : undefined,
         });
 
         if (compact) {
@@ -1744,7 +1816,7 @@ export class AgentRuntime {
       } catch (exc) {
         if (exc instanceof CancelledError || exc instanceof BoundaryError) throw exc;
         const err = exc as Error;
-        if (err.name === "ValueError" || err.message.startsWith("Unknown skill")) {
+        if (err.name === "ValueError" || /^unknown skill\b/i.test(err.message)) {
           throw err;
         }
         throw new PersistenceError(`Failed to persist user input: ${err.message || String(exc)}`, {

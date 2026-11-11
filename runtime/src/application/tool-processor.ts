@@ -54,22 +54,6 @@ export class ToolExecutor {
     return this.registry.isParallel(name);
   }
 
-  executeSync(name: string, args: Record<string, unknown>): ToolExecutionResult {
-    if (!this.registry.has(name)) {
-      return unavailableResult(name);
-    }
-    try {
-      const res = this.registry.call(name, args);
-      return completedResult(res);
-    } catch (exc) {
-      if (exc instanceof CancelledError) throw exc;
-      const err = exc as Error;
-      if (err.name === "TimeoutError") return failedResult(err, "timed_out");
-      if (err instanceof TypeError) return failedResult(err, "rejected");
-      return failedResult(err, "failed");
-    }
-  }
-
   async executeAsync(name: string, args: Record<string, unknown>): Promise<ToolExecutionResult> {
     if (!this.registry.has(name)) {
       return unavailableResult(name);
@@ -225,13 +209,6 @@ export async function runUserQuestion(
     if (exc instanceof CancelledError) throw exc;
     const err = exc as Error;
     const errType = err.name || "Error";
-    if (errType === "KeyboardInterrupt" || errType === "EOFError") {
-      return [
-        "cancelled",
-        toolError("ask_user_question", "User question input was interrupted.", errType),
-        errType,
-      ];
-    }
     return ["failed", toolError("ask_user_question", err.message || String(exc), errType), errType];
   }
 
@@ -273,6 +250,7 @@ export function buildFileChangeEvent(options: {
   parsedArgs: Record<string, unknown>;
   status: string;
   result: string;
+  parsedPayload?: Record<string, unknown> | null;
 }): (RuntimeEventBase & { type: "file_change" }) | null {
   if (
     options.status !== "completed" ||
@@ -280,11 +258,13 @@ export function buildFileChangeEvent(options: {
   ) {
     return null;
   }
-  let payload: Record<string, unknown>;
-  try {
-    payload = JSON.parse(options.result) as Record<string, unknown>;
-  } catch {
-    return null;
+  let payload: Record<string, unknown> | null = options.parsedPayload ?? null;
+  if (!payload) {
+    try {
+      payload = JSON.parse(options.result) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
   }
   if (!payload || typeof payload !== "object" || payload.ok !== true) {
     return null;
@@ -318,6 +298,7 @@ interface ToolCallOutcome {
   status: ToolEventStatus;
   result: string;
   error_type: string;
+  parsedPayload?: Record<string, unknown> | null;
 }
 
 export class ToolCallProcessor {
@@ -350,10 +331,6 @@ export class ToolCallProcessor {
     this.globalToolSemaphore = options.globalToolSemaphore ?? null;
   }
 
-  close(): void {
-    // Session-scoped processor cleanup hook (no persistent worker threads in Node runtime).
-  }
-
   setUserQuestionResponder(responder: UserQuestionResponder | null): void {
     this.userQuestionResponder = responder;
   }
@@ -383,7 +360,7 @@ export class ToolCallProcessor {
     while (index < total) {
       const call = toolCalls[index]!;
       const startedAt = performance.now();
-      const [parsedArgs, parseError] = parseToolArgs(call.raw_args);
+      const [parsedArgs, parseError] = call.parsed_args ?? parseToolArgs(call.raw_args);
       const tsStart = session.nowIso();
       const existing = await this.loadToolRecord(session, call);
 
@@ -416,7 +393,7 @@ export class ToolCallProcessor {
       index += 1;
       while (index < total) {
         const nextCall = toolCalls[index]!;
-        const [nextArgs, nextError] = parseToolArgs(nextCall.raw_args);
+        const [nextArgs, nextError] = nextCall.parsed_args ?? parseToolArgs(nextCall.raw_args);
         if (!this.isParallelCall(nextCall, nextArgs ?? {}, nextError)) {
           break;
         }
@@ -556,21 +533,13 @@ export class ToolCallProcessor {
         if (!HEARTBEAT_TOOLS.has(call.name)) {
           outcome = await execPromise;
         } else {
-          let done = false;
-          execPromise.then(
-            () => {
-              done = true;
-            },
-            () => {
-              done = true;
-            },
-          );
-          while (!done) {
+          const donePromise = execPromise.then(value => ({ kind: "done" as const, value }));
+          while (true) {
             let timer: ReturnType<typeof setTimeout> | null = null;
             let raceRes: { kind: "done"; value: Awaited<typeof execPromise> } | { kind: "tick" };
             try {
               raceRes = await Promise.race([
-                execPromise.then(r => ({ kind: "done" as const, value: r })),
+                donePromise,
                 new Promise<{ kind: "tick" }>(resolve => {
                   timer = setTimeout(
                     () => resolve({ kind: "tick" }),
@@ -597,7 +566,6 @@ export class ToolCallProcessor {
               },
             });
           }
-          outcome = await execPromise;
         }
       }
     }
@@ -637,6 +605,7 @@ export class ToolCallProcessor {
       outputStore: this.toolOutputStore,
       sessionId: session.sessionId || "",
       callId: call.call_id,
+      parsedPayload: outcome.parsedPayload,
     });
 
     const projected = parseToolResultPayload(normalizedResult.model_content);
@@ -668,6 +637,7 @@ export class ToolCallProcessor {
           call.name,
           call.call_id,
           outcome.result,
+          outcome.parsedPayload,
         );
       }
     } catch (exc) {
@@ -699,6 +669,7 @@ export class ToolCallProcessor {
           parsedArgs,
           status: outcome.status,
           result: outcome.result,
+          parsedPayload: outcome.parsedPayload,
         });
     if (changeEvent !== null) {
       yield changeEvent;
@@ -784,9 +755,10 @@ export class ToolCallProcessor {
 
       if (result.status === "ok") {
         let toolResultStr = result.result_str;
-        const payload = parseToolResultPayload(toolResultStr);
+        let payload = result.parsed_payload ?? parseToolResultPayload(toolResultStr);
         if (payload === null) {
           toolResultStr = toolOk(call.name, toolResultStr);
+          payload = parseToolResultPayload(toolResultStr);
         }
         const payloadStatus = payload ? classifyToolPayload(payload) : null;
         if (payloadStatus) {
@@ -794,9 +766,10 @@ export class ToolCallProcessor {
             status: payloadStatus[0],
             error_type: payloadStatus[1],
             result: toolResultStr,
+            parsedPayload: payload,
           };
         }
-        return { status: "completed", error_type: "", result: toolResultStr };
+        return { status: "completed", error_type: "", result: toolResultStr, parsedPayload: payload };
       }
 
       const errorType = result.error_type || "ToolExecutionError";
@@ -850,7 +823,10 @@ export class ToolCallProcessor {
       result = { ...(result as Record<string, unknown>), attachments: record.attachments };
     }
     const resultContent = typeof result === "string" ? result : JSON.stringify(result);
-    const payload = parseToolResultPayload(resultContent);
+    const payload =
+      result && typeof result === "object" && !Array.isArray(result)
+        ? parseToolResultPayload(result)
+        : parseToolResultPayload(resultContent);
     const payloadStatus = payload ? classifyToolPayload(payload) : null;
     const errorType = String(record.error_type || "");
     const status: ToolEventStatus =
@@ -861,6 +837,7 @@ export class ToolCallProcessor {
       status: payloadStatus ? payloadStatus[0] : status,
       error_type: payloadStatus ? payloadStatus[1] : errorType,
       result: resultContent,
+      parsedPayload: payload,
     };
   }
 

@@ -72,6 +72,7 @@ export class ToolResultNormalizer {
       outputStore?: ToolOutputWriter | null;
       sessionId?: string;
       callId?: string;
+      parsedPayload?: unknown;
     } = {},
   ): Promise<NormalizedToolResult> {
     const toolName = options.toolName ?? "";
@@ -81,7 +82,11 @@ export class ToolResultNormalizer {
     const sessionId = options.sessionId ?? "";
     const callId = options.callId ?? "";
 
-    const [payload, rendered, attachments] = this.preparePayload(resultPayload);
+    const [payload, rendered, attachments] = this.preparePayload(
+      options.parsedPayload !== undefined && options.parsedPayload !== null
+        ? options.parsedPayload
+        : resultPayload,
+    );
     const [totalBytes, totalLines] = this.textMetrics(rendered);
     const identity = this.projectionIdentity(payload, toolName, status, errorType);
     const [existingPath, existingTruncated] = this.existingOutputReference(payload);
@@ -252,7 +257,7 @@ export class ToolResultNormalizer {
     const render = () => JSON.stringify(projected);
     let text = render();
     while (
-      (Buffer.byteLength(text, "utf8") > limit || (text.match(/\\n/g)?.length ?? 0) > this.maxPreviewLines) &&
+      (Buffer.byteLength(text, "utf8") > limit || this.escapedNewlineCount(text) > this.maxPreviewLines) &&
       (data.stdout || data.stderr)
     ) {
       const stdoutStr = typeof data.stdout === "string" ? data.stdout : "";
@@ -701,6 +706,17 @@ export class ToolResultNormalizer {
       if (text.charCodeAt(i) === 10) count += 1;
     }
     if (!text.endsWith("\n")) count += 1;
+    return count;
+  }
+
+  private escapedNewlineCount(text: string): number {
+    let count = 0;
+    for (let i = 0; i < text.length - 1; i += 1) {
+      if (text.charCodeAt(i) === 92 && text.charCodeAt(i + 1) === 110) {
+        count += 1;
+        i += 1;
+      }
+    }
     return count;
   }
 

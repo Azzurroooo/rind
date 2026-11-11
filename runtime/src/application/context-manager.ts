@@ -6,6 +6,8 @@ import {
   COMPACT_CONTINUATION_USER_CONTENT,
   COMPACT_HANDOFF_REASONING_CONTENT,
   TERMINAL_STATES,
+  extractToolCallIds,
+  isCompactBoundaryMessage,
   type ChatClient,
   type ModelCompletion,
 } from "../domain/models.js";
@@ -34,45 +36,43 @@ function nonNegativeInt(value: unknown): number {
   return parsed;
 }
 
-function getAttr(value: unknown, name: string): unknown {
-  if (!value || typeof value !== "object") return undefined;
-  return (value as Record<string, unknown>)[name];
-}
-
-function intAttr(value: unknown, ...names: string[]): number {
+function readIntField(obj: Record<string, unknown>, ...names: string[]): number {
   for (const name of names) {
-    const raw = getAttr(value, name);
+    const raw = obj[name];
     if (raw === undefined || raw === null || typeof raw === "boolean") continue;
-    const parsed = Number.parseInt(String(raw), 10);
+    const parsed = typeof raw === "number" ? Math.trunc(raw) : Number.parseInt(String(raw), 10);
     if (Number.isFinite(parsed)) return parsed;
   }
   return 0;
 }
 
-function nestedIntAttr(value: unknown, parentName: string, childName: string): number {
-  const parent = getAttr(value, parentName);
-  if (parent === undefined || parent === null) {
-    return intAttr(value, childName);
+function readNestedIntField(
+  obj: Record<string, unknown>,
+  parentName: string,
+  childName: string,
+): number {
+  const parent = obj[parentName];
+  if (parent && typeof parent === "object" && !Array.isArray(parent)) {
+    return readIntField(parent as Record<string, unknown>, childName);
   }
-  return intAttr(parent, childName);
+  return readIntField(obj, childName);
 }
 
 export function extractUsageDict(value: unknown): Record<string, number> | null {
-  if (value === undefined || value === null) return null;
-  let usage = getAttr(value, "usage");
-  if (usage === undefined || usage === null) {
-    usage = value;
-  }
-  if (!usage || typeof usage !== "object") return null;
-  const inputTokens = intAttr(usage, "prompt_tokens", "input_tokens");
+  if (!value || typeof value !== "object") return null;
+  const root = value as Record<string, unknown>;
+  const rawUsage = root.usage !== undefined && root.usage !== null ? root.usage : value;
+  if (!rawUsage || typeof rawUsage !== "object" || Array.isArray(rawUsage)) return null;
+  const usage = rawUsage as Record<string, unknown>;
+  const inputTokens = readIntField(usage, "prompt_tokens", "input_tokens");
   const cachedInputTokens =
-    nestedIntAttr(usage, "prompt_tokens_details", "cached_tokens") ||
-    intAttr(usage, "cached_input_tokens", "cached_tokens");
-  const outputTokens = intAttr(usage, "completion_tokens", "output_tokens");
+    readNestedIntField(usage, "prompt_tokens_details", "cached_tokens") ||
+    readIntField(usage, "cached_input_tokens", "cached_tokens");
+  const outputTokens = readIntField(usage, "completion_tokens", "output_tokens");
   const reasoningOutputTokens =
-    nestedIntAttr(usage, "completion_tokens_details", "reasoning_tokens") ||
-    intAttr(usage, "reasoning_output_tokens", "reasoning_tokens");
-  const totalTokens = intAttr(usage, "total_tokens") || inputTokens + outputTokens;
+    readNestedIntField(usage, "completion_tokens_details", "reasoning_tokens") ||
+    readIntField(usage, "reasoning_output_tokens", "reasoning_tokens");
+  const totalTokens = readIntField(usage, "total_tokens") || inputTokens + outputTokens;
   return {
     input_tokens: inputTokens,
     cached_input_tokens: cachedInputTokens,
@@ -262,10 +262,44 @@ export interface ContextEstimate {
 const CJK_PATTERN =
   /[\u4e00-\u9fff\u3400-\u4dbf\u{20000}-\u{2a6df}\u{2a700}-\u{2ebef}\u{30000}-\u{323af}]/u;
 
+interface CachedMessageTokens {
+  keyCount: number;
+  contentRef: unknown;
+  reasoningRef: unknown;
+  toolCallsRef: unknown;
+  toolCallsSig: number;
+  attachmentsRef: unknown;
+  tokens: number;
+  chars: number;
+}
+
+function toolCallsSignature(toolCalls: unknown): number {
+  if (!Array.isArray(toolCalls)) return 0;
+  let sig = toolCalls.length + 1;
+  for (let i = 0; i < toolCalls.length; i += 1) {
+    const fn = (toolCalls[i] as Record<string, unknown> | null)?.function as
+      | Record<string, unknown>
+      | undefined;
+    const argsLen = typeof fn?.arguments === "string" ? fn.arguments.length : 0;
+    sig = (sig * 31 + argsLen + i) | 0;
+  }
+  return sig;
+}
+
+function stripInternalMessageFields(message: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(message)) {
+    if (!k.startsWith("_")) out[k] = v;
+  }
+  return out;
+}
+
 export class ContextEstimator {
   private static readonly MAX_CACHE_ENTRIES = 2048;
   private readonly _budget: ContextBudget;
   private readonly tokenCache = new Map<string, number>();
+  private readonly messageCache = new WeakMap<object, CachedMessageTokens>();
+  private readonly schemaCache = new WeakMap<readonly Record<string, unknown>[], number>();
 
   constructor(budget?: ContextBudget) {
     this._budget = budget ?? ContextBudget.default();
@@ -316,8 +350,12 @@ export class ContextEstimator {
 
   estimateToolSchemas(toolSchemas?: readonly Record<string, unknown>[] | null): number {
     if (!toolSchemas || toolSchemas.length === 0) return 0;
+    const cached = this.schemaCache.get(toolSchemas);
+    if (cached !== undefined) return cached;
     const [tokens] = this.estimateMessageTokens({ tools: toolSchemas });
-    return Math.max(0, tokens);
+    const resolved = Math.max(0, tokens);
+    this.schemaCache.set(toolSchemas, resolved);
+    return resolved;
   }
 
   private estimateMessageTokens(
@@ -326,45 +364,101 @@ export class ContextEstimator {
   ): [number, number] {
     const attachments = Array.isArray(message.attachments)
       ? (message.attachments as Array<Record<string, unknown>>)
-      : [];
+      : null;
     let imageTokens = 0;
-    for (const item of attachments) {
-      const w = Number(item.width ?? 0);
-      const h = Number(item.height ?? 0);
-      imageTokens += Math.ceil(w / 32) * Math.ceil(h / 32) * 2;
+    if (attachments) {
+      for (const item of attachments) {
+        const w = Number(item.width ?? 0);
+        const h = Number(item.height ?? 0);
+        imageTokens += Math.ceil(w / 32) * Math.ceil(h / 32) * 2;
+      }
     }
-    const stripped: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(message)) {
-      if (k !== "attachments") stripped[k] = v;
+
+    if (!externalCache) {
+      const keyCount = Object.keys(message).length;
+      const sig = toolCallsSignature(message.tool_calls);
+      const hit = this.messageCache.get(message);
+      if (
+        hit &&
+        hit.keyCount === keyCount &&
+        hit.contentRef === message.content &&
+        hit.reasoningRef === message.reasoning_content &&
+        hit.toolCallsRef === message.tool_calls &&
+        hit.toolCallsSig === sig &&
+        hit.attachmentsRef === message.attachments
+      ) {
+        return [hit.tokens + imageTokens, hit.chars];
+      }
+
+      let payload: string;
+      if (!("attachments" in message)) {
+        try {
+          payload = JSON.stringify(message);
+        } catch {
+          payload = String(message);
+        }
+      } else {
+        const { attachments: _ignored, ...stripped } = message;
+        try {
+          payload = JSON.stringify(stripped);
+        } catch {
+          payload = String(stripped);
+        }
+      }
+      const chars = payload.length;
+      const cacheKey =
+        chars <= 512
+          ? payload
+          : `${chars}:${createHash("sha1").update(payload, "utf8").digest("base64")}`;
+      let tokens = this.tokenCache.get(cacheKey);
+      if (tokens !== undefined) {
+        this.tokenCache.delete(cacheKey);
+        this.tokenCache.set(cacheKey, tokens);
+      } else {
+        tokens = CJK_PATTERN.test(payload) ? Math.ceil(chars / 1.5) : Math.ceil(chars / 3.5);
+        this.tokenCache.set(cacheKey, tokens);
+        if (this.tokenCache.size > ContextEstimator.MAX_CACHE_ENTRIES) {
+          const oldestKey = this.tokenCache.keys().next().value;
+          if (oldestKey !== undefined) {
+            this.tokenCache.delete(oldestKey);
+          }
+        }
+      }
+      this.messageCache.set(message, {
+        keyCount,
+        contentRef: message.content,
+        reasoningRef: message.reasoning_content,
+        toolCallsRef: message.tool_calls,
+        toolCallsSig: sig,
+        attachmentsRef: message.attachments,
+        tokens,
+        chars,
+      });
+      return [tokens + imageTokens, chars];
     }
+
     let payload: string;
-    try {
-      payload = JSON.stringify(stripped);
-    } catch {
-      payload = String(stripped);
+    if (!("attachments" in message)) {
+      try {
+        payload = JSON.stringify(message);
+      } catch {
+        payload = String(message);
+      }
+    } else {
+      const { attachments: _ignored, ...stripped } = message;
+      try {
+        payload = JSON.stringify(stripped);
+      } catch {
+        payload = String(stripped);
+      }
     }
     const chars = payload.length;
-    const cache = externalCache ?? this.tokenCache;
-    const cached = cache.get(payload);
+    const cached = externalCache.get(payload);
     if (cached !== undefined) {
-      if (cache === this.tokenCache) {
-        this.tokenCache.delete(payload);
-        this.tokenCache.set(payload, cached);
-      }
       return [cached + imageTokens, chars];
     }
-
-    const tokens = CJK_PATTERN.test(payload)
-      ? Math.ceil(chars / 1.5)
-      : Math.ceil(chars / 3.5);
-
-    cache.set(payload, tokens);
-    if (cache === this.tokenCache && this.tokenCache.size > ContextEstimator.MAX_CACHE_ENTRIES) {
-      const oldestKey = this.tokenCache.keys().next().value;
-      if (oldestKey !== undefined) {
-        this.tokenCache.delete(oldestKey);
-      }
-    }
+    const tokens = CJK_PATTERN.test(payload) ? Math.ceil(chars / 1.5) : Math.ceil(chars / 3.5);
+    externalCache.set(payload, tokens);
     return [tokens + imageTokens, chars];
   }
 }
@@ -424,7 +518,7 @@ export class CompactionHandoffBuilder {
     for (const callId of slice) {
       const rec = records.get(callId) ?? {};
       const suffix = rec.error_type ? `, error_type=${String(rec.error_type)}` : "";
-      const okStr = rec.ok === true ? "True" : rec.ok === false ? "False" : "None";
+      const okStr = rec.ok === true ? "true" : rec.ok === false ? "false" : "unknown";
       lines.push(`- ${callId}: ${String(rec.name || "unknown")}, ok=${okStr}${suffix}`);
     }
     return lines;
@@ -441,29 +535,25 @@ export class CompactionHandoffBuilder {
         ordered.push(text);
       }
     };
-    const collectIds = (toolCalls: unknown): void => {
-      if (!Array.isArray(toolCalls)) return;
-      for (const item of toolCalls) {
-        if (item && typeof item === "object") {
-          appendId((item as Record<string, unknown>).id);
-        }
-      }
-    };
     for (const message of messages) {
       if (message.role === "tool") {
         appendId(message.tool_call_id);
       }
       if (message.meta && typeof message.meta === "object") {
-        collectIds((message.meta as Record<string, unknown>).tool_calls);
+        for (const id of extractToolCallIds((message.meta as Record<string, unknown>).tool_calls)) {
+          appendId(id);
+        }
       }
-      collectIds(message.tool_calls);
+      for (const id of extractToolCallIds(message.tool_calls)) {
+        appendId(id);
+      }
     }
     return ordered;
   }
 
   latestBoundaryIndex(messages: readonly Record<string, unknown>[]): number {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
-      if (CompactionHandoffBuilder.isBoundary(messages[i]!)) {
+      if (isCompactBoundaryMessage(messages[i]!)) {
         return i;
       }
     }
@@ -480,19 +570,6 @@ export class CompactionHandoffBuilder {
     };
     const text = JSON.stringify(payload);
     return createHash("sha1").update(text, "utf8").digest("hex");
-  }
-
-  static isBoundary(message: Record<string, unknown>): boolean {
-    const meta = message.meta;
-    return Boolean(meta && typeof meta === "object" && (meta as Record<string, unknown>).kind === "compact_boundary");
-  }
-
-  static stripInternalFields(message: Record<string, unknown>): Record<string, unknown> {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(message)) {
-      if (!k.startsWith("_")) out[k] = v;
-    }
-    return out;
   }
 
   static previousHandoff(compaction?: Record<string, unknown> | null): string {
@@ -535,6 +612,7 @@ export class CompactionService {
   readonly maxExcerptChars: number;
   readonly planSnapshotProvider: ((sessionBase: string | null) => string) | null;
   readonly usageRecorder: ((record: Record<string, unknown>) => unknown) | null;
+  private readonly _estimator = new ContextEstimator();
 
   constructor(options?: {
     policyVersion?: string;
@@ -611,7 +689,7 @@ export class CompactionService {
     if (
       recentStart < corpus.length &&
       (imageBudgetExceeded(corpus.slice(recentStart)) ||
-        new ContextEstimator().estimateMessages(corpus.slice(recentStart)).estimated_input_tokens >=
+        this._estimator.estimateMessages(corpus.slice(recentStart)).estimated_input_tokens >=
           Math.max(1, Math.floor(window / 2)))
     ) {
       record = this.buildCompaction(rawMessages, {
@@ -771,7 +849,7 @@ export class CompactionService {
     );
     const sourceMessages = messages
       .slice(sourceStart, sourceEnd)
-      .filter(m => !CompactionHandoffBuilder.isBoundary(m))
+      .filter(m => !isCompactBoundaryMessage(m))
       .map(m => ({ ...m }));
     const corpusSource = options?.handoffMessages ?? sourceMessages;
     const corpusMessages = this.buildCompressionCorpus(corpusSource);
@@ -815,8 +893,8 @@ export class CompactionService {
     const corpus: Record<string, unknown>[] = [];
     for (const message of contextMessages) {
       if (!message || typeof message !== "object") continue;
-      if (CompactionHandoffBuilder.isBoundary(message) || message.role === "system") continue;
-      const item = CompactionHandoffBuilder.stripInternalFields(message);
+      if (isCompactBoundaryMessage(message) || message.role === "system") continue;
+      const item = stripInternalMessageFields(message);
       delete item.reasoning_content;
       corpus.push(item);
     }
@@ -914,18 +992,7 @@ export class CompactionService {
 
   private toolCallIds(message: Record<string, unknown>): string[] {
     const meta = message.meta as Record<string, unknown> | undefined;
-    const calls = Array.isArray(meta?.tool_calls)
-      ? meta.tool_calls
-      : Array.isArray(message.tool_calls)
-        ? message.tool_calls
-        : [];
-    const ids: string[] = [];
-    for (const call of calls) {
-      if (call && typeof call === "object" && (call as Record<string, unknown>).id) {
-        ids.push(String((call as Record<string, unknown>).id));
-      }
-    }
-    return ids;
+    return extractToolCallIds(Array.isArray(meta?.tool_calls) ? meta.tool_calls : message.tool_calls);
   }
 
   private messageChars(message: Record<string, unknown>, toolChars: Map<string, number>): number {
@@ -1068,7 +1135,7 @@ export class CompactionService {
   ): Record<string, unknown>[] {
     const corpus: Record<string, unknown>[] = structuredClone(rawCorpus);
     const inputBudget = window - maxOutputTokens - Math.max(1, Math.floor(window / 20));
-    const estimator = new ContextEstimator();
+    const estimator = this._estimator;
 
     const buildRequest = (
       historyStart = 0,
@@ -1340,12 +1407,15 @@ export class ContextManager {
     }
 
     let messages = [...fullMessages];
-    const hotMessageCount = Math.min(
-      this.hotMessageLimit,
-      fullMessages.filter(m => this.isConversationMessage(m) && !this.isSkillSnapshot(m)).length,
-    );
+    let hotConversationCount = 0;
+    for (const m of fullMessages) {
+      if (this.isConversationMessage(m) && !this.isSkillSnapshot(m)) {
+        hotConversationCount += 1;
+      }
+    }
+    const hotMessageCount = Math.min(this.hotMessageLimit, hotConversationCount);
 
-    let finalMessages = messages.map(m => this.stripInternalFields(m));
+    let finalMessages = messages.map(m => stripInternalMessageFields(m));
     let finalEstimate = this._estimator.estimateMessages(messages);
 
     let droppedCount = 0;
@@ -1363,7 +1433,10 @@ export class ContextManager {
       }
     }
 
-    const toolMessages = finalMessages.filter(m => m.role === "tool").map(m => ({ ...m }));
+    let toolMessageCount = 0;
+    for (const m of finalMessages) {
+      if (m.role === "tool") toolMessageCount += 1;
+    }
     const autoCompactStatus = await this.buildTokenPressureStatus(session, finalEstimate);
     const contextWindowTokens = budget.resolvedContextWindowTokens();
     const contextUsagePercent =
@@ -1373,7 +1446,7 @@ export class ContextManager {
       message_count: messages.length,
       persisted_message_count: persistedMessages.length,
       pending_message_count: pending.length,
-      tool_message_count: toolMessages.length,
+      tool_message_count: toolMessageCount,
       hot_message_count: hotMessageCount,
       estimated_input_tokens: finalEstimate.estimated_input_tokens,
       estimated_chars: finalEstimate.estimated_chars,
@@ -1407,7 +1480,7 @@ export class ContextManager {
       messages: finalMessages,
       stats,
       decisions,
-      internal_messages: messages.map(m => ({ ...m })),
+      internal_messages: messages,
     };
   }
 
@@ -1619,14 +1692,6 @@ export class ContextManager {
     result.usable = true;
     result.model_status = anchorModel && currentModel ? "matched" : "anchor_model_unknown";
     return result;
-  }
-
-  private stripInternalFields(message: Record<string, unknown>): Record<string, unknown> {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(message)) {
-      if (!k.startsWith("_")) out[k] = v;
-    }
-    return out;
   }
 
   private async goalPolicyMessage(session: JsonlSessionStore): Promise<Record<string, unknown>[]> {
@@ -1966,6 +2031,8 @@ function structuredResultText(record: Record<string, unknown>): string {
   return payload && typeof payload === "object" ? JSON.stringify(payload) : "";
 }
 
+const SHELL_TASK_TOOLS = new Set(["bash", "task_control", "bash_output"]);
+
 export class TaskNotifications {
   readonly store: TaskJournal;
   readonly changed: ((record: Record<string, unknown>) => void) | null;
@@ -1986,13 +2053,16 @@ export class TaskNotifications {
     toolName: string,
     callId: string,
     result: string,
+    parsedPayload?: Record<string, unknown> | null,
   ): Promise<void> {
-    if (!["bash", "task_control", "bash_output"].includes(toolName)) return;
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(result) as Record<string, unknown>;
-    } catch {
-      return;
+    if (!SHELL_TASK_TOOLS.has(toolName)) return;
+    let payload: Record<string, unknown> | null = parsedPayload ?? null;
+    if (!payload) {
+      try {
+        payload = JSON.parse(result) as Record<string, unknown>;
+      } catch {
+        return;
+      }
     }
     if (!payload || typeof payload !== "object") return;
     const data = payload.data as Record<string, unknown> | undefined;
