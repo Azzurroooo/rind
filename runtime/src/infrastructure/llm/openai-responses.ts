@@ -13,21 +13,14 @@ import { DEFAULT_USER_AGENT } from "../settings.js";
 import type { ApiKeyProvider } from "./openai-chat.js";
 import {
   awaitWithCancellation,
+  getField,
   imageDataUrl,
-  iterateWithCancellation,
-  parseSseEvents,
+  parseSseJsonEvents,
   promptCacheKey,
   providerError,
   rejectsPromptCacheKey,
   throwForHttpError,
 } from "./sse.js";
-
-export interface MockOpenAIResponsesClient {
-  responses: {
-    create(payload: Record<string, unknown>): Promise<unknown>;
-  };
-  close?: () => Promise<void> | void;
-}
 
 export class OpenAIResponsesClient implements ChatClient {
   private readonly apiKey: ApiKeyProvider;
@@ -36,7 +29,6 @@ export class OpenAIResponsesClient implements ChatClient {
   private readonly reasoningEffort: string;
   private readonly reasoningEfforts: readonly string[];
   private readonly subscription: boolean;
-  private readonly asyncClient: MockOpenAIResponsesClient | null;
   private sessionIdProvider: (() => string) | null = null;
   private promptCacheKeyDisabled = false;
 
@@ -44,7 +36,6 @@ export class OpenAIResponsesClient implements ChatClient {
     apiKey?: ApiKeyProvider;
     model: string;
     baseUrl?: string | null;
-    asyncClient?: MockOpenAIResponsesClient | null;
     reasoningEffort?: string | null;
     reasoningEfforts?: readonly string[];
     subscription?: boolean;
@@ -55,7 +46,6 @@ export class OpenAIResponsesClient implements ChatClient {
     this.reasoningEffort = options.reasoningEffort || "";
     this.reasoningEfforts = options.reasoningEfforts ?? [];
     this.subscription = Boolean(options.subscription);
-    this.asyncClient = options.asyncClient ?? null;
   }
 
   setSessionIdProvider(provider: (() => string) | null): void {
@@ -97,9 +87,6 @@ export class OpenAIResponsesClient implements ChatClient {
     cancellationToken?: CancellationToken | null,
   ): Promise<unknown> {
     cancellationToken?.throwIfCancelled();
-    if (this.asyncClient) {
-      return await awaitWithCancellation(this.asyncClient.responses.create(payload), cancellationToken);
-    }
     const stream = Boolean(payload.stream);
     const key = await this.resolveApiKey();
     const response = await awaitWithCancellation(
@@ -176,8 +163,8 @@ export class OpenAIResponsesClient implements ChatClient {
     const payload = this.buildPayload(messages, tools, { stream: true });
     const callIds = new Map<string, string>();
     try {
-      const response = await this.request(payload, cancellationToken);
-      for await (const raw of iterateResponseEvents(response, cancellationToken)) {
+      const response = (await this.request(payload, cancellationToken)) as Response;
+      for await (const raw of parseSseJsonEvents(response, cancellationToken)) {
         for (const event of mapStreamEvents(raw, callIds)) {
           yield event;
         }
@@ -188,32 +175,7 @@ export class OpenAIResponsesClient implements ChatClient {
     }
   }
 
-  async close(): Promise<void> {
-    if (this.asyncClient?.close) {
-      await this.asyncClient.close();
-    }
-  }
-}
-
-async function* iterateResponseEvents(
-  response: unknown,
-  cancellationToken?: CancellationToken | null,
-): AsyncGenerator<unknown> {
-  if (typeof Response !== "undefined" && response instanceof Response) {
-    for await (const event of parseSseEvents(response, cancellationToken)) {
-      const data = event.data.trim();
-      if (!data || data === "[DONE]") {
-        continue;
-      }
-      yield JSON.parse(data);
-    }
-    return;
-  }
-  if (response && typeof (response as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function") {
-    for await (const chunk of iterateWithCancellation(response as AsyncIterable<unknown>, cancellationToken)) {
-      yield chunk;
-    }
-  }
+  async close(): Promise<void> {}
 }
 
 function convertInputItems(messages: readonly Record<string, unknown>[]): unknown[] {
@@ -385,11 +347,4 @@ function extractUsage(value: unknown): ModelUsage | null {
     reasoning_tokens:
       Number(getField(outputDetails, "reasoning_tokens") ?? getField(value, "reasoning_tokens") ?? 0) || 0,
   };
-}
-
-function getField(value: unknown, key: string): unknown {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  return (value as Record<string, unknown>)[key];
 }

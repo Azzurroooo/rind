@@ -405,12 +405,15 @@ export class TurnPump implements InboundSink {
       await this.worker.request(
         method,
         { session_id: record.session_id, input: text },
-        this.requestTimeout,
+        newTurn ? Math.max(this.requestTimeout, TURN_STUCK_SECONDS) : this.requestTimeout,
       );
     } catch (exc) {
       if (exc instanceof WorkerError || exc instanceof Error) {
         const currentTurn = this.turns.get(key);
-        if (newTurn && currentTurn && !currentTurn.confirmed) {
+        if (newTurn && currentTurn?.confirmed) {
+          return;
+        }
+        if (newTurn && currentTurn) {
           this.turns.delete(key);
           await this.reactions.cancel(position);
         }

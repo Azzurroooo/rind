@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { LookupError } from "../../domain/errors.js";
 import { TERMINAL_STATES, type TaskStatus } from "../../domain/models.js";
 import { resolveSessionBase } from "../paths.js";
 import { FileLockHandle } from "./atomic-files.js";
@@ -278,7 +279,22 @@ export class TaskJournal {
   }
 
   async maintain(sessionId: string): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (
+      state?.maintainedAt !== null &&
+      state?.maintainedAt !== undefined &&
+      Date.now() / 1000 - state.maintainedAt < TaskJournal.MAINTENANCE_INTERVAL
+    ) {
+      return;
+    }
     this.transaction(sessionId, "maintain");
+  }
+
+  async maintainAndRelevant(sessionId: string): Promise<Record<string, Record<string, unknown>>> {
+    return this.transaction(sessionId, "maintain_and_relevant") as Record<
+      string,
+      Record<string, unknown>
+    >;
   }
 
   private static isRelevant(record: Record<string, unknown>): boolean {
@@ -388,7 +404,7 @@ export class TaskJournal {
 
   private transaction(
     sessionId: string,
-    action: "all" | "relevant" | "get" | "origin" | "save" | "maintain",
+    action: "all" | "relevant" | "maintain_and_relevant" | "get" | "origin" | "save" | "maintain",
     taskId?: string,
     changes?: Record<string, unknown>,
     create: boolean = false,
@@ -398,12 +414,15 @@ export class TaskJournal {
     if (
       (action === "all" ||
         action === "relevant" ||
+        action === "maintain_and_relevant" ||
         action === "get" ||
         action === "origin" ||
         action === "maintain") &&
       !fs.existsSync(filePath)
     ) {
-      return action === "all" || action === "relevant" ? {} : null;
+      return action === "all" || action === "relevant" || action === "maintain_and_relevant"
+        ? {}
+        : null;
     }
     if (!fs.existsSync(directory)) {
       fs.mkdirSync(directory, { recursive: true });
@@ -439,7 +458,10 @@ export class TaskJournal {
         const eid = String(found.task_id);
         return this.recover(filePath, { [eid]: found })[eid] ?? null;
       }
-      if (action === "relevant") {
+      if (action === "relevant" || action === "maintain_and_relevant") {
+        if (action === "maintain_and_relevant") {
+          this.maintainSync(filePath, directory, state, allRecords);
+        }
         const rel: Record<string, Record<string, unknown>> = {};
         for (const [k, r] of Object.entries(allRecords)) {
           if (TaskJournal.isRelevant(r)) {
@@ -469,9 +491,7 @@ export class TaskJournal {
       }
       const previous = !create && taskId ? allRecords[taskId] : undefined;
       if (!previous && !chg.task_id) {
-        const err = new Error(`Unknown task: ${taskId}`);
-        err.name = "LookupError";
-        throw err;
+        throw new LookupError(`Unknown task: ${taskId}`);
       }
       const record: Record<string, unknown> = {
         ...(previous ?? {}),

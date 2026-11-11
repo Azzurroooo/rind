@@ -21,13 +21,6 @@ import {
 } from "./http-ws-utils.js";
 
 export const CHANNEL_ID = "feishu";
-export const CONFIG_KEYS: ReadonlySet<string> = new Set([
-  "token",
-  "allow_from",
-  "group_allow",
-  "app_id",
-  "app_secret",
-]);
 
 export const CAPABILITIES: ChannelCapabilities = createCapabilities({
   max_text_length: 15000,

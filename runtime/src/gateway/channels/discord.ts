@@ -24,11 +24,6 @@ import {
 } from "./http-ws-utils.js";
 
 export const CHANNEL_ID = "discord";
-export const CONFIG_KEYS: ReadonlySet<string> = new Set([
-  "token",
-  "allow_from",
-  "group_allow",
-]);
 
 export const CAPABILITIES: ChannelCapabilities = createCapabilities({
   max_text_length: 2000,

@@ -23,12 +23,6 @@ import {
 } from "./http-ws-utils.js";
 
 export const CHANNEL_ID = "telegram";
-export const CONFIG_KEYS: ReadonlySet<string> = new Set([
-  "token",
-  "allow_from",
-  "group_allow",
-  "proxy",
-]);
 
 export const CAPABILITIES: ChannelCapabilities = createCapabilities({
   max_text_length: 4000,
@@ -500,7 +494,7 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  async react(target: SendTarget, _emoji: string): Promise<void> {
+  async react(target: SendTarget, emoji: string): Promise<void> {
     if (!this.started) return;
     const messageId = this.lastMessageId.get(target.chat_id);
     if (!messageId) return;
@@ -508,7 +502,7 @@ export class TelegramChannel implements Channel {
       await this.callApi("setMessageReaction", {
         chat_id: target.chat_id,
         message_id: messageId,
-        reaction: [{ type: "emoji", emoji: REACTION_EMOJI }],
+        reaction: [{ type: "emoji", emoji: emoji || REACTION_EMOJI }],
         is_big: false,
       });
     } catch {

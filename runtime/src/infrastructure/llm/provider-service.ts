@@ -14,6 +14,7 @@ import type {
 } from "../../domain/models.js";
 import * as chatgptOAuth from "../chatgpt-oauth.js";
 import type { AuthInteraction } from "../chatgpt-oauth.js";
+import { atomicWriteTextSync, fileStatSignature } from "../persistence/atomic-files.js";
 import {
   API_TYPES,
   CredentialStore,
@@ -618,35 +619,39 @@ export class ProviderServiceImpl {
   }
 
   private readCache(): Record<string, unknown> {
-    if (!fs.existsSync(this.cachePath)) {
+    const sig = fileStatSignature(this.cachePath);
+    if (!sig) {
+      MODEL_LIST_CACHE.delete(this.cachePath);
       return {};
+    }
+    const cached = MODEL_LIST_CACHE.get(this.cachePath);
+    if (cached && cached[0] === sig) {
+      return { ...cached[1] };
     }
     try {
       const parsed = JSON.parse(fs.readFileSync(this.cachePath, "utf8"));
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {};
+      const data =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : {};
+      if (!MODEL_LIST_CACHE.has(this.cachePath) && MODEL_LIST_CACHE.size >= 8) {
+        const oldest = MODEL_LIST_CACHE.keys().next().value;
+        if (oldest !== undefined) MODEL_LIST_CACHE.delete(oldest);
+      }
+      MODEL_LIST_CACHE.set(this.cachePath, [sig, data]);
+      return { ...data };
     } catch {
       return {};
     }
   }
 
   private writeCache(data: Record<string, unknown>): void {
-    const dir = path.dirname(this.cachePath);
-    fs.mkdirSync(dir, { recursive: true });
-    const tempPath = path.join(dir, `.${path.basename(this.cachePath)}.${process.pid}.${Date.now()}.tmp`);
-    try {
-      fs.writeFileSync(tempPath, JSON.stringify(data, null, 2) + "\n", "utf8");
-      fs.renameSync(tempPath, this.cachePath);
-    } finally {
-      try {
-        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-      } catch {
-        // ignore
-      }
-    }
+    atomicWriteTextSync(this.cachePath, JSON.stringify(data, null, 2) + "\n");
+    MODEL_LIST_CACHE.delete(this.cachePath);
   }
 }
+
+const MODEL_LIST_CACHE = new Map<string, [string, Record<string, unknown>]>();
 
 class UnavailableChatClient implements ChatClient {
   readonly model: string;

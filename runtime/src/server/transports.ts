@@ -1,14 +1,16 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { Socket } from "node:net";
 import { AsyncMutex } from "../domain/cancellation.js";
 import { expandTilde, validateSessionId } from "../infrastructure/paths.js";
 import { JsonlSessionStore } from "../infrastructure/persistence/session-store.js";
 import { ensureUserSettings, loadSettings } from "../infrastructure/settings.js";
 import { ExternalTool } from "../infrastructure/tools/control-tools.js";
+import { ServerWebSocket, upgradeWebSocket } from "../infrastructure/ws-server.js";
 import {
   type BackgroundListFn,
   type BackgroundOutputFn,
@@ -78,31 +80,55 @@ export class StdioRuntimeServer {
 
   async run(): Promise<number> {
     let closed = false;
-    let buffer = "";
+    const chunks: string[] = [];
+    const decoder = new StringDecoder("utf8");
     let ingestChain = Promise.resolve();
+
+    const enqueueLine = (rawLine: string): void => {
+      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+      if (!line) return;
+      ingestChain = ingestChain.then(async () => {
+        if (!closed) {
+          await this.ingestLine(line);
+        }
+      });
+    };
 
     const onData = (chunk: Buffer | string): void => {
       if (closed) return;
-      buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line) continue;
-        ingestChain = ingestChain.then(async () => {
-          if (!closed) {
-            await this.ingestLine(line);
-          }
-        });
+      const text = typeof chunk === "string" ? chunk : decoder.write(chunk);
+      if (!text) return;
+      const nl = text.indexOf("\n");
+      if (nl === -1) {
+        chunks.push(text);
+        return;
+      }
+      const prefix = chunks.length > 0 ? chunks.join("") : "";
+      chunks.length = 0;
+      let start = 0;
+      let idx = nl;
+      let first = true;
+      while (idx !== -1) {
+        const segment = text.slice(start, idx);
+        enqueueLine(first ? prefix + segment : segment);
+        first = false;
+        start = idx + 1;
+        idx = text.indexOf("\n", start);
+      }
+      if (start < text.length) {
+        chunks.push(text.slice(start));
       }
     };
 
     const onEnd = (): void => {
       if (closed) return;
-      const tail = buffer;
-      buffer = "";
+      const rem = decoder.end();
+      if (rem) chunks.push(rem);
+      const tail = chunks.join("");
+      chunks.length = 0;
       ingestChain = ingestChain.then(async () => {
         if (!closed && tail.trim()) {
-          await this.ingestLine(tail);
+          await this.ingestLine(tail.endsWith("\r") ? tail.slice(0, -1) : tail);
         }
         if (!closed) {
           await this.dispatcher.submit(null);
@@ -165,161 +191,10 @@ export class StdioRuntimeServer {
 // --- WebSocket Transport (from agent/runtime/server/websocket.py) ---
 
 export const AUTH_CLOSE_CODE = 4401;
-const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_WS_MESSAGE_BYTES = 8 * 1024 * 1024;
 
-function encodeWsFrame(opcode: number, payload: Buffer): Buffer {
-  const len = payload.length;
-  let header: Buffer;
-  if (len < 126) {
-    header = Buffer.allocUnsafe(2);
-    header[0] = 0x80 | opcode;
-    header[1] = len;
-  } else if (len < 65536) {
-    header = Buffer.allocUnsafe(4);
-    header[0] = 0x80 | opcode;
-    header[1] = 126;
-    header.writeUInt16BE(len, 2);
-  } else {
-    header = Buffer.allocUnsafe(10);
-    header[0] = 0x80 | opcode;
-    header[1] = 127;
-    header.writeBigUInt64BE(BigInt(len), 2);
-  }
-  return Buffer.concat([header, payload]);
-}
-
-export class WebSocketConnection {
-  readonly socket: Socket;
-  readonly request: http.IncomingMessage;
-  private closed = false;
-  private buffer = Buffer.alloc(0);
-  private fragments: Buffer[] = [];
-  private fragmentBytes = 0;
-
-  constructor(socket: Socket, request: http.IncomingMessage) {
-    this.socket = socket;
-    this.request = request;
-  }
-
-  async sendText(text: string): Promise<void> {
-    if (this.closed || this.socket.destroyed) {
-      throw new Error("ConnectionClosed");
-    }
-    const frame = encodeWsFrame(0x01, Buffer.from(text, "utf8"));
-    await new Promise<void>((resolve, reject) => {
-      this.socket.write(frame, err => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-  }
-
-  async close(code = 1000): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    if (!this.socket.destroyed) {
-      const payload = Buffer.allocUnsafe(2);
-      payload.writeUInt16BE(code, 0);
-      const frame = encodeWsFrame(0x08, payload);
-      await new Promise<void>(resolve => {
-        this.socket.end(frame, () => resolve());
-      });
-    }
-  }
-
-  listen(onMessage: (rawMessage: string) => void, onClose: () => void): void {
-    this.socket.on("data", (chunk: Buffer) => {
-      if (this.closed) return;
-      this.buffer = Buffer.concat([this.buffer, chunk]);
-      this.drainFrames(onMessage);
-    });
-    this.socket.on("close", () => {
-      this.closed = true;
-      onClose();
-    });
-    this.socket.on("error", () => {
-      this.closed = true;
-      onClose();
-    });
-  }
-
-  private drainFrames(onMessage: (rawMessage: string) => void): void {
-    while (this.buffer.length >= 2 && !this.closed) {
-      const b0 = this.buffer[0]!;
-      const b1 = this.buffer[1]!;
-      const fin = (b0 & 0x80) !== 0;
-      const opcode = b0 & 0x0f;
-      const masked = (b1 & 0x80) !== 0;
-      let payloadLen = b1 & 0x7f;
-      let offset = 2;
-
-      if (payloadLen === 126) {
-        if (this.buffer.length < 4) return;
-        payloadLen = this.buffer.readUInt16BE(2);
-        offset = 4;
-      } else if (payloadLen === 127) {
-        if (this.buffer.length < 10) return;
-        const bigLen = this.buffer.readBigUInt64BE(2);
-        if (bigLen > BigInt(MAX_WS_MESSAGE_BYTES)) {
-          void this.close(1009);
-          return;
-        }
-        payloadLen = Number(bigLen);
-        offset = 10;
-      }
-
-      if (payloadLen > MAX_WS_MESSAGE_BYTES) {
-        void this.close(1009);
-        return;
-      }
-
-      const maskLen = masked ? 4 : 0;
-      if (this.buffer.length < offset + maskLen + payloadLen) {
-        return;
-      }
-
-      const maskKey = masked ? this.buffer.subarray(offset, offset + 4) : null;
-      offset += maskLen;
-      const payload = Buffer.from(this.buffer.subarray(offset, offset + payloadLen));
-      this.buffer = this.buffer.subarray(offset + payloadLen);
-
-      if (maskKey) {
-        for (let i = 0; i < payload.length; i += 1) {
-          payload[i] ^= maskKey[i & 3]!;
-        }
-      }
-
-      if (opcode === 0x08) {
-        void this.close(1000);
-        return;
-      }
-      if (opcode === 0x09) {
-        if (!this.closed && !this.socket.destroyed) {
-          this.socket.write(encodeWsFrame(0x0a, payload));
-        }
-        continue;
-      }
-      if (opcode === 0x0a) {
-        continue;
-      }
-      if (opcode === 0x01 || opcode === 0x02 || opcode === 0x00) {
-        if (this.fragmentBytes + payload.length > MAX_WS_MESSAGE_BYTES) {
-          void this.close(1009);
-          return;
-        }
-        this.fragments.push(payload);
-        this.fragmentBytes += payload.length;
-        if (fin) {
-          const full = Buffer.concat(this.fragments, this.fragmentBytes).toString("utf8");
-          this.fragments = [];
-          this.fragmentBytes = 0;
-          onMessage(full);
-        }
-      }
-    }
-  }
-}
+export type WebSocketConnection = ServerWebSocket;
+export const WebSocketConnection = ServerWebSocket;
 
 export class WebSocketWriter implements TransportWriter {
   private readonly ws: WebSocketConnection;
@@ -503,28 +378,12 @@ export class WebRuntimeServer {
     socket: Socket,
     head: Buffer,
   ): Promise<void> {
-    const key = req.headers["sec-websocket-key"];
-    if (typeof key !== "string" || !key.trim()) {
-      socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+    const ws = upgradeWebSocket(req, socket, head, {
+      maxMessageBytes: MAX_WS_MESSAGE_BYTES,
+    });
+    if (!ws) {
       return;
     }
-    const accept = createHash("sha1")
-      .update(key.trim() + WS_GUID)
-      .digest("base64");
-    socket.write(
-      [
-        "HTTP/1.1 101 Switching Protocols",
-        "Upgrade: websocket",
-        "Connection: Upgrade",
-        `Sec-WebSocket-Accept: ${accept}`,
-        "\r\n",
-      ].join("\r\n"),
-    );
-    if (head && head.length > 0) {
-      socket.unshift(head);
-    }
-
-    const ws = new WebSocketConnection(socket, req);
     if (!(await this.authorize(ws))) {
       return;
     }

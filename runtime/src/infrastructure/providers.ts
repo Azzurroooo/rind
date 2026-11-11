@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AuthMethod, Credential, ModelDefinition, ProviderApi, ProviderDefinition } from "../domain/models.js";
 import { REASONING_EFFORTS } from "./settings.js";
 import { resolveRindHome } from "./paths.js";
+import { atomicWriteTextSync, fileStatSignature } from "./persistence/atomic-files.js";
 
 export const API_TYPES = new Set<ProviderApi>([
   "openai-chat",
@@ -647,16 +648,39 @@ function mergeProvider(
   ];
 }
 
+const PROVIDERS_CACHE = new Map<
+  string,
+  [string, Record<string, ProviderDefinition>, Record<string, Record<string, UserModelConfig>>]
+>();
+
+function cloneUserModelsMap(
+  source: Record<string, Record<string, UserModelConfig>>,
+): Record<string, Record<string, UserModelConfig>> {
+  const out: Record<string, Record<string, UserModelConfig>> = {};
+  for (const [k, v] of Object.entries(source)) {
+    out[k] = { ...v };
+  }
+  return out;
+}
+
 export function loadProviders(
   providersPath?: string | null,
   builtin: Readonly<Record<string, ProviderDefinition>> = PROVIDERS,
 ): [Record<string, ProviderDefinition>, Record<string, Record<string, UserModelConfig>>] {
   const filePath = path.resolve(providersPath || path.join(resolveRindHome(), "providers.json"));
+  const sig = fileStatSignature(filePath);
+  if (!sig) {
+    PROVIDERS_CACHE.delete(filePath);
+    return [{ ...builtin }, {}];
+  }
+  if (builtin === PROVIDERS) {
+    const cached = PROVIDERS_CACHE.get(filePath);
+    if (cached && cached[0] === sig) {
+      return [{ ...cached[1] }, cloneUserModelsMap(cached[2])];
+    }
+  }
   const merged: Record<string, ProviderDefinition> = { ...builtin };
   const userModels: Record<string, Record<string, UserModelConfig>> = {};
-  if (!fs.existsSync(filePath)) {
-    return [merged, userModels];
-  }
   let raw: unknown;
   try {
     raw = JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -683,6 +707,13 @@ export function loadProviders(
     const [definition, models] = mergeProvider(providerId, value, merged[providerId]);
     merged[providerId] = definition;
     userModels[providerId] = models;
+  }
+  if (builtin === PROVIDERS) {
+    if (!PROVIDERS_CACHE.has(filePath) && PROVIDERS_CACHE.size >= 8) {
+      const oldest = PROVIDERS_CACHE.keys().next().value;
+      if (oldest !== undefined) PROVIDERS_CACHE.delete(oldest);
+    }
+    PROVIDERS_CACHE.set(filePath, [sig, { ...merged }, cloneUserModelsMap(userModels)]);
   }
   return [merged, userModels];
 }
@@ -734,19 +765,8 @@ export function saveCustomProvider(
     models[model] = {};
   }
   loadProvidersFromData(data);
-
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tempPath = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`);
-  try {
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2) + "\n", "utf8");
-    fs.renameSync(tempPath, target);
-  } finally {
-    try {
-      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-    } catch {
-      // ignore
-    }
-  }
+  atomicWriteTextSync(target, JSON.stringify(data, null, 2) + "\n");
+  PROVIDERS_CACHE.delete(target);
   return pid;
 }
 
@@ -756,6 +776,8 @@ function loadProvidersFromData(data: Record<string, unknown>): void {
     mergeProvider(String(providerId).trim(), value, PROVIDERS[String(providerId).trim()]);
   }
 }
+
+const AUTH_CACHE = new Map<string, [string, Record<string, unknown>]>();
 
 export class CredentialStore {
   readonly path: string;
@@ -830,14 +852,26 @@ export class CredentialStore {
   }
 
   private readAll(): Record<string, unknown> {
-    if (!fs.existsSync(this.path)) {
+    const sig = fileStatSignature(this.path);
+    if (!sig) {
+      AUTH_CACHE.delete(this.path);
       return {};
+    }
+    const cached = AUTH_CACHE.get(this.path);
+    if (cached && cached[0] === sig) {
+      return { ...cached[1] };
     }
     const value = JSON.parse(fs.readFileSync(this.path, "utf8"));
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error(`Invalid auth.json: ${this.path} must contain a JSON object`);
     }
-    return value as Record<string, unknown>;
+    const record = value as Record<string, unknown>;
+    if (!AUTH_CACHE.has(this.path) && AUTH_CACHE.size >= 8) {
+      const oldest = AUTH_CACHE.keys().next().value;
+      if (oldest !== undefined) AUTH_CACHE.delete(oldest);
+    }
+    AUTH_CACHE.set(this.path, [sig, record]);
+    return { ...record };
   }
 
   private writeAll(payload: Record<string, unknown>): void {
@@ -848,22 +882,8 @@ export class CredentialStore {
     } catch {
       // ignore
     }
-    const tempPath = path.join(dir, `.${path.basename(this.path)}.${process.pid}.${Date.now()}.tmp`);
-    try {
-      fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2) + "\n", "utf8");
-      try {
-        fs.chmodSync(tempPath, 0o600);
-      } catch {
-        // ignore
-      }
-      fs.renameSync(tempPath, this.path);
-    } finally {
-      try {
-        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-      } catch {
-        // ignore
-      }
-    }
+    atomicWriteTextSync(this.path, JSON.stringify(payload, null, 2) + "\n", 0o600);
+    AUTH_CACHE.delete(this.path);
   }
 }
 

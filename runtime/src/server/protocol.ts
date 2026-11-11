@@ -375,38 +375,35 @@ export function resolveWorkspacePath(workspaceRoot: string, relPath: unknown): s
 
 export function fileList(workspaceRoot: string, relPath: string): Record<string, unknown> {
   const resolved = resolveWorkspacePath(workspaceRoot, relPath);
-  if (!fs.existsSync(resolved)) {
-    throw new FileMethodError(`Directory not found: ${relPath}`, "NotFound");
-  }
-  let stat: fs.Stats;
+  let dirents: fs.Dirent[];
   try {
-    stat = fs.statSync(resolved);
-  } catch {
+    dirents = fs.readdirSync(resolved, { withFileTypes: true });
+  } catch (exc) {
+    const code = (exc as NodeJS.ErrnoException).code;
+    if (code === "ENOTDIR") {
+      throw new FileMethodError(`Not a directory: ${relPath}`, "InvalidRequest");
+    }
     throw new FileMethodError(`Directory not found: ${relPath}`, "NotFound");
   }
-  if (!stat.isDirectory()) {
-    throw new FileMethodError(`Not a directory: ${relPath}`, "InvalidRequest");
-  }
-  const names = fs.readdirSync(resolved).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  dirents.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const entries: Array<{ name: string; type: "dir" | "file"; size: number }> = [];
-  for (const name of names) {
-    const child = path.join(resolved, name);
-    let isDir = false;
-    try {
-      isDir = fs.statSync(child).isDirectory();
-    } catch {
-      isDir = false;
+  for (const dirent of dirents) {
+    const name = dirent.name;
+    if (dirent.isDirectory()) {
+      entries.push({ name, type: "dir", size: 0 });
+      continue;
     }
-    if (isDir) {
+    const child = path.join(resolved, name);
+    let stat: fs.Stats | null = null;
+    try {
+      stat = fs.statSync(child);
+    } catch {
+      stat = null;
+    }
+    if (stat?.isDirectory()) {
       entries.push({ name, type: "dir", size: 0 });
     } else {
-      let size = 0;
-      try {
-        size = fs.statSync(child).size;
-      } catch {
-        size = 0;
-      }
-      entries.push({ name, type: "file", size });
+      entries.push({ name, type: "file", size: stat?.size ?? 0 });
     }
   }
   return { entries };

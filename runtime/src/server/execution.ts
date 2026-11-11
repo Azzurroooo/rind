@@ -255,11 +255,14 @@ export class ExecutionCoordinator {
     }
   }
 
-  async backgroundWait(sessionId: string): Promise<Record<string, unknown> | null> {
+  async backgroundWait(
+    sessionId: string,
+    preloadedRecords?: Record<string, Record<string, unknown>>,
+  ): Promise<Record<string, unknown> | null> {
     if (this.closed || this.suppressed.has(sessionId) || this.closedSessions.has(sessionId)) {
       return null;
     }
-    const records = await this.taskNotifications.store.relevant(sessionId);
+    const records = preloadedRecords ?? (await this.taskNotifications.store.relevant(sessionId));
     const scope = this.scopes.get(sessionId);
     const workerId = this.shellTools.supervisor.journal?.worker_instance_id ?? "";
     const tasks = Object.values(records).filter(

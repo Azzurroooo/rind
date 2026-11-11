@@ -102,7 +102,3 @@ export function resetPhotonCache(): void {
     // ignore
   }
 }
-
-export async function loadPhoton(): Promise<PhotonModule> {
-  return loadPhotonSync();
-}

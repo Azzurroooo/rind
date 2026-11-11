@@ -10,7 +10,6 @@ import type {
 export const TYPING_RESEND_SECONDS = 3.0;
 export const TYPING_TTL_SECONDS = 60.0;
 export const TYPING_FAILURE_LIMIT = 2;
-export const COMPLETION_REACTION = "✅";
 export const DEFAULT_MAX_TEXT_LENGTH = 4000;
 
 interface TypingTask {
@@ -194,9 +193,5 @@ export class Outbound {
       return;
     }
     await channel.react(target, emoji);
-  }
-
-  async react(position: ReplyPosition | null): Promise<void> {
-    await this.reactEmoji(position, COMPLETION_REACTION);
   }
 }

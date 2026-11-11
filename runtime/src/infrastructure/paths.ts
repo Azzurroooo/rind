@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -51,10 +51,6 @@ export function resolveRindHome(envHome = process.env.RIND_HOME): string {
 
 export function getDefaultSessionsDir(envHome?: string): string {
   return path.join(resolveRindHome(envHome), "sessions");
-}
-
-export function getDefaultSkillsDir(envHome?: string): string {
-  return path.join(resolveRindHome(envHome), "skills");
 }
 
 export function validateSessionId(sessionId: unknown): string {
@@ -146,7 +142,21 @@ function findExecutableInPath(name: string): string | null {
   return null;
 }
 
+let cachedShellKey: string | null = null;
+let cachedShellDetection: ShellDetection | null = null;
+
 export function detectDefaultShell(): ShellDetection {
+  const key = `${process.platform}:${process.env.RIND_BASH_PATH || ""}`;
+  if (cachedShellDetection && cachedShellKey === key) {
+    return cachedShellDetection;
+  }
+  const detected = computeDefaultShell();
+  cachedShellKey = key;
+  cachedShellDetection = detected;
+  return detected;
+}
+
+function computeDefaultShell(): ShellDetection {
   if (process.platform !== "win32") {
     return {
       executable: findExecutableInPath("bash") || "bash",
@@ -232,32 +242,4 @@ export function getSystemInfo(workspaceRoot?: string | null): string {
     `Shell Executable: ${shellExecutable}\n` +
     "</environment_context>\n"
   );
-}
-
-export function checkPathAllowed(targetPath: string, allowedRoots: readonly string[]): string {
-  const canonical = canonicalizePath(targetPath);
-  const normCandidate = normcasePath(canonical);
-  for (const root of allowedRoots) {
-    const normRoot = normcasePath(canonicalizePath(root));
-    if (normCandidate === normRoot) return canonical;
-    const prefix = normRoot.endsWith(path.sep) ? normRoot : normRoot + path.sep;
-    if (normCandidate.startsWith(prefix)) return canonical;
-  }
-  throw new Error(`Path '${targetPath}' is outside allowed workspace roots.`);
-}
-
-export function isSymlinkEscape(rootPath: string, targetPath: string): boolean {
-  const canonicalRoot = normcasePath(canonicalizePath(rootPath));
-  const canonicalTarget = normcasePath(canonicalizePath(targetPath));
-  if (canonicalTarget === canonicalRoot) return false;
-  const prefix = canonicalRoot.endsWith(path.sep) ? canonicalRoot : canonicalRoot + path.sep;
-  if (!canonicalTarget.startsWith(prefix)) return true;
-  try {
-    const lst = lstatSync(targetPath);
-    if (lst.isSymbolicLink()) {
-      const real = normcasePath((realpathSync.native || realpathSync)(targetPath));
-      if (real !== canonicalRoot && !real.startsWith(prefix)) return true;
-    }
-  } catch {}
-  return false;
 }

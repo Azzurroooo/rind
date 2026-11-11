@@ -1,21 +1,11 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { canonicalizePath, resolveProjectRoot, resolveRindHome } from "./paths.js";
+import { fileStatSignature } from "./persistence/atomic-files.js";
 
-export const RIND_DOC_FILENAME = "RIND.md";
 export const RIND_DOC_NAME = "RIND.md";
-export const MAX_RIND_DOC_BYTES = 32 * 1024;
 export const RIND_DOC_BYTE_LIMIT = 32 * 1024;
-export const RIND_DOC_TRUNCATION_MARKER = "\n...[RIND.md truncated at 32 KiB byte budget]...";
-
-export interface RindDocEntry {
-  readonly scope: "user" | "project";
-  readonly path: string;
-  readonly content: string;
-  readonly truncated: boolean;
-  readonly byte_size: number;
-}
 
 export function resolveUserDocPath(userHome?: string): string {
   const base = userHome ? canonicalizePath(userHome) : resolveRindHome();
@@ -37,28 +27,46 @@ interface RawRindDoc {
   error_type: string | null;
 }
 
+const DOC_CACHE = new Map<string, [string, RawRindDoc]>();
+
 function readDoc(scope: "user" | "project", filePath: string): RawRindDoc {
-  let exists = false;
-  try {
-    exists = statSync(filePath).isFile();
-  } catch {
-    exists = false;
+  const sig = fileStatSignature(filePath);
+  const cacheKey = `${scope}:${filePath}`;
+  if (!sig) {
+    DOC_CACHE.delete(cacheKey);
+    return {
+      scope,
+      path: filePath,
+      exists: false,
+      raw_bytes: 0,
+      injected_bytes: 0,
+      truncated: false,
+      content: "",
+      error_type: null,
+    };
+  }
+  const cached = DOC_CACHE.get(cacheKey);
+  if (cached && cached[0] === sig) {
+    return cached[1];
   }
   const doc: RawRindDoc = {
     scope,
     path: filePath,
-    exists,
+    exists: true,
     raw_bytes: 0,
     injected_bytes: 0,
     truncated: false,
     content: "",
     error_type: null,
   };
-  if (!exists) return doc;
   let raw: Buffer;
   try {
     raw = readFileSync(filePath);
   } catch (exc: any) {
+    if (exc?.code === "EISDIR") {
+      doc.exists = false;
+      return doc;
+    }
     doc.error_type = exc?.name || "Error";
     return doc;
   }
@@ -70,6 +78,11 @@ function readDoc(scope: "user" | "project", filePath: string): RawRindDoc {
   doc.injected_bytes = Buffer.byteLength(text, "utf8");
   doc.truncated = truncated;
   doc.content = text;
+  if (!DOC_CACHE.has(cacheKey) && DOC_CACHE.size >= 16) {
+    const oldest = DOC_CACHE.keys().next().value;
+    if (oldest !== undefined) DOC_CACHE.delete(oldest);
+  }
+  DOC_CACHE.set(cacheKey, [sig, doc]);
   return doc;
 }
 
@@ -125,46 +138,4 @@ export function buildRindDocContext(
     stats,
     decisions,
   ];
-}
-
-export function loadRindDocs(workspaceRoot?: string | null, userHome?: string | null): RindDocEntry[] {
-  const userDoc = readDoc("user", resolveUserDocPath(userHome ?? undefined));
-  const entries: RindDocEntry[] = [];
-  if (userDoc.exists && !userDoc.error_type && userDoc.content.trim()) {
-    entries.push({
-      scope: "user",
-      path: userDoc.path,
-      content: userDoc.content.trim(),
-      truncated: userDoc.truncated,
-      byte_size: userDoc.raw_bytes,
-    });
-  }
-  if (workspaceRoot) {
-    const projectPath = resolveProjectDocPath(workspaceRoot);
-    if (path.resolve(projectPath) !== path.resolve(userDoc.path)) {
-      const projectDoc = readDoc("project", projectPath);
-      if (projectDoc.exists && !projectDoc.error_type && projectDoc.content.trim()) {
-        entries.push({
-          scope: "project",
-          path: projectDoc.path,
-          content: projectDoc.content.trim(),
-          truncated: projectDoc.truncated,
-          byte_size: projectDoc.raw_bytes,
-        });
-      }
-    }
-  }
-  return entries;
-}
-
-export function formatRindDocsMessage(docs: readonly RindDocEntry[]): string {
-  if (!docs || docs.length === 0) return "";
-  return docs
-    .map((doc) => {
-      const warning = doc.truncated
-        ? `[warning] ${doc.scope} RIND.md exceeded ${RIND_DOC_BYTE_LIMIT} bytes and was truncated before injection.\n\n`
-        : "";
-      return `\n\n--- ${doc.scope}-doc ---\n\n${warning}${doc.content}`;
-    })
-    .join("");
 }

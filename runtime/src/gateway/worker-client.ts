@@ -390,6 +390,12 @@ export class WorkerClient {
       if (this.seen.has(key)) {
         return;
       }
+      if (this.seen.size >= 4096) {
+        const oldest = this.seen.values().next().value;
+        if (oldest !== undefined) {
+          this.seen.delete(oldest);
+        }
+      }
       this.seen.add(key);
     }
     this.enqueueEvent(envelope, replayed);

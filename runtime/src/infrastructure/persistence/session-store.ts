@@ -3,13 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { AsyncMutex, type CancellationToken } from "../../domain/cancellation.js";
+import { LookupError } from "../../domain/errors.js";
 import {
   classifyToolError,
   classifyToolPayload,
   COMPACT_CONTINUATION_USER_CONTENT,
   COMPACT_HANDOFF_REASONING_CONTENT,
   isCompactBoundaryMessage,
-  looksLikeToolPayload,
   normalizeGoal,
   normalizeGoalObjective,
   normalizeGoalStatus,
@@ -27,7 +27,6 @@ import { refreshSystemPrompt } from "../../prompts.js";
 import {
   attachmentPath,
   captureImage,
-  checkCancelled,
   checkImageBudget,
   loadImage,
   processImage,
@@ -37,7 +36,7 @@ import {
 import { resolveProjectRoot, resolveRindHome, resolveSessionBase, validateSessionId } from "../paths.js";
 import { DEFAULT_PROVIDER, normalizeReasoningEffort } from "../settings.js";
 import { IMPORT_DEFAULTS } from "../skills.js";
-import { SESSION_FILES, type SessionFiles } from "./atomic-files.js";
+import { atomicWriteTextSync, SESSION_FILES, type SessionFiles } from "./atomic-files.js";
 import { ToolResultNormalizer } from "./result-normalizer.js";
 
 export const NAME_LIMIT = 80;
@@ -348,6 +347,9 @@ export class SessionIndexRepository {
         const sessions = [...indexData.sessions];
         const idx = sessions.findIndex(s => s && s.id === entry.id);
         if (idx >= 0) {
+          if (sameIndexSummary(sessions[idx], entry) && sessions[idx].updated_at === entry.updated_at) {
+            return;
+          }
           sessions[idx] = entry;
         } else {
           sessions.push(entry);
@@ -434,7 +436,7 @@ export class MessageRepository {
     meta?: Record<string, unknown> | null,
     reasoningContent?: string | null,
     attachments?: unknown[] | null,
-  ): void {
+  ): Record<string, unknown> {
     const msg: Record<string, unknown> = {
       id: randomUUID().replace(/-/g, ""),
       ts,
@@ -451,6 +453,7 @@ export class MessageRepository {
       msg.attachments = attachments;
     }
     this.files.appendJsonl(this.filePath, msg);
+    return msg;
   }
 
   loadMessages(): Record<string, unknown>[] {
@@ -483,14 +486,7 @@ export class ToolCallRepository {
     if (typeof modelContent !== "string" || !modelContent) {
       throw new Error("tool record schema v2 requires non-empty model_content");
     }
-    let parsed: unknown = result;
-    if (typeof result === "string" && looksLikeToolPayload(result)) {
-      try {
-        parsed = JSON.parse(result);
-      } catch {
-        parsed = result;
-      }
-    }
+    let parsed: unknown = typeof result === "string" ? (parseToolResultPayload(result) ?? result) : result;
     if (attachments && attachments.length > 0 && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const copy = { ...(parsed as Record<string, unknown>) };
       delete copy.attachments;
@@ -653,6 +649,29 @@ function compactReplacementBoundary(compaction: Record<string, unknown>): Record
   ];
 }
 
+function applyCompactPair(
+  messages: readonly Record<string, unknown>[],
+  matched: [number, Record<string, unknown>],
+): Record<string, unknown>[] {
+  const [boundaryIndex, compaction] = matched;
+  const cut = retainedCutIndex(boundaryIndex, compaction);
+  const projected: Record<string, unknown>[] = [];
+  for (let i = 0; i < cut; i++) {
+    const m = messages[i];
+    if (m.role === "system") projected.push({ ...m });
+  }
+  projected.push(...compactReplacementBoundary(compaction));
+  for (let i = cut; i < boundaryIndex; i++) {
+    const m = messages[i];
+    if (m.role !== "system") projected.push({ ...m });
+  }
+  for (let i = boundaryIndex + 1; i < messages.length; i++) {
+    const m = messages[i];
+    if (!isCompactBoundaryMessage(m)) projected.push({ ...m });
+  }
+  return projected;
+}
+
 export function applyLatestCompactBoundary(
   messages: readonly Record<string, unknown>[],
   compactions: readonly Record<string, unknown>[],
@@ -661,20 +680,7 @@ export function applyLatestCompactBoundary(
   if (!matched) {
     return messages.map(m => ({ ...m }));
   }
-  const [boundaryIndex, compaction] = matched;
-  const cut = retainedCutIndex(boundaryIndex, compaction);
-  const projected: Record<string, unknown>[] = [];
-  for (const m of messages.slice(0, cut)) {
-    if (m.role === "system") projected.push({ ...m });
-  }
-  projected.push(...compactReplacementBoundary(compaction));
-  for (const m of messages.slice(cut, boundaryIndex)) {
-    if (m.role !== "system") projected.push({ ...m });
-  }
-  for (const m of messages.slice(boundaryIndex + 1)) {
-    if (!isCompactBoundaryMessage(m)) projected.push({ ...m });
-  }
-  return projected;
+  return applyCompactPair(messages, matched);
 }
 
 function toolResultPayload(record: Record<string, unknown>, message: Record<string, unknown>): unknown {
@@ -789,7 +795,7 @@ function projectToolMessage(
 
 function buildAssistantToolCalls(
   toolCallsMeta: readonly Record<string, unknown>[],
-  toolMap: Map<string, Record<string, unknown>>,
+  toolMap: ReadonlyMap<string, Record<string, unknown>>,
 ): Record<string, unknown>[] {
   const toolCalls: Record<string, unknown>[] = [];
   for (const tcMeta of toolCallsMeta) {
@@ -814,7 +820,7 @@ function buildAssistantToolCalls(
 
 function missingToolMessages(
   toolCalls: readonly Record<string, unknown>[],
-  toolMap: Map<string, Record<string, unknown>>,
+  toolMap: ReadonlyMap<string, Record<string, unknown>>,
   emittedToolCallIds: Set<string>,
   includeIds: boolean,
 ): Record<string, unknown>[] {
@@ -855,22 +861,28 @@ export function projectMessages(
     includeIds?: boolean;
     compacted?: boolean;
     includeInternal?: boolean;
+    toolMap?: ReadonlyMap<string, Record<string, unknown>>;
   } = {},
 ): Record<string, unknown>[] {
   const includeIds = options.includeIds ?? false;
   const compacted = options.compacted ?? true;
   const includeInternal = options.includeInternal ?? false;
 
-  const compactApplied = compacted && latestCompactPair(messages, compactions) !== null;
-  const projectedMessages = compactApplied
-    ? applyLatestCompactBoundary(messages, compactions)
+  const matchedCompact = compacted ? latestCompactPair(messages, compactions) : null;
+  const compactApplied = matchedCompact !== null;
+  const projectedMessages = matchedCompact
+    ? applyCompactPair(messages, matchedCompact)
     : messages.map(m => ({ ...m }));
 
-  const toolMap = new Map<string, Record<string, unknown>>();
-  for (const item of toolRecords) {
-    if (item && typeof item === "object" && item.id) {
-      toolMap.set(String(item.id), item);
+  let toolMap = options.toolMap;
+  if (!toolMap) {
+    const built = new Map<string, Record<string, unknown>>();
+    for (const item of toolRecords) {
+      if (item && typeof item === "object" && item.id) {
+        built.set(String(item.id), item);
+      }
     }
+    toolMap = built;
   }
 
   const builtMessages: Record<string, unknown>[] = [];
@@ -1068,7 +1080,8 @@ export class JsonlSessionStore {
   private _lastPreview = "";
   private _projectedCaches = new Map<string, [string, Record<string, unknown>[]]>();
   private _messagesCache: [string, Record<string, unknown>[]] | null = null;
-  private _toolRecordsCache: [string, Record<string, unknown>[]] | null = null;
+  private _toolRecordsCache: [string, Record<string, unknown>[], Map<string, Record<string, unknown>>] | null = null;
+  private _compactionsCache: [string, Record<string, unknown>[]] | null = null;
   private readonly _files = SESSION_FILES;
   private _msgRepo: MessageRepository | null = null;
   private _toolRepo: ToolCallRepository | null = null;
@@ -1176,9 +1189,7 @@ export class JsonlSessionStore {
     const base = resolveSessionBase(root, clean);
     const metaPath = path.join(base, "meta.json");
     if (!fs.existsSync(base) || !fs.statSync(base).isDirectory()) {
-      const err = new Error(`Session not found: ${clean}`);
-      err.name = "LookupError";
-      throw err;
+      throw new LookupError(`Session not found: ${clean}`);
     }
     const meta = SESSION_FILES.loadJson(metaPath);
     validateSessionMeta(meta, clean);
@@ -1501,6 +1512,7 @@ export class JsonlSessionStore {
       projectedCaches: new Map(this._projectedCaches),
       messagesCache: this._messagesCache,
       toolRecordsCache: this._toolRecordsCache,
+      compactionsCache: this._compactionsCache,
       model: this._model,
       provider: this._provider,
       reasoningEffort: this._reasoningEffort,
@@ -1521,6 +1533,7 @@ export class JsonlSessionStore {
       this._projectedCaches = previous.projectedCaches;
       this._messagesCache = previous.messagesCache;
       this._toolRecordsCache = previous.toolRecordsCache;
+      this._compactionsCache = previous.compactionsCache;
       this._model = previous.model;
       this._provider = previous.provider;
       this._reasoningEffort = previous.reasoningEffort;
@@ -1646,6 +1659,41 @@ export class JsonlSessionStore {
     this._projectedCaches.clear();
     this._messagesCache = null;
     this._toolRecordsCache = null;
+    this._compactionsCache = null;
+  }
+
+  private _appendMessageSync(
+    role: string,
+    content: string,
+    toolCallId?: string | null,
+    toolName?: string | null,
+    meta?: Record<string, unknown> | null,
+    reasoningContent?: string | null,
+    attachments?: unknown[] | null,
+  ): Record<string, unknown> {
+    const msgPath = this._sessionPaths.messages;
+    const priorCache = this._messagesCache;
+    const priorMessages =
+      priorCache && priorCache[0] === this._projectionFileSignature(msgPath)
+        ? priorCache[1]
+        : null;
+    const msg = this._msgRepo!.persistMessage(
+      this.now_iso(),
+      role,
+      content,
+      toolCallId,
+      toolName,
+      meta,
+      reasoningContent,
+      attachments,
+    );
+    this._projectedCaches.clear();
+    if (priorMessages !== null) {
+      this._messagesCache = [this._projectionFileSignature(msgPath), [...priorMessages, msg]];
+    } else {
+      this._messagesCache = null;
+    }
+    return msg;
   }
 
   private _loadMessagesSync(): Record<string, unknown>[] {
@@ -1660,15 +1708,37 @@ export class JsonlSessionStore {
     return messages;
   }
 
-  private _loadToolRecordsSync(): Record<string, unknown>[] {
-    if (!this._toolRepo) return [];
+  private _loadToolRecordsWithMapSync(): [Record<string, unknown>[], Map<string, Record<string, unknown>>] {
+    if (!this._toolRepo) return [[], new Map()];
     const filePath = this._sessionPaths.tool_calls;
     const sig = this._projectionFileSignature(filePath);
     if (this._toolRecordsCache && this._toolRecordsCache[0] === sig) {
-      return this._toolRecordsCache[1];
+      return [this._toolRecordsCache[1], this._toolRecordsCache[2]];
     }
     const records = this._toolRepo.loadToolCalls();
-    this._toolRecordsCache = [sig, records];
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const item of records) {
+      if (item && typeof item === "object" && item.id) {
+        byId.set(String(item.id), item);
+      }
+    }
+    this._toolRecordsCache = [sig, records, byId];
+    return [records, byId];
+  }
+
+  private _loadToolRecordsSync(): Record<string, unknown>[] {
+    return this._loadToolRecordsWithMapSync()[0];
+  }
+
+  private _loadCompactionsSync(): Record<string, unknown>[] {
+    if (!this._compactionRepo) return [];
+    const filePath = this._sessionPaths.compactions;
+    const sig = this._projectionFileSignature(filePath);
+    if (this._compactionsCache && this._compactionsCache[0] === sig) {
+      return this._compactionsCache[1];
+    }
+    const records = sig === "0:0" ? [] : this._compactionRepo.loadCompactions();
+    this._compactionsCache = [sig, records];
     return records;
   }
 
@@ -1706,12 +1776,13 @@ export class JsonlSessionStore {
       return cached[1];
     }
     const messages = this._loadMessagesSync();
-    const toolRecords = this._loadToolRecordsSync();
-    const compactions = this._compactionRepo ? this._compactionRepo.loadCompactions() : [];
+    const [toolRecords, toolMap] = this._loadToolRecordsWithMapSync();
+    const compactions = this._loadCompactionsSync();
     const built = projectMessages(messages, toolRecords, compactions, this._systemPrompt, {
       includeIds,
       compacted,
       includeInternal,
+      toolMap,
     });
     this._projectedCaches.set(key, [sig, built]);
     return built;
@@ -1736,9 +1807,7 @@ export class JsonlSessionStore {
         return this._loadSession(sessionId);
       }
       if (!this._createMissing) {
-        const err = new Error(`Session not found: ${sessionId}`);
-        err.name = "LookupError";
-        throw err;
+        throw new LookupError(`Session not found: ${sessionId}`);
       }
       this._createSession(sessionId);
       return [];
@@ -1761,8 +1830,7 @@ export class JsonlSessionStore {
     if (!this._msgRepo || !this._sessionMeta) return;
     const hasSystem = messages.some(m => m && m.role === "system");
     if (!hasSystem && this._systemPrompt) {
-      this._msgRepo.persistMessage(this.now_iso(), "system", this._systemPrompt);
-      this._invalidateProjectionCache();
+      this._appendMessageSync("system", this._systemPrompt);
       this._sessionMeta.message_count = Number(this._sessionMeta.message_count || 0) + 1;
       this._persistMetaSync();
     }
@@ -1771,9 +1839,7 @@ export class JsonlSessionStore {
   private _materializeDraftSync(): void {
     if (this.is_persisted) return;
     if (!this._createMissing) {
-      const err = new Error(`Session not found: ${this._sessionId || "unknown"}`);
-      err.name = "LookupError";
-      throw err;
+      throw new LookupError(`Session not found: ${this._sessionId || "unknown"}`);
     }
     if (this._sessionId === null) {
       this._bindDraftSync(newSessionId());
@@ -2049,8 +2115,7 @@ export class JsonlSessionStore {
       }
       this._materializeDraftSync();
     }
-    this._msgRepo!.persistMessage(
-      this.now_iso(),
+    this._appendMessageSync(
       role,
       content,
       toolCallId,
@@ -2059,7 +2124,6 @@ export class JsonlSessionStore {
       reasoningContent,
       attachments,
     );
-    this._invalidateProjectionCache();
     if (!isContextRecord && this._sessionMeta) {
       this._sessionMeta.message_count = Number(this._sessionMeta.message_count || 0) + 1;
     }
@@ -2097,9 +2161,9 @@ export class JsonlSessionStore {
       if (!this._toolRepo || !this._sessionMeta) return;
       const toolPath = this._sessionPaths.tool_calls;
       const priorCache = this._toolRecordsCache;
-      const priorRecords =
+      const priorMatch =
         priorCache && priorCache[0] === this._projectionFileSignature(toolPath)
-          ? priorCache[1]
+          ? priorCache
           : null;
       const record = this._toolRepo.persistToolCall(
         callId,
@@ -2114,9 +2178,13 @@ export class JsonlSessionStore {
         modelContentPolicy,
         attachments,
       );
-      this._invalidateProjectionCache();
-      if (priorRecords !== null) {
-        this._toolRecordsCache = [this._projectionFileSignature(toolPath), [...priorRecords, record]];
+      this._projectedCaches.clear();
+      if (priorMatch !== null) {
+        const nextMap = new Map(priorMatch[2]);
+        if (record.id) nextMap.set(String(record.id), record);
+        this._toolRecordsCache = [this._projectionFileSignature(toolPath), [...priorMatch[1], record], nextMap];
+      } else {
+        this._toolRecordsCache = null;
       }
       this._sessionMeta.tool_call_count = Number(this._sessionMeta.tool_call_count || 0) + 1;
       this._persistMetaSync();
@@ -2129,7 +2197,7 @@ export class JsonlSessionStore {
 
   private _latestCompactionSync(): Record<string, unknown> | null {
     if (!this._compactionRepo || !this._msgRepo) return null;
-    return latestCompaction(this._loadMessagesSync(), this._compactionRepo.loadCompactions());
+    return latestCompaction(this._loadMessagesSync(), this._loadCompactionsSync());
   }
 
   async get_messages_slice(options: {
@@ -2175,7 +2243,12 @@ export class JsonlSessionStore {
     callIds?: readonly string[] | null;
   } = {}): Promise<Record<string, unknown>[]> {
     if (!this._toolRepo) return [];
-    let records = this._loadToolRecordsSync();
+    const [allRecords, byId] = this._loadToolRecordsWithMapSync();
+    if (options.callIds && options.callIds.length === 1) {
+      const hit = byId.get(String(options.callIds[0]));
+      return hit ? [{ ...hit }] : [];
+    }
+    let records = allRecords;
     if (options.callIds && options.callIds.length > 0) {
       const allowed = new Set(options.callIds);
       records = records.filter(r => allowed.has(String(r.id || "")));
@@ -2320,13 +2393,23 @@ export class JsonlSessionStore {
       if (!candidate.id) candidate.id = randomUUID().replace(/-/g, "");
       if (!candidate.created_at) candidate.created_at = this.now_iso();
       if (!candidate.policy_version) candidate.policy_version = "compact_boundary_v1";
+      const compPath = this._sessionPaths.compactions;
+      const priorCompCache = this._compactionsCache;
+      const priorComps =
+        priorCompCache && priorCompCache[0] === this._projectionFileSignature(compPath)
+          ? priorCompCache[1]
+          : null;
       const record = this._compactionRepo.persistCompaction(candidate);
+      if (priorComps !== null) {
+        this._compactionsCache = [this._projectionFileSignature(compPath), [...priorComps, record]];
+      } else {
+        this._compactionsCache = null;
+      }
       const compactId = record.id;
-      this._msgRepo.persistMessage(this.now_iso(), "assistant", "", null, null, {
+      this._appendMessageSync("assistant", "", null, null, {
         kind: "compact_boundary",
         compact_id: compactId,
       });
-      this._invalidateProjectionCache();
       this._sessionMeta.message_count = Number(this._sessionMeta.message_count || 0) + 1;
       this._sessionMeta.latest_compaction = {
         id: compactId,
@@ -2624,7 +2707,7 @@ export class JsonlSessionStore {
     const meta = await this.get_metadata();
     const messages = await this.load_messages();
     const toolRecords = await this.get_tool_records();
-    const compactions = this._compactionRepo ? this._compactionRepo.loadCompactions() : [];
+    const compactions = this._loadCompactionsSync();
     let messagesBytes = 0;
     try {
       if (this._sessionPaths.messages && fs.existsSync(this._sessionPaths.messages)) {
@@ -2701,9 +2784,7 @@ export function forkSession(
 
   const meta = files.loadJson(path.join(sourceBase, "meta.json"));
   if (!meta) {
-    const err = new Error(`Session not found: ${clean}`);
-    err.name = "LookupError";
-    throw err;
+    throw new LookupError(`Session not found: ${clean}`);
   }
 
   const messages = files.readJsonl(path.join(sourceBase, "messages.jsonl"));
@@ -2873,26 +2954,7 @@ export function writePlan(plan: readonly PlanItem[], sessionBase: string | null 
     schema_version: PLAN_SCHEMA_VERSION,
     plan,
   };
-  const temporary = path.join(
-    path.dirname(filePath),
-    `${path.basename(filePath)}.${randomUUID().replace(/-/g, "")}.tmp`,
-  );
-  try {
-    const fd = fs.openSync(temporary, "w");
-    try {
-      fs.writeFileSync(fd, JSON.stringify(payload, null, 2) + "\n", "utf8");
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(temporary, filePath);
-  } finally {
-    try {
-      if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
-    } catch {
-      // ignore
-    }
-  }
+  atomicWriteTextSync(filePath, JSON.stringify(payload, null, 2) + "\n");
 }
 
 function truncatePlanText(text: string, charLimit: number): string {

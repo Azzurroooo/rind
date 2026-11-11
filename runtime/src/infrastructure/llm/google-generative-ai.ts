@@ -11,49 +11,27 @@ import type {
 import { DEFAULT_USER_AGENT } from "../settings.js";
 import {
   awaitWithCancellation,
-  iterateWithCancellation,
-  parseSseEvents,
+  getField,
+  parseSseJsonEvents,
   providerError,
   separateToolImages,
   throwForHttpError,
 } from "./sse.js";
 
-export interface MockGoogleGenAIClient {
-  aio: {
-    models: {
-      generate_content(params: {
-        model: string;
-        contents: unknown[];
-        config: Record<string, unknown>;
-      }): Promise<unknown>;
-      generate_content_stream(params: {
-        model: string;
-        contents: unknown[];
-        config: Record<string, unknown>;
-      }): Promise<unknown>;
-    };
-    close?: () => Promise<void> | void;
-  };
-  close?: () => Promise<void> | void;
-}
-
 export class GoogleGenerativeAIClient implements ChatClient {
   private readonly apiKey: string;
   private readonly model: string;
   private readonly baseUrl: string;
-  private readonly client: MockGoogleGenAIClient | null;
   private readonly sendToolCallIds: boolean;
 
   constructor(options: {
     apiKey: string;
     model: string;
     baseUrl?: string | null;
-    client?: MockGoogleGenAIClient | null;
   }) {
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.baseUrl = (options.baseUrl || "https://generativelanguage.googleapis.com").replace(/\/+$/, "");
-    this.client = options.client ?? null;
     this.sendToolCallIds = requiresToolCallIds(options.model);
   }
 
@@ -78,17 +56,6 @@ export class GoogleGenerativeAIClient implements ChatClient {
     }
     try {
       cancellationToken?.throwIfCancelled();
-      if (this.client) {
-        const response = await awaitWithCancellation(
-          this.client.aio.models.generate_content({
-            model: this.model,
-            contents,
-            config,
-          }),
-          cancellationToken,
-        );
-        return parseCompletion(response);
-      }
       const body = buildRestBody(contents, config);
       const response = await awaitWithCancellation(
         fetch(this.endpoint(false), {
@@ -123,38 +90,25 @@ export class GoogleGenerativeAIClient implements ChatClient {
     const fallbackId = () => `call_${nextFallbackIdx++}`;
     try {
       cancellationToken?.throwIfCancelled();
-      let streamSource: unknown;
-      if (this.client) {
-        streamSource = await awaitWithCancellation(
-          this.client.aio.models.generate_content_stream({
-            model: this.model,
-            contents,
-            config,
-          }),
-          cancellationToken,
-        );
-      } else {
-        const body = buildRestBody(contents, config);
-        const response = await awaitWithCancellation(
-          fetch(this.endpoint(true), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "text/event-stream",
-              "x-goog-api-key": this.apiKey,
-              "User-Agent": DEFAULT_USER_AGENT,
-            },
-            body: JSON.stringify(body),
-            signal: cancellationToken?.signal,
-          }),
-          cancellationToken,
-        );
-        if (!response.ok) {
-          await throwForHttpError(response);
-        }
-        streamSource = response;
+      const body = buildRestBody(contents, config);
+      const response = await awaitWithCancellation(
+        fetch(this.endpoint(true), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            "x-goog-api-key": this.apiKey,
+            "User-Agent": DEFAULT_USER_AGENT,
+          },
+          body: JSON.stringify(body),
+          signal: cancellationToken?.signal,
+        }),
+        cancellationToken,
+      );
+      if (!response.ok) {
+        await throwForHttpError(response);
       }
-      for await (const raw of iterateGeminiEvents(streamSource, cancellationToken)) {
+      for await (const raw of parseSseJsonEvents(response, cancellationToken)) {
         for (const event of mapEvents(raw, fallbackId)) {
           yield event;
         }
@@ -165,17 +119,7 @@ export class GoogleGenerativeAIClient implements ChatClient {
     }
   }
 
-  async close(): Promise<void> {
-    try {
-      if (this.client?.aio?.close) {
-        await this.client.aio.close();
-      }
-    } finally {
-      if (this.client?.close) {
-        await this.client.close();
-      }
-    }
-  }
+  async close(): Promise<void> {}
 }
 
 function buildRestBody(contents: unknown[], config: Record<string, unknown>): Record<string, unknown> {
@@ -190,27 +134,6 @@ function buildRestBody(contents: unknown[], config: Record<string, unknown>): Re
     body.generationConfig = { maxOutputTokens: config.max_output_tokens };
   }
   return body;
-}
-
-async function* iterateGeminiEvents(
-  source: unknown,
-  cancellationToken?: CancellationToken | null,
-): AsyncGenerator<unknown> {
-  if (typeof Response !== "undefined" && source instanceof Response) {
-    for await (const event of parseSseEvents(source, cancellationToken)) {
-      const data = event.data.trim();
-      if (!data || data === "[DONE]") {
-        continue;
-      }
-      yield JSON.parse(data);
-    }
-    return;
-  }
-  if (source && typeof (source as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function") {
-    for await (const chunk of iterateWithCancellation(source as AsyncIterable<unknown>, cancellationToken)) {
-      yield chunk;
-    }
-  }
 }
 
 function buildRequest(
@@ -272,7 +195,9 @@ function convertContents(
       parts.push({
         inline_data: {
           mime_type: image.mime_type,
-          data: image.data,
+          data: Buffer.isBuffer(image.data)
+            ? image.data.toString("base64")
+            : Buffer.from(image.data).toString("base64"),
         },
       });
     }
@@ -428,11 +353,4 @@ function requiresToolCallIds(model: string): boolean {
   const lowered = model.toLowerCase();
   const match = /^gemini-(\d+)/.exec(lowered);
   return Boolean(match && Number.parseInt(match[1], 10) >= 3) || lowered.startsWith("gpt-oss-");
-}
-
-function getField(value: unknown, key: string): unknown {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  return (value as Record<string, unknown>)[key];
 }

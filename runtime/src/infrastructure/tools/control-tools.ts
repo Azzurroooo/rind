@@ -23,16 +23,16 @@ export function updatePlan(plan: unknown, sessionBase: string | null): string {
     writePlan(normalized, sessionBase);
   } catch (exc) {
     const err = exc as NodeJS.ErrnoException;
-    if (err?.code === "ENOENT" || err?.name === "FileNotFoundError") {
+    if (err?.code === "ENOENT") {
       return toolError("update_plan", err.message, "NotFound");
     }
-    if (err instanceof Error && (err.name === "ValueError" || err.name === "Error" || err.name === "TypeError")) {
+    if (err instanceof Error) {
       if (err.message.includes("session_base")) {
         return toolError("update_plan", err.message, "NotFound");
       }
       return toolError("update_plan", err.message, "ValidationError");
     }
-    return toolError("update_plan", String(exc), err?.name || "Error");
+    return toolError("update_plan", String(exc), "Error");
   }
   return toolOk("update_plan", "Plan updated");
 }

@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { atomicWriteTextSync } from "../infrastructure/persistence/atomic-files.js";
 import type { InboundMessage } from "./types.js";
 
 export const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -222,7 +223,6 @@ export class PairingStore {
   }
 
   save(): void {
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const payload = JSON.stringify(
       {
         pending: this.pending,
@@ -231,9 +231,7 @@ export class PairingStore {
       null,
       2,
     );
-    const temp = `${this.filePath}.tmp`;
-    fs.writeFileSync(temp, payload, "utf8");
-    fs.renameSync(temp, this.filePath);
+    atomicWriteTextSync(this.filePath, payload);
     const sig = this.statSignature();
     this.loadedMtimeMs = sig.mtimeMs;
     this.loadedSize = sig.size;
@@ -245,6 +243,7 @@ export class CooldownGate {
   private readonly windowSeconds: number;
   private readonly hits = new Map<string, number[]>();
   private readonly notified = new Set<string>();
+  private lastPruneAt = 0;
 
   constructor(limit: number, options?: { windowSeconds?: number }) {
     this.limit = limit;
@@ -253,6 +252,19 @@ export class CooldownGate {
 
   admit(channel: string, senderId: string, options?: { now?: number }): Verdict {
     const moment = options?.now ?? Date.now() / 1000;
+    if (this.hits.size > 256 && moment - this.lastPruneAt >= this.windowSeconds) {
+      this.lastPruneAt = moment;
+      const cutoff = moment - this.windowSeconds;
+      for (const [k, w] of this.hits.entries()) {
+        while (w.length > 0 && w[0]! <= cutoff) {
+          w.shift();
+        }
+        if (w.length === 0) {
+          this.hits.delete(k);
+          this.notified.delete(k);
+        }
+      }
+    }
     const key = `${channel}\0${senderId}`;
     let window = this.hits.get(key);
     if (!window) {

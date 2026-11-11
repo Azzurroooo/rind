@@ -993,9 +993,14 @@ export class ProcessSupervisor {
     return await this.buildResult("task_control", record, reason, maxOutputChars, cursor);
   }
 
-  async monitorTasks(sessionId: string, pageToken?: string | null): Promise<Record<string, unknown>> {
+  async monitorTasks(
+    sessionId: string,
+    pageToken?: string | null,
+    preloadedRecords?: Record<string, Record<string, unknown>>,
+  ): Promise<Record<string, unknown>> {
     this.retireFinished();
-    const stored = this.journal ? await this.journal.relevant(sessionId) : {};
+    const stored =
+      preloadedRecords ?? (this.journal ? await this.journal.relevant(sessionId) : {});
     const records: Record<string, Record<string, unknown>> = { ...stored };
     for (const record of this.processes.values()) {
       if (
@@ -1729,14 +1734,27 @@ export class ShellTools {
     return payload.data.tasks.map(task => ({ ...task, bg_id: task.task_id }));
   }
 
-  async monitorTasks(sessionId: string, pageToken?: string | null): Promise<Record<string, unknown>> {
-    return await this.supervisor.monitorTasks(sessionId, pageToken);
+  async monitorTasks(
+    sessionId: string,
+    pageToken?: string | null,
+    preloadedRecords?: Record<string, Record<string, unknown>>,
+  ): Promise<Record<string, unknown>> {
+    return await this.supervisor.monitorTasks(sessionId, pageToken, preloadedRecords);
   }
 
   async maintainTasks(sessionId: string): Promise<void> {
     if (this.supervisor.journal) {
       await this.supervisor.journal.maintain(sessionId);
     }
+  }
+
+  async maintainAndLoadRelevantTasks(
+    sessionId: string,
+  ): Promise<Record<string, Record<string, unknown>>> {
+    if (!this.supervisor.journal) {
+      return {};
+    }
+    return await this.supervisor.journal.maintainAndRelevant(sessionId);
   }
 
   async snapshotBackground(

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { atomicWriteTextSync } from "../infrastructure/persistence/atomic-files.js";
 import type { InboundMessage } from "./types.js";
 
 export const SESSION_NEW_METHOD = "session/new";
@@ -181,9 +182,6 @@ export class SessionRouter {
       null,
       2,
     );
-    fs.mkdirSync(path.dirname(this.statePath), { recursive: true });
-    const temp = `${this.statePath}.tmp`;
-    fs.writeFileSync(temp, payload, "utf8");
-    fs.renameSync(temp, this.statePath);
+    atomicWriteTextSync(this.statePath, payload);
   }
 }

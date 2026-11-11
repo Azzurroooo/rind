@@ -18,6 +18,7 @@ import {
   saveCustomProvider,
 } from "../dist/index.js";
 import * as chatgptOAuth from "../dist/infrastructure/chatgpt-oauth.js";
+import { GoogleGenerativeAIClient } from "../dist/infrastructure/llm/google-generative-ai.js";
 import {
   HttpStatusError,
   chatMessages,
@@ -626,4 +627,39 @@ test("providers.ts & ProviderServiceImpl: built-in catalog, custom providers.jso
     "utf8",
   );
   assert.throws(() => loadProviders(invalidPath), /unknown field 'extraKey'/);
+});
+
+test("GoogleGenerativeAIClient: encodes RequestImage bytes as base64 in inline_data", async t => {
+  const prevFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = prevFetch;
+  });
+
+  let capturedBody = null;
+  globalThis.fetch = async (_url, init = {}) => {
+    capturedBody = JSON.parse(String(init.body || "{}"));
+    return new Response(
+      JSON.stringify({
+        candidates: [{ content: { parts: [{ text: "vision ok" }] }, finishReason: "STOP" }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+
+  const rawBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const client = new GoogleGenerativeAIClient({ apiKey: "gem-key", model: "gemini-4-carbon" });
+  const completion = await client.create([
+    {
+      role: "user",
+      content: "Inspect image",
+      images: [{ mime_type: "image/png", data: rawBytes }],
+    },
+  ]);
+
+  assert.equal(completion.content, "vision ok");
+  const inlinePart = capturedBody.contents[0].parts.find(part => part.inline_data);
+  assert.ok(inlinePart);
+  assert.equal(inlinePart.inline_data.mime_type, "image/png");
+  assert.equal(inlinePart.inline_data.data, rawBytes.toString("base64"));
 });

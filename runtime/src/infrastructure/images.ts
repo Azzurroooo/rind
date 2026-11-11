@@ -589,7 +589,12 @@ export async function processImageAsync(
   });
 }
 
+const UPLOAD_FAST_RE = /uploads\//i;
+
 export function uploadReferences(content: string): string[] {
+  if (!UPLOAD_FAST_RE.test(content)) {
+    return [];
+  }
   const seen = new Set<string>();
   const matches = content.matchAll(UPLOAD_REFERENCE_RE);
   for (const match of matches) {
@@ -668,12 +673,19 @@ export function attachmentPath(sessionBase: string, relative: string): string {
   return resolved;
 }
 
+const LOADED_IMAGE_CACHE = new Map<string, [string, Buffer]>();
+
 export function loadImage(sessionBase: string, attachment: ImageAttachment): Buffer {
   try {
     const filePath = attachmentPath(sessionBase, attachment.path);
     const stat = fs.statSync(filePath);
     if (stat.size <= 0 || stat.size > MAX_IMAGE_BYTES || stat.size !== attachment.size_bytes) {
       throw new Error("size mismatch");
+    }
+    const sig = `${stat.dev}:${stat.ino}:${stat.birthtimeMs}:${stat.ctimeMs}:${stat.mtimeMs}:${stat.size}:${attachment.mime_type}:${attachment.width}:${attachment.height}`;
+    const cached = LOADED_IMAGE_CACHE.get(filePath);
+    if (cached && cached[0] === sig) {
+      return cached[1];
     }
     const data = fs.readFileSync(filePath);
     const stem = path.basename(filePath, path.extname(filePath));
@@ -691,6 +703,11 @@ export function loadImage(sessionBase: string, attachment: ImageAttachment): Buf
     ) {
       throw new Error("image metadata mismatch");
     }
+    if (!LOADED_IMAGE_CACHE.has(filePath) && LOADED_IMAGE_CACHE.size >= 16) {
+      const oldest = LOADED_IMAGE_CACHE.keys().next().value;
+      if (oldest !== undefined) LOADED_IMAGE_CACHE.delete(oldest);
+    }
+    LOADED_IMAGE_CACHE.set(filePath, [sig, data]);
     return data;
   } catch (err) {
     if (err instanceof ProviderError && err.code === "InvalidAttachment") {
@@ -835,9 +852,13 @@ export async function prepareImageMessages(
   }
   if (options.imageInput === false) {
     omitted = "Image not sent: the current model does not support images. Select a vision model to inspect it.";
-  } else if (options.compact && imageBudgetExceeded(messages)) {
-    omitted =
-      "Images not re-examined for this summary: image request limit exceeded. Use prior observations and references only.";
+  } else if (options.compact) {
+    try {
+      checkImageBudget(allAttachments);
+    } catch {
+      omitted =
+        "Images not re-examined for this summary: image request limit exceeded. Use prior observations and references only.";
+    }
   } else {
     checkImageBudget(allAttachments);
   }

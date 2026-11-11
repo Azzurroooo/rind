@@ -175,12 +175,20 @@ function renderCatalogLine(item: { name: string; location: string }, description
   return `<skill name="${escapeHtml(item.name)}" location="${escapeHtml(item.location)}">${description}</skill>`;
 }
 
+const HTML_ESCAPE_TEST_RE = /[&<>"']/;
+
 function escapedPrefix(text: string, maxChars: number): string {
   if (maxChars <= 0) {
     return "";
   }
+  if (text.length <= maxChars && !HTML_ESCAPE_TEST_RE.test(text)) {
+    return text;
+  }
+  if (!HTML_ESCAPE_TEST_RE.test(text)) {
+    return text.slice(0, maxChars);
+  }
   let low = 0;
-  let high = text.length;
+  let high = Math.min(text.length, maxChars);
   let best = "";
   while (low <= high) {
     const midpoint = Math.floor((low + high) / 2);
@@ -210,33 +218,39 @@ export function renderAvailableSkills(
     "that contains its SKILL.md.";
   const footer = "</available_skills>";
   const budget = Math.max(0, Math.trunc(maxChars));
-  if (`${intro}\n${footer}`.length > budget) {
+  const baseOverhead = intro.length + 1 + footer.length;
+  if (baseOverhead > budget) {
     return "";
+  }
+
+  const emptyPrefixLengths = new Array<number>(normalized.length + 1);
+  emptyPrefixLengths[0] = 0;
+  for (let i = 0; i < normalized.length; i += 1) {
+    emptyPrefixLengths[i + 1] = emptyPrefixLengths[i] + renderCatalogLine(normalized[i], "").length + 1;
   }
 
   for (let count = normalized.length; count >= 0; count -= 1) {
     const omitted = normalized.length - count;
-    const selected = normalized.slice(0, count);
-    const lines = selected.map(item => renderCatalogLine(item, ""));
-    if (omitted > 0) {
-      lines.push(`${omitted} additional Skill(s) omitted due to catalog budget.`);
-    }
-    const skeleton = [intro, ...lines, footer].join("\n");
-    if (skeleton.length > budget) {
+    const omittedNotice =
+      omitted > 0 ? `${omitted} additional Skill(s) omitted due to catalog budget.` : "";
+    const skeletonLength =
+      baseOverhead + emptyPrefixLengths[count] + (omittedNotice ? omittedNotice.length + 1 : 0);
+    if (skeletonLength > budget) {
       continue;
     }
-    let descriptionBudget = budget - skeleton.length;
+    let descriptionBudget = budget - skeletonLength;
     const rendered: string[] = [];
-    let remaining = selected.length;
-    for (const item of selected) {
+    let remaining = count;
+    for (let i = 0; i < count; i += 1) {
+      const item = normalized[i];
       const share = remaining > 0 ? Math.floor(descriptionBudget / remaining) : 0;
       const renderedDescription = escapedPrefix(item.description, share);
       rendered.push(renderCatalogLine(item, renderedDescription));
       descriptionBudget -= renderedDescription.length;
       remaining -= 1;
     }
-    if (omitted > 0) {
-      rendered.push(`${omitted} additional Skill(s) omitted due to catalog budget.`);
+    if (omittedNotice) {
+      rendered.push(omittedNotice);
     }
     return [intro, ...rendered, footer].join("\n");
   }
@@ -366,12 +380,19 @@ export class SkillRepository {
     ];
   }
 
-  scan(imports: Readonly<Record<string, boolean>> = {}): SkillScan {
+  scan(
+    imports: Readonly<Record<string, boolean>> = {},
+    options?: { includeDisabled?: boolean },
+  ): SkillScan {
+    const includeDisabled = options?.includeDisabled ?? true;
     return new SkillScan(
       this.sources.map(source => {
         const enabled = source.id in imports
           ? Boolean(imports[source.id])
           : (IMPORT_DEFAULTS[source.id] ?? true);
+        if (!enabled && !includeDisabled) {
+          return { source, enabled, skills: [], problems: [] };
+        }
         const [skills, problems] = scanSource(source);
         return { source, enabled, skills, problems };
       }),
@@ -379,14 +400,14 @@ export class SkillRepository {
   }
 
   listSkills(imports: Readonly<Record<string, boolean>> = {}): SkillMetadata[] {
-    return Array.from(this.scan(imports).effective().values()).sort((a, b) =>
+    return Array.from(this.scan(imports, { includeDisabled: false }).effective().values()).sort((a, b) =>
       a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
     );
   }
 
   loadSkill(name: string, imports: Readonly<Record<string, boolean>> = {}): LoadedSkill | null {
     const clean = String(name || "").trim().toLowerCase();
-    const metadata = this.scan(imports).effective().get(clean);
+    const metadata = this.scan(imports, { includeDisabled: false }).effective().get(clean);
     if (!metadata) {
       return null;
     }
@@ -533,17 +554,22 @@ export class SkillTurnCoordinator {
 
   async persistUserInput(session: SkillSessionPort, text: string): Promise<SkillInvocation[]> {
     const invocations = this.parser.parse(text);
-    const imports = invocations.length > 0 ? await session.getSkillSources() : {};
     const loaded: [SkillInvocation, LoadedSkill][] = [];
-    for (const invocation of invocations) {
-      const skill = this.repository.loadSkill(invocation.name, imports);
-      if (!skill) {
-        if (invocation.syntax === "slash") {
-          throw new Error(`Unknown Skill: ${invocation.name}`);
+    if (invocations.length > 0) {
+      const imports = await session.getSkillSources();
+      const effective = this.repository.scan(imports, { includeDisabled: false }).effective();
+      for (const invocation of invocations) {
+        const metadata = effective.get(invocation.name.trim().toLowerCase());
+        if (!metadata) {
+          if (invocation.syntax === "slash") {
+            throw new Error(`Unknown Skill: ${invocation.name}`);
+          }
+          continue;
         }
-        continue;
+        const raw = fs.readFileSync(metadata.location, "utf8");
+        const [, body] = splitFrontmatter(raw);
+        loaded.push([invocation, { metadata, body }]);
       }
-      loaded.push([invocation, skill]);
     }
     if (loaded.length > 0) {
       await session.persistUserInput(text, {

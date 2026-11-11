@@ -168,23 +168,23 @@ export async function awaitWithCancellation<T>(
   }
 }
 
-export async function* iterateWithCancellation<T>(
-  stream: AsyncIterable<T>,
+export function getField(value: unknown, key: string): unknown {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return (value as Record<string, unknown>)[key];
+}
+
+export async function* parseSseJsonEvents(
+  response: Response,
   cancellationToken?: CancellationToken | null,
-): AsyncGenerator<T> {
-  const iterator = stream[Symbol.asyncIterator]();
-  try {
-    while (true) {
-      const next = await awaitWithCancellation(iterator.next(), cancellationToken);
-      if (next.done) {
-        break;
-      }
-      yield next.value;
+): AsyncGenerator<unknown> {
+  for await (const event of parseSseEvents(response, cancellationToken)) {
+    const data = event.data.trim();
+    if (!data || data === "[DONE]") {
+      continue;
     }
-  } finally {
-    if (typeof iterator.return === "function") {
-      void Promise.resolve(iterator.return()).catch(() => {});
-    }
+    yield JSON.parse(data);
   }
 }
 
@@ -289,11 +289,11 @@ export function makeTrace(tracePath?: string | null): LlmCallTrace | null {
             ? (payload.input as Record<string, unknown>[])
             : [];
         const prefixHashes: string[] = [];
-        const running: unknown[] = [];
-        for (const item of messages) {
-          running.push(traceReady(item));
-          const serialized = JSON.stringify(running);
-          prefixHashes.push(sha256Hex(serialized).slice(0, 16));
+        let runningJson = "[";
+        for (let i = 0; i < messages.length; i++) {
+          if (i > 0) runningJson += ",";
+          runningJson += JSON.stringify(traceReady(messages[i]));
+          prefixHashes.push(sha256Hex(runningJson + "]").slice(0, 16));
         }
         const entry = {
           ts: new Date().toISOString(),

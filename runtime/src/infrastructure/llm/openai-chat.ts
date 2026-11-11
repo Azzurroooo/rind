@@ -13,10 +13,10 @@ import { DEFAULT_USER_AGENT } from "../settings.js";
 import {
   awaitWithCancellation,
   chatMessages,
+  getField,
   HttpStatusError,
   isCancellationError,
-  iterateWithCancellation,
-  parseSseEvents,
+  parseSseJsonEvents,
   promptCacheKey,
   providerError,
   rejectsPromptCacheKey,
@@ -33,22 +33,12 @@ const FINISH_REASON_MAP: Readonly<Record<string, FinishReason>> = {
 
 export type ApiKeyProvider = string | (() => Promise<string> | string);
 
-export interface MockOpenAIChatClient {
-  chat: {
-    completions: {
-      create(payload: Record<string, unknown>): Promise<unknown>;
-    };
-  };
-  close?: () => Promise<void> | void;
-}
-
 export class OpenAIChatCompletionsClient implements ChatClient {
   private readonly apiKey: ApiKeyProvider;
   private readonly _model: string;
   private readonly baseUrl: string;
   private readonly reasoningEffort: string | null;
   private readonly reasoningEfforts: readonly string[];
-  private readonly asyncClient: MockOpenAIChatClient | null;
   private reasoningEffortDisabled = false;
   private promptCacheKeyDisabled = false;
   private sessionIdProvider: (() => string) | null = null;
@@ -57,7 +47,6 @@ export class OpenAIChatCompletionsClient implements ChatClient {
     apiKey?: ApiKeyProvider;
     model: string;
     baseUrl?: string | null;
-    asyncClient?: MockOpenAIChatClient | null;
     reasoningEffort?: string | null;
     reasoningEfforts?: readonly string[];
   }) {
@@ -66,7 +55,6 @@ export class OpenAIChatCompletionsClient implements ChatClient {
     this.baseUrl = (options.baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
     this.reasoningEffort = (options.reasoningEffort || "").trim() || null;
     this.reasoningEfforts = options.reasoningEfforts ?? [];
-    this.asyncClient = options.asyncClient ?? null;
   }
 
   get model(): string {
@@ -123,9 +111,6 @@ export class OpenAIChatCompletionsClient implements ChatClient {
     cancellationToken?: CancellationToken | null,
   ): Promise<unknown> {
     cancellationToken?.throwIfCancelled();
-    if (this.asyncClient) {
-      return await awaitWithCancellation(this.asyncClient.chat.completions.create(payload), cancellationToken);
-    }
     const url = `${this.baseUrl}/chat/completions`;
     const key = await this.resolveApiKey();
     const maxRetries = 4;
@@ -274,7 +259,7 @@ export class OpenAIChatCompletionsClient implements ChatClient {
 
     const callIds = new Map<number, string>();
     try {
-      for await (const chunk of iterateChunks(streamResponse, cancellationToken)) {
+      for await (const chunk of parseSseJsonEvents(streamResponse as Response, cancellationToken)) {
         for (const event of mapChunkEvents(chunk, callIds)) {
           yield event;
         }
@@ -285,11 +270,7 @@ export class OpenAIChatCompletionsClient implements ChatClient {
     }
   }
 
-  async close(): Promise<void> {
-    if (this.asyncClient?.close) {
-      await this.asyncClient.close();
-    }
-  }
+  async close(): Promise<void> {}
 }
 
 async function sleepBeforeRetry(attempt: number, cancellationToken?: CancellationToken | null): Promise<void> {
@@ -298,27 +279,6 @@ async function sleepBeforeRetry(attempt: number, cancellationToken?: Cancellatio
     await cancellationToken.sleep(delayMs);
   } else {
     await new Promise(resolve => setTimeout(resolve, delayMs));
-  }
-}
-
-async function* iterateChunks(
-  response: unknown,
-  cancellationToken?: CancellationToken | null,
-): AsyncGenerator<unknown> {
-  if (typeof Response !== "undefined" && response instanceof Response) {
-    for await (const event of parseSseEvents(response, cancellationToken)) {
-      const data = event.data.trim();
-      if (!data || data === "[DONE]") {
-        continue;
-      }
-      yield JSON.parse(data);
-    }
-    return;
-  }
-  if (response && typeof (response as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function") {
-    for await (const chunk of iterateWithCancellation(response as AsyncIterable<unknown>, cancellationToken)) {
-      yield chunk;
-    }
   }
 }
 
@@ -423,11 +383,4 @@ function extractUsage(rawUsage: unknown): ModelUsage | null {
 
 function normalizeFinishReason(value: string): FinishReason {
   return FINISH_REASON_MAP[value] ?? "error";
-}
-
-function getField(value: unknown, key: string): unknown {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  return (value as Record<string, unknown>)[key];
 }

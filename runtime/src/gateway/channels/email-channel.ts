@@ -20,19 +20,6 @@ import {
 } from "./http-ws-utils.js";
 
 export const CHANNEL_ID = "email";
-export const CONFIG_KEYS: ReadonlySet<string> = new Set([
-  "allow_from",
-  "imap_host",
-  "imap_port",
-  "imap_ssl",
-  "smtp_host",
-  "smtp_port",
-  "smtp_starttls",
-  "username",
-  "password",
-  "mailbox",
-  "poll_interval",
-]);
 
 export const CAPABILITIES: ChannelCapabilities = createCapabilities({
   max_text_length: 60000,

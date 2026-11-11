@@ -26,14 +26,6 @@ import {
 } from "./http-ws-utils.js";
 
 export const CHANNEL_ID = "whatsapp";
-export const CONFIG_KEYS: ReadonlySet<string> = new Set([
-  "allow_from",
-  "phone_number_id",
-  "access_token",
-  "verify_token",
-  "webhook_host",
-  "webhook_port",
-]);
 
 export const CAPABILITIES: ChannelCapabilities = createCapabilities({
   max_text_length: 4096,

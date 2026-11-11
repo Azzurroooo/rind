@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ModelSelection } from "../domain/models.js";
 import { RIND_VERSION } from "../version.js";
 import { resolveRindHome } from "./paths.js";
+import { atomicWriteTextSync, fileStatSignature } from "./persistence/atomic-files.js";
 
 export const DEFAULT_PROVIDER = "openai";
 export const DEFAULT_MODEL = "gpt-4o-mini";
@@ -110,6 +110,8 @@ export function defaultSettingsPath(rindHome?: string): string {
   return path.resolve(resolveRindHome(rindHome), "settings.json");
 }
 
+const SETTINGS_CACHE = new Map<string, [string, AppSettings]>();
+
 export function ensureUserSettings(rindHome?: string): string {
   const filePath = defaultSettingsPath(rindHome);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -120,6 +122,7 @@ export function ensureUserSettings(rindHome?: string): string {
     } finally {
       fs.closeSync(fd);
     }
+    SETTINGS_CACHE.delete(filePath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
       throw err;
@@ -147,7 +150,7 @@ function stringField(data: Record<string, unknown>, key: string): string {
   return String(value).trim();
 }
 
-function buildSettings(settingsPath: string, data: Record<string, unknown>): AppSettings {
+function buildSettings(settingsPath: string, exists: boolean, data: Record<string, unknown>): AppSettings {
   let provider = stringField(data, "provider");
   if (!provider) {
     const baseUrl = stringField(data, "baseUrl");
@@ -155,7 +158,7 @@ function buildSettings(settingsPath: string, data: Record<string, unknown>): App
   }
   return {
     settings_path: settingsPath,
-    settings_exists: fs.existsSync(settingsPath),
+    settings_exists: exists,
     model: stringField(data, "model") || DEFAULT_MODEL,
     reasoning_effort: stringField(data, "reasoningEffort"),
     user_agent: DEFAULT_USER_AGENT,
@@ -165,28 +168,27 @@ function buildSettings(settingsPath: string, data: Record<string, unknown>): App
 }
 
 export function writeJsonAtomicSync(filePath: string, data: unknown, mode?: number): void {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
-  const tempPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`);
-  try {
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2) + "\n", {
-      encoding: "utf8",
-      ...(mode !== undefined ? { mode } : {}),
-    });
-    fs.renameSync(tempPath, filePath);
-  } finally {
-    try {
-      if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
-    } catch {
-      // ignore
-    }
-  }
+  atomicWriteTextSync(filePath, JSON.stringify(data, null, 2) + "\n", mode);
 }
 
 export function loadSettings(settingsPath?: string): AppSettings {
   const target = settingsPath ? path.resolve(settingsPath) : defaultSettingsPath();
-  const data = fs.existsSync(target) ? readJsonObject(target, "settings.json") : {};
-  return buildSettings(target, data);
+  const sig = fileStatSignature(target);
+  if (!sig) {
+    SETTINGS_CACHE.delete(target);
+    return buildSettings(target, false, {});
+  }
+  const cached = SETTINGS_CACHE.get(target);
+  if (cached && cached[0] === sig) {
+    return { ...cached[1] };
+  }
+  const settings = buildSettings(target, true, readJsonObject(target, "settings.json"));
+  if (!SETTINGS_CACHE.has(target) && SETTINGS_CACHE.size >= 8) {
+    const oldest = SETTINGS_CACHE.keys().next().value;
+    if (oldest !== undefined) SETTINGS_CACHE.delete(oldest);
+  }
+  SETTINGS_CACHE.set(target, [sig, settings]);
+  return { ...settings };
 }
 
 export function saveSettings(
@@ -211,7 +213,8 @@ export function saveSettings(
     data.reasoningEffort = normalizeReasoningEffort(options.reasoning_effort);
   }
   writeJsonAtomicSync(target, data);
-  return buildSettings(target, data);
+  SETTINGS_CACHE.delete(target);
+  return loadSettings(target);
 }
 
 export type SelectionSourceKind = "folder" | "main_repository" | "settings";

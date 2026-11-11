@@ -174,6 +174,59 @@ export class FileLockHandle {
   }
 }
 
+export function fileStatSignature(filePath: string): string | null {
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) return null;
+    return `${stat.dev}:${stat.ino}:${stat.birthtimeMs}:${stat.ctimeMs}:${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return null;
+  }
+}
+
+export function atomicWriteTextSync(filePath: string, content: string, mode?: number): void {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tempPath = path.join(
+    dir,
+    `.${path.basename(filePath)}.${process.pid}.${randomUUID().replace(/-/g, "").slice(0, 12)}.tmp`,
+  );
+  try {
+    const fd = fs.openSync(tempPath, "w", mode);
+    try {
+      fs.writeFileSync(fd, content, "utf8");
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (mode !== undefined) {
+      try {
+        fs.chmodSync(tempPath, mode);
+      } catch {
+        // ignore on platforms without POSIX mode bits
+      }
+    }
+    for (const delay of [50, 100, 200, 400, null] as const) {
+      try {
+        fs.renameSync(tempPath, filePath);
+        break;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if ((code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") || delay === null) {
+          throw err;
+        }
+        sleepSync(delay);
+      }
+    }
+  } finally {
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export class SessionFiles {
   lockFor(filePath: string): FileLockHandle {
     return new FileLockHandle(`${filePath}.lock`, 5000);
@@ -269,21 +322,11 @@ export class SessionFiles {
   }
 
   private writeAtomic(filePath: string, payload: string): void {
-    const tmp = `${filePath}.${randomUUID().replace(/-/g, "")}.tmp`;
     try {
       this.lockFor(filePath).withLock(() => {
-        fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        const fd = fs.openSync(tmp, "w");
-        try {
-          fs.writeFileSync(fd, payload, "utf8");
-          fs.fsyncSync(fd);
-        } finally {
-          fs.closeSync(fd);
-        }
-        this.replaceWithRetry(tmp, filePath);
+        atomicWriteTextSync(filePath, payload);
       });
     } catch (err) {
-      this.removeTmp(tmp);
       if ((err as Error).name === "TimeoutError") {
         throw this.lockTimeoutError(filePath);
       }
@@ -297,31 +340,6 @@ export class SessionFiles {
       return new Error(`Timed out waiting to update shared store: ${filePath}`);
     }
     return new Error(`Session is currently in use by another process. Failed to acquire lock for: ${filePath}`);
-  }
-
-  private replaceWithRetry(source: string, destination: string): void {
-    for (const delay of [50, 100, 200, 400, null] as const) {
-      try {
-        fs.renameSync(source, destination);
-        return;
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if ((code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") || delay === null) {
-          throw err;
-        }
-        sleepSync(delay);
-      }
-    }
-  }
-
-  private removeTmp(filePath: string): void {
-    try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch {
-      // ignore
-    }
   }
 }
 
@@ -351,19 +369,7 @@ export class ToolOutputStore {
 
   async write(sessionId: string, callId: string, content: string): Promise<string> {
     const target = this.pathFor(sessionId, callId);
-    const parent = path.dirname(target);
-    fs.mkdirSync(parent, { recursive: true });
-    const temporary = path.join(parent, `.${path.basename(target)}.${randomUUID().replace(/-/g, "")}.tmp`);
-    try {
-      fs.writeFileSync(temporary, String(content), "utf8");
-      fs.renameSync(temporary, target);
-    } finally {
-      try {
-        if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
-      } catch {
-        // ignore
-      }
-    }
+    atomicWriteTextSync(target, String(content));
     return target;
   }
 

@@ -278,7 +278,11 @@ test("TelegramChannel: long-polling, ans:<idx> callback, media <=20MB / >20MB no
   assert.ok(sendMsgCall);
   assert.ok(apiCalls.some(c => c.url.endsWith("/sendPhoto")));
   assert.ok(apiCalls.some(c => c.url.endsWith("/sendChatAction")));
-  assert.ok(apiCalls.some(c => c.url.endsWith("/setMessageReaction")));
+  const reactCall = apiCalls.find(c => c.url.endsWith("/setMessageReaction"));
+  assert.ok(reactCall);
+  assert.deepEqual(JSON.parse(String(reactCall.init?.body ?? "{}")).reaction, [
+    { type: "emoji", emoji: "✅" },
+  ]);
 });
 
 // --- 2. Discord --------------------------------------------------------------

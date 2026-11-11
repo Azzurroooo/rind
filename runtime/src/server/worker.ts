@@ -439,16 +439,16 @@ export class RuntimeWorker {
     const end = options?.end ?? null;
     const tail = options?.tail ?? null;
     const metadataOnly = end === 0 && !tail;
-    if (!metadataOnly) {
-      await this.shellTools.maintainTasks(sessionId);
-    }
+    const relevantTasks = metadataOnly
+      ? undefined
+      : await this.shellTools.maintainAndLoadRelevantTasks(sessionId);
     const result = await this.repository.replay(sessionId, options);
     result.live_turn = this.execution.liveTurn(sessionId);
     result.hosted = this.execution.ownsSession(sessionId);
     result.tasks = metadataOnly
       ? []
-      : (await this.shellTools.monitorTasks(sessionId)).tasks;
-    result.background_wait = await this.execution.backgroundWait(sessionId);
+      : (await this.shellTools.monitorTasks(sessionId, null, relevantTasks)).tasks;
+    result.background_wait = await this.execution.backgroundWait(sessionId, relevantTasks);
     return result;
   }
 

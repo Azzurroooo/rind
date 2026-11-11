@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ConfigError, loadConfig } from "./config.js";
-import { type ChannelGuide, GUIDES } from "./onboarding.js";
+import { GUIDES } from "./onboarding.js";
 import { workerAlive } from "./status.js";
 
 export interface CheckResult {
@@ -56,18 +56,6 @@ function fixCorrupt(filePath: string): string {
   }
 }
 
-export async function ensureChannelSdks(
-  guides: readonly ChannelGuide[],
-  _options?: {
-    interactive?: boolean;
-    confirm?: (label: string) => Promise<boolean>;
-    echo?: (line: string) => void;
-  },
-): Promise<readonly [ChannelGuide[], boolean]> {
-  // All channel transports and SDKs are built-in / bundled in runtime/node_modules.
-  return [[...guides], false];
-}
-
 export interface RunChecksOptions {
   readonly probe?: boolean;
   readonly fix?: boolean;
@@ -76,9 +64,6 @@ export interface RunChecksOptions {
     worker: string,
     token: string | null,
   ) => Promise<readonly [boolean, string]>;
-  readonly sdkChecker?: (
-    channelId: string,
-  ) => Promise<readonly [boolean, string]> | readonly [boolean, string];
 }
 
 export async function runChecks(
@@ -181,13 +166,6 @@ export async function runChecks(
   for (const [channelId, channel] of channelEntries) {
     const guide = GUIDES[channelId];
     const label = guide ? guide.label : channelId;
-    if (options?.sdkChecker) {
-      const [sdkOk, sdkDetail] = await options.sdkChecker(channelId);
-      if (!sdkOk) {
-        add(`channel ${label}`, false, sdkDetail);
-        continue;
-      }
-    }
     if (guide?.probe && options?.probe) {
       const answers: Record<string, unknown> = {
         ...(channel.token ? { token: channel.token } : {}),

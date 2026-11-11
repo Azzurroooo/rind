@@ -11,35 +11,25 @@ import type {
 import { DEFAULT_USER_AGENT } from "../settings.js";
 import {
   awaitWithCancellation,
-  iterateWithCancellation,
-  parseSseEvents,
+  getField,
+  parseSseJsonEvents,
   providerError,
   throwForHttpError,
 } from "./sse.js";
-
-export interface MockAnthropicClient {
-  messages: {
-    create(payload: Record<string, unknown>): Promise<unknown>;
-  };
-  close?: () => Promise<void> | void;
-}
 
 export class AnthropicMessagesClient implements ChatClient {
   private readonly apiKey: string;
   private readonly model: string;
   private readonly baseUrl: string;
-  private readonly asyncClient: MockAnthropicClient | null;
 
   constructor(options: {
     apiKey: string;
     model: string;
     baseUrl?: string | null;
-    asyncClient?: MockAnthropicClient | null;
   }) {
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.baseUrl = (options.baseUrl || "https://api.anthropic.com").replace(/\/+$/, "");
-    this.asyncClient = options.asyncClient ?? null;
   }
 
   private messagesEndpoint(): string {
@@ -52,9 +42,6 @@ export class AnthropicMessagesClient implements ChatClient {
     cancellationToken?: CancellationToken | null,
   ): Promise<unknown> {
     cancellationToken?.throwIfCancelled();
-    if (this.asyncClient) {
-      return await awaitWithCancellation(this.asyncClient.messages.create(payload), cancellationToken);
-    }
     const response = await awaitWithCancellation(
       fetch(this.messagesEndpoint(), {
         method: "POST",
@@ -122,8 +109,8 @@ export class AnthropicMessagesClient implements ChatClient {
     }
     let usage: ModelUsage | null = null;
     try {
-      const response = await this.executeRequest(payload, true, cancellationToken);
-      for await (const raw of iterateAnthropicEvents(response, cancellationToken)) {
+      const response = (await this.executeRequest(payload, true, cancellationToken)) as Response;
+      for await (const raw of parseSseJsonEvents(response, cancellationToken)) {
         const [events, nextUsage] = mapEvents(raw, usage);
         usage = nextUsage;
         for (const event of events) {
@@ -136,32 +123,7 @@ export class AnthropicMessagesClient implements ChatClient {
     }
   }
 
-  async close(): Promise<void> {
-    if (this.asyncClient?.close) {
-      await this.asyncClient.close();
-    }
-  }
-}
-
-async function* iterateAnthropicEvents(
-  response: unknown,
-  cancellationToken?: CancellationToken | null,
-): AsyncGenerator<unknown> {
-  if (typeof Response !== "undefined" && response instanceof Response) {
-    for await (const event of parseSseEvents(response, cancellationToken)) {
-      const data = event.data.trim();
-      if (!data || data === "[DONE]") {
-        continue;
-      }
-      yield JSON.parse(data);
-    }
-    return;
-  }
-  if (response && typeof (response as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function") {
-    for await (const chunk of iterateWithCancellation(response as AsyncIterable<unknown>, cancellationToken)) {
-      yield chunk;
-    }
-  }
+  async close(): Promise<void> {}
 }
 
 function convertMessages(
@@ -195,17 +157,17 @@ function convertMessages(
         tool_use_id: String(message.tool_call_id ?? ""),
         content,
       };
-      let parsedPayload: unknown = null;
-      try {
-        parsedPayload = JSON.parse(text);
-      } catch {
-        parsedPayload = null;
-      }
-      if (
-        message.is_error ||
-        (parsedPayload && typeof parsedPayload === "object" && !Array.isArray(parsedPayload) && (parsedPayload as Record<string, unknown>).ok === false)
-      ) {
+      if (message.is_error) {
         block.is_error = true;
+      } else if (text.startsWith("{") && text.includes('"ok"')) {
+        try {
+          const parsedPayload = JSON.parse(text);
+          if (parsedPayload && typeof parsedPayload === "object" && !Array.isArray(parsedPayload) && (parsedPayload as Record<string, unknown>).ok === false) {
+            block.is_error = true;
+          }
+        } catch {
+          // Non-JSON tool payload
+        }
       }
       const last = result.length > 0 ? result[result.length - 1] : null;
       if (
@@ -399,11 +361,4 @@ function extractUsage(value: unknown, previous: ModelUsage | null = null): Model
     cached_tokens: cacheRead,
     reasoning_tokens: reasoningTokens,
   };
-}
-
-function getField(value: unknown, key: string): unknown {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  return (value as Record<string, unknown>)[key];
 }

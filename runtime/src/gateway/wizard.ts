@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { buildConfig, parseYaml, renderYaml } from "./config.js";
-import { ensureChannelSdks, looksLikeSourceDir, runChecks } from "./doctor.js";
+import { looksLikeSourceDir, runChecks } from "./doctor.js";
 import { type ChannelGuide, guideFor } from "./onboarding.js";
 import { type PromptIO, PromptSession, WizardCancelled } from "./prompt.js";
 import { runGateway } from "./runner.js";
@@ -369,23 +369,19 @@ export async function runInit(
           return 2;
         }
       }
-      const [keptGuides, autoInstall] = await ensureChannelSdks(guides, {
-        interactive: false,
-        echo: line => prompt.println(line),
-      });
-      if (keptGuides.length === 0) {
+      if (guides.length === 0) {
         prompt.printerr("No channels available to start.");
         return 2;
       }
       return await finishInit({
-        selected: keptGuides.map(g => g.id),
+        selected: guides.map(g => g.id),
         answers,
         lists,
         worker,
         workerToken,
         workspace,
         confirmWrite: false,
-        autoInstallSdk: autoInstall,
+        autoInstallSdk: false,
         prompt,
         env,
         workerAliveImpl: options?.workerAliveImpl,
@@ -429,12 +425,7 @@ export async function runInit(
       );
     }
 
-    const initialGuides = selected.map(id => guideFor(id)!);
-    const [guides, autoInstall] = await ensureChannelSdks(initialGuides, {
-      interactive: true,
-      confirm: label => prompt.confirm(label),
-      echo: line => prompt.println(line),
-    });
+    const guides = selected.map(id => guideFor(id)!);
     if (guides.length === 0) {
       prompt.printerr("No channels available to start.");
       return 2;
@@ -456,7 +447,7 @@ export async function runInit(
       workerToken,
       workspace,
       confirmWrite: true,
-      autoInstallSdk: autoInstall,
+      autoInstallSdk: false,
       prompt,
       env,
       workerAliveImpl: options?.workerAliveImpl,

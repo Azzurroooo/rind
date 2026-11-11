@@ -13,10 +13,8 @@ export const REDIRECT_URI = `http://${CALLBACK_HOST}:${CALLBACK_PORT}${CALLBACK_
 export const DIRECT_TOKEN_SCOPE = "chatgpt.tokens.use.direct";
 export const SCOPE = `openid profile email offline_access resource.invoke ${DIRECT_TOKEN_SCOPE}`;
 export const REFRESH_BEFORE_SECONDS = 5 * 60;
-export const TOKEN_TIMEOUT_SECONDS = 15;
 export const ACCOUNT_NAME = "ChatGPT";
 export const SIGNED_IN_PAGE = `Signed in to ${ACCOUNT_NAME}. You can close this page and return to Rind.`;
-export const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
 
 export interface AuthInteraction {
   prompt(kind: string, message: string, options?: readonly string[] | null): Promise<string>;

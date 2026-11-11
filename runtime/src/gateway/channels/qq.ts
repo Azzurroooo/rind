@@ -28,14 +28,6 @@ import {
 } from "./http-ws-utils.js";
 
 export const CHANNEL_ID = "qq";
-export const CONFIG_KEYS: ReadonlySet<string> = new Set([
-  "token",
-  "allow_from",
-  "group_allow",
-  "ws_path",
-  "ws_port",
-  "access_token",
-]);
 
 export const CAPABILITIES: ChannelCapabilities = createCapabilities({
   max_text_length: 4500,

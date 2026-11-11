@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { resolveRindHome } from "../paths.js";
 import { SESSION_FILES } from "./atomic-files.js";
@@ -8,6 +9,35 @@ export const USAGE_SUMMARY_MAX_DAYS = 365;
 export const USAGE_SUMMARY_MODEL_LIMIT = 5;
 export const USAGE_SUMMARY_SESSION_LIMIT = 5;
 
+interface UsageLedgerCacheEntry {
+  dev: number;
+  ino: number;
+  birthtimeMs: number;
+  ctimeMs: number;
+  mtimeMs: number;
+  offset: number;
+  head: Buffer;
+  records: Record<string, unknown>[];
+}
+
+const USAGE_LEDGER_CACHE = new Map<string, UsageLedgerCacheEntry>();
+
+function parseJsonlSlice(content: string, out: Record<string, unknown>[]): void {
+  let start = 0;
+  while (start < content.length) {
+    const nl = content.indexOf("\n", start);
+    const rawLine = nl === -1 ? content.slice(start) : content.slice(start, nl);
+    start = nl === -1 ? content.length : nl + 1;
+    const line = rawLine.trim();
+    if (!line) continue;
+    try {
+      out.push(JSON.parse(line) as Record<string, unknown>);
+    } catch {
+      continue;
+    }
+  }
+}
+
 export function defaultUsageLedgerPath(): string {
   return path.join(resolveRindHome(), USAGE_LEDGER_FILENAME);
 }
@@ -17,7 +47,86 @@ export function appendUsageRecord(filePath: string, record: Record<string, unkno
 }
 
 export function loadUsageRecords(filePath: string): Record<string, unknown>[] {
-  return SESSION_FILES.readJsonl(filePath);
+  const resolved = path.resolve(filePath);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(resolved);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      USAGE_LEDGER_CACHE.delete(resolved);
+      return [];
+    }
+    return SESSION_FILES.readJsonl(resolved);
+  }
+
+  const cached = USAGE_LEDGER_CACHE.get(resolved);
+  if (
+    cached &&
+    cached.dev === stat.dev &&
+    cached.ino === stat.ino &&
+    cached.birthtimeMs === stat.birthtimeMs
+  ) {
+    if (stat.size === cached.offset && stat.mtimeMs === cached.mtimeMs && stat.ctimeMs === cached.ctimeMs) {
+      return cached.records.map(r => ({ ...r }));
+    }
+    if (stat.size > cached.offset && cached.offset > 0) {
+      try {
+        const fd = fs.openSync(resolved, "r");
+        try {
+          const headCheck = Buffer.allocUnsafe(cached.head.length);
+          const headRead = fs.readSync(fd, headCheck, 0, cached.head.length, 0);
+          if (headRead === cached.head.length && headCheck.equals(cached.head)) {
+            const tailLen = stat.size - cached.offset;
+            const tailBuf = Buffer.allocUnsafe(tailLen);
+            const tailRead = fs.readSync(fd, tailBuf, 0, tailLen, cached.offset);
+            const lastNl = tailBuf.subarray(0, tailRead).lastIndexOf(0x0a);
+            if (lastNl >= 0) {
+              const consumed = lastNl + 1;
+              parseJsonlSlice(tailBuf.subarray(0, consumed).toString("utf8"), cached.records);
+              cached.offset += consumed;
+              cached.mtimeMs = stat.mtimeMs;
+              cached.ctimeMs = stat.ctimeMs;
+              return cached.records.map(r => ({ ...r }));
+            }
+          }
+        } finally {
+          fs.closeSync(fd);
+        }
+      } catch {
+        // Fall through to full read
+      }
+    }
+  }
+
+  const records = SESSION_FILES.readJsonl(resolved);
+  try {
+    const fd = fs.openSync(resolved, "r");
+    try {
+      const fstat = fs.fstatSync(fd);
+      const headLen = Math.min(128, fstat.size);
+      const head = Buffer.allocUnsafe(headLen);
+      const readBytes = headLen > 0 ? fs.readSync(fd, head, 0, headLen, 0) : 0;
+      if (!USAGE_LEDGER_CACHE.has(resolved) && USAGE_LEDGER_CACHE.size >= 8) {
+        const oldest = USAGE_LEDGER_CACHE.keys().next().value;
+        if (oldest !== undefined) USAGE_LEDGER_CACHE.delete(oldest);
+      }
+      USAGE_LEDGER_CACHE.set(resolved, {
+        dev: fstat.dev,
+        ino: fstat.ino,
+        birthtimeMs: fstat.birthtimeMs,
+        ctimeMs: fstat.ctimeMs,
+        mtimeMs: fstat.mtimeMs,
+        offset: fstat.size,
+        head: head.subarray(0, readBytes),
+        records,
+      });
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    USAGE_LEDGER_CACHE.delete(resolved);
+  }
+  return records.map(r => ({ ...r }));
 }
 
 function windowDays(days: unknown): number {

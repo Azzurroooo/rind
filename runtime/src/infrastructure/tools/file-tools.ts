@@ -946,13 +946,10 @@ export async function globFiles(
         );
         return;
       }
-      paths.sort((a, b) => {
-        const ka = a.replace(/\\/g, "/").toLowerCase();
-        const kb = b.replace(/\\/g, "/").toLowerCase();
-        return ka < kb ? -1 : ka > kb ? 1 : 0;
-      });
+      const keyedPaths = paths.map(p => ({ p, k: p.replace(/\\/g, "/").toLowerCase() }));
+      keyedPaths.sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
       const results: Array<{ path: string; size_bytes: number }> = [];
-      for (const filePath of paths) {
+      for (const { p: filePath } of keyedPaths) {
         if (results.length >= parsedMax) break;
         try {
           const st = fs.statSync(filePath);
