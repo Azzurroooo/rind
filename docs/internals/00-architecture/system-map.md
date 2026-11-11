@@ -36,6 +36,6 @@ The diagram also has a reverse edge that is easy to leave out: session facts are
 
 For example, refreshing the browser loses only the third layer: the Worker keeps executing, and once the client resubscribes, the view is rebuilt from history and snapshots. A Worker restart loses the second layer: the persistent session can still be opened, but the old process cannot automatically recover into a controllable process from a task_id alone. It is more accurate to judge problems along these three layers than to read "the session is still there" as "all state is still there".
 
-Code entry points: [main.py](../../../main.py), [RuntimeWorker](../../../agent/runtime/server/worker.py), [assembly root](../../../agent/bootstrap/container.py). Verification: [architecture boundary tests](../../../test/test_agent_architecture.py).
+Code entry points: [main.py](../../../runtime/src/cli.ts), [RuntimeWorker](../../../runtime/src/server/worker.ts), [assembly root](../../../runtime/src/core/turn-runner.ts). Verification: [architecture boundary tests](../../../runtime/test/architecture.test.js).
 
 [Back to the series map](../README.md)

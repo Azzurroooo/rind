@@ -33,6 +33,6 @@ trace 在模型流进入内核解析前记录，适合区分“供应商没发 t
 
 先用 session_id、turn_id、tool_call_id 或 task_id 定位持久记录，再看订阅事件与 Surface。只有问题确实在模型边界时才启用 trace 复现。启动与协议诊断走 stderr；stdio 的 stdout 必须仍是合法协议流，混入一行日志就会破坏消费者。
 
-源码：[context inspect 分派](../../../agent/runtime/server/dispatcher.py)、[trace](../../../agent/infrastructure/llm/trace.py)、[Chat 接入点](../../../agent/infrastructure/llm/openai_chat.py)、[启动诊断](../../../agent/runtime/server/app_server.py)。验证：[上下文检查](../../../test/test_runtime_server_context.py)、[trace](../../../test/test_llm_trace.py)。关联：[事件](../01-runtime/event-system.zh-CN.md)、[用量账本](../03-persistence/usage-ledger.zh-CN.md)。
+源码：[context inspect 分派](../../../runtime/src/server/dispatcher.ts)、[trace](../../../runtime/src/infrastructure/llm/sse.ts)、[Chat 接入点](../../../runtime/src/infrastructure/llm/openai-chat.ts)、[启动诊断](../../../runtime/src/server/transports.ts)。验证：[上下文检查](../../../runtime/test/server-protocol.test.js)、[trace](../../../runtime/test/context-and-turn.test.js)。关联：[事件](../01-runtime/event-system.zh-CN.md)、[用量账本](../03-persistence/usage-ledger.zh-CN.md)。
 
 [返回系列地图](../README.zh-CN.md)

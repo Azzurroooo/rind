@@ -30,6 +30,6 @@ plan_updated 事件在 TurnRunner 解析模型调用时就会发出；它不能�
 
 计划文件损坏时不能把它默认为“任务都完成了”。读取错误需要明确报告，压缩附加计划采用尽力读取；即使计划缺席，原始工具与消息事实仍可用于追溯，但新 handoff 不应虚构进度。
 
-代码入口：[计划工具](../../../agent/infrastructure/tools/planning.py)、[计划存储](../../../agent/infrastructure/persistence/plan.py)、[计划规范](../../../agent/domain/planning.py)。验证：[计划工具](../../../test/test_plan_tool.py)、[会话隔离](../../../test/test_plan_session_isolation.py)、[压缩摘要](../../../test/test_plan_context_summary.py)。
+代码入口：[计划工具](../../../runtime/src/infrastructure/tools/control-tools.ts)、[计划存储](../../../runtime/src/infrastructure/persistence/session-store.ts)、[计划规范](../../../runtime/src/domain/models.ts)。验证：[计划工具](../../../runtime/test/tools.test.js)、[会话隔离](../../../runtime/test/persistence.test.js)、[压缩摘要](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

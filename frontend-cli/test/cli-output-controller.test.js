@@ -267,12 +267,12 @@ test("brief mode collapses consecutive tool calls into one live line, applies to
   assert.deepEqual(lines.at(-1), "  ◉ $ npm test · 800ms", "settling at turn end transitions trailing tool group to ◉");
 
   // ctrl+o expands all grouped tools even in brief mode, and collapses back to 1 line.
-  output.setToolsExpanded(true);
+  output.setDetailsExpanded(true);
   const expandedText = stripAnsi(transcript.render(90).join("\n"));
   assert.match(expandedText, /◉ read package\.json/);
   assert.match(expandedText, /◉ grep \/build\/ in src/);
   assert.match(expandedText, /\+ new/);
-  output.setToolsExpanded(false);
+  output.setDetailsExpanded(false);
   assert.equal(transcript.render(90).map(stripAnsi).filter(line => line.includes("3 tools")).length, 1);
 
   // 4. Replaying an existing session in brief mode renders consecutive tool calls and deliveries concisely.
@@ -418,3 +418,47 @@ test("notify routes info/warning to stdout and error to stderr when TUI is inact
   }
 });
 
+
+test("a long delivery opens folded to twelve lines, ctrl+o expands and folds it, brief mode keeps one line", async (t) => {
+  const { setBriefMode } = await import("../lib/cli-state-store.js");
+  t.after(() => setBriefMode(false));
+  const report = Array.from({ length: 9678 }, (_, index) => `第${index}行：调研结论 evidence ✅ line ${index}`).join("\n");
+  const delivery = `Delegated work settled:\n- a · task t1 · delivered: ${report}`;
+  const state = createCliState();
+  const transcript = createTranscript();
+  const output = createCliOutputController({ state, transcript, terminalUi: { requestRender() {} }, animateTools: false });
+
+  const started = performance.now();
+  output.renderHistory([{ role: "user", content: delivery, _rind_meta: { kind: "team_delivery" } }], {});
+  const folded = transcript.render(90).map(stripAnsi);
+  assert.ok(performance.now() - started < 1000, "opening the session does not wrap the whole delivery");
+  assert.equal(folded[0], "─ Delivery");
+  assert.equal(folded.length, 1 + 12 + 1);
+  assert.equal(folded[1], "  Delegated work settled:");
+  assert.equal(folded.at(-1), "  … (9667 more lines · ctrl+o to expand)");
+
+  output.setDetailsExpanded(true);
+  const expanded = transcript.render(90).map(stripAnsi);
+  assert.equal(expanded.length, 1 + 9679);
+  assert.equal(expanded.at(-1), "  第9677行：调研结论 evidence ✅ line 9677");
+
+  output.setDetailsExpanded(false);
+  assert.equal(state.display.detailsExpanded, false);
+  assert.equal(transcript.render(90).length, 14);
+
+  setBriefMode(true);
+  output.clearTranscript();
+  output.renderHistory([{ role: "user", content: delivery, _rind_meta: { kind: "team_delivery" } }], {});
+  const brief = transcript.render(90).map(stripAnsi);
+  assert.equal(brief.length, 1);
+  assert.match(brief[0], /^─ Delivery · Delegated work settled: - a · task t1 · delivered: 第0行/);
+  assert.ok(brief[0].endsWith("..."));
+});
+
+test("a delivery shorter than the preview shows in full without a footer", () => {
+  const state = createCliState();
+  const transcript = createTranscript();
+  const output = createCliOutputController({ state, transcript, terminalUi: { requestRender() {} }, animateTools: false });
+  output.renderHistory([{ role: "user", content: "Delegated work settled:\n- a · task t1 · delivered: done", _rind_meta: { kind: "team_delivery" } }], {});
+  assert.deepEqual(transcript.render(90).map(stripAnsi), ["─ Delivery", "  Delegated work settled:", "  - a · task t1 · delivered: done"]);
+});

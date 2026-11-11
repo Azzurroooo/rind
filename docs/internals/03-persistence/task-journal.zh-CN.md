@@ -26,6 +26,6 @@ Worker lease 防止另一个活着的 Worker 领养或发信号给不属于自�
 
 终态、通知投递和通知消费也不是同一步。日志保存足够的信息，让恢复者区分“进程结束了”“消息进入会话了”“模型看过了”。旧输出可以在满足维护条件后删除，任务身份和结果状态却仍用于解释历史。
 
-代码入口：[TaskJournal](../../../agent/infrastructure/persistence/task_journal.py)、[ProcessSupervisor](../../../agent/infrastructure/tools/shell/supervisor.py)。验证：[任务日志](../../../test/test_task_journal.py)、[日志索引](../../../test/test_task_journal_index.py)。
+代码入口：[TaskJournal](../../../runtime/src/infrastructure/persistence/task-journal.ts)、[ProcessSupervisor](../../../runtime/src/infrastructure/tools/shell-tools.ts)。验证：[任务日志](../../../runtime/test/persistence.test.js)、[日志索引](../../../runtime/test/persistence.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

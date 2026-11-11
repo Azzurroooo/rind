@@ -29,6 +29,6 @@ A single question-and-answer exchange locates its waiter by session_id and tool_
 
 The question tool's ordinary handler returns Unsupported on its own; the real interaction is joined by the runtime processor and the responder. This means that the Python kernel does not need to know whether the user typed in the terminal, clicked a Desktop option, or replied with a number from a messaging channel. Non-interactive environments disable the capability at assembly, instead of trying to read stdin halfway through execution; the system prompt then says nothing about the tool either.
 
-Code entry points: [question declaration](../../../agent/infrastructure/tools/user_question.py), [question handling](../../../agent/application/tools/processor.py), [waiter management](../../../agent/runtime/server/execution.py). Verification: [processor tests](../../../test/test_async_tool_call_processor.py), [one-shot tests](../../../frontend-cli/test/one-shot.test.js).
+Code entry points: [question declaration](../../../runtime/src/infrastructure/tools/control-tools.ts), [question handling](../../../runtime/src/application/tool-processor.ts), [waiter management](../../../runtime/src/server/execution.ts). Verification: [processor tests](../../../runtime/test/context-and-turn.test.js), [one-shot tests](../../../frontend-cli/test/one-shot.test.js).
 
 [Back to the series map](../README.md)

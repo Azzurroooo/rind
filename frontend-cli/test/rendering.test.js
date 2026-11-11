@@ -321,7 +321,7 @@ test("helpText renders compact shortcuts and commands", () => {
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       stop · clear · leave ?              show shortcuts",
             "  ctrl+b       task monitor         esc            close monitor",
-      "  ctrl+o       toggle tool detail   ← empty        agents",
+      "  ctrl+o       toggle details       ← empty        agents",
     ].join("\n"),
   );
   assert.equal(
@@ -339,7 +339,7 @@ test("helpText renders compact shortcuts and commands", () => {
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       stop · clear · leave ?              show shortcuts",
             "  ctrl+b       task monitor         esc            close monitor",
-      "  ctrl+o       toggle tool detail   ← empty        agents",
+      "  ctrl+o       toggle details       ← empty        agents",
       "",
       `  ── Commands · 5 available ${"─".repeat(68)}`,
       "  /status",

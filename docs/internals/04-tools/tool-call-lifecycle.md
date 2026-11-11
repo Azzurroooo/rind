@@ -34,6 +34,6 @@ A bash command may exit before its initial call has written the tool result. If 
 
 Likewise, "finding an existing result" means reusing a committed fact, and is not limited to successful results. Recovery must preserve the information from a failure, and must not treat that failure as never executed and automatically retry its side effects. Parallel delegation also commits in the original call order, so that the next model request sees a stable pairing.
 
-Code entry points: [processor](../../../agent/application/tools/processor.py), [executor](../../../agent/application/tools/executor.py), [tool records](../../../agent/infrastructure/persistence/tool_call_repository.py). Verification: [tool processor](../../../test/test_async_tool_call_processor.py), [persistence failure](../../../test/test_tool_persistence_failure.py).
+Code entry points: [processor](../../../runtime/src/application/tool-processor.ts), [executor](../../../runtime/src/application/tool-processor.ts), [tool records](../../../runtime/src/infrastructure/persistence/session-store.ts). Verification: [tool processor](../../../runtime/test/context-and-turn.test.js), [persistence failure](../../../runtime/test/persistence.test.js).
 
 [Back to the series map](../README.md)

@@ -29,6 +29,6 @@ Events are not a second persistence database. The session saves messages, tool r
 
 For example, after a tool request is sent, the interface can expand the tool block immediately, but the real completion shows in tool_result and the persisted record. A Task's terminal state can also arrive after its original turn ends, so it keeps the source turn rather than marking an already finished turn as running again. Event wrapping is uniform; the business lifetime is still decided by the event type.
 
-Code entry points: [event types](../../../agent/domain/events.py), [the protocol wrapper](../../../agent/runtime/server/protocol.py), [the replay projection](../../../agent/runtime/server/replay_events.py). Verification: [event tests](../../../test/test_runtime_events.py), [subscription tests](../../../test/test_runtime_server_subscriptions.py).
+Code entry points: [event types](../../../runtime/src/domain/events.ts), [the protocol wrapper](../../../runtime/src/server/protocol.ts), [the replay projection](../../../runtime/src/server/protocol.ts). Verification: [event tests](../../../runtime/test/domain.test.js), [subscription tests](../../../runtime/test/server-protocol.test.js).
 
 [Back to the series map](../README.md)

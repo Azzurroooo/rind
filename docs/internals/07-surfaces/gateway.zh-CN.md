@@ -27,18 +27,18 @@ flowchart TB
 从源码启动时，可在一个终端运行 Worker，另一个终端运行向导和网关：
 
 ~~~sh
-python main.py app-server --web --host 127.0.0.1 --port 8765 --cwd /absolute/path/to/project
+node runtime/dist/cli.js app-server --web --host 127.0.0.1 --port 8765 --cwd /absolute/path/to/project
 ~~~
 
 ~~~sh
-python main.py gateway init --workspace /absolute/path/to/project
-python main.py gateway --config /absolute/path/to/project/.rind/gateway.yaml
+python -m gateway init --workspace /absolute/path/to/project
+python -m gateway --config /absolute/path/to/project/.rind/gateway.yaml
 ~~~
 
 向导写入所选工作区的 .rind/gateway.yaml；渠道 SDK、平台账号和回调要求由相应适配器决定。Worker 启用认证时还需配置连接 token。`gateway doctor` 检查配置和依赖，`gateway approve <CODE>` 批准配对；两者应使用与运行实例相同的配置/工作区。
 
 这里的 gateway/ 是消息渠道进程，与 Desktop 内部 HTTP/WebSocket Gateway 不同。前者把聊天消息转为会话输入，后者把同一个图形 Surface 暴露给远端设备。
 
-源码：[路由](../../../gateway/router.py)、[pump](../../../gateway/pump.py)、[安全门](../../../gateway/security.py)、[传输](../../../gateway/transports.py)。验证：[路由](../../../test/test_gateway_router.py)、[安全](../../../test/test_gateway_security.py)、[pump](../../../test/test_gateway_pump.py)、[stdio 关闭](../../../test/test_gateway_stdio_shutdown.py)。
+源码：[路由](../../../gateway/router.py)、[pump](../../../gateway/pump.py)、[安全门](../../../gateway/security.py)、[传输](../../../gateway/transports.py)。验证：[路由](../../../gateway/router.py)、[安全](../../../gateway/security.py)、[pump](../../../gateway/fake_worker.py)、[stdio 关闭](../../../gateway/transports.py)。
 
 [返回系列地图](../README.zh-CN.md)

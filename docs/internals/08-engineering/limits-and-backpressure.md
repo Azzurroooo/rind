@@ -21,9 +21,11 @@ flowchart TB
 | Text and tool argument deltas | At most 2,048 characters per piece | Bounds the size of one event without dropping content |
 | steering / follow-up | 4 items per queue, 8,000 characters in total | Rejects new input and keeps the existing queues |
 | Tool projection | terminal 8 KiB; model 25 KiB / 2,000 lines | Normalization and truncation; the full output is read per the contract |
-| Shell supervisor | 8 not-yet-retired task records by default | Rejects new tasks once capacity is reached |
+| Shell supervisor | 64 not-yet-retired task records per session by default | Rejects new tasks once capacity is reached |
 | Process output to disk | 32 MiB by default, including the index | Records the over-limit information, keeps draining, and discards output beyond the bound |
+| File tool concurrency | 8 concurrent file operations per session; 512 per Worker; rg --threads 4 | Queues waiting calls per session and Worker; idle file threads are reclaimed |
 | Ordinary file read | At most 50 KiB of source content per call | Paginates; different from the model projection bound |
+| Team delivery payload | 8 KiB per-report preview; 48 KiB total delivery text; 12 preview lines in CLI | Line-aligned preview with delegate({wait: true, task}) pointer; ctrl+o expands in CLI |
 | Images | 20 MiB / 40 million pixels per source; 3 MiB after normalization | Rejected or scaled; a request is separately limited to 8 images / 16 MiB of encoded data |
 
 These values are in different units: characters, UTF-8 bytes, lines, and tokens are not interchangeable, and a 2,048-character CJK text can be far larger than 2 KiB. The defaults in the table are also not a total memory bound for the whole machine.
@@ -34,6 +36,6 @@ If reading from the child process pipe stopped as soon as output exceeded the li
 
 Likewise, low load does not mean every cache is cleared: the Worker still holds managed tasks, bounded session/task caches, and connections, and the on-disk task journal needs maintenance to shrink. Bounds should be analyzed from the resource owner and the retirement conditions, not from a single array length.
 
-Source code: [stream backpressure](../../../agent/runtime/core/stream_pump.py), [CLI drain](../../../frontend-cli/lib/tui/tui.js). Mechanisms and test entry points: [input queues](../01-runtime/input-queues.md), [structured results](../04-tools/tool-results.md), [managed tasks](../05-autonomy/managed-tasks.md), [images](../02-context/image-input.md). Verification: [stream pump](../../../test/test_stream_pump.py), [runtime stream](../../../test/test_runtime_stream_pump.py).
+Source code: [stream backpressure](../../../runtime/src/core/turn-runner.ts), [CLI drain](../../../frontend-cli/lib/tui/tui.js). Mechanisms and test entry points: [input queues](../01-runtime/input-queues.md), [structured results](../04-tools/tool-results.md), [managed tasks](../05-autonomy/managed-tasks.md), [images](../02-context/image-input.md). Verification: [stream pump](../../../runtime/test/context-and-turn.test.js), [runtime stream](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

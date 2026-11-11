@@ -21,6 +21,6 @@ edit_file requires old_str to appear exactly once in the current file, and even 
 
 The queue only coordinates writes that go through the file tools inside this Worker. Editors, other Workers, Shell, and hard-link aliases are not uniformly controlled by it, and neither is the check-before-replace step an atomic file-system compare-and-swap. Cancelling a waiter writes nothing, and the lock cannot be released until the file thread that has already started finishes.
 
-Code entry points: [file definitions and paths](../../../agent/infrastructure/tools/files/specs.py), [read tools](../../../agent/infrastructure/tools/files/queries.py), [mutations](../../../agent/infrastructure/tools/files/mutations.py), [write queue](../../../agent/infrastructure/tools/files/mutation_queue.py). Verification: [mutation regression](../../../test/test_file_mutation_tools.py), [queue regression](../../../test/test_file_mutation_queue.py).
+Code entry points: [file definitions and paths](../../../runtime/src/infrastructure/tools/file-tools.ts), [read tools](../../../runtime/src/infrastructure/tools/file-tools.ts), [mutations](../../../runtime/src/infrastructure/tools/file-tools.ts), [write queue](../../../runtime/src/infrastructure/tools/file-tools.ts). Verification: [mutation regression](../../../runtime/test/tools.test.js), [queue regression](../../../runtime/test/tools.test.js).
 
 [Back to the series map](../README.md)

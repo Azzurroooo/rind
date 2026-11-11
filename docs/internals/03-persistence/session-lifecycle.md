@@ -25,6 +25,6 @@ The history before the fork point and the related attachments are the new sessio
 
 A fork's meta is derived from the original metadata, with fields such as identity rewritten, so one cannot broadly claim that state such as Goal and turn_state is cleared. If a caller needs new business state, it should inspect the concrete return value and metadata rather than inferring from the new session_id alone that it is a completely blank execution environment.
 
-Code entry points: [SessionService](../../../agent/runtime/server/session_service.py), [fork implementation](../../../agent/infrastructure/persistence/session_fork.py), [Worker deletion](../../../agent/runtime/server/worker.py). Verification: [startup session](../../../test/test_startup_session.py), [fork](../../../test/test_runtime_server_fork.py), [deletion](../../../test/test_runtime_server_delete.py).
+Code entry points: [SessionService](../../../runtime/src/server/session-service.ts), [fork implementation](../../../runtime/src/infrastructure/persistence/session-store.ts), [Worker deletion](../../../runtime/src/server/worker.ts). Verification: [startup session](../../../runtime/test/server-protocol.test.js), [fork](../../../runtime/test/server-protocol.test.js), [deletion](../../../runtime/test/server-protocol.test.js).
 
 [Back to the series map](../README.md)

@@ -25,6 +25,6 @@ fork 在指定用户消息**之前**截取快照；复制保留的消息、相�
 
 fork 的 meta 由原元数据派生并改写身份等字段，不能笼统宣称 Goal、turn_state 等所有状态都会清空。若调用方需要新的业务状态，应检查具体返回与元数据，而不是仅由新 session_id 推断它是完全空白的执行环境。
 
-代码入口：[SessionService](../../../agent/runtime/server/session_service.py)、[fork 实现](../../../agent/infrastructure/persistence/session_fork.py)、[Worker 删除](../../../agent/runtime/server/worker.py)。验证：[启动会话](../../../test/test_startup_session.py)、[分叉](../../../test/test_runtime_server_fork.py)、[删除](../../../test/test_runtime_server_delete.py)。
+代码入口：[SessionService](../../../runtime/src/server/session-service.ts)、[fork 实现](../../../runtime/src/infrastructure/persistence/session-store.ts)、[Worker 删除](../../../runtime/src/server/worker.ts)。验证：[启动会话](../../../runtime/test/server-protocol.test.js)、[分叉](../../../runtime/test/server-protocol.test.js)、[删除](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

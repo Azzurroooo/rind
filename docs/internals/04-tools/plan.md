@@ -30,6 +30,6 @@ This is the shape of update_plan's arguments, not the complete on-disk format of
 
 A corrupted plan file must not be treated by default as "all tasks are done". Read errors must be reported clearly, and attaching the plan during compaction uses best-effort reading; even when the plan is absent, the original tool and message facts remain available for tracing, but a new handoff must not fabricate progress.
 
-Code entry points: [plan tools](../../../agent/infrastructure/tools/planning.py), [plan storage](../../../agent/infrastructure/persistence/plan.py), [plan specification](../../../agent/domain/planning.py). Verification: [plan tools](../../../test/test_plan_tool.py), [session isolation](../../../test/test_plan_session_isolation.py), [compaction summary](../../../test/test_plan_context_summary.py).
+Code entry points: [plan tools](../../../runtime/src/infrastructure/tools/control-tools.ts), [plan storage](../../../runtime/src/infrastructure/persistence/session-store.ts), [plan specification](../../../runtime/src/domain/models.ts). Verification: [plan tools](../../../runtime/test/tools.test.js), [session isolation](../../../runtime/test/persistence.test.js), [compaction summary](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

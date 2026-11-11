@@ -29,8 +29,9 @@ flowchart TD
 Run from the repository root after installing the corresponding development dependencies; choosing files according to the scope of the change is enough:
 
 ~~~sh
-python -m pip install -r requirements.txt
-python -m pytest test/ -q
+npm --prefix runtime install
+npm --prefix runtime test
+npm --prefix agent-management test
 npm --prefix frontend-cli ci
 npm --prefix frontend-cli test
 npm --prefix frontend-web test
@@ -39,7 +40,7 @@ npm --prefix desktop test
 npm --prefix mobile test
 ~~~
 
-Python and CLI tests live in test/ and frontend-cli/test/; Web and Mobile use Vitest, and Desktop's scripts tests run under Node. A fake provider still belongs to deterministic regression even when it starts real subprocesses; the presence of an API key on the machine is no reason to switch to a real service.
+Runtime, Agents Management, and CLI tests live in runtime/test/, agent-management/test/, and frontend-cli/test/; Web and Mobile use Vitest, and Desktop's scripts tests run under Node. A fake provider still belongs to deterministic regression even when it starts real subprocesses; the presence of an API key on the machine is no reason to switch to a real service.
 
 ## Manual acceptance and documentation maintenance
 
@@ -47,6 +48,6 @@ Plans under test/manual are executed only when the user explicitly asks for spec
 
 The documentation's own checks cover whether all 52 topics are present, whether source/test/cross-links exist, whether Mermaid parses and renders, and whether numbers and defaults have a basis in the source. Later code changes should update the corresponding mechanism article rather than create another legacy overview describing the same flow.
 
-Basis: [test classification](../../../test/README.md), [manual acceptance directory](../../../test/manual/README.md), [protocol samples](../../../test/fixtures/runtime_protocol.golden.jsonl), [Python protocol tests](../../../test/test_runtime_server_protocol.py), [CLI protocol tests](../../../frontend-cli/test/runtime-protocol.test.js), [virtual terminal integration](../../../frontend-cli/test/tui-integration.test.js).
+Basis: [test classification](../../../test/README.md), [manual acceptance directory](../../../test/manual/README.md), [protocol samples](../../../runtime/test/fixtures/runtime_protocol.golden.jsonl), [Python protocol tests](../../../runtime/test/server-protocol.test.js), [CLI protocol tests](../../../frontend-cli/test/runtime-protocol.test.js), [virtual terminal integration](../../../frontend-cli/test/tui-integration.test.js).
 
 [Back to the series map](../README.md)

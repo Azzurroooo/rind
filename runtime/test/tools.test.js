@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  AsyncSemaphore,
   buildFileToolSpecs,
+  CancellationTokenSource,
   DefaultToolRegistry,
+  FileMutationQueue,
   ProcessSupervisor,
+  setRgSpawnerForTest,
   ShellSessionPool,
   ShellTools,
   TaskJournal,
@@ -172,40 +177,32 @@ test("SkillRepository discovers project and system skills and SkillTurnCoordinat
   assert.ok(msgs.some(m => String(m.content).includes("Follow demo skill steps.")));
 });
 
-test("glob and grep pass bounded --threads 4 to rg", async t => {
+test("glob and grep pass bounded --threads 4 to rg and respect Worker toolSemaphore", async t => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-rg-threads-"));
-  const binDir = path.join(tmp, "bin");
   const workspace = path.join(tmp, "workspace");
-  const logFile = path.join(tmp, "rg-calls.jsonl");
-  await mkdir(binDir, { recursive: true });
   await mkdir(workspace, { recursive: true });
   await writeFile(path.join(workspace, "a.py"), "needle\n");
 
-  const realRg = "/usr/bin/rg";
-  const wrapperPath = path.join(binDir, "rg");
-  await writeFile(
-    wrapperPath,
-    `#!/usr/bin/env node
-const fs = require("node:fs");
-const { spawnSync } = require("node:child_process");
-fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(process.argv.slice(2)) + "\\n");
-const res = spawnSync(${JSON.stringify(realRg)}, process.argv.slice(2), { stdio: "inherit" });
-process.exit(res.status ?? 1);
-`,
-    { mode: 0o755 },
-  );
-
-  const prevPath = process.env.PATH;
-  process.env.PATH = `${binDir}${path.delimiter}${prevPath || ""}`;
+  const seenCommands = [];
+  setRgSpawnerForTest((args, cwd) => {
+    seenCommands.push([...args]);
+    return spawn("rg", args, {
+      ...(cwd ? { cwd } : {}),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+  });
   t.after(async () => {
-    process.env.PATH = prevPath;
+    setRgSpawnerForTest(null);
     await rm(tmp, { recursive: true, force: true });
   });
 
+  const workerSemaphore = new AsyncSemaphore(1);
   const registry = new DefaultToolRegistry(
     buildFileToolSpecs({
       workspaceRoot: workspace,
       allowedRoots: [workspace],
+      mutationQueue: new FileMutationQueue(workerSemaphore),
     }),
   );
 
@@ -216,17 +213,26 @@ process.exit(res.status ?? 1);
   const grepRes = JSON.parse(await registry.callAsync("grep", { pattern: "needle", path: workspace }));
   assert.equal(grepRes.ok, true);
 
-  const { readFileSync } = await import("node:fs");
-  const seenCommands = readFileSync(logFile, "utf8")
-    .trim()
-    .split("\n")
-    .map(line => JSON.parse(line));
   assert.equal(seenCommands.length, 2);
   for (const cmd of seenCommands) {
     const idx = cmd.indexOf("--threads");
     assert.notEqual(idx, -1, `Expected --threads in ${JSON.stringify(cmd)}`);
     assert.equal(cmd[idx + 1], "4");
   }
+
+  // Exhaust worker semaphore and verify glob/grep wait on it and cancel cleanly
+  assert.equal(await workerSemaphore.tryAcquire(), true);
+  const cancelSource = new CancellationTokenSource();
+  const pendingGlob = registry.callAsync("glob", {
+    pattern: "*.py",
+    path: workspace,
+    _cancellation_token: cancelSource.token,
+  });
+  cancelSource.cancel("Worker slot cancelled");
+  const cancelledGlob = JSON.parse(await pendingGlob);
+  assert.equal(cancelledGlob.ok, false);
+  assert.equal(cancelledGlob.error_type, "Cancelled");
+  workerSemaphore.release();
 });
 
 test("ProcessSupervisor enforces per-session limit (default 64) without global cap", async t => {

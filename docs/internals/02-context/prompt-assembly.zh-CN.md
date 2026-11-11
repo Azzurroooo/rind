@@ -22,6 +22,6 @@ flowchart TB
 
 运行时消息插在首条 system 消息之后；最近会话消息按原顺序保留。Goal 检查点属于一次续接的临时输入，用户给出的目标被标记为数据而非更高优先级指令。每类注入都能在 context stats/decisions 中看到，避免“模型为什么知道这个”只能靠猜。
 
-代码入口：[系统提示](../../../agent/prompts.py)、[RIND.md 加载](../../../agent/infrastructure/rind_docs.py)、[上下文组装](../../../agent/application/context/manager.py)。验证：[提示回归](../../../test/test_prompts.py)、[RIND.md 回归](../../../test/test_rind_docs.py)。
+代码入口：[系统提示](../../../runtime/src/prompts.ts)、[RIND.md 加载](../../../runtime/src/infrastructure/rind-docs.ts)、[上下文组装](../../../runtime/src/application/context-manager.ts)。验证：[提示回归](../../../runtime/test/domain.test.js)、[RIND.md 回归](../../../runtime/test/architecture.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

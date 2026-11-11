@@ -37,6 +37,6 @@ delivered 只证明通知已进入会话；consumed 在模型步骤成功后标�
 
 这套顺序降低重复和丢失风险，但不承诺业务动作全局恰好一次。外部进程的副作用是否发生，仍可能在崩溃边界变得不确定，任务日志用 lost 等状态诚实表达。
 
-代码入口：[TaskNotifications](../../../agent/application/task_notifications.py)、[续接协调](../../../agent/runtime/server/execution.py)。验证：[通知投递](../../../test/test_task_delivery.py)、[自动续接](../../../test/test_task_continuation.py)。
+代码入口：[TaskNotifications](../../../runtime/src/application/context-manager.ts)、[续接协调](../../../runtime/src/server/execution.ts)。验证：[通知投递](../../../runtime/test/server-protocol.test.js)、[自动续接](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -21,7 +21,7 @@ sequenceDiagram
     W->>W: 停止接单并关闭拥有的资源
 ~~~
 
-[RuntimeWorker](../../../agent/runtime/server/worker.py) 创建 SessionService、ExecutionCoordinator、共享的解析/归一化/压缩服务、ShellTools 和 WebSessions。首次 initialize 才启动一次过期模型目录刷新；关闭时取消并等待刷新任务，还要关闭活跃执行和 Shell 进程，最后关闭 Web 会话。
+[RuntimeWorker](../../../runtime/src/server/worker.ts) 创建 SessionService、ExecutionCoordinator、共享的解析/归一化/压缩服务、ShellTools 和 WebSessions。首次 initialize 才启动一次过期模型目录刷新；关闭时取消并等待刷新任务，还要关闭活跃执行和 Shell 进程，最后关闭 Web 会话。
 
 启动时保留稳定的 session_id，但默认草稿无需立即生成会话目录；第一条用户任务或显式 Goal 才使它落盘。浏览会话列表、模型、状态和重放不需要创建活跃 AgentContainer。这样“打开应用”不等于“启动一个 Agent 回合”。
 
@@ -31,6 +31,6 @@ initialize 使用锁保护首次初始化：清理工具输出、决定初始会
 
 关闭先让 supervisor 停止接收新任务，再取消刷新、关闭执行与受管资源。这样资源拥有者仍在时就能进行清理，不让正在退出的 Worker 继续接收一条新的进程启动请求。正常退出可保存可解释的终态；强制杀进程只能依赖后续恢复识别不确定状态。
 
-代码入口：[Worker](../../../agent/runtime/server/worker.py)、[会话服务](../../../agent/runtime/server/session_service.py)。验证：[Worker 生命周期](../../../test/test_runtime_worker.py)、[启动草稿](../../../test/test_startup_session.py)。
+代码入口：[Worker](../../../runtime/src/server/worker.ts)、[会话服务](../../../runtime/src/server/session-service.ts)。验证：[Worker 生命周期](../../../runtime/test/server-protocol.test.js)、[启动草稿](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

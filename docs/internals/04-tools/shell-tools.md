@@ -22,6 +22,6 @@ stdin is DEVNULL, so interactive input is not supported. Windows uses Job Object
 
 BashPolicy is a call filter for a small number of dangerous commands, not a script sandbox. Worker shutdown must stop owned tasks; handing a command to the background does not mean an independent daemon may be left behind.
 
-Code entry points: [ShellTools](../../../agent/infrastructure/tools/shell/tool.py), [process supervision](../../../agent/infrastructure/tools/shell/supervisor.py), [process tree](../../../agent/infrastructure/tools/shell/process_tree.py). Verification: [shell arguments and lifecycle](../../../test/test_shell_tasks.py), [process supervision](../../../test/test_process_supervisor.py).
+Code entry points: [ShellTools](../../../runtime/src/infrastructure/tools/shell-tools.ts), [process supervision](../../../runtime/src/infrastructure/tools/shell-tools.ts), [process tree](../../../runtime/src/infrastructure/tools/shell-tools.ts). Verification: [shell arguments and lifecycle](../../../runtime/test/tools.test.js), [process supervision](../../../runtime/test/tools.test.js).
 
 [Back to the series map](../README.md)

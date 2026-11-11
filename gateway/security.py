@@ -29,7 +29,7 @@ COOLDOWN_WINDOW_SECONDS = 60.0
 
 DEFAULT_BOT_HANDLES = ("rind", "bot")
 COOLDOWN_NOTICE = "You're sending too fast; processing is paused — try again shortly."
-APPROVE_COMMAND = "python main.py gateway approve {code}"
+APPROVE_COMMAND = "python -m gateway approve {code}"
 PAIRING_FULL_NOTICE = "Too many pending pairing requests; try again later."
 
 

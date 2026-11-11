@@ -22,6 +22,6 @@ stdin 为 DEVNULL，因此不支持交互式输入。Windows 用 Job Object 管�
 
 BashPolicy 是少量危险命令的调用过滤，不是脚本沙箱。Worker 关闭要停止 owned tasks；交给后台也不意味着可以留下独立守护进程。
 
-代码入口：[ShellTools](../../../agent/infrastructure/tools/shell/tool.py)、[进程监督](../../../agent/infrastructure/tools/shell/supervisor.py)、[进程树](../../../agent/infrastructure/tools/shell/process_tree.py)。验证：[Shell 参数与生命周期](../../../test/test_shell_tasks.py)、[进程监督](../../../test/test_process_supervisor.py)。
+代码入口：[ShellTools](../../../runtime/src/infrastructure/tools/shell-tools.ts)、[进程监督](../../../runtime/src/infrastructure/tools/shell-tools.ts)、[进程树](../../../runtime/src/infrastructure/tools/shell-tools.ts)。验证：[Shell 参数与生命周期](../../../runtime/test/tools.test.js)、[进程监督](../../../runtime/test/tools.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -27,6 +27,6 @@ flowchart TB
 
 手动 compact 也需要独占位置；已有活跃回合或排队启动时会拒绝压缩，而非并行改写上下文。显式用户业务输入可解除中断后的抑制；维护性 compact 保留抑制标记。这一细分避免用户只想整理上下文，却意外把已停下的长目标重新启动。
 
-代码入口：[ExecutionCoordinator](../../../agent/runtime/server/execution.py)、[AgentRuntime](../../../agent/runtime/core/runtime.py)。验证：[自动续接](../../../test/test_task_continuation.py)、[运行时输入队列](../../../test/test_runtime_input_queues.py)。
+代码入口：[ExecutionCoordinator](../../../runtime/src/server/execution.ts)、[AgentRuntime](../../../runtime/src/core/turn-runner.ts)。验证：[自动续接](../../../runtime/test/server-protocol.test.js)、[运行时输入队列](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

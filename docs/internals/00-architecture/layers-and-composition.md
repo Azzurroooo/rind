@@ -15,7 +15,7 @@ flowchart TB
     I -. "implements ports" .-> A
 ~~~
 
-[AgentContainer](../../../agent/bootstrap/container.py) explicitly receives the session store, the model client, ShellTools, WebSessions, and shared resources, then assembles ContextManager, ToolCallProcessor, TurnRunner, and AgentRuntime. runtime/core does not import runtime/server, bootstrap, or concrete infrastructure in reverse, and a Surface does not hold Python business objects either.
+[AgentContainer](../../../runtime/src/core/turn-runner.ts) explicitly receives the session store, the model client, ShellTools, WebSessions, and shared resources, then assembles ContextManager, ToolCallProcessor, TurnRunner, and AgentRuntime. runtime/core does not import runtime/server, bootstrap, or concrete infrastructure in reverse, and a Surface does not hold Python business objects either.
 
 This makes the lifecycles legible: Worker-level resources are created by RuntimeWorker, a single active execution is assembled in ExecutionCoordinator, application depends on abstract ports, and infrastructure implements them outside the boundary. When adding a Provider or a tool, you usually change the adapter and the assembly rather than rewriting the turn loop.
 
@@ -25,6 +25,6 @@ The fact that a tool needs a session ID, a cancellation signal, and output stora
 
 The Server also carries execution mutual exclusion, cross-turn continuation, and connection subscription, so it cannot be abbreviated to "only forwarding requests". Core manages the sampling and tool loop inside one turn; application provides reusable services. The dependency graph shows module direction, not process isolation: in production these Python modules run in the same process.
 
-Code entry points: [composition root](../../../agent/bootstrap/container.py), [application ports](../../../agent/application/ports/), [domain events](../../../agent/domain/events.py). Verification: [dependency direction tests](../../../test/test_agent_architecture.py), [container tests](../../../test/test_agent_container.py).
+Code entry points: [composition root](../../../runtime/src/core/turn-runner.ts), [application ports](../../../agent/application/ports/), [domain events](../../../runtime/src/domain/events.ts). Verification: [dependency direction tests](../../../runtime/test/architecture.test.js), [container tests](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

@@ -24,6 +24,6 @@ Every ledger record carries sampling_kind, session_id, model, ts, and the normal
 
 When no usage is returned at all, no precise ledger record is generated for that sampling; when there is a usage object but a field is missing, normalization may record it as 0. "No record" and "no consumption" are therefore not the same conclusion. A ledger write is still a best-effort diagnostic path: when it fails, check the logs, and do not treat a summary as a strict mirror of the provider's bill.
 
-Code entry points: [usage ledger](../../../agent/infrastructure/persistence/usage_ledger.py), [summary](../../../agent/application/usage_summary.py), [usage normalization](../../../agent/application/context/token_usage.py). Verification: [ledger regression](../../../test/test_usage_ledger.py), [summary regression](../../../test/test_usage_summary.py).
+Code entry points: [usage ledger](../../../runtime/src/infrastructure/persistence/usage-ledger.ts), [summary](../../../runtime/src/infrastructure/persistence/usage-ledger.ts), [usage normalization](../../../runtime/src/application/context-manager.ts). Verification: [ledger regression](../../../runtime/test/persistence.test.js), [summary regression](../../../runtime/test/persistence.test.js).
 
 [Back to the series map](../README.md)

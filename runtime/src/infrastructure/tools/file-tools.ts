@@ -41,7 +41,7 @@ const SKIP_GLOBS: readonly string[] = [
 
 export class FileMutationQueue {
   private readonly queues = new Map<string, Promise<void>>();
-  private readonly semaphore: AsyncSemaphore | null;
+  readonly semaphore: AsyncSemaphore | null;
 
   constructor(semaphore?: AsyncSemaphore | null) {
     this.semaphore = semaphore ?? null;
@@ -790,6 +790,21 @@ function rgErrorType(stderr: string, fallback: string): string {
   return fallback;
 }
 
+type RgSpawner = (args: readonly string[], cwd?: string) => ReturnType<typeof spawn>;
+
+const defaultRgSpawner: RgSpawner = (args, cwd) =>
+  spawn("rg", args, {
+    ...(cwd ? { cwd } : {}),
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+
+let activeRgSpawner: RgSpawner = defaultRgSpawner;
+
+export function setRgSpawnerForTest(spawner: RgSpawner | null): void {
+  activeRgSpawner = spawner ?? defaultRgSpawner;
+}
+
 export async function globFiles(
   pattern: string,
   rawPath = ".",
@@ -828,10 +843,7 @@ export async function globFiles(
   return await new Promise<string>(resolve => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn("rg", args, {
-        cwd: searchPath,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      child = activeRgSpawner(args, searchPath);
     } catch {
       resolve(toolError("glob", "rg executable not found.", "RgUnavailable"));
       return;
@@ -1016,9 +1028,7 @@ export async function grepFiles(
   return await new Promise<string>(resolve => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn("rg", args, {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      child = activeRgSpawner(args);
     } catch {
       resolve(toolError("grep", "rg executable not found.", "RgUnavailable"));
       return;
@@ -1183,11 +1193,13 @@ export function buildFileToolSpecs(options?: {
   sharedRoot?: string | null;
   sessionOutputRoot?: string | null;
   mutationQueue?: FileMutationQueue | null;
+  toolSemaphore?: AsyncSemaphore | null;
   captureImage?: ((path: string, token?: CancellationToken | null) => [ImageAttachment, string | null]) | null;
   imageInput?: () => boolean | null;
   sessionBaseProvider?: (() => string | null) | null;
 }): ToolSpec[] {
   const mutationQueue = options?.mutationQueue ?? new FileMutationQueue();
+  const toolSemaphore = options?.toolSemaphore ?? mutationQueue.semaphore;
   const root = path.resolve(expandUserPath(options?.workspaceRoot || process.cwd()));
   const allowed = options?.allowedRoots
     ? Array.from(options.allowedRoots, p => path.resolve(expandUserPath(p)))
@@ -1373,12 +1385,20 @@ export function buildFileToolSpecs(options?: {
       handler: async args => {
         const [resolved, err] = resolveScopedPath("glob", args.path ?? ".");
         if (err) return err;
-        return await globFiles(
-          args.pattern as string,
-          resolved!,
-          args.max_results ?? 1000,
-          args._cancellation_token as CancellationToken | undefined,
-        );
+        const token = args._cancellation_token as CancellationToken | undefined;
+        if (toolSemaphore && !(await tryAcquireSlot(toolSemaphore, token))) {
+          return toolCancelled("glob", token?.reason);
+        }
+        try {
+          return await globFiles(
+            args.pattern as string,
+            resolved!,
+            args.max_results ?? 1000,
+            token,
+          );
+        } finally {
+          toolSemaphore?.release();
+        }
       },
     }),
     new ToolSpec({
@@ -1416,13 +1436,21 @@ export function buildFileToolSpecs(options?: {
       handler: async args => {
         const [resolved, err] = resolveScopedPath("grep", args.path ?? ".");
         if (err) return err;
-        return await grepFiles(
-          args.pattern as string,
-          resolved!,
-          (args.glob as string | undefined) ?? "**/*",
-          args.max_results ?? 1000,
-          args._cancellation_token as CancellationToken | undefined,
-        );
+        const token = args._cancellation_token as CancellationToken | undefined;
+        if (toolSemaphore && !(await tryAcquireSlot(toolSemaphore, token))) {
+          return toolCancelled("grep", token?.reason);
+        }
+        try {
+          return await grepFiles(
+            args.pattern as string,
+            resolved!,
+            (args.glob as string | undefined) ?? "**/*",
+            args.max_results ?? 1000,
+            token,
+          );
+        } finally {
+          toolSemaphore?.release();
+        }
       },
     }),
   ];

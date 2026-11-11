@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, truncateToWidth, wrapTextCells } from "../lib/text-width.js";
 
-test("printable ASCII bypasses segmentation; Unicode and controls retain their semantics", (t) => {
+test("text that cannot cluster bypasses segmentation; Unicode and controls retain their semantics", (t) => {
   const segment = t.mock.method(Intl.Segmenter.prototype, "segment");
   const ascii = Array.from({ length: 95 }, (_, i) => String.fromCharCode(i + 32)).join("");
   assert.equal(textWidth(ascii), 95);
@@ -13,7 +13,7 @@ test("printable ASCII bypasses segmentation; Unicode and controls retain their s
   for (const [text, width] of [["中文", 4], ["e\u0301", 1], ["👩‍💻", 2], ["✈️", 2], ["\u200b", 0], ["\t", 1], ["\x07", 1]]) {
     assert.equal(textWidth(text), width);
   }
-  assert.ok(segment.mock.callCount() >= 7);
+  assert.equal(segment.mock.callCount(), 3, "only the combining mark, the ZWJ sequence and the variation selector need the segmenter");
   assert.deepEqual(graphemes("\r\n"), ["\r\n"]);
 });
 
@@ -83,4 +83,80 @@ test("text-presentation symbols take one cell, as a terminal draws them", async 
   assert.deepEqual(samples.map(text => [text, textWidth(text)]), samples.map(text => [text, expected[text]]));
   assert.deepEqual(drawn.slice(0, 6), [1, 1, 1, 1, 1, 1], "the terminal draws text-presentation symbols in one cell");
   terminal.dispose();
+});
+
+
+// Long text from a delivered report or tool output: every grapheme comes back
+// exactly as one Intl.Segmenter pass would return it, while the segmenter
+// itself never sees more than a bounded window.
+const COMPLEX = ["👩‍💻", "🇨🇳🇺🇸", "👍🏽", "e\u0301", "9️⃣", "\r\n", "\x07", "한", "\u1100\u1161\u11a8", "✈️", "中文，标点。", "é", "ab cd"];
+const longMixedText = (length) => {
+  let text = "";
+  for (let index = 0; text.length < length; index += 1) text += COMPLEX[index % COMPLEX.length] + (index % 7 ? "" : "这是一段中文回复内容 English words 123 ");
+  return text;
+};
+
+test("windowed segmentation matches a single segmenter pass grapheme for grapheme", () => {
+  const reference = (text) => Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text), (s) => s.segment);
+  for (const text of [
+    longMixedText(6000),
+    "👨‍👩‍👧‍👦".repeat(400) + "abc",
+    "🇨🇳".repeat(700) + "x",
+    "a" + "\u0301".repeat(1500) + "b",
+    "\u0e01\u0e33".repeat(900),
+  ]) {
+    assert.deepEqual(graphemes(text), reference(text));
+    assert.equal(textWidth(text), reference(text).reduce((sum, g) => sum + textWidth(g), 0));
+  }
+});
+
+test("long text is measured, clipped and wrapped without handing the segmenter more than a window", (t) => {
+  const original = Intl.Segmenter.prototype.segment;
+  let longest = 0;
+  t.mock.method(Intl.Segmenter.prototype, "segment", function (input) {
+    longest = Math.max(longest, input.length);
+    return original.call(this, input);
+  });
+  const text = longMixedText(280_000);
+  const styled = `\x1b[2m${text}\x1b[0m`;
+  textWidth(text);
+  graphemes(text);
+  const clipped = clipCells(styled, 66);
+  assert.ok(textWidth(clipped) >= 65 && textWidth(clipped) <= 66, "a wide character never straddles the cut");
+  assert.ok(clipped.endsWith("...\x1b[0m"));
+  const middle = textWidth(middleClipCells(styled, 40));
+  assert.ok(middle >= 38 && middle <= 40, `middle clip is ${middle} cells`);
+  assert.equal(truncateToWidth(text, 20, "…").length < 40, true);
+  assert.ok(longest <= 1024, `segmenter saw ${longest} code units`);
+});
+
+test("clipping reads only as far as the cut", (t) => {
+  const original = Intl.Segmenter.prototype.segment;
+  let seen = 0;
+  t.mock.method(Intl.Segmenter.prototype, "segment", function (input) {
+    seen += input.length;
+    return original.call(this, input);
+  });
+  clipCells(longMixedText(280_000), 66);
+  assert.ok(seen <= 2048, `clip segmented ${seen} code units`);
+});
+
+test("every code point that skips the segmenter is a grapheme of its own", () => {
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const check = (chunk) => {
+    const text = chunk.join("");
+    assert.deepEqual(graphemes(text), Array.from(segmenter.segment(text), (s) => s.segment), `near U+${chunk[0].codePointAt(0).toString(16)}`);
+  };
+  // All of the BMP and the emoji planes: 64 consecutive code points at a time,
+  // then each one beside ASCII, CJK and Hangul bases.
+  for (const [from, to] of [[0, 0xffff], [0x1f000, 0x1faff]]) {
+    let run = [], mixed = [];
+    for (let cp = from; cp <= to; cp += 1) {
+      if (cp >= 0xd800 && cp <= 0xdfff) continue;
+      run.push(String.fromCodePoint(cp));
+      mixed.push(String.fromCodePoint(cp), ["a", "中", "한"][cp % 3]);
+      if (run.length >= 64) { check(run); check(mixed); run = []; mixed = []; }
+    }
+    if (run.length) { check(run); check(mixed); }
+  }
 });

@@ -1,5 +1,5 @@
-# Gateway core dependencies: standard library + `websockets` (already pinned by
-# requirements-runtime.txt / requirements.txt). No additional runtime deps.
+# Gateway core dependencies: standard library + `websockets`.
+websockets>=14.0,<17.0
 #
 # Channel SDKs below are OPTIONAL per-channel dependencies (WP4): the gateway
 # core never imports them. Each adapter lazy-imports its SDK only when its

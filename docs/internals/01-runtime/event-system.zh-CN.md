@@ -29,6 +29,6 @@ assistant_delta、tool_input_delta、tool_progress 等增量事件用于即时�
 
 例如工具请求发出后界面可立即展开工具块，但真正完成要看 tool_result 与持久记录。Task 的终态又可在原 turn 结束后抵达，所以它保留来源 turn，而不把已经结束的回合重新标成运行中。事件封装统一，业务寿命仍由事件类型决定。
 
-代码入口：[事件类型](../../../agent/domain/events.py)、[协议封装](../../../agent/runtime/server/protocol.py)、[重放投影](../../../agent/runtime/server/replay_events.py)。验证：[事件测试](../../../test/test_runtime_events.py)、[订阅测试](../../../test/test_runtime_server_subscriptions.py)。
+代码入口：[事件类型](../../../runtime/src/domain/events.ts)、[协议封装](../../../runtime/src/server/protocol.ts)、[重放投影](../../../runtime/src/server/protocol.ts)。验证：[事件测试](../../../runtime/test/domain.test.js)、[订阅测试](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

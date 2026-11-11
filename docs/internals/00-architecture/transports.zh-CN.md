@@ -32,6 +32,6 @@ WebSocket 入口还要验证连接凭证；它不是“把 stdio 换成网络端
 
 图中的 WebRuntimeServer 是独立 Python Web 模式；Desktop 远程 Gateway 则是另一条桥接路线。它们共用协议语义，不能据此把认证、进程归属和退出流程画成完全相同的实现。
 
-代码入口：[stdio](../../../agent/runtime/server/stdio.py)、[WebSocket](../../../agent/runtime/server/websocket.py)、[Desktop bridge](../../../desktop/src/preload/types.ts)。验证：[Web Runtime 测试](../../../test/test_web_runtime.py)、[stdio 关闭测试](../../../test/test_gateway_stdio_shutdown.py)。
+代码入口：[stdio](../../../runtime/src/server/transports.ts)、[WebSocket](../../../runtime/src/server/transports.ts)、[Desktop bridge](../../../desktop/src/preload/types.ts)。验证：[Web Runtime 测试](../../../runtime/test/server-protocol.test.js)、[stdio 关闭测试](../../../gateway/transports.py)。
 
 [返回系列地图](../README.zh-CN.md)

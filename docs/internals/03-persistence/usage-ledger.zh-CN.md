@@ -24,6 +24,6 @@ summarize_usage 是纯归约：默认 7 天、最多 365 天，按日、模型�
 
 未返回任何用量时不会生成这次采样的精确账本记录；有用量对象但缺少某字段时，正规化可能将它记为 0。因而“没有记录”和“没有消耗”不是同一结论。账本写入还是尽力完成的诊断路径，写入失败应看日志，不能把汇总当成供应商账单的严格镜像。
 
-代码入口：[用量账本](../../../agent/infrastructure/persistence/usage_ledger.py)、[汇总](../../../agent/application/usage_summary.py)、[用量正规化](../../../agent/application/context/token_usage.py)。验证：[账本回归](../../../test/test_usage_ledger.py)、[汇总回归](../../../test/test_usage_summary.py)。
+代码入口：[用量账本](../../../runtime/src/infrastructure/persistence/usage-ledger.ts)、[汇总](../../../runtime/src/infrastructure/persistence/usage-ledger.ts)、[用量正规化](../../../runtime/src/application/context-manager.ts)。验证：[账本回归](../../../runtime/test/persistence.test.js)、[汇总回归](../../../runtime/test/persistence.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

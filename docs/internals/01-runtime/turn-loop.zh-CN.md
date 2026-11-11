@@ -33,6 +33,6 @@ AgentRuntime 持有该会话的 turn lock、输入队列、turn_id 和运行状�
 
 follow-up 可在同一回合继续采样；后台任务通知或 Goal 由协调器另发起续接。把二者分开，才能解释为什么 UI 一次提交可能有很多增量事件，却不应显示成很多重复用户请求。
 
-代码入口：[AgentRuntime.run_turn](../../../agent/runtime/core/runtime.py)、[TurnRunner.run_turn](../../../agent/runtime/core/turn_runner.py)。验证：[异步运行时](../../../test/test_async_runtime.py)、[用户流程回归](../../../test/test_journeys_user.py)。
+代码入口：[AgentRuntime.run_turn](../../../runtime/src/core/turn-runner.ts)、[TurnRunner.run_turn](../../../runtime/src/core/turn-runner.ts)。验证：[异步运行时](../../../runtime/test/context-and-turn.test.js)、[用户流程回归](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

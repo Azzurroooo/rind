@@ -24,6 +24,6 @@ stream_pump.py 把文本和工具参数按字符边界拆开，队列同时约�
 
 这层队列约束的是待转发事件，不等于完整回答或 SDK 内部缓冲也只有 1 MiB。消费者停止、取消或解析失败时都必须关闭底层 stream 并结束读取任务，否则“有界队列”仍可能留下活着的网络资源。相关测试要同时检查顺序、背压和清理。
 
-代码入口：[流泵](../../../agent/runtime/core/stream_pump.py)、[解析器](../../../agent/runtime/core/stream_parser.py)。验证：[流泵边界](../../../test/test_stream_pump.py)、[消息解析](../../../test/test_message_stream_parser.py)。
+代码入口：[流泵](../../../runtime/src/core/turn-runner.ts)、[解析器](../../../runtime/src/core/turn-runner.ts)。验证：[流泵边界](../../../runtime/test/context-and-turn.test.js)、[消息解析](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

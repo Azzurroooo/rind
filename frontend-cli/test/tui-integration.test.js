@@ -452,7 +452,7 @@ test("tool blocks render rich per-tool output and respond to ctrl+o expansion", 
   harness.tui.stop();
 });
 
-test("setToolsExpanded reveals capped bash output", async () => {
+test("setDetailsExpanded reveals capped bash output", async () => {
   const harness = createHarness({ columns: 70, rows: 24 });
   harness.tui.start();
   const event = {
@@ -476,7 +476,7 @@ test("setToolsExpanded reveals capped bash output", async () => {
   assert.ok(plain.some((line) => line.includes("more lines")), "collapsed footer present");
   assert.ok(!plain.some((line) => line.includes("line-0")), "early output hidden when collapsed");
 
-  harness.output.setToolsExpanded(true);
+  harness.output.setDetailsExpanded(true);
   await settle(harness.virtual);
   viewport = harness.virtual.getViewport();
   plain = viewport.map((l) => l.trim());

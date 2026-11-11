@@ -25,6 +25,6 @@ ToolSpec 从函数签名生成参数结构，记录是否异步，以及允许�
 
 因此新增工具不仅是写一个函数，还要回答三件事：参数如何归一化，成功与失败如何构成结构化结果，在哪种容器配置下暴露。结果大或带图片时再走统一归一化与附件路径，避免一个工具绕开整个系统的输出预算。
 
-代码入口：[ToolSpec](../../../agent/infrastructure/tools/spec.py)、[catalog](../../../agent/infrastructure/tools/catalog.py)、[registry](../../../agent/infrastructure/tools/registry.py)。验证：[注册表测试](../../../test/test_tool_registry.py)。
+代码入口：[ToolSpec](../../../runtime/src/infrastructure/tools/registry.ts)、[catalog](../../../runtime/src/infrastructure/tools/control-tools.ts)、[registry](../../../runtime/src/infrastructure/tools/registry.ts)。验证：[注册表测试](../../../runtime/test/tools.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

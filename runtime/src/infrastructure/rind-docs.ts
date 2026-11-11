@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { canonicalizePath, resolveProjectRoot, resolveRindHome } from "./paths.js";
 
 export const RIND_DOC_FILENAME = "RIND.md";
@@ -64,7 +65,7 @@ function readDoc(scope: "user" | "project", filePath: string): RawRindDoc {
   const rawBytes = raw.byteLength;
   const truncated = rawBytes > RIND_DOC_BYTE_LIMIT;
   const clipped = truncated ? raw.subarray(0, RIND_DOC_BYTE_LIMIT) : raw;
-  const text = clipped.toString("utf8");
+  const text = truncated ? new StringDecoder("utf8").write(clipped) : clipped.toString("utf8");
   doc.raw_bytes = rawBytes;
   doc.injected_bytes = Buffer.byteLength(text, "utf8");
   doc.truncated = truncated;

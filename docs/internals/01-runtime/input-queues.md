@@ -30,6 +30,6 @@ Two inputs, A and B, wait in order in the same queue: normal delivery sends A fi
 
 A follow-up can be promoted to steering, changing "do it after completion" into "seen before the next sampling". Promotion does not cancel the model HTTP request in flight; it changes when the next safe delivery happens. A Surface should keep input_id to align acceptance, retraction, and delivery, so the same text does not appear twice in the queue panel and in the sent history.
 
-Code entry points: [the input queues](../../../agent/runtime/core/runtime.py), [the execution entry point](../../../agent/runtime/server/execution.py). Verification: [queue regression](../../../test/test_runtime_input_queues.py), [the compaction input flow](../../../test/test_compact_input_lifecycle.py).
+Code entry points: [the input queues](../../../runtime/src/core/turn-runner.ts), [the execution entry point](../../../runtime/src/server/execution.ts). Verification: [queue regression](../../../runtime/test/context-and-turn.test.js), [the compaction input flow](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

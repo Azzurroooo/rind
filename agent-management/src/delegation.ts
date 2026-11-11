@@ -16,13 +16,47 @@ export function ownDelegations(state: State, session: Session) {
   return sessionDelegations(state, session.id);
 }
 
-export function resultsText(state: State, delegations: Delegation[]) {
+// A delivery reaches the delegator's model context and every window that
+// replays it, so it stays bounded however many reports it carries. A report
+// that does not fit is previewed, with the call that reads it in full; once
+// too little room is left for a useful preview, it takes one line.
+export const DELIVERY_BUDGET_BYTES = 48 * 1024;
+export const REPORT_PREVIEW_BYTES = 8 * 1024;
+const MIN_PREVIEW_BYTES = 1024;
+
+export function resultsText(state: State, delegations: Delegation[], { full = false } = {}) {
+  let budget = DELIVERY_BUDGET_BYTES;
   return ["Delegated work settled:", ...delegations.map(d => {
     const head = "- " + nameOf(state, d.assigneeAgentId) + " · task " + d.id + " · ";
-    if (d.status === "done") return head + "delivered: " + (d.reply || "");
-    return head + d.status + (d.error ? ": " + d.error : "");
+    const [label, body] = d.status === "done" ? ["delivered", d.reply || ""] : [d.status, d.error || ""];
+    const size = utf8Length(body);
+    const room = Math.min(REPORT_PREVIEW_BYTES, budget);
+    if (full || size <= room) {
+      budget -= size;
+      return head + label + (body ? ": " + body : "");
+    }
+    const pointer = "full report (" + formatBytes(size) + "): delegate({wait: true, task: \"" + d.id + "\"})";
+    if (room < MIN_PREVIEW_BYTES) return head + label + " · " + pointer;
+    const preview = headWithin(body, room);
+    budget -= utf8Length(preview);
+    return head + label + ": " + preview + "\n  [truncated · " + pointer + "]";
   })].join("\n");
 }
+
+// The opening of text within maxBytes of UTF-8, ending at a line break when one fits.
+function headWithin(text: string, maxBytes: number) {
+  let bytes = 0, end = 0, lineEnd = 0;
+  for (const char of text) {
+    bytes += utf8Length(char);
+    if (bytes > maxBytes) break;
+    end += char.length;
+    if (char === "\n") lineEnd = end;
+  }
+  return text.slice(0, lineEnd || end).trimEnd();
+}
+
+const utf8Length = (text: string) => Buffer.byteLength(text, "utf8");
+const formatBytes = (bytes: number) => bytes < 1024 ? bytes + " B" : (bytes / 1024).toFixed(1) + " KB";
 
 export function returnDelegations(state: State, delegations: Delegation[], send: (text: string) => void) {
   const fresh = delegations.filter(d => !d.returned && !awaitingDelegation(d));
@@ -70,15 +104,14 @@ export function claimWaitResult(state: State, ids: string[], outcome: { timedOut
   const output = outcome.released
     ? "Wait interrupted by new input; delegated work continues in the background."
     : settled.length
-      ? resultsText(state, settled)
+      // A wait for a named task reads its report again, in full.
+      ? resultsText(state, settled, { full: includeReturned })
       : outcome.timedOut
         ? "Timed out waiting for delegated work; still running: " + running.map(d => nameOf(state, d.assigneeAgentId) + " (task " + d.id + ")").join(", ") + ". Do not call delegate({wait: true}) again; continue local work or end your turn to be resumed automatically when they settle."
         : "No pending delegated work.";
+  // The reports themselves travel once, in output.
   return {
-    settled: settled.map(d => ({
-      taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: d.status,
-      ...(d.reply ? { reply: d.reply } : {}), ...(d.error ? { error: d.error } : {}),
-    })),
+    settled: settled.map(d => ({ taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: d.status })),
     running: running.map(d => ({ taskId: d.id, assignee: nameOf(state, d.assigneeAgentId), status: d.status })),
     timedOut: outcome.timedOut,
     ...(outcome.released ? { released: true } : {}),

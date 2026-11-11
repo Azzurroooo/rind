@@ -31,6 +31,6 @@ request_id is the call correlation identifier, session_id selects the persistent
 
 A normal prompt's response returns after the turn ends; a one-shot that supports request scope also waits for this run's task continuation. Queue methods, on the other hand, confirm only receipt in accepted, and actual delivery is announced by queued_input_delivered. A client should judge completion from the invocation contract, and must not present any response as "work completed".
 
-Code entry points: [Python protocol](../../../agent/runtime/server/protocol.py), [Dispatcher](../../../agent/runtime/server/dispatcher.py), [CLI mirror](../../../frontend-cli/lib/runtime-protocol.js). Verification: [protocol regression](../../../test/test_runtime_server_protocol.py), [golden fixture](../../../test/fixtures/runtime_protocol.golden.jsonl).
+Code entry points: [Python protocol](../../../runtime/src/server/protocol.ts), [Dispatcher](../../../runtime/src/server/dispatcher.ts), [CLI mirror](../../../frontend-cli/lib/runtime-protocol.js). Verification: [protocol regression](../../../runtime/test/server-protocol.test.js), [golden fixture](../../../runtime/test/fixtures/runtime_protocol.golden.jsonl).
 
 [Back to the series map](../README.md)

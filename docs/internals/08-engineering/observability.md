@@ -33,6 +33,6 @@ The trace is recorded before the model stream enters the kernel's parsing, which
 
 First locate the persisted records by session_id, turn_id, tool_call_id, or task_id, then look at subscribed events and the Surface. Enable the trace to reproduce the problem only when it really lies at the model boundary. Startup and protocol diagnostics go to stderr; the stdio stdout must remain a valid protocol stream, and a single log line mixed in will break the consumer.
 
-Source code: [context inspect dispatch](../../../agent/runtime/server/dispatcher.py), [trace](../../../agent/infrastructure/llm/trace.py), [Chat hook point](../../../agent/infrastructure/llm/openai_chat.py), [startup diagnostics](../../../agent/runtime/server/app_server.py). Verification: [context inspection](../../../test/test_runtime_server_context.py), [trace](../../../test/test_llm_trace.py). Related: [events](../01-runtime/event-system.md), [usage ledger](../03-persistence/usage-ledger.md).
+Source code: [context inspect dispatch](../../../runtime/src/server/dispatcher.ts), [trace](../../../runtime/src/infrastructure/llm/sse.ts), [Chat hook point](../../../runtime/src/infrastructure/llm/openai-chat.ts), [startup diagnostics](../../../runtime/src/server/transports.ts). Verification: [context inspection](../../../runtime/test/server-protocol.test.js), [trace](../../../runtime/test/context-and-turn.test.js). Related: [events](../01-runtime/event-system.md), [usage ledger](../03-persistence/usage-ledger.md).
 
 [Back to the series map](../README.md)

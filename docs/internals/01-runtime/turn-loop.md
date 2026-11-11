@@ -33,6 +33,6 @@ Suppose the model first reads a file, then modifies it, and finally answers: wit
 
 A follow-up can continue sampling within the same turn; background task notifications or Goals have the coordinator start a separate continuation. Only by keeping the two apart can one explain why a single UI submission can produce many incremental events yet should not be rendered as many repeated user requests.
 
-Code entry points: [AgentRuntime.run_turn](../../../agent/runtime/core/runtime.py), [TurnRunner.run_turn](../../../agent/runtime/core/turn_runner.py). Verification: [the async runtime](../../../test/test_async_runtime.py), [user journey regression](../../../test/test_journeys_user.py).
+Code entry points: [AgentRuntime.run_turn](../../../runtime/src/core/turn-runner.ts), [TurnRunner.run_turn](../../../runtime/src/core/turn-runner.ts). Verification: [the async runtime](../../../runtime/test/context-and-turn.test.js), [user journey regression](../../../runtime/test/server-protocol.test.js).
 
 [Back to the series map](../README.md)

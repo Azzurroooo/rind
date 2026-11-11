@@ -26,6 +26,6 @@ The start intent is written to the journal before the process is created: if the
 
 The terminal state, notification delivery, and notification consumption are also separate steps. The journal keeps enough information for a recoverer to distinguish "the process ended", "the message entered the session", and "the model has seen it". Old output can be deleted once the maintenance conditions are met, yet the task identity and result status are still used to explain history.
 
-Code entry points: [TaskJournal](../../../agent/infrastructure/persistence/task_journal.py), [ProcessSupervisor](../../../agent/infrastructure/tools/shell/supervisor.py). Verification: [task journal](../../../test/test_task_journal.py), [journal index](../../../test/test_task_journal_index.py).
+Code entry points: [TaskJournal](../../../runtime/src/infrastructure/persistence/task-journal.ts), [ProcessSupervisor](../../../runtime/src/infrastructure/tools/shell-tools.ts). Verification: [task journal](../../../runtime/test/persistence.test.js), [journal index](../../../runtime/test/persistence.test.js).
 
 [Back to the series map](../README.md)

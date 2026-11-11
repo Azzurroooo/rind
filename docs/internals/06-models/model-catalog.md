@@ -35,6 +35,6 @@ Remote fields are read in the formats each provider already implements: for exam
 
 This keeps the catalog's failure modes local: one failed network refresh does not prevent the model menu from being opened offline, and unknown capabilities do not masquerade as definite promises.
 
-Source code: [built-in definitions](../../../agent/infrastructure/llm/catalog.py), [cache and capability resolution](../../../agent/infrastructure/llm/provider_service.py). Verification: [catalog](../../../test/test_model_catalog.py), [refresh and endpoint isolation](../../../test/test_model_cache_refresh.py). Related: [context budget](../02-context/context-budget.md), [image input](../02-context/image-input.md).
+Source code: [built-in definitions](../../../runtime/src/infrastructure/providers.ts), [cache and capability resolution](../../../runtime/src/infrastructure/llm/provider-service.ts). Verification: [catalog](../../../runtime/test/context-and-turn.test.js), [refresh and endpoint isolation](../../../runtime/test/context-and-turn.test.js). Related: [context budget](../02-context/context-budget.md), [image input](../02-context/image-input.md).
 
 [Back to the series map](../README.md)

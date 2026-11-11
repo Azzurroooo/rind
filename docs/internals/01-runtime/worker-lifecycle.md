@@ -21,7 +21,7 @@ sequenceDiagram
     W->>W: stop accepting work and close owned resources
 ~~~
 
-[RuntimeWorker](../../../agent/runtime/server/worker.py) creates SessionService, ExecutionCoordinator, the shared parsing/normalization/compaction services, ShellTools, and WebSessions. Only the first initialize starts a single refresh of the stale model catalog; on shutdown it cancels and awaits the refresh task, then closes active executions and Shell processes, and finally closes Web sessions.
+[RuntimeWorker](../../../runtime/src/server/worker.ts) creates SessionService, ExecutionCoordinator, the shared parsing/normalization/compaction services, ShellTools, and WebSessions. Only the first initialize starts a single refresh of the stale model catalog; on shutdown it cancels and awaits the refresh task, then closes active executions and Shell processes, and finally closes Web sessions.
 
 A stable session_id is retained at startup, but the default draft does not need a session directory right away: only the first user task or an explicit Goal persists it to disk. Browsing the session list, models, status, and replay does not create an active AgentContainer. This way "opening the app" is not the same as "starting an Agent turn".
 
@@ -31,6 +31,6 @@ initialize uses a lock to guard the one-time setup: it cleans up tool output, de
 
 Shutdown first has the supervisor stop accepting new tasks, then cancels the refresh and closes executions and managed resources. This way cleanup happens while the resource owners still exist, and an exiting Worker does not keep accepting new process-start requests. A normal exit can persist an explainable terminal state; force-killing the process can only rely on later recovery to identify the uncertain state.
 
-Code entry points: [Worker](../../../agent/runtime/server/worker.py), [the session service](../../../agent/runtime/server/session_service.py). Verification: [Worker lifecycle](../../../test/test_runtime_worker.py), [the startup draft](../../../test/test_startup_session.py).
+Code entry points: [Worker](../../../runtime/src/server/worker.ts), [the session service](../../../runtime/src/server/session-service.ts). Verification: [Worker lifecycle](../../../runtime/test/server-protocol.test.js), [the startup draft](../../../runtime/test/server-protocol.test.js).
 
 [Back to the series map](../README.md)

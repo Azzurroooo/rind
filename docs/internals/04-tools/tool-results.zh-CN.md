@@ -25,6 +25,6 @@ flowchart TB
 
 已保存的 model_content 是重放依据，后续显示规则变化不会重新裁剪旧会话。完整输出也不是无限保证：Shell 有独立输出配额和过期清理，缺失时必须报告原因。
 
-代码入口：[结果归一化](../../../agent/application/tools/result_normalizer.py)、[结果契约](../../../agent/domain/tool_result.py)、[输出存储](../../../agent/infrastructure/persistence/tool_output_store.py)。验证：[归一化测试](../../../test/test_tool_result_normalizer.py)、[文件分页](../../../test/test_file_paging.py)。
+代码入口：[结果归一化](../../../runtime/src/infrastructure/persistence/result-normalizer.ts)、[结果契约](../../../runtime/src/domain/models.ts)、[输出存储](../../../runtime/src/infrastructure/persistence/session-store.ts)。验证：[归一化测试](../../../runtime/test/persistence.test.js)、[文件分页](../../../runtime/test/tools.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

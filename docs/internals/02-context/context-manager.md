@@ -27,6 +27,6 @@ For example, if the workspace rules change but the old conversation does not, th
 
 A history read failure becomes a PersistenceError; a read exception must not be treated as "this is an empty session" and execution simply continued. This is the key failure boundary at the projection entry point.
 
-Code entry points: [ContextManager](../../../agent/application/context/manager.py), [session projection](../../../agent/infrastructure/persistence/message_projector.py), [context snapshot](../../../agent/application/context/snapshot.py). Verification: [ContextManager tests](../../../test/test_context_manager.py), [context snapshot](../../../test/test_context_snapshot.py).
+Code entry points: [ContextManager](../../../runtime/src/application/context-manager.ts), [session projection](../../../runtime/src/infrastructure/persistence/session-store.ts), [context snapshot](../../../runtime/src/application/context-manager.ts). Verification: [ContextManager tests](../../../runtime/test/context-and-turn.test.js), [context snapshot](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

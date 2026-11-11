@@ -36,7 +36,7 @@ export function createCliState() {
       activityStartedAt: 0,
       assistantHeaderShown: false,
       outputStarted: false,
-      toolDetailsExpanded: false,
+      detailsExpanded: false,
       leaveArmed: false,
       processExitTimer: null,
     },

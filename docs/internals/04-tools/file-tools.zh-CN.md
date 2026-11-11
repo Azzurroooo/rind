@@ -21,6 +21,6 @@ edit_file 要求 old_str 在当前文件中恰好出现一次，包括重叠匹�
 
 队列只协调这个 Worker 内走文件工具的写入。编辑器、其他 Worker、Shell 和硬链接别名不受它统一控制；替换前检查也不是文件系统原子 compare-and-swap。取消等待者不会写入，已启动的文件线程必须结束后才能释放锁。
 
-代码入口：[文件定义与路径](../../../agent/infrastructure/tools/files/specs.py)、[读工具](../../../agent/infrastructure/tools/files/queries.py)、[修改](../../../agent/infrastructure/tools/files/mutations.py)、[写队列](../../../agent/infrastructure/tools/files/mutation_queue.py)。验证：[修改回归](../../../test/test_file_mutation_tools.py)、[队列回归](../../../test/test_file_mutation_queue.py)。
+代码入口：[文件定义与路径](../../../runtime/src/infrastructure/tools/file-tools.ts)、[读工具](../../../runtime/src/infrastructure/tools/file-tools.ts)、[修改](../../../runtime/src/infrastructure/tools/file-tools.ts)、[写队列](../../../runtime/src/infrastructure/tools/file-tools.ts)。验证：[修改回归](../../../runtime/test/tools.test.js)、[队列回归](../../../runtime/test/tools.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

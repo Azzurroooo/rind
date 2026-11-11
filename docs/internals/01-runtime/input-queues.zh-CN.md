@@ -30,6 +30,6 @@ sequenceDiagram
 
 follow-up 可以提升为 steering，把“完成后再做”改成“下一次采样前看到”。提升并不取消正在运行的模型 HTTP 请求；它改变下一次安全投递的时机。Surface 应保留 input_id 对齐接受、撤回和投递，避免同一文本在队列栏和已发送历史中重复出现。
 
-代码入口：[输入队列](../../../agent/runtime/core/runtime.py)、[执行入口](../../../agent/runtime/server/execution.py)。验证：[队列回归](../../../test/test_runtime_input_queues.py)、[压缩输入流程](../../../test/test_compact_input_lifecycle.py)。
+代码入口：[输入队列](../../../runtime/src/core/turn-runner.ts)、[执行入口](../../../runtime/src/server/execution.ts)。验证：[队列回归](../../../runtime/test/context-and-turn.test.js)、[压缩输入流程](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -62,6 +62,6 @@ frontmatter 是 YAML，用 `yaml.safe_load` 读取；值里出现未加引号的
 
 Skill 正文是说明，不是执行器，也不会授予任何工具。SKILL.md 描述的事情，仍然只能通过容器已有的工具完成，而 `read_file` 没有目录边界。克隆来的仓库里项目级的 `.claude`、`.agents` 目录会像 `RIND.md` 一样进入目录；`/skill` 会标明每个 Skill 的来源，`/import` 可以关掉这些层级。如何编写 Skill，见内置的 `skill-creator`。
 
-代码入口：[SkillRepository](../../../agent/infrastructure/skills.py)、[解析与目录](../../../agent/domain/skills.py)、[目录与调用](../../../agent/application/skill_selection.py)、[/skill](../../../agent/runtime/server/commands/skill.py)、[/import](../../../agent/runtime/server/commands/import_skills.py)。验证：[Skill 仓库](../../../test/test_skill_repository.py)、[目录与会话](../../../test/test_skill_catalog_session.py)、[命令](../../../test/test_skill_commands.py)。
+代码入口：[SkillRepository](../../../runtime/src/infrastructure/skills.ts)、[解析与目录](../../../runtime/src/domain/models.ts)、[目录与调用](../../../runtime/src/infrastructure/skills.ts)、[/skill](../../../runtime/src/server/commands.ts)、[/import](../../../runtime/src/server/commands.ts)。验证：[Skill 仓库](../../../runtime/test/tools.test.js)、[目录与会话](../../../runtime/test/tools.test.js)、[命令](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -24,6 +24,6 @@ Suppose the model emits text A, then B, followed by a tool-argument fragment: A/
 
 This queue bounds the events waiting to be forwarded; it does not mean the complete answer or the SDK's internal buffer is limited to 1 MiB as well. When the consumer stops, cancellation occurs, or parsing fails, the underlying stream must be closed and the reading task ended; otherwise a "bounded queue" can still leave live network resources behind. Related tests must check order, backpressure, and cleanup together.
 
-Code entry points: [the stream pump](../../../agent/runtime/core/stream_pump.py), [the parser](../../../agent/runtime/core/stream_parser.py). Verification: [stream pump bounds](../../../test/test_stream_pump.py), [message parsing](../../../test/test_message_stream_parser.py).
+Code entry points: [the stream pump](../../../runtime/src/core/turn-runner.ts), [the parser](../../../runtime/src/core/turn-runner.ts). Verification: [stream pump bounds](../../../runtime/test/context-and-turn.test.js), [message parsing](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

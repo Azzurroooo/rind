@@ -391,7 +391,7 @@ test("leader delegates in background, steers running sub-agent mid-turn, collect
   assert.ok(waitResultPayload);
   assert.equal(waitResultPayload.timedOut, false);
   assert.equal(waitResultPayload.settled.length, 1);
-  assert.equal(waitResultPayload.settled[0].reply, "Fixture built with metrics");
+  assert.match(waitResultPayload.output, /delivered: Fixture built with metrics/);
 
   // 2. User steer releases active delegate({ wait: true }) immediately
   const turn2Promise = window.request("session/prompt", { session_id: info.session_id, input: "Wait for slow member", completion_scope: "request" });

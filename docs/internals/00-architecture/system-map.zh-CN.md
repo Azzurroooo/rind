@@ -36,6 +36,6 @@ Server 和执行内核在**同一个 Python Worker 进程**里；两者之间没
 
 例如浏览器刷新只丢掉第三层；Worker 仍可执行，重新订阅后从历史与快照恢复。Worker 重启会丢掉第二层，持久会话仍可打开，但旧进程不能凭一个 task_id 自动恢复为可控进程。沿这三层判断问题，比把“会话还在”理解为“所有状态都还在”更准确。
 
-代码入口：[main.py](../../../main.py)、[RuntimeWorker](../../../agent/runtime/server/worker.py)、[装配根](../../../agent/bootstrap/container.py)。验证：[架构边界测试](../../../test/test_agent_architecture.py)。
+代码入口：[main.py](../../../runtime/src/cli.ts)、[RuntimeWorker](../../../runtime/src/server/worker.ts)、[装配根](../../../runtime/src/core/turn-runner.ts)。验证：[架构边界测试](../../../runtime/test/architecture.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -23,6 +23,6 @@ TurnRunner 对 stream_interrupted 有有界的步骤重试，并持久化重试�
 
 用户中断会抑制自动续接，活跃 Goal 改为 paused；失败会令活跃 Goal blocked。Worker 正常关闭要尝试终止自己拥有的进程并等监视任务结束；强制杀死无响应 Worker 不能保证所有子进程都已清理。
 
-代码入口：[取消 token](../../../agent/domain/cancellation.py)、[TurnRunner](../../../agent/runtime/core/turn_runner.py)、[执行协调](../../../agent/runtime/server/execution.py)。验证：[取消测试](../../../test/test_cancellation_token.py)、[任务恢复](../../../test/test_task_continuation.py)、[失败边界](../../../test/test_failure_boundaries.py)、[沉默的模型](../../../test/test_model_idle_journey.py)。
+代码入口：[取消 token](../../../runtime/src/domain/cancellation.ts)、[TurnRunner](../../../runtime/src/core/turn-runner.ts)、[执行协调](../../../runtime/src/server/execution.ts)。验证：[取消测试](../../../runtime/test/domain.test.js)、[任务恢复](../../../runtime/test/server-protocol.test.js)、[失败边界](../../../runtime/test/context-and-turn.test.js)、[沉默的模型](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

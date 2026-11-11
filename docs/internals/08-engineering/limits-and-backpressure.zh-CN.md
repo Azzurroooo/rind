@@ -21,9 +21,11 @@ flowchart TB
 | 文本与工具参数增量 | 每片最多 2,048 字符 | 限制一次事件的尺寸，不丢内容 |
 | steering / follow-up | 每队列 4 项、合计 8,000 字符 | 拒绝新输入，保留已有队列 |
 | 工具投影 | terminal 8 KiB；model 25 KiB / 2,000 行 | 归一化与截断，按契约读取完整输出 |
-| Shell supervisor | 默认 8 个未退役任务记录 | 达到容量后拒绝新任务 |
+| Shell supervisor | 默认每会话 64 个未退役任务记录 | 达到容量后拒绝新任务 |
 | 进程输出落盘 | 默认 32 MiB，包含索引 | 记录超限信息，继续排空并丢弃超额输出 |
+| 文件工具并发 | 每会话 8 个并发文件操作；单 Worker 512 个；rg --threads 4 | 超出时在会话与 Worker 信号量排队；空闲文件线程自动回收 |
 | 普通文件 read | 一次源内容最多 50 KiB | 分页；不同于模型投影上限 |
+| Team 交付负载 | 单报告预览 8 KiB；单次交付总计 48 KiB；CLI 默认折叠 12 行 | 按行对齐截断并附 delegate({wait: true, task}) 全文拉取指引；CLI 按 ctrl+o 展开 |
 | 图片 | 单源 20 MiB / 4,000 万像素；规范化后 3 MiB | 拒绝或缩放；请求另限 8 张 / 16 MiB 编码数据 |
 
 这些值分别属于不同单位：字符、UTF-8 字节、行和 token 不可互换；一条 2,048 字符的 CJK 文本可能远大于 2 KiB。表中默认值也不是整机内存的总上限。
@@ -34,6 +36,6 @@ flowchart TB
 
 同样，低负载不意味着任何缓存都清零：Worker 仍保有受管任务、有限会话/任务缓存和连接；磁盘任务日志需要维护才能缩减。应从资源拥有者和退役条件分析上限，不能只看一个数组长度。
 
-源码：[流式背压](../../../agent/runtime/core/stream_pump.py)、[CLI drain](../../../frontend-cli/lib/tui/tui.js)。机制与测试入口：[输入队列](../01-runtime/input-queues.zh-CN.md)、[结构化结果](../04-tools/tool-results.zh-CN.md)、[后台任务](../05-autonomy/managed-tasks.zh-CN.md)、[图片](../02-context/image-input.zh-CN.md)。验证：[流 pump](../../../test/test_stream_pump.py)、[运行时流](../../../test/test_runtime_stream_pump.py)。
+源码：[流式背压](../../../runtime/src/core/turn-runner.ts)、[CLI drain](../../../frontend-cli/lib/tui/tui.js)。机制与测试入口：[输入队列](../01-runtime/input-queues.zh-CN.md)、[结构化结果](../04-tools/tool-results.zh-CN.md)、[后台任务](../05-autonomy/managed-tasks.zh-CN.md)、[图片](../02-context/image-input.zh-CN.md)。验证：[流 pump](../../../runtime/test/context-and-turn.test.js)、[运行时流](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

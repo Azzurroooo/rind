@@ -29,6 +29,6 @@ sequenceDiagram
 
 问答工具的普通 handler 本身只返回 Unsupported，真正的交互由运行时处理器与 responder 接合。这使 Python 内核不需要知道用户在终端输入、点 Desktop 选项还是从消息渠道回复数字。无交互环境在装配时关闭能力，而不是执行到一半才尝试读取 stdin；此时系统提示里也不会再介绍这个工具。
 
-代码入口：[问答声明](../../../agent/infrastructure/tools/user_question.py)、[问答处理](../../../agent/application/tools/processor.py)、[等待者管理](../../../agent/runtime/server/execution.py)。验证：[处理器测试](../../../test/test_async_tool_call_processor.py)、[one-shot 测试](../../../frontend-cli/test/one-shot.test.js)。
+代码入口：[问答声明](../../../runtime/src/infrastructure/tools/control-tools.ts)、[问答处理](../../../runtime/src/application/tool-processor.ts)、[等待者管理](../../../runtime/src/server/execution.ts)。验证：[处理器测试](../../../runtime/test/context-and-turn.test.js)、[one-shot 测试](../../../frontend-cli/test/one-shot.test.js)。
 
 [返回系列地图](../README.zh-CN.md)
