@@ -86,7 +86,8 @@ const handoffFile = takeHandoffPath();
 const handoffWindow = Boolean(handoffFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const runtimePath = resolveInstalledRuntime({ repoRoot });
+const installation = detectInstallation({ frontendRoot: path.resolve(scriptDir, "..") });
+const runtimePath = resolveInstalledRuntime({ repoRoot, installation });
 const managementLaunch = { repoRoot, runtimePath };
 if (cliArgs[0] === "agents") {
   try { await runAgentsCommand(cliArgs.slice(1), managementLaunch); }
@@ -193,7 +194,6 @@ if (cliArgs[0] === "run") {
 const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 let startupUpdateVersion = "";
 if (isTty && !handoffWindow) {
-  const installation = detectInstallation();
   const promptCandidate = shouldPromptStartupUpdate({ installation });
   if (promptCandidate) {
     const choice = await promptStartupUpdate({ installation, latestVersion: promptCandidate });
@@ -386,8 +386,8 @@ const runtimeController = createCliRuntimeController({
   redraw: redrawInput,
 });
 remoteController = createCliRemoteController({
-  runtimeClient: runtimeController,
-  rawClient: runtimeClient,
+  runtimeController,
+  runtimeClient,
   askRemoteMenu: (...args) => inputActions.askRemoteMenu(...args),
   sessionState,
   redraw: redrawInput,
@@ -400,9 +400,6 @@ const request = runtimeController.request;
 turnController = createTurnController({
   request,
   state: turnState,
-  onTurnStart: () => {
-    displayState.assistantHeaderShown = false;
-  },
   output: {
     queueInput: (...args) => inputActions.addPendingInput(...args),
     writeUserInput: outputController.writeUserInput,
@@ -580,8 +577,6 @@ inputController = createInputController({
   askInput: (...args) => inputActions.ask(...args),
   onSubmit: (text) => turnController.submit(text),
   onCommand: (text) => commandController.handle(text),
-  onPaste: (...args) => inputActions.handleTerminalPaste(...args),
-  onInput: (...args) => inputActions.handleTerminalInput(...args),
   cancelInput,
   prompt: mainPromptText,
   placeholder: promptPlaceholderText,
@@ -864,7 +859,6 @@ async function renderEvent(message) {
     turnStateData.interruptRequested = wasInterrupted;
     displayState.activeCompact = message.event.operation === "compact";
     displayState.activityLabel = displayState.activeCompact ? "Compacting" : "Working";
-    displayState.assistantHeaderShown = false;
     refreshInputState();
     if (wasInterrupted) {
       void request(runtimeMethods.sessionCancel).catch(() => {});
@@ -912,7 +906,6 @@ function restoreLiveTurn(value) {
   displayState.activityLabel = "Working";
   displayState.lastTurnId = turnId;
   setTurnContext(turnId);
-  displayState.assistantHeaderShown = false;
   const text = String(value.assistant_text || "");
   if (text) outputController.assistantAppend(text);
   for (const item of Array.isArray(value.pending_inputs) ? value.pending_inputs : []) {
@@ -928,12 +921,10 @@ function composeFrame(width = process.stdout.columns || 80) {
     return null;
   }
   const choiceMenu = ["model", "settings", "remote", "sessions", "fork", "choice-dialog"].includes(session.mode);
-  if (session.mode === "prompt" && session.menuState) {
-    session.menuState.setInput(session.editor.input());
-  }
-  const slashMenuOpen = session.mode === "prompt"
-    && session.menuState
-    && session.menuState.matches().length > 0;
+  const slashMatches = session.mode === "prompt" && session.menuState
+    ? (session.menuState.setInput(session.editor.input()), session.menuState.matches())
+    : [];
+  const slashMenuOpen = slashMatches.length > 0;
   const showCaret = (!choiceMenu && !slashMenuOpen)
     || (session.mode === "question" && session.questionState.isEditing());
   if (session.mode === "model") {
@@ -1048,9 +1039,11 @@ function composeFrame(width = process.stdout.columns || 80) {
         : "",
     };
   }
-  const matches = session.menuState
-    ? (session.menuState.setInput(session.editor.input()), session.menuState.matches())
-    : [];
+  const matches = session.mode === "prompt"
+    ? slashMatches
+    : session.menuState
+      ? (session.menuState.setInput(session.editor.input()), session.menuState.matches())
+      : [];
   if (typeof session.editor.setViewportWidth === "function") {
     session.editor.setViewportWidth(width);
   }

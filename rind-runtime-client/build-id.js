@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 // process reports, so an update is noticed instead of silently serving old
 // behaviour. Only file contents count, so a reinstall of identical code is a match.
 const cache = new Map();
-const SKIP = new Set(["node_modules", "__pycache__", ".git", "test", "tests"]);
+const SKIP = new Set(["node_modules", ".git", "test", "tests"]);
 
 async function files(root, extensions) {
   let entries;

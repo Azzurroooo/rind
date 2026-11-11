@@ -4,8 +4,6 @@ export function createInputController({
   askInput,
   onSubmit = () => {},
   onCommand = async () => false,
-  onPaste = () => {},
-  onInput = () => {},
   cancelInput = () => {},
   prompt = () => "",
   placeholder = () => "",
@@ -56,12 +54,8 @@ export function createInputController({
     return new Promise((resolve) => promptResumeWaiters.push(resolve));
   }
 
-  function cancel() {
-    cancelInput();
-  }
-
   function close() {
-    cancel();
+    cancelInput();
     terminalUi?.stop();
   }
 

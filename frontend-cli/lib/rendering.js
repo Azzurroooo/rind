@@ -1145,8 +1145,12 @@ function taskMonitorDetail(selected, preview, offset, width, maxRows) {
   const heading = dim(`  ${clipSingleLine(`${selected.bg_id} · ${selected.status} · ${role}`, width)}`);
   if (!preview) return [heading, dim("  Loading output…")].slice(0, maxRows);
   if (preview.error) return [heading, dim(`  Output unavailable: ${clipSingleLine(preview.error, width - 22)}`)].slice(0, maxRows);
-  const output = [preview.stdout, preview.stderr].filter(Boolean).join("\n");
-  const content = output ? output.split(/\r?\n/) : ["(no output)"];
+  const content = Array.isArray(preview.lines)
+    ? (preview.lines.length ? preview.lines : ["(no output)"])
+    : (() => {
+      const output = [preview.stdout, preview.stderr].filter(Boolean).join("\n");
+      return output ? output.split(/\r?\n/) : ["(no output)"];
+    })();
   const warnings = [];
   if (preview.expired) warnings.push("Output expired; preview incomplete");
   else if (preview.limited) warnings.push("Earlier output outside preview");

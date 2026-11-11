@@ -6,16 +6,16 @@
 //
 // Until the window reads keys itself, Esc or Ctrl+C cancels the startup.
 import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { monitorEventLoopDelay } from "node:perf_hooks";
+import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
 import { releaseInput, takeInput } from "./tui/console-input.js";
 
 const KEEP_LOGS = 20;
 const BLOCKED_MS = 500;
 const ESC = "\x1b", CTRL_C = "\x03";
 
-export function windowLogPath(home = process.env.RIND_HOME || path.join(os.homedir(), ".rind"), pid = process.pid) {
+export function windowLogPath(home = resolveRindHome(), pid = process.pid) {
   return path.join(home, "logs", "window-" + pid + ".log");
 }
 

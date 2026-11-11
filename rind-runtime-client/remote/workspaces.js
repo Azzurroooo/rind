@@ -212,7 +212,17 @@ export async function registerSharedWorkspace(rindHome, workspacePath, { setActi
   const projects = uniquePaths([...current.projects, canonical]);
   const activeProjectPath =
     setActive || !current.activeProjectPath ? canonical : current.activeProjectPath;
-  return writeSharedWorkspaces(rindHome, { projects, activeProjectPath });
+  const resolvedActive =
+    projects.find((p) => samePath(p, activeProjectPath)) || projects[0] || "";
+  if (
+    current.exists &&
+    projects.length === current.projects.length &&
+    projects.every((p, index) => samePath(p, current.projects[index])) &&
+    samePath(resolvedActive, current.activeProjectPath)
+  ) {
+    return { projects: current.projects, activeProjectPath: current.activeProjectPath };
+  }
+  return writeSharedWorkspaces(rindHome, { projects, activeProjectPath: resolvedActive });
 }
 
 export async function hasPersistedUserMessage(rindHome, sessionId) {
@@ -234,44 +244,54 @@ function parseLine(line) {
   }
 }
 
-export async function readSessionIndex(sessionIndexFile) {
+export async function readRawSessionIndexEntries(sessionIndexFile) {
   const index = await readJsonObject(sessionIndexFile);
   let rawEntries = [];
   if (Array.isArray(index.sessions)) {
     rawEntries = index.sessions;
-  } else if (asObject(index.sessions)) {
-    rawEntries = Object.entries(index.sessions).map(([id, value]) =>
+  } else {
+    const map = asObject(index.sessions) || index;
+    rawEntries = Object.entries(map).map(([id, value]) =>
       asObject(value) ? { id, ...value } : null,
     );
   }
-  const sessions = rawEntries.flatMap((value) => {
+  return rawEntries.flatMap((value) => {
     const session = asObject(value);
     if (!session) return [];
     const id = typeof session.id === "string" ? session.id : typeof session.session_id === "string" ? session.session_id : "";
     const workspaceRoot = typeof session.workspace_root === "string" ? session.workspace_root : "";
-    if (!id || !workspaceRoot) return [];
     return [
       {
         id,
-        title: typeof session.title === "string" ? session.title : typeof session.name === "string" ? session.name : "Untitled",
+        title: typeof session.title === "string" ? session.title : typeof session.name === "string" ? session.name : "",
         preview: typeof session.preview === "string" ? session.preview : typeof session.last_user_message === "string" ? session.last_user_message : "",
         updatedAt: typeof session.updated_at === "string" ? session.updated_at : typeof session.created_at === "string" ? session.created_at : "",
-        workspaceRoot: storedPath(workspaceRoot),
+        workspaceRoot,
+        messageCount: Number(session.message_count ?? (session.has_user_message ? 1 : 0)) || 0,
+        lastModel: typeof session.last_model === "string" ? session.last_model : "",
         hasUserMessage: session.has_user_message === true || Number(session.message_count) > 0,
         hasUserMessageMarker: typeof session.has_user_message === "boolean" || typeof session.message_count === "number",
       },
     ];
   });
+}
+
+export async function readSessionIndex(sessionIndexFile) {
+  const entries = await readRawSessionIndexEntries(sessionIndexFile);
   const rindHome = dirname(sessionIndexFile);
-  const resolved = await Promise.all(
-    sessions.map(async (session) => ({
-      ...session,
-      hasUserMessage: session.hasUserMessageMarker
-        ? session.hasUserMessage
-        : await hasPersistedUserMessage(rindHome, session.id),
+  const filtered = entries.filter((entry) => entry.id && entry.workspaceRoot);
+  return Promise.all(
+    filtered.map(async (entry) => ({
+      id: entry.id,
+      title: entry.title || "Untitled",
+      preview: entry.preview,
+      updatedAt: entry.updatedAt,
+      workspaceRoot: storedPath(entry.workspaceRoot),
+      hasUserMessage: entry.hasUserMessageMarker
+        ? entry.hasUserMessage
+        : await hasPersistedUserMessage(rindHome, entry.id),
     })),
   );
-  return resolved.map(({ hasUserMessageMarker: _marker, ...session }) => session);
 }
 
 export async function projectSummaryForPath(path, sessions) {

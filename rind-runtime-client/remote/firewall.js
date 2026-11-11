@@ -72,5 +72,3 @@ export async function allowRemoteOnWindows(executable, port) {
     );
   }
 }
-
-export const allowGatewayOnWindows = allowRemoteOnWindows;

@@ -325,12 +325,12 @@ export function resolveInstalledRuntime({
   envRuntimePath = process.env.RIND_RUNTIME_PATH,
   platform = process.platform,
   arch = process.arch,
-} = {}) {
-  const installation = detectInstallation({
+  installation = detectInstallation({
     frontendRoot: path.join(repoRoot, "frontend-cli"),
     platform,
     arch,
-  });
+  }),
+} = {}) {
   const cleanEnv = String(envRuntimePath || "").trim();
   if (cleanEnv && !isForeignPackagedRuntime(cleanEnv, installation.installRoot, platform)) {
     return cleanEnv;

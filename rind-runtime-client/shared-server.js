@@ -7,6 +7,7 @@ import { createRuntimeClient } from "./runtime-client.js";
 import { sharedRuntimePaths } from "./shared-runtime.js";
 import { listenOwned } from "./endpoint.js";
 import { runtimeBuildId } from "./build-id.js";
+import { createLineBuffer } from "./ndjson.js";
 import { createLiveSessions } from "./live-sessions.js";
 import { createRemoteHost } from "./remote/host.js";
 import { registerSharedWorkspace, samePath } from "./remote/workspaces.js";
@@ -209,7 +210,7 @@ export async function startSharedServer(options) {
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   ready.catch(() => {});
   const server = net.createServer(socket => {
-    socket.setEncoding("utf8"); let buffer = "";
+    socket.setEncoding("utf8");
     const peer = { socket, sessions: new Set(), prompts: new Map(), requestPrompts: new Map(), observe: false, oneShot: false, window: false, workspace: "", send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
     peers.add(peer); touchActivity(); socket.on("error", () => {});
     socket.on("close", () => {
@@ -227,11 +228,8 @@ export async function startSharedServer(options) {
       }
       if (isIdle()) touchActivity();
     });
-    socket.on("data", chunk => {
-      buffer += chunk;
-      if (buffer.length > 32 * 1024 * 1024) { socket.destroy(); return; }
-      let end; while ((end = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); void handle(line); }
-    });
+    const lines = createLineBuffer(line => { void handle(line); }, { maxBytes: 32 * 1024 * 1024, onOverflow: () => socket.destroy() });
+    socket.on("data", chunk => { lines.push(chunk); });
     async function handle(line) {
       let id, sessionId, holdsSession = false, deletesSession = false;
       try {

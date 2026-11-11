@@ -38,6 +38,17 @@ export function registerSharedWorkspace(
   options?: { setActive?: boolean },
 ): Promise<{ projects: string[]; activeProjectPath: string }>;
 export function hasPersistedUserMessage(rindHome: string, sessionId: string): Promise<boolean>;
+export function readRawSessionIndexEntries(sessionIndexFile: string): Promise<Array<{
+  id: string;
+  title: string;
+  preview: string;
+  updatedAt: string;
+  workspaceRoot: string;
+  messageCount: number;
+  lastModel: string;
+  hasUserMessage: boolean;
+  hasUserMessageMarker: boolean;
+}>>;
 export function readSessionIndex(sessionIndexFile: string): Promise<WorkspaceSessionSummary[]>;
 export function projectSummaryForPath(
   path: string,

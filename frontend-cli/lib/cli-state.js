@@ -34,7 +34,6 @@ export function createCliState() {
       activityFrame: 0,
       activityTimer: null,
       activityStartedAt: 0,
-      assistantHeaderShown: false,
       outputStarted: false,
       detailsExpanded: false,
       leaveArmed: false,

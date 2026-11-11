@@ -7,18 +7,25 @@ export function renderFrame(children, width, previousSegments = []) {
   let length = 0;
   let unchangedPrefix = 0;
   let cursor = null;
+  let segIndex = 0;
   for (let index = 0; index < children.length; index++) {
-    const rendered = children[index].render(width);
-    const source = Array.isArray(rendered) ? rendered : [];
-    const previous = previousSegments[index];
-    const content = Object.isFrozen(source) && previous?.source === source
-      ? previous.content : normalize(source);
-    if (unchangedPrefix === length && previous?.content === content && previous.start === length) {
-      unchangedPrefix += content.lines.length;
+    const child = children[index];
+    const sources = typeof child.renderSegments === "function"
+      ? child.renderSegments(width)
+      : [child.render(width)];
+    for (let s = 0; s < sources.length; s++) {
+      const rendered = sources[s];
+      const source = Array.isArray(rendered) ? rendered : [];
+      const previous = previousSegments[segIndex++];
+      const content = Object.isFrozen(source) && previous?.source === source
+        ? previous.content : normalize(source);
+      if (unchangedPrefix === length && previous?.content === content && previous.start === length) {
+        unchangedPrefix += content.lines.length;
+      }
+      segments.push({ source, content, start: length });
+      if (content.cursor) cursor = { row: length + content.cursor.row, col: content.cursor.col };
+      length += content.lines.length;
     }
-    segments.push({ source, content, start: length });
-    if (content.cursor) cursor = { row: length + content.cursor.row, col: content.cursor.col };
-    length += content.lines.length;
   }
   return {
     segments, length, unchangedPrefix, cursor,

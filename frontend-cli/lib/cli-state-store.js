@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
 import { setTheme } from "./theme.js";
 
 let cachedPath = "";
@@ -120,7 +120,7 @@ export function spinnerFrame(frame) {
 
 // CLI-owned runtime preferences, separate from the shared ~/.rind/settings.json
 // that the runtime manages (apiKey/model/baseUrl).
-export function cliStatePath(rindHome = process.env.RIND_HOME || path.join(homedir(), ".rind")) {
+export function cliStatePath(rindHome = resolveRindHome()) {
   return path.join(String(rindHome), "cli-state.json");
 }
 

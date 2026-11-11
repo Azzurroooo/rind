@@ -13,12 +13,20 @@ export function prepareComposerFrame(frame = {}, columns = DEFAULT_COLUMNS) {
   const display = input || String(frame.placeholder || "");
   const position = cursorPosition(frame, input);
   const leadingLines = wrapRenderedLines(block.leading, width);
-  const inputLines = wrapInputLines(block.prefix, display, width);
+  const wrappedInput = wrapInputLines(block.prefix, display, width);
+  const inputLines = wrappedInput.lines;
   const menuLines = wrapRenderedLines(frame.menuText, width);
   const menuCursor = frame.menuCursor
     ? resolveMenuCursor(frame.menuCursor, frame.menuText, width)
     : null;
-  const cursor = menuCursor || visualCursor(block.prefix, input, position, width, inputLines);
+  const cursor = menuCursor || visualCursor(
+    block.prefix,
+    input,
+    position,
+    width,
+    inputLines,
+    display === input ? wrappedInput : null,
+  );
   const trailingLines = wrapRenderedLines(block.trailing, width);
   const lines = [...leadingLines, ...inputLines, ...menuLines, ...trailingLines];
   const cursorRow = menuCursor
@@ -58,9 +66,11 @@ function wrapInputLines(prefix, text, columns) {
   const continuationPrefix = " ".repeat(prefixWidth);
   const contentWidth = Math.max(1, columns - prefixWidth);
   const lines = [];
+  const lineChunks = new Array(logicalLines.length);
   for (const [index, logicalLine] of logicalLines.entries()) {
     const linePrefix = index === 0 ? prefix : continuationPrefix;
     if (logicalLine.includes("\x1b")) {
+      lineChunks[index] = null;
       lines.push(...wrapLine(
         linePrefix,
         continuationPrefix,
@@ -70,21 +80,29 @@ function wrapInputLines(prefix, text, columns) {
       continue;
     }
     const chunks = wrapTextCells(logicalLine, contentWidth, contentWidth);
+    lineChunks[index] = chunks;
     lines.push(...chunks.map((chunk, chunkIndex) => (
       `${chunkIndex === 0 ? linePrefix : continuationPrefix}${chunk.text}`
     )));
   }
-  return lines.length ? lines : [String(prefix || "")];
+  return {
+    lines: lines.length ? lines : [String(prefix || "")],
+    logicalLines,
+    lineChunks,
+    prefixWidth,
+    continuationPrefix,
+    contentWidth,
+  };
 }
 
-function visualCursor(prefix, input, position, columns, inputLines) {
-  const logicalLines = String(input).split("\n");
-  const prefixWidth = textWidth(prefix);
-  const continuationPrefix = " ".repeat(prefixWidth);
-  const contentWidth = Math.max(1, columns - prefixWidth);
+function visualCursor(prefix, input, position, columns, inputLines, cached = null) {
+  const logicalLines = cached ? cached.logicalLines : String(input).split("\n");
+  const prefixWidth = cached ? cached.prefixWidth : textWidth(prefix);
+  const continuationPrefix = cached ? cached.continuationPrefix : " ".repeat(prefixWidth);
+  const contentWidth = cached ? cached.contentWidth : Math.max(1, columns - prefixWidth);
   const visualLines = [];
   for (const [lineIndex, logicalLine] of logicalLines.entries()) {
-    const chunks = wrapTextCells(logicalLine, contentWidth, contentWidth);
+    const chunks = cached?.lineChunks[lineIndex] || wrapTextCells(logicalLine, contentWidth, contentWidth);
     for (const chunk of chunks) {
       visualLines.push({
         startColumn: chunk.startColumn,

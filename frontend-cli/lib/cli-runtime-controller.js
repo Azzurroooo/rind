@@ -468,8 +468,10 @@ export function createCliRuntimeController({
   }
 
   async function fetchContextBoardData() {
-    const breakdownResult = await request(methods.contextInspect);
-    const summaryResult = await request(methods.usageSummary, { days: CONTEXT_BOARD_DAYS });
+    const [breakdownResult, summaryResult] = await Promise.all([
+      request(methods.contextInspect),
+      request(methods.usageSummary, { days: CONTEXT_BOARD_DAYS }),
+    ]);
     return {
       breakdown: breakdownResult?.breakdown && typeof breakdownResult.breakdown === "object" ? breakdownResult.breakdown : null,
       latestUsage: breakdownResult?.latest_usage && typeof breakdownResult.latest_usage === "object" ? breakdownResult.latest_usage : null,

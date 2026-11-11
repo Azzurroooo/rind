@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createLineBuffer } from "./ndjson.js";
 import { buildRuntimeEnv } from "./runtime-env.js";
 import {
   createRuntimeRequest,
@@ -84,7 +85,6 @@ export function createRuntimeClient({
   const launch = resolveRuntimeLaunch({ repoRoot, runtimePath, cliArgs });
 
   let nextId = 1;
-  let stdoutBuffer = "";
   let stderrBuffer = "";
   let closing = false;
   let shutdownPromise = null;
@@ -100,7 +100,6 @@ export function createRuntimeClient({
     if (closing) {
       throw new Error("Runtime is shutting down.");
     }
-    stdoutBuffer = "";
     stderrBuffer = "";
     exitHandled = false;
     child = spawnProcess(launch.command, launch.args, {
@@ -115,16 +114,14 @@ export function createRuntimeClient({
       }),
       stdio: ["pipe", "pipe", "pipe"],
     });
+    const stdoutLines = createLineBuffer((line) => {
+      if (line) {
+        receive(line);
+      }
+    });
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
-      stdoutBuffer += chunk;
-      const lines = stdoutBuffer.split(/\r?\n/);
-      stdoutBuffer = lines.pop() || "";
-      for (const line of lines) {
-        if (line) {
-          receive(line);
-        }
-      }
+      stdoutLines.push(chunk);
     });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => {

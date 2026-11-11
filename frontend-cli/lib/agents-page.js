@@ -256,6 +256,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     view.busy = true; view.busyLabel = label;
     if (dialog) dialog.error = "";
     spinner = setInterval(redraw, 100);
+    spinner.unref?.();
     redraw();
     const detail = view.detail;
     try {

@@ -4,7 +4,6 @@ export function createTurnController({
   request,
   state,
   output,
-  onTurnStart = () => {},
 }) {
   let activeSubmission = Promise.resolve();
   function submit(text, extra = {}) {
@@ -46,7 +45,6 @@ export function createTurnController({
     }
     state.activeTurn = true;
     state.interruptRequested = false;
-    onTurnStart();
     output.refreshInputState();
     activeSubmission = run(text, extra).catch((error) => handleSubmissionError(error, text));
   }

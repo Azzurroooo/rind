@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveRindHome as canonicalResolveRindHome } from "../local-files.js";
 import { allowRemoteOnWindows } from "./firewall.js";
 import { createManagementBridge } from "./management.js";
 import { isRemoteRuntimeMethod } from "./policy.js";
@@ -68,9 +69,11 @@ function asTrimmedString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export function resolveRindHome(envHome = process.env.RIND_HOME, fallbackHome = homedir()) {
+export function resolveRindHome(envHome = process.env.RIND_HOME, fallbackHome) {
   const clean = typeof envHome === "string" ? envHome.trim() : "";
-  return clean || join(fallbackHome, ".rind");
+  if (clean) return canonicalResolveRindHome(clean);
+  if (fallbackHome) return canonicalResolveRindHome(join(fallbackHome, ".rind"));
+  return canonicalResolveRindHome();
 }
 
 export function resolveRindPaths(rindHomeOverride) {

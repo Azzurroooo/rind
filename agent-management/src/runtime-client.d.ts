@@ -31,3 +31,10 @@ declare module "*build-id.js" {
   export function buildId(sources: Array<{ root?: string; extensions?: string[]; file?: string }>): Promise<string>;
   export function runtimeBuildId(options?: { repoRoot?: string; runtimePath?: string }): Promise<string>;
 }
+
+declare module "*ndjson.js" {
+  export function createLineBuffer(
+    onLine: (line: string) => void,
+    options?: { maxBytes?: number; onOverflow?: () => void },
+  ): { push(chunk: string | Buffer): boolean; reset(): void };
+}

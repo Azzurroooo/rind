@@ -8,7 +8,10 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { runtimeBuildId } from "./build-id.js";
 import { probeEndpoint } from "./endpoint.js";
+import { createLineBuffer } from "./ndjson.js";
 import { acquireProcessLock } from "./process-lock.js";
+
+const SPAWN_POLL_DELAYS_MS = [15, 20, 30, 50, 80];
 
 export function sharedRuntimePaths(home = process.env.RIND_HOME) {
   const directory = path.join(resolveRindHome(home), "runtime");
@@ -35,30 +38,25 @@ export async function connectSharedRuntime(options = {}) {
       socket.once("error", failed);
     });
     socket.setEncoding("utf8");
-    let buffer = "", closed = false;
+    let closed = false;
     const pending = new Map();
     socket.on("error", () => {});
     socket.on("close", () => { for (const p of pending.values()) { clearTimeout(p.timer); p.reject(Object.assign(new Error("Runtime connection lost; execution outcome is unconfirmed."), { code: "EXECUTION_UNCONFIRMED" })); } pending.clear(); if (!closed) options.onDisconnect?.(); });
-    socket.on("data", chunk => {
-      buffer += chunk;
-      if (buffer.length > 32 * 1024 * 1024) { socket.destroy(); return; }
-      let end;
-      while ((end = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
-        try {
-          const message = JSON.parse(line);
-          if (message.event) { options.onMessage?.(message.event); continue; }
-          if (message.deliver) { options.onDeliver?.(message.deliver); continue; }
-          if (message.prompt) {
-            Promise.resolve(options.onRequest?.(message.prompt)).then(value => send({ authReply: message.prompt.request_id, value: value?.value ?? value ?? "" })).catch(() => send({ authReply: message.prompt.request_id, value: "" }));
-            continue;
-          }
-          const p = pending.get(message.id); if (!p) continue;
-          clearTimeout(p.timer); pending.delete(message.id);
-          if (message.error) p.reject(Object.assign(new Error(message.error.message), { code: message.error.code })); else p.resolve(message.result);
-        } catch { socket.destroy(); }
-      }
-    });
+    const lines = createLineBuffer((line) => {
+      try {
+        const message = JSON.parse(line);
+        if (message.event) { options.onMessage?.(message.event); return; }
+        if (message.deliver) { options.onDeliver?.(message.deliver); return; }
+        if (message.prompt) {
+          Promise.resolve(options.onRequest?.(message.prompt)).then(value => send({ authReply: message.prompt.request_id, value: value?.value ?? value ?? "" })).catch(() => send({ authReply: message.prompt.request_id, value: "" }));
+          return;
+        }
+        const p = pending.get(message.id); if (!p) return;
+        clearTimeout(p.timer); pending.delete(message.id);
+        if (message.error) p.reject(Object.assign(new Error(message.error.message), { code: message.error.code })); else p.resolve(message.result);
+      } catch { socket.destroy(); }
+    }, { maxBytes: 32 * 1024 * 1024, onOverflow: () => socket.destroy() });
+    socket.on("data", chunk => { lines.push(chunk); });
     function send(message) { if (!socket.destroyed) socket.write(JSON.stringify({ ...message, token }) + "\n"); }
     return {
       request(method, params = {}) {
@@ -148,9 +146,9 @@ export async function connectSharedRuntime(options = {}) {
     // process whose current directory is inside a folder blocks removing it.
     const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome, ...(options.stopSpawnedHost && !replaced ? { stopWhenIdle: true } : {}) }), "--rind-host-nonce=" + randomUUID()], { cwd: paths.directory, detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd], env: process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env });
     child.on("error", () => {}); child.unref(); await log.close();
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 103; i++) {
+      await delay(SPAWN_POLL_DELAYS_MS[i] ?? 100);
       try { const started = await connect(); started.spawned = !replaced; return started; } catch {}
-      await new Promise(resolve => setTimeout(resolve, 100));
     }
     throw new Error("Unable to connect to shared Runtime. See " + paths.log);
   } finally {

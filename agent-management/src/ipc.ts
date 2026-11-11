@@ -4,7 +4,7 @@ import { randomBytes, randomUUID, createHmac, timingSafeEqual } from "node:crypt
 import { appendFile, readFile, writeFile, unlink, link } from "node:fs/promises";
 import type { Principal } from "./model.js";
 import { ManagementError, requireValue } from "./model.js";
-import { managementPaths, privateDirectory } from "./paths.js";
+import { canonicalDirectory, managementPaths, privateDirectory } from "./paths.js";
 import { openStore } from "./store.js";
 import { createService } from "./service.js";
 import { createRindAdapter } from "./adapters/rind.js";
@@ -16,6 +16,7 @@ import path from "node:path";
 import { connectSharedRuntime, stopSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 import { listenOwned, EndpointOccupiedError } from "../../rind-runtime-client/endpoint.js";
 import { recordedNonce } from "../../rind-runtime-client/local-files.js";
+import { createLineBuffer } from "../../rind-runtime-client/ndjson.js";
 import { canDelegate, managerInstructions, memberInstructions, toolsFor } from "./tools.js";
 
 const RUNTIME_START_MS = 30000;
@@ -123,6 +124,9 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
   // They never share a pending attempt, so a task that needs a host is not
   // handed a probe that is allowed to fail.
   let probing: Promise<any> | undefined;
+  let liveRuntimeSessionIds = new Set<string>();
+  const needsReconcile = (s: any, activeSessionIds: Set<string>) =>
+    Boolean(s.shared && s.runtimeSessionId && (service.isConnected(s.id) || liveRuntimeSessionIds.has(s.runtimeSessionId) || activeSessionIds.has(s.id) || store.state.deliveries[s.id]?.texts.length));
   function executionHost(start = true): Promise<any> {
     if (runtime) return Promise.resolve(runtime);
     if (!start) return runtimeConnecting || (probing ||= attachHost(false).finally(() => { probing = undefined; }));
@@ -132,7 +136,12 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
     let attachedClient: any;
     return connectSharedRuntime({ ...options, rindHome: options.home, start,
       onMessage(message: any) {
-        if (message?.kind === "runtime" && message.type === "sessions_changed") { service.setLive(message.sessions || []); return; }
+        if (message?.kind === "runtime" && message.type === "sessions_changed") {
+          const sessions = message.sessions || [];
+          liveRuntimeSessionIds = new Set(sessions.map((s: any) => s.id));
+          service.setLive(sessions);
+          return;
+        }
         if (message.event?.type === "folder_defaults_changed") { service.folderDefaultsChanged(); return; }
         if (message.event?.type === "wait_released" || message.event?.type === "turn_cancelled") { service.releaseWait(message.session_id); if (message.event?.type === "wait_released") return; }
         if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "background_wait_changed"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
@@ -142,6 +151,7 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
       onDisconnect() {
         if (attachedClient && runtime !== attachedClient) return;
         runtime = undefined;
+        liveRuntimeSessionIds = new Set();
         service.setLive([]);
         if (!closing) void reattach();
       },
@@ -161,10 +171,10 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
       // A host from before the live table does not know runtime/sessions.
       const liveSessions = (await value.request("runtime/sessions").catch(() => ({ sessions: [] }))).sessions || [];
       if (closing || runtime !== value) { value.close(); throw new Error("Runtime disconnected."); }
+      liveRuntimeSessionIds = new Set(liveSessions.map((s: any) => s.id));
       service.setLive(liveSessions);
-      const liveIds = new Set(liveSessions.map((s: any) => s.id));
       const activeSessionIds = new Set(Object.values(store.state.runs).filter(activeRun).map(r => r.sessionId));
-      const targets = Object.values(store.state.sessions).filter(s => s.shared && s.runtimeSessionId && (liveIds.has(s.runtimeSessionId) || activeSessionIds.has(s.id) || store.state.deliveries[s.id]?.texts.length));
+      const targets = Object.values(store.state.sessions).filter(s => needsReconcile(s, activeSessionIds));
       void Promise.all(targets.map(reconcile));
       return value;
     });
@@ -252,7 +262,7 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
     sockets.add(socket);
     touchActivity();
     socket.setEncoding("utf8");
-    let buffer = ""; let unsubscribe: (() => void) | undefined;
+    let unsubscribe: (() => void) | undefined;
     const attached: string[] = [], oneShotAttached = new Set<string>();
     let connectionPrincipal: Principal | undefined;
     function send(value: object) {
@@ -261,15 +271,8 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
         socket.write(JSON.stringify(value) + "\n");
       }
     }
-    socket.on("data", chunk => {
-      buffer += chunk;
-      if (buffer.length > 32 * 1024 * 1024) { socket.destroy(); return; }
-      let end: number;
-      while ((end = buffer.indexOf("\n")) !== -1) {
-        const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
-        void handle(line);
-      }
-    });
+    const lines = createLineBuffer(line => { void handle(line); }, { maxBytes: 32 * 1024 * 1024, onOverflow: () => socket.destroy() });
+    socket.on("data", chunk => { lines.push(chunk); });
     async function handle(line: string) {
       let id: unknown;
       try {
@@ -396,9 +399,11 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
             if (host) await host.request("session/cancel", { session_id: result.runtimeSessionId }).catch(() => {});
           } else if (message.method === "delegate" && (message.params.new !== undefined || message.params.retire !== undefined) && principal.kind === "agent") {
             const teamId = store.state.sessions[principal.sessionId]?.teamId;
-            await Promise.all(Object.values(store.state.sessions).filter(s => s.teamId === teamId && s.shared && s.runtimeSessionId).map(reconcile));
+            const activeSessionIds = new Set(Object.values(store.state.runs).filter(activeRun).map(r => r.sessionId));
+            await Promise.all(Object.values(store.state.sessions).filter(s => s.teamId === teamId && needsReconcile(s, activeSessionIds)).map(reconcile));
           } else if (["renameTeam", "addMember", "removeMember", "updateMember", "setLeader", "setSupervisor", "createWorkspace", "createWorktree", "copyWorkspace"].includes(message.method)) {
-            for (const s of Object.values(store.state.sessions)) if (s.teamId === message.params.teamId && s.shared && s.runtimeSessionId) void reconcile(s);
+            const activeSessionIds = new Set(Object.values(store.state.runs).filter(activeRun).map(r => r.sessionId));
+            for (const s of Object.values(store.state.sessions)) if (s.teamId === message.params.teamId && needsReconcile(s, activeSessionIds)) void reconcile(s);
           }
         }
         send({ id, result });
@@ -459,7 +464,7 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
     if (await recordedNonce(paths.record) === recordNonce) await unlink(paths.record).catch(() => {});
   }
   let store!: Awaited<ReturnType<typeof openStore>>;
-  const realManager = (async () => { await privateDirectory(paths.manager); const { canonicalDirectory } = await import("./paths.js"); return canonicalDirectory(paths.manager); })();
+  const realManager = (async () => { await privateDirectory(paths.manager); return canonicalDirectory(paths.manager); })();
   // Awaited by the requests that need it; a failure surfaces there, never as an unhandled rejection.
   realManager.catch(() => {});
   try {

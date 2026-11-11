@@ -1,10 +1,10 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
 
 const HISTORY_LIMIT = 100;
 
-export function promptHistoryPath(rindHome = process.env.RIND_HOME || path.join(homedir(), ".rind")) {
+export function promptHistoryPath(rindHome = resolveRindHome()) {
   return path.join(String(rindHome), "cli-history.jsonl");
 }
 

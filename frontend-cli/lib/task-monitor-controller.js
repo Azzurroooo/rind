@@ -25,6 +25,19 @@ function parseObject(value) {
   }
 }
 
+function makePreview(id, stdout, stderr, extra = {}) {
+  const out = String(stdout || "");
+  const err = String(stderr || "");
+  const combined = [out, err].filter(Boolean).join("\n");
+  return {
+    id,
+    stdout: out,
+    stderr: err,
+    lines: combined ? combined.split(/\r?\n/) : null,
+    ...extra,
+  };
+}
+
 export function createTaskMonitorController({ request, state, redraw = () => {}, log = () => {}, notify = log, terminalUi = false }) {
   const tasks = new Map();
   let monitor = null;
@@ -56,7 +69,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     return after[Math.min(index, after.length - 1)]?.bg_id || null;
   }
 
-  function reconcileMonitor(oldItems, { allowAutoExit = true } = {}) {
+  function reconcileMonitor(oldItems, { allowAutoExit = true, skipRedraw = false } = {}) {
     if (!monitor) return;
     const nextItems = items();
     if (allowAutoExit && !nextItems.length && !listLoading && !listError) {
@@ -73,10 +86,10 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     } else if (preview?.id !== monitor.selectedId) {
       preview = null;
     }
-    redraw();
+    if (!skipRedraw) redraw();
   }
 
-  function upsert(task, legacy = false, { allowAutoExit = true } = {}) {
+  function upsert(task, legacy = false, { allowAutoExit = true, skipRedraw = false } = {}) {
     const id = String(task?.task_id || task?.bg_id || "").trim();
     if (!id) return;
     const oldItems = monitor ? items() : [];
@@ -87,7 +100,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
       tasks.set(id, next);
     }
     orderedItems = null;
-    reconcileMonitor(oldItems, { allowAutoExit });
+    reconcileMonitor(oldItems, { allowAutoExit, skipRedraw });
     updateCount();
   }
 
@@ -119,12 +132,20 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     const previous = tasks.get(task.task_id);
     const oldStatus = previous?.status;
     const isHandoff = Boolean(task.handoff || previous?.handoff);
-    upsert(task);
+    const willUpdateSelectedOutput = Boolean(
+      monitor &&
+      monitor.selectedId === task.task_id &&
+      event.type === "task_output" &&
+      !readInFlight &&
+      !monitor.previewOffset &&
+      ACTIVE.has(task.status),
+    );
+    upsert(task, false, { skipRedraw: willUpdateSelectedOutput });
     const current = tasks.get(task.task_id);
     if (monitor && monitor.selectedId === task.task_id && current) {
       if (event.type === "task_output") {
         if (!readInFlight && !monitor.previewOffset) {
-          preview = { id: task.task_id, stdout: String(task.stdout || ""), stderr: String(task.stderr || ""), limited: true };
+          preview = makePreview(task.task_id, task.stdout, task.stderr, { limited: true });
           redraw();
         }
       } else if (!preview) {
@@ -345,15 +366,12 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
         task &&
         typeof task === "object"
       ) {
-        upsert(task, !supportsTasks());
+        upsert(task, !supportsTasks(), { skipRedraw: ACTIVE.has(task.status) });
         if (monitor && monitor.selectedId === id && tasks.has(id)) {
-          preview = {
-            id,
-            stdout: String(task.stdout || task.output || ""),
-            stderr: String(task.stderr || ""),
+          preview = makePreview(id, task.stdout || task.output, task.stderr, {
             limited: Boolean(task.meta?.truncated || task.meta?.output_incomplete || task.truncated),
             expired: Boolean(task.meta?.output_incomplete),
-          };
+          });
           redraw();
         }
       }
