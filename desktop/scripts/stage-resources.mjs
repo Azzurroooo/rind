@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { cp, mkdir, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import path from "node:path"
@@ -21,10 +21,40 @@ function runNpmBuild(projectDir) {
   }
 }
 
-function skipNodeModulesArtifacts(src) {
-  const base = path.basename(src)
-  const parent = path.basename(path.dirname(src))
-  return !(parent === "node_modules" && (base === ".bin" || base === ".cache"))
+function collectProductionPackages(pkgRoot) {
+  const resolvedRoot = path.resolve(pkgRoot)
+  const rootPrefix = process.platform === "win32" ? resolvedRoot.toLowerCase() : resolvedRoot
+  const withinRoot = (candidate) => {
+    const norm = process.platform === "win32" ? candidate.toLowerCase() : candidate
+    return norm === rootPrefix || norm.startsWith(rootPrefix + path.sep)
+  }
+  const seen = new Set()
+  const queue = [[resolvedRoot, JSON.parse(readFileSync(path.join(resolvedRoot, "package.json"), "utf8"))]]
+  while (queue.length > 0) {
+    const [currentDir, pkg] = queue.shift()
+    const depNames = [
+      ...Object.keys(pkg.dependencies || {}),
+      ...Object.keys(pkg.optionalDependencies || {}),
+    ]
+    for (const depName of depNames) {
+      let cursor = currentDir
+      while (withinRoot(cursor)) {
+        const candidate = path.resolve(cursor, "node_modules", depName)
+        const manifestPath = path.join(candidate, "package.json")
+        if (existsSync(manifestPath)) {
+          if (!seen.has(candidate)) {
+            seen.add(candidate)
+            queue.push([candidate, JSON.parse(readFileSync(manifestPath, "utf8"))])
+          }
+          break
+        }
+        const parent = path.dirname(cursor)
+        if (parent === cursor) break
+        cursor = parent
+      }
+    }
+  }
+  return [...seen].sort((a, b) => a.length - b.length)
 }
 
 runNpmBuild(path.join(repoRoot, "runtime"))
@@ -42,12 +72,15 @@ await mkdir(stagedRuntime, { recursive: true })
 for (const entry of ["dist", "skills", "package.json"]) {
   await cp(path.join(repoRoot, "runtime", entry), path.join(stagedRuntime, entry), { recursive: true })
 }
-const runtimeNodeModules = path.join(repoRoot, "runtime", "node_modules")
-if (existsSync(runtimeNodeModules)) {
-  await cp(runtimeNodeModules, path.join(stagedRuntime, "node_modules"), {
-    recursive: true,
-    filter: skipNodeModulesArtifacts,
-  })
+const runtimeRoot = path.join(repoRoot, "runtime")
+if (existsSync(path.join(runtimeRoot, "node_modules"))) {
+  for (const pkgDir of collectProductionPackages(runtimeRoot)) {
+    const rel = path.relative(runtimeRoot, pkgDir)
+    await cp(pkgDir, path.join(stagedRuntime, rel), {
+      recursive: true,
+      filter: (src) => src === pkgDir || path.basename(src) !== "node_modules",
+    })
+  }
 }
 
 await cp(path.join(repoRoot, "rind-runtime-client"), stagedClient, {

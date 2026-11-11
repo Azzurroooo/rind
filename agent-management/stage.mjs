@@ -1,9 +1,45 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+
+function collectProductionPackages(pkgRoot) {
+  const resolvedRoot = path.resolve(pkgRoot);
+  const rootPrefix = process.platform === "win32" ? resolvedRoot.toLowerCase() : resolvedRoot;
+  const withinRoot = (candidate) => {
+    const norm = process.platform === "win32" ? candidate.toLowerCase() : candidate;
+    return norm === rootPrefix || norm.startsWith(rootPrefix + path.sep);
+  };
+  const seen = new Set();
+  const queue = [[resolvedRoot, JSON.parse(readFileSync(path.join(resolvedRoot, "package.json"), "utf8"))]];
+  while (queue.length > 0) {
+    const [currentDir, pkg] = queue.shift();
+    const depNames = [
+      ...Object.keys(pkg.dependencies || {}),
+      ...Object.keys(pkg.optionalDependencies || {}),
+    ];
+    for (const depName of depNames) {
+      let cursor = currentDir;
+      while (withinRoot(cursor)) {
+        const candidate = path.resolve(cursor, "node_modules", depName);
+        const manifestPath = path.join(candidate, "package.json");
+        if (existsSync(manifestPath)) {
+          if (!seen.has(candidate)) {
+            seen.add(candidate);
+            queue.push([candidate, JSON.parse(readFileSync(manifestPath, "utf8"))]);
+          }
+          break;
+        }
+        const parent = path.dirname(cursor);
+        if (parent === cursor) break;
+        cursor = parent;
+      }
+    }
+  }
+  return [...seen].sort((a, b) => a.length - b.length);
+}
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const destination = process.argv[2];
@@ -22,16 +58,15 @@ await mkdir(destination); // Never overwrite an existing distribution.
 for (const relative of ["frontend-cli/bin", "frontend-cli/lib", "rind-runtime-client", "agent-management/dist", "runtime/dist", "runtime/skills"]) {
   await cp(path.join(root, relative), path.join(destination, relative), { recursive: true, errorOnExist: true, force: false });
 }
-const runtimeNodeModules = path.join(root, "runtime/node_modules");
-if (existsSync(runtimeNodeModules)) {
-  await cp(runtimeNodeModules, path.join(destination, "runtime/node_modules"), {
-    recursive: true,
-    filter: (src) => {
-      const base = path.basename(src);
-      const parent = path.basename(path.dirname(src));
-      return !(parent === "node_modules" && (base === ".bin" || base === ".cache"));
-    },
-  });
+const runtimeRoot = path.join(root, "runtime");
+if (existsSync(path.join(runtimeRoot, "node_modules"))) {
+  for (const pkgDir of collectProductionPackages(runtimeRoot)) {
+    const rel = path.relative(runtimeRoot, pkgDir);
+    await cp(pkgDir, path.join(destination, "runtime", rel), {
+      recursive: true,
+      filter: (src) => src === pkgDir || path.basename(src) !== "node_modules",
+    });
+  }
 }
 for (const relative of ["frontend-cli/package.json", "agent-management/package.json", "runtime/package.json"]) {
   await cp(path.join(root, relative), path.join(destination, relative));

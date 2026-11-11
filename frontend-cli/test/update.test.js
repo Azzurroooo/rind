@@ -730,3 +730,101 @@ test("checkLatestRelease on npm channel handles pure-TS @rind-ai/cli without opt
     "https://registry.example.test/@rind-ai%2fruntime-linux-x64/0.11.0",
   ]);
 });
+
+test("detectInstallation, resolveInstalledRuntime, and linux-portable update support pure-TS runtime/dist/cli.js layouts", async (t) => {
+  const base = withTempDir(t);
+  const rindHome = path.join(base, "home");
+
+  const makePureTsTree = (rootDir, { version = "0.11.0", isNpm = false, platform = "linux" } = {}) => {
+    mkdirSync(path.join(rootDir, "frontend-cli", "bin"), { recursive: true });
+    mkdirSync(path.join(rootDir, "runtime", "dist"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ name: "@rind-ai/cli", version }, null, 2));
+    writeFileSync(path.join(rootDir, "frontend-cli", "package.json"), JSON.stringify({ name: "rind-frontend-cli", version }, null, 2));
+    writeFileSync(path.join(rootDir, "frontend-cli", "bin", "rind.js"), "#!/usr/bin/env node\n");
+    writeFileSync(path.join(rootDir, "runtime", "dist", "cli.js"), `console.log("rind ${version}");\n`);
+    if (isNpm) {
+      mkdirSync(path.join(rootDir, "lib"), { recursive: true });
+      mkdirSync(path.join(rootDir, "bin"), { recursive: true });
+      writeFileSync(path.join(rootDir, "lib", "runtime-check.mjs"), "export {};\n");
+      writeFileSync(path.join(rootDir, "bin", "rind-npm.mjs"), "#!/usr/bin/env node\n");
+    } else if (platform === "win32") {
+      mkdirSync(path.join(rootDir, "bin"), { recursive: true });
+      writeFileSync(path.join(rootDir, "bin", "rind.cmd"), "@echo off\r\n");
+      writeFileSync(path.join(rootDir, "unins000.exe"), "uninstall");
+    }
+    return { rootDir, frontendDir: path.join(rootDir, "frontend-cli") };
+  };
+
+  const tsNpm = makePureTsTree(path.join(base, "npm", "@rind-ai", "cli"), { version: "0.11.0", isNpm: true, platform: "win32" });
+  const tsNpmInfo = detectInstallation({ frontendRoot: tsNpm.frontendDir, platform: "win32", arch: "arm64" });
+  assert.equal(tsNpmInfo.channel, "npm");
+  assert.equal(tsNpmInfo.runtimeBinary, path.join(tsNpm.rootDir, "runtime", "dist", "cli.js"));
+
+  const tsWin = makePureTsTree(path.join(base, "Rind CLI"), { version: "0.11.0", isNpm: false, platform: "win32" });
+  const tsWinInfo = detectInstallation({ frontendRoot: tsWin.frontendDir, platform: "win32", arch: "x64" });
+  assert.equal(tsWinInfo.channel, "win-installer");
+  assert.equal(tsWinInfo.runtimeBinary, path.join(tsWin.rootDir, "runtime", "dist", "cli.js"));
+
+  // Foreign packaged TS runtime/dist/cli.js is ignored by source checkout and by another installation
+  const sourceTree = createFakeCliTree(path.join(base, "src-checkout"), { version: "0.11.0", channel: "source" });
+  assert.equal(
+    resolveInstalledRuntime({
+      repoRoot: sourceTree.rootDir,
+      envRuntimePath: tsWinInfo.runtimeBinary,
+      platform: "win32",
+      arch: "x64",
+    }),
+    "",
+  );
+  assert.equal(
+    resolveInstalledRuntime({
+      repoRoot: tsNpm.rootDir,
+      envRuntimePath: tsWinInfo.runtimeBinary,
+      platform: "win32",
+      arch: "arm64",
+    }),
+    tsNpmInfo.runtimeBinary,
+  );
+
+  // linux-portable update executes Node with [stagedRuntime, "--version"] when runtime/dist/cli.js is present
+  const tsPortable = makePureTsTree(path.join(base, "portable-ts"), { version: "0.11.0", isNpm: false, platform: "linux" });
+  const tsPortableInfo = detectInstallation({ frontendRoot: tsPortable.frontendDir, platform: "linux", arch: "x64" });
+  assert.equal(tsPortableInfo.channel, "linux-portable");
+
+  const fakeTar = Buffer.from("pure-ts-tar-gz");
+  const fakeSha = createHash("sha256").update(fakeTar).digest("hex");
+  const smokeCalls = [];
+  await runUpdate({
+    args: [],
+    installation: tsPortableInfo,
+    rindHome,
+    pathEnv: "",
+    stdout: () => {},
+    quiesceImpl: async () => {},
+    fetchImpl: async (url) =>
+      String(url).endsWith("release-manifest.json")
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              version: "0.12.0",
+              assets: [{ name: "rind-cli-0.12.0-linux-x64.tar.gz", product: "cli", target: "linux-x64", bytes: fakeTar.length, sha256: fakeSha }],
+            }),
+          }
+        : { ok: true, status: 200, body: Readable.from([fakeTar]) },
+    spawnSyncImpl: (cmd, args) => {
+      if (cmd === "tar") {
+        const destDir = args[args.indexOf("-C") + 1];
+        makePureTsTree(path.join(destDir, "rind-cli"), { version: "0.12.0", isNpm: false, platform: "linux" });
+        return { status: 0, stdout: "", stderr: "" };
+      }
+      smokeCalls.push({ cmd, args });
+      return { status: 0, stdout: "rind 0.12.0\n", stderr: "" };
+    },
+  });
+  assert.equal(smokeCalls.length, 1);
+  assert.equal(smokeCalls[0].cmd, process.execPath);
+  assert.ok(smokeCalls[0].args[0].endsWith(path.join("runtime", "dist", "cli.js")));
+  assert.equal(smokeCalls[0].args[1], "--version");
+  assert.equal(JSON.parse(readFileSync(path.join(tsPortable.frontendDir, "package.json"), "utf8")).version, "0.12.0");
+});
