@@ -494,10 +494,34 @@ test("providers.ts & ProviderServiceImpl: built-in catalog, custom providers.jso
     await rm(tmp, { recursive: true, force: true });
   });
 
-  // Built-in provider lookup
+  // Built-in provider lookup & catalog structural invariants
+  const allowedEfforts = new Set(["low", "medium", "high", "xhigh", "max"]);
+  for (const [pid, def] of Object.entries(PROVIDERS)) {
+    assert.equal(def.id, pid);
+    assert.ok(def.fallback_models.length > 0, `${pid} must define fallback_models`);
+    const seenIds = new Set();
+    for (const model of def.fallback_models) {
+      assert.equal(model.provider_id, pid);
+      assert.ok(model.id.trim().length > 0);
+      assert.equal(seenIds.has(model.id), false, `Duplicate model ${model.id} in ${pid}`);
+      seenIds.add(model.id);
+      for (const effort of model.reasoning_efforts) {
+        assert.equal(allowedEfforts.has(effort), true, `Invalid effort ${effort} on ${pid}/${model.id}`);
+      }
+      if (model.context_window !== null) {
+        assert.equal(Number.isInteger(model.context_window) && model.context_window > 0, true);
+      }
+      if (model.image_input !== null) {
+        assert.equal(typeof model.image_input, "boolean");
+      }
+    }
+  }
   const openaiDef = provider("openai");
   assert.equal(openaiDef.api, "openai-responses");
   assert.ok(openaiDef.auth_methods.includes("oauth"));
+  assert.ok(openaiDef.fallback_models.some(m => m.id === "gpt-6.1-terra"));
+  assert.ok(provider("anthropic").fallback_models.some(m => m.id === "claude-fable-5-2"));
+  assert.ok(provider("google").fallback_models.some(m => m.id === "gemini-4-carbon"));
   assert.throws(() => provider("nonexistent-provider"), /Unknown provider/);
 
   // saveCustomProvider + custom providers.json override & model config merging
