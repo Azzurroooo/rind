@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { ModelSelection } from "../domain/models.js";
 import { RIND_VERSION } from "../version.js";
-import { resolveRindHome } from "./paths.js";
+import { canonicalizePath, normcasePath, resolveRindHome } from "./paths.js";
 import { atomicWriteTextSync, fileStatSignature } from "./persistence/atomic-files.js";
 
 export const DEFAULT_PROVIDER = "openai";
@@ -251,7 +251,7 @@ export function mainRepository(workspaceRoot: string): string | null {
     if (path.basename(commonDir) !== ".git" || !fs.statSync(path.dirname(commonDir)).isDirectory()) {
       return null;
     }
-    return path.dirname(commonDir);
+    return canonicalizePath(path.dirname(commonDir));
   } catch {
     return null;
   }
@@ -260,11 +260,7 @@ export function mainRepository(workspaceRoot: string): string | null {
 export const gitCommonWorkspaceRoot = mainRepository;
 
 function workspaceKey(workspaceRoot: string): string {
-  const expanded = workspaceRoot.startsWith("~")
-    ? path.join(os.homedir(), workspaceRoot.slice(1))
-    : workspaceRoot;
-  const resolved = path.resolve(expanded);
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  return normcasePath(canonicalizePath(workspaceRoot));
 }
 
 export class WorkspaceDefaults {

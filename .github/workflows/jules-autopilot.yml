@@ -54,15 +54,19 @@ jobs:
             exit 0
           fi
 
-          LOG_SNIPPET=$(gh run view "$RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -n 120 || true)
+          LOG_SNIPPET=$(gh run view "$RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | grep -E "not ok|error:|Error:|FAILED|ERR_MODULE_NOT_FOUND|AssertionError|timed out|##\[error\]" -C 6 | tail -n 120 || true)
+          if [ -z "$LOG_SNIPPET" ]; then
+            LOG_SNIPPET=$(gh run view "$RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -n 100 || true)
+          fi
           if [ -z "$LOG_SNIPPET" ]; then
             JOB_ID=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs" --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | .id' | head -n 1)
             if [ -n "$JOB_ID" ]; then
               LOG_SNIPPET=$(gh run view --job="$JOB_ID" --repo "$REPO" --log 2>/dev/null | grep -E "not ok|error:|Error:|FAILED|ERR_MODULE_NOT_FOUND|AssertionError|timed out" -C 4 | tail -n 120 || true)
             fi
           fi
+          LOG_SNIPPET=$(printf '%s' "$LOG_SNIPPET" | tail -c 20000)
 
-          COMMIT_INFO=$(git log -1 --stat "$HEAD_SHA" || true)
+          COMMIT_INFO=$(git log -1 --stat "$HEAD_SHA" 2>/dev/null | head -n 60 | head -c 8000 || true)
 
           BODY=$(cat <<EOF
           ## Objective
@@ -78,7 +82,7 @@ jobs:
           ## Environment Setup
 
           \`\`\`bash
-          npm --prefix runtime install && npm --prefix runtime run build
+          npm --prefix runtime ci && npm --prefix runtime run build
           npm --prefix agent-management ci && npm --prefix agent-management run build
           npm --prefix frontend-cli ci
           \`\`\`
@@ -106,12 +110,16 @@ jobs:
           EOF
           )
 
+          BODY_FILE=$(mktemp)
+          trap 'rm -f "$BODY_FILE"' EXIT
+          printf '%s' "${BODY:0:60000}" > "$BODY_FILE"
+
           gh issue create \
             --repo "$REPO" \
             --label "jules" \
             --label "bug" \
             --title "$TITLE" \
-            --body "$BODY"
+            --body-file "$BODY_FILE"
 
   scheduled-audit:
     name: Gatekeeper audit & conditional Jules dispatch
@@ -130,7 +138,7 @@ jobs:
           node-version: "22"
       - name: Build TypeScript runtime for gatekeeper tests
         run: |
-          npm --prefix runtime install
+          npm --prefix runtime ci
           npm --prefix runtime run build
       - name: Run deterministic gatekeeper checks
         shell: bash
@@ -268,7 +276,7 @@ jobs:
             "The scheduled Gatekeeper Audit detected actionable dependency/architecture drift on `main`. Fix the items below with minimal, surgical changes.",
             "---",
             "## Environment Setup",
-            "```bash\nnpm --prefix runtime install && npm --prefix runtime run build\n```",
+            "```bash\nnpm --prefix runtime ci && npm --prefix runtime run build\n```",
             "---",
             "## Scope & Findings",
             `> **Constraint**: ${scopeNote} Follow \`AGENTS.md\`.`,

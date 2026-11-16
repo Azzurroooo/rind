@@ -342,7 +342,7 @@ function realpathSafe(p: string): string {
     cur = parent;
   }
   try {
-    const baseReal = fs.realpathSync(cur);
+    const baseReal = (fs.realpathSync.native || fs.realpathSync)(cur);
     return tail.length > 0 ? path.join(baseReal, ...tail) : baseReal;
   } catch {
     return path.resolve(p);

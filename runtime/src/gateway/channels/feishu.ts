@@ -169,6 +169,19 @@ export function postText(content: Record<string, unknown>): string {
   return lines.join("\n");
 }
 
+async function closeReadStream(stream: fs.ReadStream): Promise<void> {
+  if (stream.closed) return;
+  await new Promise<void>(resolve => {
+    const done = () => resolve();
+    stream.once("close", done);
+    stream.destroy();
+    if (stream.closed) {
+      stream.off("close", done);
+      resolve();
+    }
+  });
+}
+
 function extractMessageId(response: unknown): string {
   if (!response || typeof response !== "object") return "";
   const rec = response as Record<string, unknown>;
@@ -464,12 +477,18 @@ export class FeishuChannel implements Channel {
   private async postAttachment(chatId: string, attachment: Attachment): Promise<void> {
     if (!this.client) return;
     if (attachment.kind === "image") {
-      const resp = await this.client.im.image.create({
-        data: {
-          image_type: "message",
-          image: fs.createReadStream(attachment.path),
-        },
-      });
+      const stream = fs.createReadStream(attachment.path);
+      let resp: unknown;
+      try {
+        resp = await this.client.im.image.create({
+          data: {
+            image_type: "message",
+            image: stream,
+          },
+        });
+      } finally {
+        await closeReadStream(stream);
+      }
       const imageKey = extractDataKey(resp, "image_key");
       if (!imageKey) {
         throw new Error("feishu image.create returned no image_key");
@@ -477,13 +496,19 @@ export class FeishuChannel implements Channel {
       await this.sendMessage(chatId, "image", { image_key: imageKey });
       return;
     }
-    const resp = await this.client.im.file.create({
-      data: {
-        file_type: FILE_TYPE_BY_KIND[attachment.kind] ?? "stream",
-        file_name: path.basename(attachment.path),
-        file: fs.createReadStream(attachment.path),
-      },
-    });
+    const stream = fs.createReadStream(attachment.path);
+    let resp: unknown;
+    try {
+      resp = await this.client.im.file.create({
+        data: {
+          file_type: FILE_TYPE_BY_KIND[attachment.kind] ?? "stream",
+          file_name: path.basename(attachment.path),
+          file: stream,
+        },
+      });
+    } finally {
+      await closeReadStream(stream);
+    }
     const fileKey = extractDataKey(resp, "file_key");
     if (!fileKey) {
       throw new Error("feishu file.create returned no file_key");

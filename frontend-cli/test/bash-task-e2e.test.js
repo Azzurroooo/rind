@@ -108,10 +108,22 @@ test("rind run E2E: short bash leaves zero task artifacts and stderr spam; yield
   await mkdir(home, { recursive: true });
   await mkdir(workspace, { recursive: true });
 
+  const slowReleaseFile = path.join(workspace, "slow-release.txt");
   await writeFile(path.join(workspace, "fast.mjs"), 'process.stdout.write("SHORT_RESULT_42\\n");\n', "utf8");
   await writeFile(
     path.join(workspace, "slow.mjs"),
-    'setTimeout(() => { process.stdout.write("LONG_JOB_COMPLETE\\n"); process.exit(0); }, 350);\n',
+    [
+      'import { existsSync } from "node:fs";',
+      `const releaseFile = ${JSON.stringify(slowReleaseFile)};`,
+      "const deadline = Date.now() + 15000;",
+      "const timer = setInterval(() => {",
+      "  if (existsSync(releaseFile) || Date.now() >= deadline) {",
+      "    clearInterval(timer);",
+      '    process.stdout.write("LONG_JOB_COMPLETE\\n");',
+      "    process.exit(0);",
+      "  }",
+      "}, 20);",
+    ].join("\n"),
     "utf8",
   );
 
@@ -141,7 +153,7 @@ test("rind run E2E: short bash leaves zero task artifacts and stderr spam; yield
           res.end(sseText("SHORT_DONE"));
           return;
         }
-        res.end(sseToolCall("call_short_1", "bash", { command: "node fast.mjs", yield_time_ms: 5000 }));
+        res.end(sseToolCall("call_short_1", "bash", { command: `${JSON.stringify(process.execPath)} fast.mjs`, yield_time_ms: 5000 }));
         return;
       }
 
@@ -158,7 +170,7 @@ test("rind run E2E: short bash leaves zero task artifacts and stderr spam; yield
         res.end(sseText("Waiting on long job."));
         return;
       }
-      res.end(sseToolCall("call_long_1", "bash", { command: "node slow.mjs", yield_time_ms: 50, notify: "on_exit" }));
+      res.end(sseToolCall("call_long_1", "bash", { command: `${JSON.stringify(process.execPath)} slow.mjs`, yield_time_ms: 50, notify: "on_exit" }));
     });
   });
 
@@ -200,11 +212,29 @@ test("rind run E2E: short bash leaves zero task artifacts and stderr spam; yield
   }
 
   // 2) Yielded on_exit bash command in `rind run`
-  const longRun = await execFileAsync(
-    process.execPath,
-    [rindBin, "run", "--dir", workspace, "--prompt", "long-check"],
-    { cwd: workspace, env, timeout: 45000 },
-  );
+  const longRun = await new Promise((resolve, reject) => {
+    let released = false;
+    let stderr = "";
+    const child = execFile(
+      process.execPath,
+      [rindBin, "run", "--dir", workspace, "--prompt", "long-check"],
+      { cwd: workspace, env, timeout: 45000 },
+      (error, out, err) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve({ stdout: out, stderr: err });
+      },
+    );
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+      if (!released && stderr.includes("waiting for 1 background task")) {
+        released = true;
+        void writeFile(slowReleaseFile, "1", "utf8");
+      }
+    });
+  });
   assert.equal(longRun.stdout.trim(), "AUTO_RESUMED_FINAL_ANSWER");
   assert.doesNotMatch(longRun.stderr, /task task_.*:\s*(?:running|completed)/);
   assert.equal((longRun.stderr.match(/waiting for 1 background task\b/g) || []).length, 1);

@@ -25,7 +25,7 @@ import * as email from "../dist/gateway/channels/email-channel.js";
 async function withTempDir(t, prefix = "rind-gw-chan-") {
   const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
   t.after(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   });
   return dir;
 }

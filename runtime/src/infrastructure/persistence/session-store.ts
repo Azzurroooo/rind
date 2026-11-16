@@ -33,7 +33,7 @@ import {
   saveImage,
   uploadPaths,
 } from "../images.js";
-import { resolveProjectRoot, resolveRindHome, resolveSessionBase, validateSessionId } from "../paths.js";
+import { canonicalizePath, resolveProjectRoot, resolveRindHome, resolveSessionBase, validateSessionId } from "../paths.js";
 import { DEFAULT_PROVIDER, normalizeReasoningEffort } from "../settings.js";
 import { IMPORT_DEFAULTS } from "../skills.js";
 import { atomicWriteTextSync, SESSION_FILES, type SessionFiles } from "./atomic-files.js";
@@ -1232,16 +1232,10 @@ export class JsonlSessionStore {
     const roots = new Map<string, string>();
 
     const normalizedWorkspace = (value: string): string => {
-      const expanded = value.startsWith("~") ? path.join(os.homedir(), value.slice(1)) : value;
-      const key = path.resolve(expanded);
-      let cached = roots.get(key);
+      let cached = roots.get(value);
       if (cached === undefined) {
-        try {
-          cached = normalizePathCase(fs.realpathSync(key));
-        } catch {
-          cached = normalizePathCase(key);
-        }
-        roots.set(key, cached);
+        cached = normalizePathCase(canonicalizePath(value));
+        roots.set(value, cached);
       }
       return cached;
     };
@@ -1316,17 +1310,9 @@ export class JsonlSessionStore {
   }
 
   private _resolveWorkspaceRoot(): string {
-    const raw = this._workspaceRoot
-      ? (this._workspaceRoot.startsWith("~")
-          ? path.join(os.homedir(), this._workspaceRoot.slice(1))
-          : this._workspaceRoot)
+    return this._workspaceRoot
+      ? normalizePathCase(canonicalizePath(this._workspaceRoot))
       : resolveProjectRoot();
-    const resolved = path.resolve(raw);
-    try {
-      return normalizePathCase(fs.realpathSync(resolved));
-    } catch {
-      return normalizePathCase(resolved);
-    }
   }
 
   private _expectedBinding(): Record<string, string | null> {
@@ -1604,12 +1590,7 @@ export class JsonlSessionStore {
     if (typeof entryRoot !== "string" || !entryRoot.trim()) {
       return false;
     }
-    let sessionRoot: string;
-    try {
-      sessionRoot = normalizePathCase(fs.realpathSync(path.resolve(entryRoot)));
-    } catch {
-      sessionRoot = normalizePathCase(path.resolve(entryRoot));
-    }
+    const sessionRoot = normalizePathCase(canonicalizePath(entryRoot));
     const currentRoot = this._resolveWorkspaceRoot();
     return sessionRoot === currentRoot;
   }

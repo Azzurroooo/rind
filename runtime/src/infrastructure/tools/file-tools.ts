@@ -9,7 +9,7 @@ import {
 import { ProviderError } from "../../domain/errors.js";
 import { type ImageAttachment, toolCancelled, toolError, toolOk } from "../../domain/models.js";
 import { attachmentPath, isImageFile } from "../images.js";
-import { expandUserPath } from "../paths.js";
+import { canonicalizePath, expandUserPath, normcasePath } from "../paths.js";
 import { ToolSpec } from "./registry.js";
 
 const MAX_WRITE_FILE_SIZE = 10 * 1024 * 1024;
@@ -55,13 +55,7 @@ export class FileMutationQueue {
       cancellationToken?: CancellationToken | null;
     },
   ): Promise<string> {
-    let real = filePath;
-    try {
-      real = fs.realpathSync(filePath);
-    } catch {
-      real = path.resolve(filePath);
-    }
-    const key = process.platform === "win32" ? real.toLowerCase() : real;
+    const key = normcasePath(canonicalizePath(filePath));
     const prev = this.queues.get(key) ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>(resolve => {
@@ -1216,13 +1210,13 @@ export function buildFileToolSpecs(options?: {
 }): ToolSpec[] {
   const mutationQueue = options?.mutationQueue ?? new FileMutationQueue();
   const toolSemaphore = options?.toolSemaphore ?? mutationQueue.semaphore;
-  const root = path.resolve(expandUserPath(options?.workspaceRoot || process.cwd()));
+  const root = canonicalizePath(options?.workspaceRoot || process.cwd());
   const allowed = options?.allowedRoots
-    ? Array.from(options.allowedRoots, p => path.resolve(expandUserPath(p)))
+    ? Array.from(options.allowedRoots, p => canonicalizePath(p))
     : [];
-  const shared = options?.sharedRoot ? path.resolve(expandUserPath(options.sharedRoot)) : null;
+  const shared = options?.sharedRoot ? canonicalizePath(options.sharedRoot) : null;
   const sessionOutput = options?.sessionOutputRoot
-    ? path.resolve(expandUserPath(options.sessionOutputRoot))
+    ? canonicalizePath(options.sessionOutputRoot)
     : null;
   const imageInput = options?.imageInput ?? (() => null);
 
@@ -1246,11 +1240,7 @@ export function buildFileToolSpecs(options?: {
     } else {
       candidate = path.resolve(expanded);
     }
-    try {
-      candidate = fs.realpathSync(candidate);
-    } catch {
-      // keep resolved candidate when target doesn't exist yet
-    }
+    candidate = canonicalizePath(candidate);
     if (allowed.length > 0 && !allowed.some(allowedRoot => isRelativeTo(candidate, allowedRoot))) {
       if (allowSessionOutput && sessionOutput && isRelativeTo(candidate, sessionOutput)) {
         return [candidate, null];
@@ -1259,7 +1249,8 @@ export function buildFileToolSpecs(options?: {
       if (
         allowSessionOutput &&
         base &&
-        path.dirname(candidate) === path.join(path.resolve(base), "attachments")
+        normcasePath(path.dirname(candidate)) ===
+          normcasePath(path.join(canonicalizePath(base), "attachments"))
       ) {
         try {
           attachmentPath(base, `attachments/${path.basename(candidate)}`);
