@@ -42,11 +42,12 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: |
+            runtime/package-lock.json
             frontend-web/package-lock.json
             desktop/package-lock.json
       - name: Build TypeScript Runtime
         run: |
-          npm --prefix runtime install
+          npm --prefix runtime ci
           npm --prefix runtime run build
       - name: Install Web dependencies
         run: npm --prefix frontend-web ci
