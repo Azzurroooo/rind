@@ -1,4 +1,5 @@
 import {
+  AsyncQueue,
   AsyncSemaphore,
   CancellationTokenSource,
   tryAcquireSlot,
@@ -413,33 +414,45 @@ export class ToolCallProcessor {
       }
 
       const sessionId = session.sessionId || "default";
-      const outcomes = await Promise.all(
-        batch.map(([bCall, bArgs]) =>
-          this.runToolCall({
+      const events = new AsyncQueue<RuntimeEventBase>();
+      const cancellation = new CancellationTokenSource(cancellationToken);
+      const completed = Promise.allSettled(
+        batch.map(async ([bCall, bArgs, bTsStart, bStartedAt]) => {
+          const outcome = await this.runToolCall({
             call: bCall,
             parsedArgs: bArgs,
             sessionId,
-            cancellationToken: cancellationToken ?? null,
+            cancellationToken: cancellation.token,
             turnId,
-          }),
-        ),
-      );
-
-      for (let i = 0; i < batch.length; i += 1) {
-        const [bCall, bArgs, bTsStart, bStartedAt] = batch[i]!;
-        const outcome = outcomes[i]!;
-        for await (const event of this.finishToolCall({
-          session,
-          turnId,
-          call: bCall,
-          parsedArgs: bArgs,
-          outcome,
-          reused: false,
-          tsStart: bTsStart,
-          startedAt: bStartedAt,
-        })) {
+          });
+          for await (const event of this.finishToolCall({
+            session,
+            turnId,
+            call: bCall,
+            parsedArgs: bArgs,
+            outcome,
+            reused: false,
+            tsStart: bTsStart,
+            startedAt: bStartedAt,
+          })) {
+            events.push(event);
+          }
+        }),
+      ).then(results => {
+        events.close();
+        return results;
+      });
+      try {
+        let event: RuntimeEventBase | null;
+        while ((event = await events.shift()) !== null) {
           yield event;
         }
+        const failure = (await completed).find(result => result.status === "rejected");
+        if (failure?.status === "rejected") throw failure.reason;
+      } finally {
+        cancellation.cancel("Tool batch stopped");
+        await completed;
+        cancellation.dispose();
       }
     }
   }
@@ -597,6 +610,7 @@ export class ToolCallProcessor {
     const { session, turnId, call, parsedArgs, reused, tsStart, startedAt } = options;
     let outcome = options.outcome;
     const tsEnd = session.nowIso();
+    const durationMs = Math.trunc(performance.now() - startedAt);
 
     let normalizedResult = await this.toolResultNormalizer.normalize(outcome.result, {
       toolName: call.name,
@@ -659,7 +673,6 @@ export class ToolCallProcessor {
       });
     }
 
-    const durationMs = Math.trunc(performance.now() - startedAt);
     const changeEvent = reused
       ? null
       : buildFileChangeEvent({
