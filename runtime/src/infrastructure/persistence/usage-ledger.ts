@@ -48,85 +48,52 @@ export function appendUsageRecord(filePath: string, record: Record<string, unkno
 
 export function loadUsageRecords(filePath: string): Record<string, unknown>[] {
   const resolved = path.resolve(filePath);
-  let stat: fs.Stats;
+  let fd: number;
   try {
-    stat = fs.statSync(resolved);
+    fd = fs.openSync(resolved, "r");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      USAGE_LEDGER_CACHE.delete(resolved);
-      return [];
-    }
-    return SESSION_FILES.readJsonl(resolved);
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    USAGE_LEDGER_CACHE.delete(resolved);
+    return [];
   }
-
-  const cached = USAGE_LEDGER_CACHE.get(resolved);
-  if (
-    cached &&
-    cached.dev === stat.dev &&
-    cached.ino === stat.ino &&
-    cached.birthtimeMs === stat.birthtimeMs
-  ) {
-    if (stat.size === cached.offset && stat.mtimeMs === cached.mtimeMs && stat.ctimeMs === cached.ctimeMs) {
+  try {
+    const stat = fs.fstatSync(fd);
+    const cached = USAGE_LEDGER_CACHE.get(resolved);
+    const sameFile = cached && cached.dev === stat.dev && cached.ino === stat.ino &&
+      cached.birthtimeMs === stat.birthtimeMs;
+    if (sameFile && stat.size === cached.offset && stat.mtimeMs === cached.mtimeMs && stat.ctimeMs === cached.ctimeMs) {
       return cached.records.map(r => ({ ...r }));
     }
-    if (stat.size > cached.offset && cached.offset > 0) {
-      try {
-        const fd = fs.openSync(resolved, "r");
-        try {
-          const headCheck = Buffer.allocUnsafe(cached.head.length);
-          const headRead = fs.readSync(fd, headCheck, 0, cached.head.length, 0);
-          if (headRead === cached.head.length && headCheck.equals(cached.head)) {
-            const tailLen = stat.size - cached.offset;
-            const tailBuf = Buffer.allocUnsafe(tailLen);
-            const tailRead = fs.readSync(fd, tailBuf, 0, tailLen, cached.offset);
-            const lastNl = tailBuf.subarray(0, tailRead).lastIndexOf(0x0a);
-            if (lastNl >= 0) {
-              const consumed = lastNl + 1;
-              parseJsonlSlice(tailBuf.subarray(0, consumed).toString("utf8"), cached.records);
-              cached.offset += consumed;
-              cached.mtimeMs = stat.mtimeMs;
-              cached.ctimeMs = stat.ctimeMs;
-              return cached.records.map(r => ({ ...r }));
-            }
-          }
-        } finally {
-          fs.closeSync(fd);
-        }
-      } catch {
-        // Fall through to full read
-      }
+    const head = Buffer.alloc(Math.min(128, stat.size));
+    const headRead = fs.readSync(fd, head, 0, head.length, 0);
+    const append = sameFile && stat.size > cached.offset && cached.offset > 0 &&
+      headRead >= cached.head.length && head.subarray(0, cached.head.length).equals(cached.head);
+    const offset = append ? cached.offset : 0;
+    const records = append ? [...cached.records] : [];
+    const bytes = Buffer.allocUnsafe(stat.size - offset);
+    let read = 0;
+    while (read < bytes.length) {
+      const count = fs.readSync(fd, bytes, read, bytes.length - read, offset + read);
+      if (count === 0) break;
+      read += count;
     }
-  }
-
-  const records = SESSION_FILES.readJsonl(resolved);
-  try {
-    const fd = fs.openSync(resolved, "r");
-    try {
-      const fstat = fs.fstatSync(fd);
-      const headLen = Math.min(128, fstat.size);
-      const head = Buffer.allocUnsafe(headLen);
-      const readBytes = headLen > 0 ? fs.readSync(fd, head, 0, headLen, 0) : 0;
-      if (!USAGE_LEDGER_CACHE.has(resolved) && USAGE_LEDGER_CACHE.size >= 8) {
-        const oldest = USAGE_LEDGER_CACHE.keys().next().value;
-        if (oldest !== undefined) USAGE_LEDGER_CACHE.delete(oldest);
-      }
-      USAGE_LEDGER_CACHE.set(resolved, {
-        dev: fstat.dev,
-        ino: fstat.ino,
-        birthtimeMs: fstat.birthtimeMs,
-        ctimeMs: fstat.ctimeMs,
-        mtimeMs: fstat.mtimeMs,
-        offset: fstat.size,
-        head: head.subarray(0, readBytes),
-        records,
-      });
-    } finally {
-      fs.closeSync(fd);
+    // A writer may still be appending the last line. Re-read it on the next call.
+    const consumed = bytes.subarray(0, read).lastIndexOf(0x0a) + 1;
+    parseJsonlSlice(bytes.subarray(0, consumed).toString("utf8"), records);
+    if (!cached && USAGE_LEDGER_CACHE.size >= 8) {
+      USAGE_LEDGER_CACHE.delete(USAGE_LEDGER_CACHE.keys().next().value!);
     }
-  } catch {
-    USAGE_LEDGER_CACHE.delete(resolved);
+    USAGE_LEDGER_CACHE.set(resolved, {
+      dev: stat.dev, ino: stat.ino, birthtimeMs: stat.birthtimeMs,
+      ctimeMs: stat.ctimeMs, mtimeMs: stat.mtimeMs,
+      offset: offset + consumed,
+      head: head.subarray(0, Math.min(headRead, offset + consumed)),
+      records,
+    });
+    return records.map(r => ({ ...r }));
+  } finally {
+    fs.closeSync(fd);
   }
-  return records.map(r => ({ ...r }));
 }
 
 function windowDays(days: unknown): number {

@@ -11,7 +11,8 @@ import type {
 import { resolveReasoningEffort } from "../providers.js";
 import { DEFAULT_USER_AGENT } from "../settings.js";
 import {
-  awaitWithCancellation,
+  fetchModelResponse,
+  modelRetryDelay,
   chatMessages,
   getField,
   HttpStatusError,
@@ -91,18 +92,9 @@ export class OpenAIChatCompletionsClient implements ChatClient {
 
   private shouldRetryWithoutReasoningEffort(exc: unknown): boolean {
     const text = (exc instanceof Error ? exc.message : String(exc)).toLowerCase();
-    return [
-      "reasoning_effort",
-      "request was blocked",
-      "blocked",
-      "unsupported",
-      "unknown",
-      "invalid",
-      "unrecognized",
-      "not support",
-      "not supported",
-      "extra_forbidden",
-    ].some(m => text.includes(m));
+    const status = (exc as { status_code?: number }).status_code;
+    return (status === 400 || status === 422) && text.includes("reasoning_effort") &&
+      ["unsupported", "unknown", "unrecognized", "not support", "extra_forbidden"].some(marker => text.includes(marker));
   }
 
   private async executeRequest(
@@ -118,38 +110,36 @@ export class OpenAIChatCompletionsClient implements ChatClient {
       cancellationToken?.throwIfCancelled();
       let response: Response;
       try {
-        response = await awaitWithCancellation(
-          fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: stream ? "text/event-stream" : "application/json",
-              Authorization: `Bearer ${key}`,
-              "User-Agent": DEFAULT_USER_AGENT,
-            },
-            body: JSON.stringify(payload),
-            signal: cancellationToken?.signal,
-          }),
-          cancellationToken,
-        );
+        response = await fetchModelResponse(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: stream ? "text/event-stream" : "application/json",
+            Authorization: `Bearer ${key}`,
+            "User-Agent": DEFAULT_USER_AGENT,
+          },
+          body: JSON.stringify(payload),
+        }, cancellationToken);
       } catch (err) {
         if (isCancellationError(err, cancellationToken)) {
           throw new CancelledError(cancellationToken?.reason || "cancelled");
         }
-        if (attempt < maxRetries) {
+        const failure = providerError(err, null, cancellationToken);
+        if (attempt < maxRetries && (failure.status === "unavailable" || failure.status === "timed_out")) {
           await sleepBeforeRetry(attempt, cancellationToken);
           continue;
         }
-        throw err;
+        throw failure;
       }
       if (!response.ok) {
         if ((response.status === 429 || response.status >= 500) && attempt < maxRetries) {
-          await sleepBeforeRetry(attempt, cancellationToken);
+          await response.body?.cancel();
+          await sleepBeforeRetry(attempt, cancellationToken, response.headers);
           continue;
         }
-        await throwForHttpError(response);
+        await throwForHttpError(response, cancellationToken);
       }
-      return stream ? response : await awaitWithCancellation(response.json(), cancellationToken);
+      return stream ? response : await response.json();
     }
   }
 
@@ -273,8 +263,8 @@ export class OpenAIChatCompletionsClient implements ChatClient {
   async close(): Promise<void> {}
 }
 
-async function sleepBeforeRetry(attempt: number, cancellationToken?: CancellationToken | null): Promise<void> {
-  const delayMs = Math.min(2000, 250 * 2 ** attempt);
+async function sleepBeforeRetry(attempt: number, cancellationToken?: CancellationToken | null, headers?: Headers): Promise<void> {
+  const delayMs = modelRetryDelay(attempt, headers);
   if (cancellationToken) {
     await cancellationToken.sleep(delayMs);
   } else {

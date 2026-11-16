@@ -41,7 +41,7 @@ export const TERMINAL_EVENT_TYPES: ReadonlySet<string> = new Set([
 
 export const QUESTION_EXPIRED_REPLY = "Question expired";
 export const WORKER_UNRESPONSIVE_REPLY =
-  "Worker temporarily unresponsive; queued for retry";
+  "Worker temporarily unresponsive; delivery is unconfirmed. Check the session before retrying.";
 
 interface ActiveTurn {
   session_id: string;
@@ -326,10 +326,11 @@ export class TurnPump implements InboundSink {
     if (!ref) {
       return false;
     }
-    if (this.seenRefs.has(ref)) {
+    const key = JSON.stringify([message.channel, message.chat_id, ref]);
+    if (this.seenRefs.has(key)) {
       return true;
     }
-    this.seenRefs.set(ref, true);
+    this.seenRefs.set(key, true);
     while (this.seenRefs.size > MESSAGE_REF_LRU_SIZE) {
       const oldest = this.seenRefs.keys().next().value;
       if (oldest === undefined) break;

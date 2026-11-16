@@ -10,7 +10,7 @@ import type {
 } from "../../domain/models.js";
 import { DEFAULT_USER_AGENT } from "../settings.js";
 import {
-  awaitWithCancellation,
+  fetchModelResponse,
   getField,
   parseSseJsonEvents,
   providerError,
@@ -42,25 +42,21 @@ export class AnthropicMessagesClient implements ChatClient {
     cancellationToken?: CancellationToken | null,
   ): Promise<unknown> {
     cancellationToken?.throwIfCancelled();
-    const response = await awaitWithCancellation(
-      fetch(this.messagesEndpoint(), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: stream ? "text/event-stream" : "application/json",
-          "x-api-key": this.apiKey,
-          "anthropic-version": "2023-06-01",
-          "User-Agent": DEFAULT_USER_AGENT,
-        },
-        body: JSON.stringify(payload),
-        signal: cancellationToken?.signal,
-      }),
-      cancellationToken,
-    );
+    const response = await fetchModelResponse(this.messagesEndpoint(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: stream ? "text/event-stream" : "application/json",
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01",
+        "User-Agent": DEFAULT_USER_AGENT,
+      },
+      body: JSON.stringify(payload),
+    }, cancellationToken);
     if (!response.ok) {
-      await throwForHttpError(response);
+      await throwForHttpError(response, cancellationToken);
     }
-    return stream ? response : await awaitWithCancellation(response.json(), cancellationToken);
+    return stream ? response : await response.json();
   }
 
   async create(

@@ -97,6 +97,31 @@ function makeInbound(overrides = {}) {
   };
 }
 
+test("gateway deduplication is scoped to channel and chat, and uncertain delivery is not advertised as queued", async () => {
+  const requests = [];
+  const worker = {
+    connected: true, onEvent() {}, async subscribe() {},
+    async request(method, params) { requests.push({ method, params }); throw new Error("Disconnected"); },
+  };
+  const pump = new TurnPump({
+    worker, workspaceRoot: ".", security: { admit: () => ({ allow: true }) },
+    router: { async ensureSession(key) { return { session_id: key }; } },
+  });
+  const first = new RecordingChannel("telegram");
+  const second = new RecordingChannel("discord");
+  pump.registerChannel(first);
+  pump.registerChannel(second);
+  for (const overrides of [{}, {}, { chat_id: "200" }, { channel: "discord" }]) {
+    await pump.inbound(makeInbound(overrides));
+  }
+  assert.equal(requests.length, 3);
+  // The failed request was not placed in the offline queue and must not be automatically resent.
+  await pump.tick();
+  assert.equal(requests.length, 3);
+  assert.match(JSON.stringify(first), /delivery is unconfirmed/);
+  assert.doesNotMatch(JSON.stringify(first), /queued for retry/);
+});
+
 class RecordingChannel {
   constructor(id = "telegram", capOverrides = {}) {
     this.id = id;

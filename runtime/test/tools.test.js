@@ -14,6 +14,7 @@ import {
   setRgSpawnerForTest,
   ShellSessionPool,
   ShellTools,
+  buildShellToolSpecs,
   TaskJournal,
   ToolOutputStore,
   JsonlSessionStore,
@@ -21,6 +22,29 @@ import {
   SkillTurnCoordinator,
   installSystemSkills,
 } from "../dist/index.js";
+
+test("shell task contracts reject invalid ranges and combinations with actionable errors", async t => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-task-contract-"));
+  const shell = new ShellTools(new ToolOutputStore(tmp));
+  t.after(async () => { await shell.close(); await rm(tmp, { recursive: true, force: true }); });
+  const registry = new DefaultToolRegistry(buildShellToolSpecs(shell, tmp));
+  for (const wait_ms of [0, 999, 60001, 1.5]) {
+    const result = JSON.parse(await registry.callAsync("task_control", { action: "wait", task_id: "missing", wait_ms }));
+    assert.equal(result.error_type, "InvalidArguments");
+    assert.match(result.error, /1000\.\.60000/);
+  }
+  for (const yield_time_ms of [-1, 60001, 1.5]) {
+    const result = JSON.parse(await registry.callAsync("bash", { command: "echo never", yield_time_ms }));
+    assert.equal(result.error_type, "InvalidArguments");
+    assert.match(result.error, /0\.\.60000/);
+  }
+  const read = JSON.parse(await registry.callAsync("task_control", { action: "read", task_id: "missing", wait_ms: 1000 }));
+  assert.match(read.error, /Remove wait_ms/);
+  const alias = JSON.parse(await registry.callAsync("task_control", { action: "read", task_id: "missing", start_cursor: "x" }));
+  assert.equal(alias.ok, false);
+  assert.match(alias.error, /Unknown arguments: start_cursor/);
+  assert.equal(JSON.parse(await registry.callAsync("task_control", { action: "list" })).ok, true);
+});
 
 test("buildFileToolSpecs supports write_file, read_file, edit_file, glob, grep, and enforces workspace boundary", async t => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "rind-file-tools-"));

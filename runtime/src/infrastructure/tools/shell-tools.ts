@@ -1677,7 +1677,7 @@ export class ShellTools {
           throw new Error("page_token is only valid for list.");
         }
         if (action !== "wait" && waitMs !== null) {
-          throw new Error("wait_ms is only valid for wait.");
+          throw new Error("Remove wait_ms for this action, or use action=wait to wait for completion.");
         }
         if (action === "cancel" && cursor !== null) {
           throw new Error("cancel does not accept cursor.");
@@ -1818,7 +1818,7 @@ export function buildShellToolSpecs(
         properties: {
           command: { type: "string" },
           cwd: { type: "string" },
-          yield_time_ms: { type: "integer", default: 10000, minimum: 0, maximum: 60000 },
+          yield_time_ms: { type: "integer", default: 10000, minimum: 0, maximum: 60000, description: "Wait before returning control (0..60000 ms); this does not stop the command. Use timeout_ms for a runtime deadline." },
           timeout_ms: { type: ["integer", "null"], default: null, minimum: 1 },
           notify: { type: "string", default: "on_exit", enum: ["on_exit", "manual"] },
         },
@@ -1846,7 +1846,7 @@ export function buildShellToolSpecs(
     new ToolSpec({
       name: "task_control",
       description:
-        "Control a task owned by this session. list returns up to 50 tasks; read returns immediately; wait observes completion for a bounded interval without killing the task; cancel explicitly terminates its process tree. Reads are repeatable; use next_cursor for sequential output. No interactive stdin.",
+        "Control a task owned by this session. list returns up to 50 tasks; read returns immediately; wait observes completion for a bounded interval without killing the task; cancel explicitly terminates its process tree. Reads are repeatable. Read: {action:\"read\",task_id:\"...\"}. Wait: {action:\"wait\",task_id:\"...\",wait_ms:30000}. Only wait accepts wait_ms. No interactive stdin.",
       parameters: {
         type: "object",
         properties: {
@@ -1855,7 +1855,7 @@ export function buildShellToolSpecs(
           cursor: {
             type: "string",
             description:
-              "read/wait only. Omit for a bounded latest preview; start_cursor begins full stored output, next_cursor continues independently.",
+              "read/wait only. Put the returned start_cursor or next_cursor VALUE in this cursor field. Do not send a start_cursor argument. Omit for a bounded latest preview.",
           },
           wait_ms: {
             type: "integer",

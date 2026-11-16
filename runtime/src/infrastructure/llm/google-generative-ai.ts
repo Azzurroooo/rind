@@ -10,7 +10,7 @@ import type {
 } from "../../domain/models.js";
 import { DEFAULT_USER_AGENT } from "../settings.js";
 import {
-  awaitWithCancellation,
+  fetchModelResponse,
   getField,
   parseSseJsonEvents,
   providerError,
@@ -57,23 +57,19 @@ export class GoogleGenerativeAIClient implements ChatClient {
     try {
       cancellationToken?.throwIfCancelled();
       const body = buildRestBody(contents, config);
-      const response = await awaitWithCancellation(
-        fetch(this.endpoint(false), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": this.apiKey,
-            "User-Agent": DEFAULT_USER_AGENT,
-          },
-          body: JSON.stringify(body),
-          signal: cancellationToken?.signal,
-        }),
-        cancellationToken,
-      );
+      const response = await fetchModelResponse(this.endpoint(false), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": this.apiKey,
+          "User-Agent": DEFAULT_USER_AGENT,
+        },
+        body: JSON.stringify(body),
+      }, cancellationToken);
       if (!response.ok) {
-        await throwForHttpError(response);
+        await throwForHttpError(response, cancellationToken);
       }
-      return parseCompletion(await awaitWithCancellation(response.json(), cancellationToken));
+      return parseCompletion(await response.json());
     } catch (exc) {
       if (exc instanceof CancelledError) throw exc;
       throw providerError(exc, null, cancellationToken);
@@ -91,22 +87,18 @@ export class GoogleGenerativeAIClient implements ChatClient {
     try {
       cancellationToken?.throwIfCancelled();
       const body = buildRestBody(contents, config);
-      const response = await awaitWithCancellation(
-        fetch(this.endpoint(true), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "text/event-stream",
-            "x-goog-api-key": this.apiKey,
-            "User-Agent": DEFAULT_USER_AGENT,
-          },
-          body: JSON.stringify(body),
-          signal: cancellationToken?.signal,
-        }),
-        cancellationToken,
-      );
+      const response = await fetchModelResponse(this.endpoint(true), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          "x-goog-api-key": this.apiKey,
+          "User-Agent": DEFAULT_USER_AGENT,
+        },
+        body: JSON.stringify(body),
+      }, cancellationToken);
       if (!response.ok) {
-        await throwForHttpError(response);
+        await throwForHttpError(response, cancellationToken);
       }
       for await (const raw of parseSseJsonEvents(response, cancellationToken)) {
         for (const event of mapEvents(raw, fallbackId)) {

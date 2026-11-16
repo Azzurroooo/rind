@@ -12,7 +12,7 @@ import { resolveReasoningEffort } from "../providers.js";
 import { DEFAULT_USER_AGENT } from "../settings.js";
 import type { ApiKeyProvider } from "./openai-chat.js";
 import {
-  awaitWithCancellation,
+  fetchModelResponse,
   getField,
   imageDataUrl,
   parseSseJsonEvents,
@@ -89,24 +89,20 @@ export class OpenAIResponsesClient implements ChatClient {
     cancellationToken?.throwIfCancelled();
     const stream = Boolean(payload.stream);
     const key = await this.resolveApiKey();
-    const response = await awaitWithCancellation(
-      fetch(`${this.baseUrl}/responses`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: stream ? "text/event-stream" : "application/json",
-          Authorization: `Bearer ${key}`,
-          "User-Agent": DEFAULT_USER_AGENT,
-        },
-        body: JSON.stringify(payload),
-        signal: cancellationToken?.signal,
-      }),
-      cancellationToken,
-    );
+    const response = await fetchModelResponse(`${this.baseUrl}/responses`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: stream ? "text/event-stream" : "application/json",
+        Authorization: `Bearer ${key}`,
+        "User-Agent": DEFAULT_USER_AGENT,
+      },
+      body: JSON.stringify(payload),
+    }, cancellationToken);
     if (!response.ok) {
-      await throwForHttpError(response);
+      await throwForHttpError(response, cancellationToken);
     }
-    return stream ? response : await awaitWithCancellation(response.json(), cancellationToken);
+    return stream ? response : await response.json();
   }
 
   private async request(

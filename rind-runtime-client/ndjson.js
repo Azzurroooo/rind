@@ -1,50 +1,38 @@
-import { StringDecoder } from "node:string_decoder";
-
 export function createLineBuffer(onLine, { maxBytes = 0, onOverflow = null } = {}) {
-  let decoder = null;
-  let carry = "";
   const pending = [];
-  let pendingLength = 0;
+  let pendingBytes = 0;
+  let failed = false;
 
   function reset() {
-    decoder = null;
-    carry = "";
     pending.length = 0;
-    pendingLength = 0;
+    pendingBytes = 0;
+    failed = false;
   }
 
   function push(chunk) {
-    const text = typeof chunk === "string"
-      ? chunk
-      : (decoder ??= new StringDecoder("utf8")).write(chunk);
-    if (!text) return true;
-    const nextLength = carry.length + pendingLength + text.length;
-    if (maxBytes > 0 && nextLength > maxBytes) {
-      reset();
-      onOverflow?.();
-      return false;
-    }
-    if (!text.includes("\n")) {
-      pending.push(text);
-      pendingLength += text.length;
-      return true;
-    }
-    const combined = pending.length
-      ? carry + pending.join("") + text
-      : carry
-        ? carry + text
-        : text;
-    pending.length = 0;
-    pendingLength = 0;
+    if (failed) return false;
+    const bytes = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
     let start = 0;
-    let end;
-    while ((end = combined.indexOf("\n", start)) !== -1) {
-      let line = combined.slice(start, end);
+    while (start < bytes.length) {
+      const end = bytes.indexOf(0x0a, start);
+      const part = bytes.subarray(start, end === -1 ? bytes.length : end);
+      pendingBytes += part.length;
+      // The limit covers a frame, excluding LF (including an optional CR).
+      if (maxBytes > 0 && pendingBytes > maxBytes) {
+        reset();
+        failed = true;
+        onOverflow?.();
+        return false;
+      }
+      if (part.length) pending.push(part);
+      if (end === -1) break;
+      let line = (pending.length === 1 ? pending[0] : Buffer.concat(pending, pendingBytes)).toString("utf8");
+      pending.length = 0;
+      pendingBytes = 0;
       if (line.endsWith("\r")) line = line.slice(0, -1);
-      start = end + 1;
       onLine(line);
+      start = end + 1;
     }
-    carry = combined.slice(start);
     return true;
   }
 

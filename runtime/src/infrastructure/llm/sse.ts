@@ -168,6 +168,69 @@ export async function awaitWithCancellation<T>(
   }
 }
 
+export async function fetchModelResponse(
+  url: string,
+  init: RequestInit,
+  token?: CancellationToken | null,
+  timeoutMs = MODEL_IDLE_TIMEOUT_MS,
+): Promise<Response> {
+  token?.throwIfCancelled();
+  const controller = new AbortController();
+  const unsubscribe = token?.onCancel(() => controller.abort()) ?? (() => {});
+  const pending = Promise.resolve().then(() => fetch(url, { ...init, signal: controller.signal }));
+  let response: Response;
+  try {
+    response = await awaitWithCancellation(pending, token, timeoutMs);
+  } catch (error) {
+    controller.abort();
+    unsubscribe();
+    void pending.then(r => r.body?.cancel()).catch(() => {});
+    throw error;
+  }
+  if (!response.body) {
+    unsubscribe();
+    return response;
+  }
+  const reader = response.body.getReader();
+  const finish = (abort: boolean) => {
+    unsubscribe();
+    if (abort) {
+      controller.abort();
+      void reader.cancel().catch(() => {});
+    }
+    reader.releaseLock();
+  };
+  // The response owns the request until EOF or cancellation, including JSON/error bodies.
+  const body = new ReadableStream<Uint8Array>({
+    async pull(stream) {
+      try {
+        const { value, done } = await awaitWithCancellation(reader.read(), token, timeoutMs);
+        if (done) {
+          finish(false);
+          stream.close();
+        } else {
+          stream.enqueue(value);
+        }
+      } catch (error) {
+        finish(true);
+        stream.error(error);
+      }
+    },
+    cancel() { finish(true); },
+  }, { highWaterMark: 0 });
+  return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+
+export function modelRetryDelay(attempt: number, headers?: Headers, now = Date.now()): number {
+  const value = headers?.get("retry-after");
+  if (value) {
+    const seconds = Number(value);
+    const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - now;
+    if (Number.isFinite(delay) && delay >= 0) return Math.min(60_000, delay);
+  }
+  return Math.min(2000, 250 * 2 ** attempt) * (0.9 + Math.random() * 0.2);
+}
+
 export function getField(value: unknown, key: string): unknown {
   if (!value || typeof value !== "object") {
     return undefined;
@@ -181,7 +244,8 @@ export async function* parseSseJsonEvents(
 ): AsyncGenerator<unknown> {
   for await (const event of parseSseEvents(response, cancellationToken)) {
     const data = event.data.trim();
-    if (!data || data === "[DONE]") {
+    if (data === "[DONE]") return;
+    if (!data) {
       continue;
     }
     yield JSON.parse(data);
@@ -415,6 +479,7 @@ export async function* parseSseEvents(
     }
   } finally {
     unsubscribe();
+    void reader.cancel().catch(() => {});
     try {
       reader.releaseLock();
     } catch {
@@ -423,12 +488,29 @@ export async function* parseSseEvents(
   }
 }
 
-export async function throwForHttpError(response: Response): Promise<never> {
+export async function throwForHttpError(response: Response, token?: CancellationToken | null): Promise<never> {
   let bodyText = "";
+  const reader = response.body?.getReader();
   try {
-    bodyText = await response.text();
-  } catch {
+    if (reader) {
+      const decoder = new TextDecoder();
+      let remaining = 64 * 1024;
+      while (remaining > 0) {
+        const { value, done } = await awaitWithCancellation(reader.read(), token);
+        if (done) break;
+        bodyText += decoder.decode(value.subarray(0, remaining), { stream: true });
+        remaining -= value.length;
+      }
+      bodyText += decoder.decode();
+    }
+  } catch (error) {
+    if (isCancellationError(error, token) || error instanceof ProviderError) throw error;
     bodyText = response.statusText || `HTTP ${response.status}`;
+  } finally {
+    if (reader) {
+      void reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
   }
   let message = bodyText.trim() || `HTTP ${response.status}`;
   try {

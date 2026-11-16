@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile, utimes } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rename, rm, stat, writeFile, utimes } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -19,6 +19,30 @@ import {
   FileLockHandle,
   loadSettings,
 } from "../dist/index.js";
+
+test("usage cache only advances past complete lines, including split UTF-8 and replacement", async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "rind-usage-tail-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "usage.jsonl");
+  await writeFile(file, '{"n":1}\n{"text":"');
+  assert.deepEqual(loadUsageRecords(file), [{ n: 1 }]);
+  const tail = Buffer.from('中文"}\n');
+  await appendFile(file, tail.subarray(0, 2));
+  assert.deepEqual(loadUsageRecords(file), [{ n: 1 }]);
+  await appendFile(file, tail.subarray(2));
+  assert.deepEqual(loadUsageRecords(file), [{ n: 1 }, { text: "中文" }]);
+  assert.deepEqual(loadUsageRecords(file), [{ n: 1 }, { text: "中文" }]);
+  await writeFile(file, '{"n":2}');
+  assert.deepEqual(loadUsageRecords(file), []);
+  await appendFile(file, '\n');
+  assert.deepEqual(loadUsageRecords(file), [{ n: 2 }]);
+  const replacement = path.join(dir, "new.jsonl");
+  await writeFile(replacement, '{"n":3}\n');
+  await rename(replacement, file);
+  assert.deepEqual(loadUsageRecords(file), [{ n: 3 }]);
+  await rm(file);
+  assert.deepEqual(loadUsageRecords(file), []);
+});
 
 test("JsonlSessionStore defers disk creation until first user message, persists messages/tools/plan/goal, and supports fork", async t => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-runtime-store-"));
