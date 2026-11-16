@@ -18,11 +18,11 @@ The client assigns a request_id to each request and distinguishes events from re
 
 On the Web the ticket is stored in sessionStorage; on mobile, the native ticketFetch forbids redirects, requires HTTPS (except for local pairing addresses), and uses a bounded timeout. A Desktop Gateway one-time ticket is valid for 60 seconds, and both the WebSocket connection count and the subscription count are capped. Origin is only a source check; a ticket must still be consumed.
 
-Mobile does not run Python, models, or shell; it is a remote Surface. The Worker address configured in the frontend must be an explicit ws/wss URL with no username, password, query, or hash, so that an old link cannot be treated as an implicit redirect.
+Mobile does not run a local runtime, models, or shell; it is a remote Surface. The Worker address configured in the frontend must be an explicit ws/wss URL with no username, password, query, or hash, so that an old link cannot be treated as an implicit redirect.
 
 ## Two remote entry points
 
-Desktop remote access reuses its live Worker directly; a standalone deployment runs Python app-server --web, and the service stays alive after the browser is closed. After the connection is restored the upper layer re-initializes, resubscribes, and restores the view together with the historical cursor; the client does not automatically resend every failed request, to avoid duplicate side effects. See [replay](../01-runtime/replay-and-resubscribe.md).
+Desktop remote access reuses its live Worker directly; a standalone deployment runs the TypeScript runtime `app-server --web`, and the service stays alive after the browser is closed. After the connection is restored the upper layer re-initializes, resubscribes, and restores the view together with the historical cursor; the client does not automatically resend every failed request, to avoid duplicate side effects. See [replay](../01-runtime/replay-and-resubscribe.md).
 
 A standalone Docker deployment sets, in .env at the repository root:
 

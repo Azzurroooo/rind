@@ -19,7 +19,7 @@ import { errorText } from "./constants.js";
 // Native Team Agents Management controller for Rind Web.
 // Transparently uses the Desktop Gateway WebSocket RPC (`rind/agents/*`) when
 // advertised, or the Vite dev bridge (`/api/agents` + `/api/agents/stream`)
-// when running against a standalone Python runtime in a browser.
+// when running against a standalone runtime in a browser.
 export function useAgentsController(ctx) {
   const [snapshot, setSnapshot] = useState(emptyAgentsSnapshot);
   const [connection, setConnection] = useState("connecting");
@@ -62,12 +62,19 @@ export function useAgentsController(ctx) {
 
   const acceptPayload = useCallback((payload) => {
     if (!mountedRef.current || !payload || typeof payload !== "object") return;
+    const applySnapshot = (raw) => {
+      const normalized = normalizeAgentsSnapshot(raw);
+      setSnapshot((prev) => {
+        if (prev.seq > 0 && normalized.seq > 0 && prev.seq !== normalized.seq) {
+          return normalized;
+        }
+        return JSON.stringify(prev) === JSON.stringify(normalized) ? prev : normalized;
+      });
+    };
     if (payload.snapshot) {
-      const normalized = normalizeAgentsSnapshot(payload.snapshot);
-      setSnapshot((prev) => (JSON.stringify(prev) === JSON.stringify(normalized) ? prev : normalized));
+      applySnapshot(payload.snapshot);
     } else if (Array.isArray(payload.teams)) {
-      const normalized = normalizeAgentsSnapshot(payload);
-      setSnapshot((prev) => (JSON.stringify(prev) === JSON.stringify(normalized) ? prev : normalized));
+      applySnapshot(payload);
     }
     if (typeof payload.connection === "string") {
       setConnection((prev) => (prev === payload.connection ? prev : payload.connection));
@@ -173,53 +180,98 @@ export function useAgentsController(ctx) {
     };
   }, [canUseHttpBridge, acceptPayload]);
 
+  const fullRefreshInFlightRef = useRef(null);
+  const fullRefreshPendingRef = useRef(false);
+
   const refreshAgentHistories = useCallback(
     async (targetTeamIds = null) => {
       if (connection !== "connected") return;
-      const teamIds = Array.isArray(targetTeamIds)
-        ? targetTeamIds
-        : (teamsRef.current || []).map((t) => String(t.id));
-      try {
-        const [mgrRes, ...teamResults] = await Promise.all([
-          requestAgent("listSessions", { manager: true }).catch(() => ({ sessions: [] })),
-          ...teamIds.map((teamId) =>
-            requestAgent("listSessions", { teamId })
-              .then((res) => ({ teamId, sessions: Array.isArray(res?.sessions) ? res.sessions : [] }))
-              .catch(() => ({ teamId, sessions: [] })),
-          ),
-        ]);
-        if (!mountedRef.current) return;
-        if (Array.isArray(mgrRes?.sessions)) {
-          setManagerHistory((prev) =>
-            JSON.stringify(prev) === JSON.stringify(mgrRes.sessions) ? prev : mgrRes.sessions,
-          );
-        }
-        if (teamResults.length > 0) {
-          setTeamHistories((prev) => {
-            let changed = false;
-            const next = { ...prev };
-            for (const item of teamResults) {
-              if (JSON.stringify(next[item.teamId] || []) !== JSON.stringify(item.sessions)) {
-                next[item.teamId] = item.sessions;
-                changed = true;
-              }
-            }
-            return changed ? next : prev;
-          });
-        }
-      } catch {
-        // Session history refresh is advisory.
+      const isFullRefresh = !Array.isArray(targetTeamIds);
+      if (isFullRefresh && fullRefreshInFlightRef.current) {
+        fullRefreshPendingRef.current = true;
+        return fullRefreshInFlightRef.current;
       }
+      const runRefresh = async () => {
+        const teamIds = Array.isArray(targetTeamIds)
+          ? targetTeamIds
+          : (teamsRef.current || []).map((t) => String(t.id));
+        try {
+          const [mgrRes, ...teamResults] = await Promise.all([
+            requestAgent("listSessions", { manager: true }).catch(() => ({ sessions: [] })),
+            ...teamIds.map((teamId) =>
+              requestAgent("listSessions", { teamId })
+                .then((res) => ({ teamId, sessions: Array.isArray(res?.sessions) ? res.sessions : [] }))
+                .catch(() => ({ teamId, sessions: [] })),
+            ),
+          ]);
+          if (!mountedRef.current) return;
+          if (Array.isArray(mgrRes?.sessions)) {
+            setManagerHistory((prev) =>
+              JSON.stringify(prev) === JSON.stringify(mgrRes.sessions) ? prev : mgrRes.sessions,
+            );
+          }
+          if (teamResults.length > 0) {
+            setTeamHistories((prev) => {
+              let changed = false;
+              const next = { ...prev };
+              for (const item of teamResults) {
+                if (JSON.stringify(next[item.teamId] || []) !== JSON.stringify(item.sessions)) {
+                  next[item.teamId] = item.sessions;
+                  changed = true;
+                }
+              }
+              return changed ? next : prev;
+            });
+          }
+        } catch {
+          // Session history refresh is advisory.
+        }
+      };
+
+      if (!isFullRefresh) {
+        await runRefresh();
+        return;
+      }
+
+      const promise = (async () => {
+        try {
+          do {
+            fullRefreshPendingRef.current = false;
+            await runRefresh();
+          } while (fullRefreshPendingRef.current && mountedRef.current);
+        } finally {
+          fullRefreshInFlightRef.current = null;
+        }
+      })();
+      fullRefreshInFlightRef.current = promise;
+      await promise;
     },
     [connection, requestAgent],
   );
 
-  // Refresh saved session histories whenever teams or snapshot sequence changes
-  const teamIdsKey = snapshot.teams.map((t) => t.id).join(",");
+  // Refresh saved session histories only when session-relevant snapshot fields change
+  const historyRefreshKey = useMemo(() => {
+    const teamsPart = snapshot.teams.map((t) => t.id).join(",");
+    const agentsPart = snapshot.agents.map((a) => `${a.id}:${a.canonicalWorkspace || ""}:${a.name || ""}`).join(",");
+    const sessionsPart = snapshot.sessions
+      .map((s) => `${s.id}:${s.runtimeSessionId || ""}:${s.teamId || ""}:${s.agentId || ""}:${s.updatedAt || ""}`)
+      .join(",");
+    const runsPart = snapshot.runs
+      .map((r) => `${r.id}:${r.status || ""}:${r.sessionId || ""}:${r.runtimeSessionId || ""}`)
+      .join(",");
+    const livePart = snapshot.live
+      .map((l) => `${l.id || l.runtimeSessionId || ""}:${l.turn || l.turnStatus || ""}:${l.updatedAt || ""}:${l.title || ""}`)
+      .join(",");
+    return `${teamsPart}|${agentsPart}|${sessionsPart}|${runsPart}|${livePart}`;
+  }, [snapshot.teams, snapshot.agents, snapshot.sessions, snapshot.runs, snapshot.live]);
+
   useEffect(() => {
-    if (connection !== "connected") return;
-    void refreshAgentHistories();
-  }, [connection, snapshot.seq, teamIdsKey, refreshAgentHistories]);
+    if (connection !== "connected") return undefined;
+    const timer = setTimeout(() => {
+      void refreshAgentHistories();
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [connection, historyRefreshKey, refreshAgentHistories]);
 
   const openChatSurface = useCallback(() => {
     setSurface({ kind: "chat" });
@@ -546,7 +598,6 @@ export function useAgentsController(ctx) {
             all: [],
             groups: { needs: [], working: [], queued: [], delegated: [], done: [], cancelled: [] },
             sections: [],
-            columns: { queued: [], in_progress: [], needs_attention: [], completed: [] },
           },
     [snapshot, currentTeamId],
   );
@@ -556,6 +607,7 @@ export function useAgentsController(ctx) {
   const inboxCount = useMemo(() => inboxBadgeCount(snapshot), [snapshot]);
   const backgroundModel = useMemo(() => buildBackgroundModel(snapshot, service), [snapshot, service]);
   const bgCount = useMemo(() => activeBackgroundCount(snapshot), [snapshot]);
+  const clearAgentOverride = useCallback(() => setActiveAgentOverride(null), []);
 
   return {
     snapshot,
@@ -588,7 +640,7 @@ export function useAgentsController(ctx) {
     renameAgentConversation,
     deleteAgentConversation,
     refreshAgentHistories,
-    clearAgentOverride: () => setActiveAgentOverride(null),
+    clearAgentOverride,
     requestAgent,
     runAction,
   };

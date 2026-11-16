@@ -37,8 +37,8 @@ export class TextBlock {
       lines.pop();
     }
     this.cacheWidth = width;
-    this.cacheLines = lines;
-    return lines;
+    this.cacheLines = Object.freeze(lines);
+    return this.cacheLines;
   }
 
   invalidate() {

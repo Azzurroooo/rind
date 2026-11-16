@@ -27,6 +27,6 @@ JSON 临时替换避免读到半份 meta，JSONL 追加使旧消息无需重写�
 
 plan.json 也是按需存在的会话控制文件。原始对话、当前计划和进程日志分别读写，让重放历史不必加载所有大输出，也让计划变化无需重写对话。
 
-代码入口：[JsonlSessionStore](../../../agent/infrastructure/persistence/jsonl_session_store.py)、[SessionFiles](../../../agent/infrastructure/persistence/session_files.py)。验证：[异步会话存储](../../../test/test_async_session_store.py)、[会话分叉](../../../test/test_persistence_session_fork.py)。
+代码入口：[JsonlSessionStore](../../../runtime/src/infrastructure/persistence/session-store.ts)、[SessionFiles](../../../runtime/src/infrastructure/persistence/session-store.ts)。验证：[异步会话存储](../../../runtime/test/persistence.test.js)、[会话分叉](../../../runtime/test/persistence.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

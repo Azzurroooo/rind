@@ -33,6 +33,6 @@ The summary request reserves an output budget of min(8,192, window/10) and then 
 
 The summary model's reasoning is not retained as new business reasoning history; when it is projected into a handoff, a fixed non-empty reasoning marker is used to satisfy the corresponding compatibility requirement. Compaction records and boundary messages are persisted separately, and only matching valid pairs are adopted; this is not a cross-file ACID transaction. See [session structure](../03-persistence/session-store.md) for details.
 
-Code entry points: [compaction service](../../../agent/application/context/compaction.py), [handoff construction](../../../agent/application/context/handoff.py), [projection](../../../agent/infrastructure/persistence/message_projector.py). Verification: [compaction service](../../../test/test_compaction_service.py), [boundary recovery](../../../test/test_compact_pipeline.py).
+Code entry points: [compaction service](../../../runtime/src/application/context-manager.ts), [handoff construction](../../../runtime/src/application/context-manager.ts), [projection](../../../runtime/src/infrastructure/persistence/session-store.ts). Verification: [compaction service](../../../runtime/test/context-and-turn.test.js), [boundary recovery](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

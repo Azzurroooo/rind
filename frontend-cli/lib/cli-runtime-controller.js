@@ -42,7 +42,12 @@ export function createCliRuntimeController({
   async function request(method, params = {}) {
     await ensureRuntime();
     // A window's first message creates its conversation; until then it has none.
-    if (method === methods.sessionPrompt && !params.session_id && !state.session.info.session_id) await createConversation();
+    if (method === methods.sessionPrompt && !params.session_id && !state.session.info.session_id) {
+      await createConversation();
+      if (state.turn?.interruptRequested && state.session.info.session_id) {
+        void client.request(methods.sessionCancel, { session_id: state.session.info.session_id }).catch(() => {});
+      }
+    }
     const requestParams = { ...params };
     const sessionScoped = sessionScopedMethods.has(method) || method === methods.modelList;
     if (sessionScoped && !requestParams.session_id) {
@@ -463,8 +468,10 @@ export function createCliRuntimeController({
   }
 
   async function fetchContextBoardData() {
-    const breakdownResult = await request(methods.contextInspect);
-    const summaryResult = await request(methods.usageSummary, { days: CONTEXT_BOARD_DAYS });
+    const [breakdownResult, summaryResult] = await Promise.all([
+      request(methods.contextInspect),
+      request(methods.usageSummary, { days: CONTEXT_BOARD_DAYS }),
+    ]);
     return {
       breakdown: breakdownResult?.breakdown && typeof breakdownResult.breakdown === "object" ? breakdownResult.breakdown : null,
       latestUsage: breakdownResult?.latest_usage && typeof breakdownResult.latest_usage === "object" ? breakdownResult.latest_usage : null,

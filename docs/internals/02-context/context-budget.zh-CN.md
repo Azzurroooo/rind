@@ -25,6 +25,6 @@ ContextBudget 保存窗口、硬上限以及 system/conversation/tool 的诊断�
 
 没有可靠模型窗口时，默认窗口为 256,000 token；已知模型能力会覆盖它。本地优先使用 cl100k_base，缺少 tokenizer 时使用 CJK/其他文本启发式。因此 90% 触发线提供余量，却不保证供应商永远不会拒绝请求，仍需要 context-length 错误恢复路径。
 
-代码入口：[估算器](../../../agent/application/context/estimator.py)、[锚点逻辑](../../../agent/application/context/manager.py)、[用量正规化](../../../agent/application/context/token_usage.py)。验证：[估算回归](../../../test/test_context_estimator.py)、[预算回归](../../../test/test_compact_budget.py)。
+代码入口：[估算器](../../../runtime/src/application/context-manager.ts)、[锚点逻辑](../../../runtime/src/application/context-manager.ts)、[用量正规化](../../../runtime/src/application/context-manager.ts)。验证：[估算回归](../../../runtime/test/context-and-turn.test.js)、[预算回归](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

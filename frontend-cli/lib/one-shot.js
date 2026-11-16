@@ -1,6 +1,9 @@
+import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { buildRuntimeEnv } from "../../rind-runtime-client/runtime-env.js";
+import { resolveRuntimeExecutable } from "../../rind-runtime-client/runtime-client.js";
 import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
 import { createOneShotProgress } from "./one-shot-progress.js";
@@ -29,6 +32,14 @@ export const tourHelp = [
   "Example: rind tour start.hello",
 ].join("\n");
 
+export const gatewayHelp = [
+  "Usage: rind gateway [options | doctor]",
+  "",
+  "Runs the messaging gateway daemon (Lark/Feishu, Email) against the shared Runtime.",
+  "  --config <path>  Path to gateway.json (default: ~/.rind/gateway.json)",
+  "  doctor           Validate gateway configuration and connectivity",
+].join("\n");
+
 export const cliHelp = [
   "Usage: rind [options]",
   "",
@@ -42,10 +53,63 @@ export const cliHelp = [
   "",
   configHelp,
   "",
+  gatewayHelp,
+  "",
   tourHelp,
   "",
   updateHelp,
 ].join("\n");
+
+export function runGateway({
+  args = [],
+  repoRoot,
+  runtimePath = "",
+  cwd = process.cwd(),
+  env = process.env,
+  spawnImpl = spawn,
+  processObj = process,
+} = {}) {
+  const executable = resolveRuntimeExecutable(repoRoot, runtimePath);
+  const childEnv = buildRuntimeEnv(repoRoot, env, {
+    sourceRuntime: !runtimePath || /\.(?:c|m)?js$/i.test(runtimePath),
+    command: executable.command,
+  });
+  return new Promise((resolve, reject) => {
+    const child = spawnImpl(executable.command, [...executable.args, "gateway", ...args], {
+      cwd,
+      env: childEnv,
+      stdio: "inherit",
+    });
+    const forwardSigint = () => {
+      if (child && !child.killed && child.exitCode === null) {
+        try { child.kill("SIGINT"); } catch {}
+      }
+    };
+    const forwardSigterm = () => {
+      if (child && !child.killed && child.exitCode === null) {
+        try { child.kill("SIGTERM"); } catch {}
+      }
+    };
+    const cleanup = () => {
+      processObj.off("SIGINT", forwardSigint);
+      processObj.off("SIGTERM", forwardSigterm);
+    };
+    processObj.on("SIGINT", forwardSigint);
+    processObj.on("SIGTERM", forwardSigterm);
+    child.once("error", (error) => {
+      cleanup();
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      cleanup();
+      if (typeof code === "number") {
+        resolve(code);
+        return;
+      }
+      resolve(signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 1);
+    });
+  });
+}
 
 export function parseOneShotArgs(args) {
   if (args[0] !== "run") return null;
@@ -137,7 +201,7 @@ export async function writeRunLog({ workspace, sessionId, turnId, model, prompt,
   }
 }
 
-export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = process.cwd(), stderr = console.error, stdout = console.log, clientFactory = createSharedRuntimeClient }) {
+export async function runOneShot({ args, repoRoot, runtimePath, cwd = process.cwd(), stderr = console.error, stdout = console.log, clientFactory = createSharedRuntimeClient }) {
   const options = parseOneShotArgs(args);
   if (!options) return false;
   const runtimeArgs = ["--no-user-question"];
@@ -179,11 +243,10 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   if (process.platform !== "win32") process.on("SIGHUP", onSignal);
   try {
     management = clientFactory === createSharedRuntimeClient
-      ? await interruptible(prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false, stopSpawnedService: true }))
+      ? await interruptible(prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { repoRoot, runtimePath }, { interactive: false, stopSpawnedService: true }))
       : { args: runtimeArgs, shared: true };
     progress.begin();
     client = observeRuntime(clientFactory({
-      python,
       repoRoot,
       runtimePath,
       cwd: options.dir || cwd,
@@ -198,7 +261,10 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
         if (type === "assistant_delta") assistant += String(event.text || "");
         if (type === "assistant_message_completed") completed = String(event.content || "");
         if (type === "turn_failed" || type === "turn_cancelled" || type === "task_continuation_failed") turnFailure = String(event.error || event.reason || "Request interrupted.");
-        if (type === "task_updated") progress.note(`task ${event.task?.task_id}: ${event.task?.status}`);
+        if (type === "turn_completed" && Number(event.background_wait?.count) > 0) {
+          const count = Number(event.background_wait.count);
+          progress.note(`waiting for ${count} background ${count === 1 ? "task" : "tasks"}`);
+        }
         if (type === "assistant_message_completed" && sessionInfo?.capabilities?.includes("rind/request-completion")) progress.note(String(event.content || ""));
         if (type === "context_built" && event.decisions?.image_notice) progress.systemNotice(String(event.decisions.image_notice), event.decisions.image_notice_level);
         const toolCallId = String(event?.tool_call_id || "");

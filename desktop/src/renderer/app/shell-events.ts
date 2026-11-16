@@ -1,9 +1,9 @@
-import { requiredElement, settingsNotifications, sidebarResizeHandle, sidebarToggle, topbarUpdateButton } from "./dom.ts"
+import { requiredElement, sidebarResizeHandle, sidebarToggle, topbarUpdateButton } from "./dom.ts"
 import { openPalette } from "./palette-ui.ts"
 import { runAction } from "./runtime.ts"
 import { addProject, startNewChat } from "./sessions.ts"
 import { openSettings } from "./settings.ts"
-import { bindSidebarResize, nextTheme, render, setTheme, toggleSidebar } from "./shell.ts"
+import { bindSidebarResize, nextTheme, render, scheduleRender, setTheme, toggleSidebar } from "./shell.ts"
 import { state } from "./state.ts"
 
 export function bindShellEvents(): void {
@@ -30,13 +30,5 @@ export function bindShellEvents(): void {
 
   document.getElementById("toggle-theme")?.addEventListener("click", () => setTheme(nextTheme()))
 
-  settingsNotifications.addEventListener("change", () => {
-    const enabled = settingsNotifications.checked
-    state.notificationsEnabled = enabled
-    runAction(async () => {
-      await window.api.prefs.update({ notificationsEnabled: enabled })
-    })
-  })
-
-  window.addEventListener("resize", () => render())
+  window.addEventListener("resize", () => scheduleRender())
 }

@@ -1,6 +1,9 @@
 node_modules/
 out/
 dist/
+resources/runtime
+resources/rind-runtime-client
+resources/agent-management
 .verify-user-data*/
 !src/
 !src/**

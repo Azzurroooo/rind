@@ -30,6 +30,6 @@ Before the disconnect, a stretch of assistant_delta was already displayed; after
 
 Tasks use a separate snapshot because a process can span multiple turns. after_cursor does not count the task snapshot, and the client should not miscount a single snapshot application as a new conversation event. After a Worker restart there is no old live tail; recovery should honestly show the on-disk boundary rather than padding a half-finished stream into a complete answer.
 
-Code entry points: [Worker.replay](../../../agent/runtime/server/worker.py), [the durable projection](../../../agent/runtime/server/replay_events.py), [Dispatcher replay](../../../agent/runtime/server/dispatcher.py). Verification: [protocol replay](../../../test/test_runtime_server_protocol.py), [session recovery preview](../../../test/test_resume_preview.py).
+Code entry points: [Worker.replay](../../../runtime/src/server/worker.ts), [the durable projection](../../../runtime/src/server/protocol.ts), [Dispatcher replay](../../../runtime/src/server/dispatcher.ts). Verification: [protocol replay](../../../runtime/test/server-protocol.test.js), [session recovery preview](../../../runtime/test/server-protocol.test.js).
 
 [Back to the series map](../README.md)

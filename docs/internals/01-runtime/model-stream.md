@@ -14,7 +14,7 @@ flowchart LR
     R --> SURFACE["Surface"]
 ~~~
 
-stream_pump.py splits text and tool arguments at character boundaries, and the queue bounds both the item count and the serialized byte count; an oversized non-text event fails explicitly. Adjacent assistant text waits at most 25 ms or accumulates up to 8 KiB; tool arguments, usage, and termination boundaries are never reordered. When the consumer is slow, the producer waits for space rather than piling up events without limit.
+The stream pump in `turn-runner.ts` splits text and tool arguments at character boundaries, and the queue bounds both the item count and the serialized byte count; an oversized non-text event fails explicitly. Adjacent assistant text waits at most 25 ms or accumulates up to 8 KiB; tool arguments, usage, and termination boundaries are never reordered. When the consumer is slow, the producer waits for space rather than piling up events without limit.
 
 Cancellation interrupts the model stream as it is being read; the end of production and cancellation are signaled to the consumer with separate wake-up signals, not by stuffing an end marker into a queue that is already full. The parser collects the complete text, tool calls, reasoning, and finish reason, and the usage record is written only after usage has been normalized.
 
@@ -24,6 +24,6 @@ Suppose the model emits text A, then B, followed by a tool-argument fragment: A/
 
 This queue bounds the events waiting to be forwarded; it does not mean the complete answer or the SDK's internal buffer is limited to 1 MiB as well. When the consumer stops, cancellation occurs, or parsing fails, the underlying stream must be closed and the reading task ended; otherwise a "bounded queue" can still leave live network resources behind. Related tests must check order, backpressure, and cleanup together.
 
-Code entry points: [the stream pump](../../../agent/runtime/core/stream_pump.py), [the parser](../../../agent/runtime/core/stream_parser.py). Verification: [stream pump bounds](../../../test/test_stream_pump.py), [message parsing](../../../test/test_message_stream_parser.py).
+Code entry points: [the stream pump](../../../runtime/src/core/turn-runner.ts), [the parser](../../../runtime/src/core/turn-runner.ts). Verification: [stream pump bounds](../../../runtime/test/context-and-turn.test.js), [message parsing](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

@@ -1,12 +1,12 @@
-# Agents Management
+# Agents 管理（Agents Management）
 
-English | [简体中文](agents-management.md)
+[English](agents-management.md) | 简体中文
 
-Agents Management is the local control plane for persistent workers. It is an independent TypeScript package; Rind is only its first execution adapter. A future Codex or Claude Code adapter uses the same task and run contract.
+Agents Management 是常驻执行体的本地控制平面。它是一个独立的 TypeScript 包；Rind 只是它的第一个执行适配器，未来的 Codex 或 Claude Code 适配器也将遵循同一套任务与运行契约。
 
-## Start
+## 启动
 
-Build the service once, then use the CLI from this repository:
+构建一次服务后，即可在仓库中使用 CLI：
 
 ```sh
 npm --prefix agent-management install
@@ -16,33 +16,33 @@ npm --prefix frontend-cli run build
 node frontend-cli/bin/rind.js agents list
 ```
 
-The service starts on demand under `RIND_HOME/agents-management`. Its state is an atomic JSONL journal and snapshot. `manager/` is the Manager's private workspace; `state/` contains credentials, the endpoint and published artifacts. Keep `RIND_HOME` user-private.
+服务会在 `RIND_HOME/agents-management` 下按需启动。其状态由原子写入的 JSONL 日志与快照组成。`manager/` 是 Manager 的私有工作区；`state/` 存放凭据、本地端点与已发布产物。请确保 `RIND_HOME` 仅当前用户可访问。
 
-## Team workflow
+## 团队工作流
 
-Teams and tasks are managed on the Agents page (`rind agents`, or Left on an empty chat input) or by the Manager. Only the user and the Manager create tasks, so every task has an owner who expects its delivery report. The command line observes and recovers:
+团队与任务由 Agents 页面（`rind agents`，或在空白聊天输入框按左方向键 `←`）或 Manager 管理。只有用户和 Manager 能创建任务，因此每个任务都有明确的交付接收方。命令行用于观测与故障恢复：
 
 ```sh
-rind agents list --json                         # the full state, for scripts and diagnostics
-rind agents stop <run>                          # stop one run
-rind agents resolve <run> --confirm-stopped     # release a run whose process has stopped
-rind agents stop [--all]                        # stop the background services
-rind agents import <legacy-root> [--confirm]    # bring in an old .aiteam team
+rind agents list --json                         # 输出完整状态，供脚本和诊断使用
+rind agents stop <run>                          # 停止单次运行
+rind agents resolve <run> --confirm-stopped     # 确认旧进程已停止后释放对应运行锁
+rind agents stop [--all]                        # 停止后台服务
+rind agents import <legacy-root> [--confirm]    # 导入旧版 .aiteam 团队
 ```
 
-`rind agents` refuses to run inside a Rind session: a session's shell would otherwise act as the user. Members work through `delegate` and `report`, the Manager through `agent_management`.
+`rind agents` 拒绝在 Rind 会话内部执行，以防会话内的 shell 冒充用户身份。团队成员通过 `delegate` 和 `report` 协作，Manager 通过 `agent_management` 管理组织与任务。
 
-Every member is an existing canonical folder. Teams are registry relationships, so a folder can join several teams. If it already belongs to another team, the Agents page recommends an independent copy and offers sharing as an explicit choice. Shared workspaces serialize writes. A Git worktree (**Add member › New Git worktree**) gets a separate registered member and can run in parallel.
+每个成员都对应一个已存在的规范目录。团队是注册表关系，因此同一目录可以加入多个团队。如果某目录已属于其他团队，Agents 页面会推荐创建独立副本，并将共享作为显式选项提供。共享工作区会串行化写入；Git worktree（**Add member › New Git worktree**）则会注册为独立成员并可并行运行。
 
-The first member is not silently granted extra file access: it is simply the initial leader. Each configured team has one main agent and a tree of reporting relationships. Members delegate to their direct reports and see tasks in their subtree. Every member can create and register a new direct report below the team creation root. User and Manager can arrange the entire tree. Cycles are rejected, and direct reports must be reassigned before removing their supervisor. A task is `done` only after a valid report and confirmed execution completion. A blocker must name `user` or a current member and state the action needed. Reports wake the original delegating task, recursively through all levels; waiting for grandchildren does not complete the intermediate task. Moving a member does not rewrite existing task ownership or parent tasks. Existing flat teams remain valid: an omitted supervisor means the main agent.
+第一个成员不会被暗中赋予额外文件权限：它只是初始负责人（Leader）。每个团队都有一名主成员以及一棵汇报关系树。成员只能向自己的直接下属委派任务，并查看其子树中的任务；任何成员都可以在团队创建根目录下新建并注册自己的直接下属；用户和 Manager 可以调整整棵组织树。系统拒绝循环汇报关系，移除上级前必须先重新指定其直接下属。任务只有在提交有效报告且确认执行结束后才会进入 `done`。阻塞项（blocker）必须指明由 `user` 或当前成员处理，并说明所需动作。报告会逐层向上唤醒最初发起委派的任务；等待孙级任务不会提前完成中间层任务。调整成员汇报线不会改写已有任务的归属或父子关系。扁平团队依然有效：未指定上级时默认向团队负责人汇报。
 
-The folder basename is its initial agent name; position is a separate display label. New workspaces and worktrees are created in the team's creation root: the open project's folder in Desktop, otherwise `RIND_HOME/agents-management/workspaces/<team>`; the Manager can create a team with another existing folder (`createRoot`). Agent hints and Skill references can be supplied through `registerAgent`; a reference is a normal project/user Skill name or an absolute `SKILL.md` path. Imported local legacy Skills retain their original reference directories.
+目录基名作为初始成员名称，职位（position）是独立的展示标签。新工作区与 worktree 创建在团队的 `createRoot` 下：在 Desktop 中默认为当前打开项目的目录，否则为 `RIND_HOME/agents-management/workspaces/<team>`；Manager 也可以用已存在的其他目录（`createRoot`）创建团队。可通过 `registerAgent` 提供成员提示词与 Skill 引用（普通项目/用户 Skill 名称或 `SKILL.md` 绝对路径）；导入的旧版地方法规 Skill 会保留原始引用目录。
 
-## CLI surface
+## CLI 界面
 
-Press **Left (←) while the chat input is empty** to open Agents Management; see [Back, leave and stop](#back-leave-and-stop) for how to get out again. A nonempty input keeps its normal editing behavior. Management adds no slash commands; the shell entry remains `rind agents`. The page is keyboard-only and never captures the mouse, so the terminal's own selection and scrollback keep working.
+在聊天输入框为空时按 **左方向键（←）** 即可打开 Agents Management；退出方式见[返回、离开与停止](#返回离开与停止)。输入框非空时保持正常光标移动。管理面板不额外增加斜杠命令，命令行入口保持为 `rind agents`。整个页面纯键盘操作且从不捕获鼠标，因此终端原生选区复制与滚屏回看始终可用。
 
-### Layout
+### 布局
 
 ```text
  Agents › Product › Organization                        ! 1 need you  ● 1 working  ● connected
@@ -60,61 +60,61 @@ Press **Left (←) while the chat input is empty** to open Agents Management; se
  enter open member  space more actions  c new conversation  e edit role  t assign task  a add member below  ? help  esc back
 ```
 
-- **Header** — breadcrumb on the left; attention, activity and connection on the right.
-- **Sidebar** — Inbox, Manager, Independent, Background, every team (with its most urgent status) and New team. Below 84 columns the sidebar becomes its own screen: Esc shows it, Enter opens the selection.
-- **Main view** — the selected page. A team has two views, Organization and Tasks (Tab, `1`, `2`).
-- **Detail pane** — what the selected row is and what Enter does; beside the list from 90 columns, below it on tall narrow terminals.
-- **Status line** — the result of the last action (✓, ✕ or •), which clears after a few seconds; a spinner while an action runs.
-- **Key bar** — only the keys valid for the selected row, most important first, each named for what it does to that row (`enter open member`, `enter join`, `enter open report`). `?` and `esc` are always kept and hints are dropped whole, never cut in half. One table in `frontend-cli/lib/agents-keys.js` declares every action, so the key bar, the `?` overlay and the keys themselves always agree: a key that is not offered for the selected row does nothing, and Space never falls back to Enter.
+- **顶栏（Header）** — 左侧为面包屑路径；右侧显示待处理项、活跃运行数与连接状态。
+- **侧栏（Sidebar）** — 包含 Inbox、Manager、Independent、Background、各团队（显示最高优先级状态）与 New team。宽度低于 84 列时侧栏独立成屏：按 `Esc` 返回侧栏，按 `Enter` 进入所选页面。
+- **主视图（Main view）** — 当前选中页面。团队包含 Organization 与 Tasks 两个视图（`Tab`、`1`、`2` 切换）。
+- **详情栏（Detail pane）** — 展示当前选中行的详情及 `Enter` 动作；90 列及以上位于列表右侧，窄高终端位于列表下方。
+- **状态行（Status line）** — 显示最近一次操作结果（✓、✕ 或 •），数秒后自动清除；操作执行中显示旋转指示器。
+- **快捷键栏（Key bar）** — 仅展示对当前选中行生效的按键，按重要度排序，并按具体动作命名（如 `enter open member`、`enter join`、`enter open report`）。`?` 与 `esc` 始终保留，空间不足时整项隐藏而绝不截断。所有动作统一在 `frontend-cli/lib/agents-keys.js` 的单表中声明，保证底栏、`?` 帮助浮层与实际按键行为完全一致：未列出的按键不做任何动作，`Space` 也不会回退成 `Enter`。
 
-### Organization
+### 组织树（Organization）
 
-The reporting tree, rooted at the leader; members without a supervisor report to the leader. Members and their conversations are drawn differently so their levels never blur:
+汇报树以团队负责人为根；未显式设置上级的成员直接向负责人汇报。成员行与会话行采用不同绘制样式以避免层级混淆：
 
-- A **member** row is the name in bold, its role in an aligned column, and a summary on the right in words about the person: `● working`, `! needs you`, `○ 1 open`, or a dim `idle`. A member has no status glyph of its own in the tree.
-- A **conversation** sits under its member, inside the tree guides, with its own glyph, status and age: `├─ ● Plan the release   Working   now`. The three most urgent are shown inline; the rest collapse into a "+N more" row.
+- **成员行** — 粗体显示名称，对齐列显示角色，右侧以文字汇总该成员状态：`● working`、`! needs you`、`○ 1 open` 或暗色 `idle`；成员行自身不在树首放置状态符号。
+- **会话行** — 缩进在所属成员下方的树形导引线内，带独立状态符号、状态名与相对时间：`├─ ● Plan the release   Working   now`。内联展示最紧急的 3 条会话，其余折叠为 `+N more`。
 
-Statuses use one glyph set everywhere: `!` Needs input, `?` Unconfirmed, `●` Working, `↻` Running job, `⋯` Delegated, `◦` Queued, `○` Open, `✓` Done, `·` Idle. Only `!` asks for you; the `?` overlay lists them all. A member's summary also counts its open tasks (`○ 1 open · 2 tasks`).
+全界面共用同一套状态符号：`!` Needs input、`?` Unconfirmed、`●` Working、`↻` Running job、`⋯` Delegated、`◦` Queued、`○` Open、`✓` Done、`·` Idle。只有 `!` 需要你介入；按 `?` 可查看完整图例。成员摘要还会统计未结任务数（如 `○ 1 open · 2 tasks`）。
 
-### What a status means
+### 状态含义
 
-The shared Runtime hosts the conversation of every interactive Rind window and every task, and it keeps a small live table: for each conversation its folder, whether a turn is running or waiting for an answer, and how many windows show it on screen. The table is updated from requests and events the Runtime already handles, so nothing polls, and it is pushed to the Agents page once per burst of changes.
+共享 Runtime 托管所有交互式 Rind 窗口和团队任务的会话，并维护一张轻量实时表：记录每个会话的工作目录、是否有轮次正在运行或等待回答，以及当前有多少窗口正在屏幕展示该会话。该表由 Runtime 已处理的请求与事件直接驱动，无需轮询，并在状态突发变化时合并推送给 Agents 页面。
 
-| Status | Meaning |
+| 状态 | 含义 |
 | --- | --- |
-| `●` Working | A turn or task is running, whether or not any window shows it. |
-| `↻` Running job | The turn ended, but a job it started (a build, a test run) still runs; it resumes by itself when the job finishes. Rows name the job (`↻ Running job · npm test +1`); the detail says it in full. Nothing for you to do. |
-| `⋯` Delegated | A task handed work to its members and runs again by itself, told the results, when they deliver. Nothing for you to do. |
-| `!` Needs input | It stopped to ask a question, or a task is blocked on you. |
-| `?` Unconfirmed | A run's outcome could not be confirmed after a service was lost; confirm the old process stopped before retrying. |
-| `○` Open | Nothing runs, and a Rind window shows it on screen right now. Several terminals can each have one open. |
-| `·` Idle | Nothing runs and no window shows it; the time is its last activity. |
+| `●` Working | 轮次或任务正在运行（无论是否有窗口正在显示）。 |
+| `↻` Running job | 当前轮次已结束，但由它启动的后台作业（如构建、测试）仍在运行；作业结束后会自动唤醒继续执行。列表会标出作业命令（如 `↻ Running job · npm test +1`），详情栏显示完整信息，无需人工介入。 |
+| `⋯` Delegated | 任务已将子工作委派给下属成员，待所有子工作交付后会自动携结果恢复运行，无需人工介入。 |
+| `!` Needs input | 会话停下向你提问，或任务阻塞在需要你回答的问题上。 |
+| `?` Unconfirmed | 服务中断后无法确认某次运行的最终结果；请先确认旧进程已退出再决定重试。 |
+| `○` Open | 当前没有运行中的工作，但正被至少一个 Rind 窗口展示在屏幕上（可多终端同时打开）。 |
+| `·` Idle | 无运行工作且无窗口展示；时间表示最近一次活动。 |
 
-Open means on screen. A window covered by the Agents page still holds its conversation but tells the Runtime (`runtime/visibility`), so that conversation shows Idle, or Working while its turn runs. Closing or covering a window never stops a running turn. A conversation exists only once its first message is sent. Before that a window is a folder and an input box: it has no session ID (its banner says `session new`), and nothing in the Runtime, the management service or the Agents page knows about it. `/model`, `/effort` and `/login` change the window's own settings, which the conversation is created with; `/sessions` and `/status` work; `/goal`, `/compact`, `/context` and `/fork` say they need a conversation. The first message creates it (`session/create`, then the prompt) and saves it, and from that moment it is listed everywhere. If that first prompt fails before the message is saved (a missing key, say), the conversation is discarded (`session_discarded`) and the window is new again; retrying reuses the same identity, so a team window stays bound to one conversation. Leaving a window before its first message leaves nothing behind, and going back to it (`esc`) opens a new conversation in the same place. `rind run` and team tasks create their conversation the same way.
+Open 仅代表正在屏幕上显示。被 Agents 页面遮盖的窗口仍持有原会话，但会通过 `runtime/visibility` 告知 Runtime，因此该会话会显示为 Idle（若轮次运行中则仍为 Working）。关闭或切换窗口绝不会中断正在运行的轮次。会话只有在发送第一条消息后才真正创建：在此之前窗口只是一个目录加输入框，没有会话 ID（顶栏显示 `session new`），Runtime、管理服务与 Agents 页面中都不会留存空记录。`/model`、`/effort` 与 `/login` 修改当前窗口设置并在创建会话时生效；`/sessions` 与 `/status` 可直接使用；`/goal`、`/compact`、`/context` 与 `/fork` 会提示需先开始会话。发送首条消息时执行 `session/create` 并落盘，自此出现在各列表中。若首条提示词在保存前失败（例如缺少密钥），空会话会被丢弃（`session_discarded`），窗口回到新建态；重试时复用同一管理绑定。在首条消息前离开窗口不会留下任何痕迹，按 `esc` 返回仍回到原位置的新建会话。`rind run` 与团队任务采用完全一致的创建流程。
 
-### Conversation names
+### 会话命名与删除
 
-A conversation is shown by its name when it has one, otherwise by its first message (up to 80 characters; each list clips it to its width), otherwise by its ID. `/rename <name>` names it, `/rename` shows what it is shown as and changes nothing, and `/rename --reset` goes back to its first message. The name is taken as typed (an apostrophe is fine), on one line, up to 80 characters. Before the first message the window keeps the name and creates the conversation with it. In Agents, Space on a conversation offers **Rename…**; leaving the field empty resets it. Both run the conversation's own command, so there is one place that writes names (`set_name` on its store, under the same lock as its messages). A rename is broadcast (`session_renamed`): other windows showing it follow, and the shared Runtime's live table carries the new title to every list before history is read again. A fork is never given its source's name; it is shown as the source's title with "(fork)". Space also offers **Delete conversation…**: confirmed, it removes the conversation's saved messages permanently; it is refused while the conversation runs or a window is showing it, and any registration it had is dropped, so it leaves every list and Esc no longer goes back to it.
+会话优先显示自定义名称，否则显示首条消息（最多 80 字符，各列表按列宽裁剪），再否则显示会话 ID。`/rename <name>` 设置名称，无参 `/rename` 查看当前显示名而不做修改，`/rename --reset` 恢复使用首条消息。名称按原样单行保存（支持单引号等字符，上限 80 字符）。首条消息发出前也可预设名称并在创建时带入。在 Agents 页面对会话按 `Space` 选择 **Rename…**（留空即重置），底层调用同一会话命令（在消息同一把锁下执行 `rename`），确保只有单一写入路径。重命名会广播 `session_renamed`：其他打开该会话的窗口实时同步，共享 Runtime 的实时表也会在重读历史前即时更新所有列表标题。分叉（fork）会话不会直接复制源名称，而是显示源标题加 `(fork)`。`Space` 菜单同时提供 **Delete conversation…**：确认后永久删除已保存的消息；会话运行中或正被窗口展示时拒绝删除，删除后同步清理管理注册信息，`Esc` 也不会再返回已删除会话。
 
-### Several windows on one conversation
+### 多窗口协同观察同一会话
 
-Any number of Rind windows can show the same conversation; the shared Runtime keeps them in step.
+任意数量的 Rind 窗口都可以同时打开同一个会话，由共享 Runtime 保持同步：
 
-- When the agent asks a question, every window shows it. Answering in one closes it in the others, which show the answer as "answered in another window".
-- `rind send --session <id> "…"` goes to the window that most recently showed the conversation, as if typed there. With no window open, a turn that is still running takes it as a follow-up. An idle conversation nobody has open is refused rather than started without the tools and scope its window configured.
-- Every page opens a conversation the same way, by its session and its folder (or team member, or Manager), so Background, Independent and the team pages behave alike. A conversation's folder comes from the Runtime first, so one without saved history can still be opened. When a conversation window cannot start, the Agents page shows why.
+- 当模型发起提问时，所有打开该会话的窗口都会展示问题卡片；任一窗口作答后，其余窗口自动收起并标注“已在其他窗口回答”。
+- `rind send --session <id> "…"` 会发送到最近展示该会话的窗口；若当前无打开窗口但轮次仍在运行，则作为 follow-up 入队；若会话处于空闲且无窗口打开，则拒绝裸启动，避免丢失原窗口配置的工具与管理作用域。
+- Background、Independent 与各团队页面都按统一的“会话 ID + 目录（或团队成员 / Manager）”方式打开会话；目录优先取自 Runtime 实时表，因此尚未落盘历史的活跃会话同样可以切入；若无法启动窗口，Agents 页面会直接给出原因。
 
-**Left always moves up one level** — from a conversation to its member, from a member to the sidebar — and never collapses anything, so leaving the tree takes at most two presses. Right expands a collapsed member or opens it. `z` folds the selected branch and `Z` folds or unfolds all; a folded member shows `▸`, the number of hidden rows and the most urgent status hidden inside. Lists keep two rows of context around the selection while scrolling. `/` searches and `f` filters by status; matches keep their ancestors visible, and Esc clears them.
+**左方向键 `←` 始终向上退一级**（从会话退到成员，从成员退到侧栏）且绝不折叠节点，最多按两次即可退回侧栏；右方向键 `→` 展开折叠成员或进入成员页。`z` 折叠/展开当前分支，`Z` 全部折叠/展开；折叠成员会显示 `▸`、隐藏行数以及内部最紧急状态。滚动列表时上下保留两行上下文。`/` 搜索、`f` 按状态过滤，匹配节点自动保留祖先链，`Esc` 清除过滤。
 
-Only conversations attached to the team are listed; a member folder's other conversations are on the Independent page. The service enforces this through `listSessions { teamId }`.
+团队页面仅列出绑定到该团队的会话（由服务端 `listSessions { teamId }` 强约束）；同一目录的普通会话归入 Independent 页面。
 
-Enter on a member opens its page: every conversation it has in this team, newest and most urgent first, with **New conversation** on top. Enter on a conversation joins it in the member's workspace. Contextual keys act on the selected member: `c` new conversation, `t` assign a task, `a` add a member below it, `e` edit role and responsibility, Space for all actions (change supervisor, resolve an unconfirmed run, remove from team). The Manager changes the team leader.
+在成员行按 `Enter` 打开该成员页：顶部为 **New conversation**，下方按紧急度与时间列出其在本团队的所有会话；在会话行按 `Enter` 则进入该成员工作区接入对话。常用单键直接作用于当前成员：`c` 新建会话、`t` 分配任务、`a` 在其下新增成员、`e` 编辑角色与职责、`Space` 打开全部操作（调整上级、确认未知运行、移出团队）。团队负责人的变更由 Manager 执行。
 
-### Tasks
+### 任务（Tasks）
 
-Tasks are grouped by what you do first: Needs you, In progress, Queued, Delegated to members, Delivered and Cancelled. Each row shows the owner and priority; wide terminals add the blocker, queue reason or delivery summary. Priority only reorders waiting work; it never interrupts a running task.
+任务按“最先需要你做什么”分为六组：Needs you、In progress、Queued、Delegated to members、Delivered 与 Cancelled。每行展示负责人与优先级；宽终端还会显示阻塞说明、排队原因或交付摘要。优先级只调整排队顺序，绝不打断正在运行的任务。
 
-Enter opens the task's **report**:
+按 `Enter` 打开任务的**交付报告（report）**：
 
 ```text
  Ship the login page
@@ -134,157 +134,152 @@ Enter opens the task's **report**:
  a accept  b send back  n add note  o open files  z history  space more actions  r refresh  esc back
 ```
 
-The header says where the task stands; the next line says what, if anything, is yours to decide (an answer, a problem, a delivery to review); the delivery follows in aligned blocks, and notes, runs and subtasks stay folded until `z`. The keys the report offers are the ones in its footer:
+报告头部展示当前状态，下一行指出需要你拍板的事项（回答阻塞、处理异常或验收新交付），随后是对齐排版的交付详情，备注、运行记录与子任务默认折叠（按 `z` 展开）。底栏提供对应操作：
 
-- `a` **accept** — the delivery is reviewed; the Inbox stops marking it new.
-- `b` **send back for rework** — asks what should change, then gives the same owner a new task with your feedback and the delivery you reviewed. The reviewed report stays as it was and says it was sent back. Offered only while the owner is still in the team.
-- `n` add a note, or answer when the task is waiting on you; `o` opens a published file in place, or the owner's conversations; Space opens task actions (start or retry, queue priority, stop or cancel, resolve an unconfirmed run); `r` refreshes.
+- `a` **accept（验收通过）** — 标记交付已审阅，Inbox 不再将其标为新交付。
+- `b` **send back for rework（打回返工）** — 询问修改意见后，向原负责人派发附带反馈与原报告的新任务（`reworkOf`）；原报告保留并注明已打回（仅当原负责人仍在团队中时提供）。
+- `n` 添加备注（若任务正在等待你回答，则直接作为答复并恢复运行）；`o` 原地查看已发布产物或打开负责人的会话；`Space` 打开更多任务操作（启动/重试、调整队列优先级、停止/取消、确认未知运行已停止）；`r` 刷新。
 
-### Deleting a team
+### 删除团队
 
-Space on a team in the sidebar offers **Delete team…**. Type the team's name to confirm; the dialog first says how many members are released and how many tasks are removed. Deletion is refused while the team has running work, so stop or resolve it first. The team and its tasks are removed; members leave the team and their team conversations become plain conversations in their folders; one that is open in a window keeps working there, outside the team. Folders, their files and conversation history are never touched. A released folder that is in no other team and has no instructions or skills of its own is no longer registered as an agent; one with its own instructions keeps them.
+在侧栏选中团队按 `Space` 选择 **Delete team…**，输入完整团队名称确认；对话框会先说明将释放多少成员、移除多少任务。团队存在运行中任务时拒绝删除，请先停止或确认结束。删除后团队及其任务与发布产物被移除，原成员的团队会话转为各自目录下的普通会话（正在窗口中打开的会话继续正常工作），工作区目录、源码文件与会话历史完好无损。若被释放的目录不属于其他团队且没有自定义提示词或 Skill，则自动取消 Agent 注册；带有专属提示词的目录则保留配置。
 
-### What the Manager may do
+### Manager 权限与审批
 
-The Manager assembles teams and assigns work directly. It may also remove members and delete a team that is still empty (no members, tasks or conversations). Anything that destroys history or stops running work — deleting a team that has anything in it, stopping a running task — becomes a request in your **Inbox** ("Approve: Delete team Product"). Enter shows what it would do; Decline is the default. Nothing changes until you decide, and a request whose target has meanwhile finished or disappeared leaves the Inbox by itself.
+Manager 可直接组建团队、指派工作、移除成员或删除完全空白的团队（无成员、任务或会话）。任何会清除历史或中断运行中工作的操作——例如删除非空团队、停止正在运行的任务——都会转为 **Inbox** 中的审批请求（如“Approve: Delete team Product”），默认预选 Decline（拒绝）。在你拍板前不会发生任何变更；若审批目标在此期间已自行结束或消失，审批项会自动从 Inbox 移除。
 
-### Inbox, Manager and Independent
+### Inbox、Manager 与 Independent
 
-The **Inbox** collects everything waiting on you across teams: the Manager's requests for approval, blocked tasks, tasks that need attention, runs whose stop could not be confirmed, running tasks that stopped to ask a question ("Task asks: …") and team conversations waiting for an answer. Enter decides, answers, resolves or joins. Below that, **Recently delivered** lists the deliveries you have not reviewed yet — tasks you or the Manager gave out, not work members hand each other — marked `●` and in bold, then the latest reviewed ones (`↺` when sent back for rework); Enter opens the report. Teams themselves are only in the sidebar.
+**Inbox** 汇总跨团队所有等待你处理的事项：Manager 审批请求、阻塞在用户上的任务、需关注任务、停止状态待确认的运行、停下提问的任务以及等待回答的团队会话；按 `Enter` 直接审批、作答、确认或接入。下方 **Recently delivered** 列出由你或 Manager 指派且尚未审阅的新交付（粗体 `●` 标记）以及最近审阅过的交付（返工标记 `↺`），按 `Enter` 打开报告。
 
-**Manager** lists Manager conversations and starts new ones in its own working directory. That folder is the Manager's identity: running Rind inside it (or pointing `--cwd`/`--dir` at it) opens the same Manager window — same conversations, same `agent_management` tool, same scope as entering from this page.
+**Manager** 页面列出 Manager 会话并在其专属目录中发起新对话。该目录即 Manager 的身份标识：直接在该目录启动 Rind（或通过 `--cwd`/`--dir` 指向它）会打开完全相同的 Manager 窗口、会话与 `agent_management` 工具作用域。
 
-**Independent** shows every conversation that belongs to no team, grouped by folder, live. A conversation outside a team is a plain session: it never becomes an agent; only team members are bound to a folder. Folders that are team members show their team; other folders appear under their basename. Running and open folders sort first. Each folder shows its three most urgent conversations and a "+N more" row; Enter on the folder (or the row) opens the folder's page, which reads that folder's own conversations on demand, grouped as Active, Today, This week and Earlier, searchable with `/`. `[` and `]` jump between folders, `z` / `Z` fold them, and `c` starts a new conversation in the selected folder. Enter on a conversation continues it in its folder, outside every team. The overview is one runtime call: `listSessions { independent: true }` returns, per folder, its newest few conversations and its total, in a single pass, with team-owned conversations excluded by id and the Manager's folder by path; the folder's page asks again with `workspace`. Loads refresh every 30 seconds while shown, and live state arrives as it changes.
+**Independent** 实时按目录分组展示所有不属于任何团队的独立会话。团队外的会话只是普通会话，不会自动注册为 Agent。运行中与已打开的目录排在最前；每个目录展示最紧急的 3 条会话及 `+N more`，按 `Enter` 进入目录专页（按 Active、Today、This week、Earlier 分组，支持 `/` 搜索）。`[` / `]` 在目录间跳转，`z` / `Z` 折叠，`c` 在选中目录新建会话。概览页仅通过一次 `listSessions { independent: true }` 调用完成聚合（按会话 ID 排除团队会话、按路径排除 Manager 目录），展示期间每 30 秒刷新历史并实时接收运行态推送。
 
-### Adding members
+### 添加成员
 
-**Add member** offers three sources; each says who the new member will report to, and the first member of a team becomes its leader.
+**Add member** 支持三种来源，都会标明新成员的汇报上级（团队首名成员自动成为负责人）：
 
-- **Existing folder** — `Folder` accepts an absolute path, `~/…` or a path relative to where you opened Rind. Matching folders are listed as you type: Tab completes like a shell, ↑↓ and Enter pick a folder, Esc hides the list. Below the input a live check shows the resolved path and whether it is a Git repository, or why it cannot be used. `Name` defaults to the folder name.
-- **New empty workspace** — `Folder name` previews the full path inside the team's workspace area and rejects names with slashes or ones that already exist.
-- **New Git worktree** — asked in the order you think about it: `Repository` (must be a Git repository), `New branch`, `Folder name` (derived from the branch) and `Start from` (HEAD by default).
+- **Existing folder（已有目录）** — 支持绝对路径、`~/…` 或相对路径，输入时实时列出匹配目录：`Tab` 补全、`↑↓` 与 `Enter` 选择、`Esc` 收起，并在下方实时提示解析路径、是否为 Git 仓库或不可用原因；`Name` 默认取目录名。
+- **New empty workspace（新建空工作区）** — 实时预览在团队工作区根目录下的完整路径，拒绝包含斜杠或已存在的名称。
+- **New Git worktree（新建 Git worktree）** — 依次填写 `Repository`（须为 Git 仓库）、`New branch`、`Folder name`（默认由分支名派生）与 `Start from`（默认 `HEAD`）。
 
-Every source asks for the same two optional fields:
+三种来源均可选填两个字段：
 
-- **Role** — a short job title shown beside the name in the tree, e.g. Reviewer or Frontend. The leader also sees it when choosing who to delegate to.
-- **Responsibility** — what the member is in charge of, in a sentence. It is added to the member's instructions on every team task.
+- **Role（角色）** — 树中名称旁显示的简短头衔（如 Reviewer、Frontend），负责人委派任务时也会看到。
+- **Responsibility（职责）** — 一句话描述负责范围，每次执行团队任务时会自动注入该成员指令。
 
-### Back, leave and stop
+### 返回、离开与停止
 
-Rind is not one process: agents, tasks and the shared Runtime run in the background, and windows only watch them. So there are three different ways to get out, and none of them silently does another's job.
+Rind 并非单一进程：Agent、任务与共享 Runtime 在后台常驻运行，终端窗口只是观察口。因此“返回”“离开窗口”与“全部停止”三者严格区分，绝不暗中越界：
 
-| You want to | Do | What happens |
+| 你的意图 | 操作 | 实际行为 |
 | --- | --- | --- |
-| Go to Agents | `←` on an empty input in a conversation | The Agents page opens. The conversation you left is marked `↩` and selected. |
-| Go back to it | `esc` from the Agents sidebar | Reopens the conversation you just left (`esc back to conversation`). Only that one: every conversation you visited before is simply in the background. |
-| Open another | Enter on a conversation | It replaces the one on screen; windows never stack. |
-| Leave Rind | `ctrl+c` twice when idle · `/exit` | Every Rind window closes. Agents, tasks and the shared Runtime **keep running**; the last window says how many are still working. |
-| Stop everything | Agents › **Background** › Stop all agents and leave Rind · `rind agents stop --all` | Managed tasks end as cancelled, running conversation turns are cancelled, then the shared Runtime and the management service stop and every Rind window closes. Teams, tasks and conversation history are kept. |
+| 打开 Agents 页面 | 在会话空白输入框按 `←` | 打开 Agents 页面，刚离开的会话标记为 `↩` 并默认选中。 |
+| 返回刚才的会话 | 在 Agents 侧栏按 `esc` | 重新回到刚才离开的那一个会话（`esc back to conversation`）。 |
+| 切换到其他会话 | 在目标会话上按 `Enter` | 原地替换当前屏幕会话，窗口绝不层层堆叠。 |
+| 离开 Rind 窗口 | 空闲时连按两次 `ctrl+c` · `/exit` | 关闭所有 Rind 窗口；后台 Agent、任务与共享 Runtime **继续运行**，最后一个窗口退出时会提示仍有几项工作在后台运行。 |
+| 停止所有后台工作 | Agents › **Background** › Stop all agents and leave Rind · `rind agents stop --all` | 取消托管任务与运行中轮次，随后停止共享 Runtime 与管理服务并关闭所有窗口；团队、任务记录与会话历史全部保留。 |
 
-`ctrl+c` always handles the most immediate thing first:
+`ctrl+c` 始终优先处理最紧迫的当前动作：
 
-1. While a turn runs, it interrupts that turn. A second press during the interrupt force-closes the window.
-2. With text in the input, it clears the text.
-3. When idle, the first press shows `ctrl+c again to leave Rind · agents keep running` for two seconds. A second press leaves; any other key (or `esc` on the Agents page) cancels. Without a terminal (scripts, pipes) there is no hint to see, so a single interrupt leaves.
+1. 轮次运行中：第一次中断当前轮次；中断过程中再按第二次则强制关闭窗口。
+2. 输入框非空：清空当前输入文本。
+3. 空闲态：第一次提示 `ctrl+c again to leave Rind · agents keep running`（保留 2 秒），再按一次离开，按其他键（或在 Agents 页按 `esc`）取消；非交互终端下一次中断直接退出。
 
-`ctrl+c` never navigates: in any window it interrupts, clears, or leaves Rind, and Agents is reached only with `←`. To open Agents without entering a conversation, run `rind agents`; `esc` there closes it until you have visited a conversation, and then goes back to that one.
+`ctrl+c` 从不承担页面导航：进入 Agents 页面始终使用 `←`。直接运行 `rind agents` 启动时，访问会话前按 `esc` 直接退出，访问过会话后按 `esc` 返回该会话。
 
-Conversations opened from Agents never nest. When you move to Agents or to another conversation from inside one, it hands the move back to the window that opened it, says which conversation it was on, and closes. A forced close (a second `ctrl+c` while a turn is being interrupted) also says "leave", so the window that opened it closes too instead of showing Agents again. The window you started Rind in keeps its own conversation loaded behind the page; choosing that conversation again, or `esc` while it is the one marked `↩`, returns to it without a second window. The handoff goes through a private file named by `RIND_AGENTS_HANDOFF`; the window removes that variable from its environment at startup, so services and tools it starts never inherit it. There is at most one conversation on screen, and leaving from anywhere closes everything. A conversation in an unregistered folder runs in the window's own worker; while it is working, moving away is refused instead of killing it.
+从 Agents 打开会话绝不嵌套子窗口：窗口切换通过环境变量 `RIND_AGENTS_HANDOFF` 指向的私有文件交回外层宿主窗口处理，且窗口启动后立即从自身环境中移除该变量，确保子服务与工具进程不会继承它。屏幕上最多只有一个活跃会话，从任一位置执行离开都会干净收尾。未注册目录的独立会话若运行在当前窗口自有 Worker 中，运行期间会拒绝切走以免误杀任务。
 
-The **Background** page shows what keeps running after you leave. **Running now** lists every running turn and task in the shared Runtime, from any Rind window, in a team or not, with where it runs and for how long, including conversations running a job. They count as still working when you leave Rind, and Stop all names them, since stopping ends their jobs too. Below are runs whose stop could not be confirmed, and both background services with their process ID and uptime. Enter on a service shows its recent log; when a newer Rind is installed, the management service offers **Restart to load the update**, which keeps every conversation running while windows reconnect. The shared Runtime keeps old code while windows use it and updates once they are all closed. Stop is a quiet `[ Stop all agents… ]` button at the end, also on `S`. Its dialog selects Cancel first, lists what is running and says what is kept. Its single action is **Stop all agents and leave Rind**. Every open conversation depends on these services, so stopping always closes the windows too, rather than leaving them on a stopped Runtime.
+**Background** 页面集中展示离开窗口后仍在运行的一切：**Running now** 列出共享 Runtime 中所有运行中的轮次、任务及后台作业；其下展示待确认运行以及两个后台服务的 PID 与运行时长。在服务行按 `Enter` 查看最近日志；检测到新版本安装后，管理服务会提供 **Restart to load the update**（不中断运行中会话，窗口平滑重连）；共享 Runtime 则在所有窗口关闭且空闲后自动更新。底部 `[ Stop all agents… ]` 按钮（快捷键 `S`）默认聚焦 Cancel，明确列出将被停止的运行项与保留的数据，确认后执行 **Stop all agents and leave Rind**。
 
-`rind agents stop` stops both background services, but only when nothing is running; otherwise it lists the running work and exits with status 1. `--all` also stops running agents. It never starts a service just to stop it. Conversations still open elsewhere notice the stop, reattach if the service comes back on its own, and otherwise continue untracked; nothing restarts a service you stopped except opening Agents or pressing `r`.
+`rind agents stop` 仅在无运行任务时停止两个后台服务（否则列出活跃工作并以状态码 1 退出）；加上 `--all` 才会一并停止运行中的 Agent，且绝不会为了停止而先把未运行的服务拉起。
 
-### Updates and background services
+### 更新与后台服务指纹
 
-The background services run detached, so after you update Rind they would otherwise keep running the old code. Each one reports a fingerprint of its code: `serviceInfo` for the management service and `runtime/info` for the shared Runtime, which answers without starting a worker. Every client compares that fingerprint with the code on disk when it connects:
+后台服务以分离进程运行。管理服务通过 `serviceInfo`、共享 Runtime 通过 `runtime/info`（无需拉起 Worker 即可响应）各自报告启动时加载代码的指纹（仅基于相对文件名与文件内容计算，与安装路径或盘符大小写无关）。客户端每次连接时比对磁盘代码指纹：
 
-- **Idle and outdated:** the service is stopped and replaced transparently.
-- **Running agents:** the service is kept, so no work is interrupted. The Agents page says an update is waiting, and the Background page marks the service. Once its agents finish, the next connection replaces it, or you can stop it from Background.
+- **空闲且版本过期**：透明停止旧服务并替换为新版本。
+- **仍有运行中 Agent**：保留旧服务以免打断任务，在 Agents 与 Background 页面提示有待生效更新；待任务结束后下次连接自动替换，也可在 Background 手动停止重启。
 
-A fingerprint covers file names relative to the install and file contents only, so the same code installed elsewhere, spelled with another drive-letter case, or reinstalled matches. Each service fingerprints the code it loaded at startup. A Runtime that is still observed by the management service or used by a conversation is never replaced underneath it; when the host is replaced while idle, the management service reattaches to the new one.
+这遵循了 Crush（`restartIfStale`，繁忙时拒绝重启）与 Orca（保留仍持有活跃会话的旧守护进程）的演进原则。
 
-Services started by a Rind from before fingerprints cannot be asked to stop. Clients find their process by script and data folder, check through the service's own snapshot that nothing is running, then end it so a current one starts. `rind agents stop` uses the same path, and with `--all` it does so even while agents run.
+### 对话框与表单
 
-This follows the rule used by crush (`restartIfStale`, refused while busy) and orca (a stale daemon is preserved while it owns live sessions).
+选择对话框为选项编号（`1`–`9` 直接选择，右侧字母对应页面快捷键）；破坏性确认框使用红色边框、默认预选 Cancel（`n`），必须按 `y` 或显式确认才执行。对话框位置固定，输入时不跳动。表单复用聊天行编辑器，完整支持粘贴、光标移动、撤销与 `Shift+Enter`；`Enter` 跳至下一字段并在末字段保存，`Shift+Tab` 上移，`Tab` 下移（目录字段中触发路径补全）。校验未通过的字段禁止离开；保存失败保留已输入内容并在框内提示错误；保存期间敲击的按键会在保存完成后按序重放（除非保存动作打开了新对话框）。
 
-### Dialogs and forms
+## 成员模型配置
 
-Choice dialogs number their options: `1`–`9` pick directly, and the letter shown at the right runs the same action as the page shortcut. Destructive dialogs are framed in red, preselect Cancel (`n`), and require `y` or an explicit selection. Dialogs open at a fixed position, so they do not jump while you type. Forms reuse the chat editor, so paste, cursor movement, undo and Shift+Enter work. Enter moves to the next field and saves on the last one; Shift+Tab goes back, and Tab moves on (in folder fields it completes). A field with a problem cannot be left, and a failed save keeps what you typed and shows the error inside the dialog. Keys typed while a save is running are replayed afterwards, unless the save opened a new dialog.
+每个成员使用其所在目录的新会话默认配置：模型（连接与模型 ID）与推理强度（reasoning effort），两者可分别设置或保持继承。未显式设置时，Git worktree 继承主仓库目录配置，普通工作区继承 `~/.rind/settings.json`；你直接在该目录打开独立会话时同样使用这套目录默认配置，做到“一目录一配置”，而非按团队分裂。
 
-## Member models
+只有用户与 Manager 可以修改成员模型。在 Agents 页面选中成员按 `Space` 打开 **Model and effort**（仅列出已登录连接）；Manager 调用 `setMemberModel` 与 `clearMemberModel`，每次修改都会出现在你的 Inbox *Changed by the Manager* 分栏中直至忽略。团队负责人与普通成员无权修改任何模型（包括自身模型），单个任务也不携带独立模型覆盖。变更自该成员的下一次任务起生效（新任务以此启动，重试或恢复的任务在运行前切换至此模型），正在运行的工作保持原模型不变。
 
-A member runs on its folder's defaults for new conversations: a model (connection and model) and a reasoning effort, each set or left to the default on its own. Anything a member's folder does not set comes from its main repository when it is a Git worktree, otherwise from `~/.rind/settings.json`. The same defaults apply when you open a conversation in that folder yourself, so there is one setting per folder, not one per team.
+`rind agents list --json` 输出完整状态；占用目录的运行可用 `rind agents stop <run>` 停止，或在进程已退出且状态为 `unknown` 后用 `rind agents resolve <run> --confirm-stopped` 释放；`rind agents import <legacy-root>` 预览旧版 `.aiteam` 配置，确认无误后加 `--confirm` 导入，导入过程绝不修改旧文件。
 
-Only you and the Manager choose them. On the Agents page, Space on a member opens **Model and effort**; only connections you are logged in to are offered. The Manager uses `setMemberModel` and `clearMemberModel`; each change it makes appears in your Inbox under *Changed by the Manager* until you dismiss it. Leaders and members cannot change any model, including their own, and a task cannot carry a model of its own. A change applies from the member's next task: a new task's conversation starts with it, and a retried or resumed task's conversation is brought to it before it runs. Running work keeps its model.
+当同一工作区属于多个团队时，交互终端会询问要挂载的作用域，非 TTY 环境需显式传入 `--team <id>` 或 `--standalone`。直接对话作为运行项被观测，但其私密消息内容不会广播。管理服务断线重连后会先与 Runtime 回放对账再恢复调度；未确认运行在人工确认停止前持续保留目录锁。
 
-`rind agents list --json` gives the full state. A run that holds a folder is stopped with `rind agents stop <run>`, or released with `rind agents resolve <run> --confirm-stopped` once its status is unknown and its process has stopped. `rind agents import <legacy-root>` previews old `.aiteam` files; add `--confirm` after reviewing the preview. Import never edits legacy files.
+每个受管 Session 绑定唯一管理作用域，共享 Worker 在其上隔离托管多个 Session。`/sessions` 与 `/fork` 会在连接到同一共享 Runtime 的窗口中打开所选历史（分叉还会预填选中的用户消息），返回原窗口时原对话完好保留。也可通过 Agents 页面或 `rind --session <runtime-id> --team <team-id>` 恢复指定成员会话；跨工作区或跨团队会话不会混用当前作用域。未注册的普通 Rind 保持原有会话行为。首个适配器为 Rind；外部 Codex/Claude 进程暂不自动观测。
 
-When a workspace belongs to multiple teams, a TTY asks which scope to attach. Non-TTY requires `--team <id>` or `--standalone`. Direct conversations are observed as runs, but their private messages are not broadcast. If the management service disconnects, it reconciles with the Runtime replay before restoring activity; an unconfirmed run remains reserved until a human confirms it stopped.
+## 成员可调用的工具
 
-Each managed Session keeps one management scope; the shared Worker hosts many isolated Sessions. `/sessions` and `/fork` open the selected history in another CLI connected to the same shared Runtime, preserving the current conversation when you return; a fork also prefills its selected user message. Open another member through the Agents page or resume with `rind --session <runtime-id> --team <team-id>`. A conversation from another workspace or team cannot reuse the current scope. Unregistered ordinary Rind retains its existing session controls. The first adapter is Rind; external Codex/Claude processes are not automatically observed.
+团队成员既不能读取也不能修改组织架构。系统只会告知其自身身份、直属上级与直接下属，并按需授予至多两个工具：
 
-## What members can call
-
-A member never reads or changes the organization. It is told who it is, its supervisor and its direct reports, and gets at most two tools:
-
-| Tool | Who gets it | Forms |
+| 工具 | 授予对象 | 调用形式 |
 |---|---|---|
-| `delegate` | The leader, and members with direct reports | `{to, brief}` assigns a task to a direct report · `{new, brief}` adds a direct report first: with `new.branch` a Git worktree on a new branch of a team repository, otherwise an empty workspace · `{task, message}` sends a finished or blocked task back · `{task, cancel: true}` cancels it · `{retire}` removes a member it added, once its work is finished and its worktree is clean (never forced; the branch stays) |
-| `report` | A task run | `{outcome, summary, evidence, artifacts}` delivers; `artifacts` are files in the member's workspace, copied for the recipient · `{blocked: {responder, action}}` asks the user, the supervisor or a direct report |
+| `delegate` | 团队负责人及拥有直接下属的成员 | `{to, brief}` 向直接下属派发任务 · `{new, brief}` 先新建直接下属再派发（带 `new.branch` 时基于团队仓库创建新分支 Git worktree，否则创建空工作区）· `{task, message}` 将已完成或阻塞的子任务发回继续处理 · `{task, cancel: true}` 取消子任务 · `{retire}` 在自己创建的下属完成工作且 worktree 干净后将其退役（绝不强制删除，分支保留） |
+| `report` | 任务运行实例 | `{outcome, summary, evidence, artifacts}` 提交交付报告（`artifacts` 为成员工作区内文件，由服务复制给接收方）· `{blocked: {responder, action}}` 向用户、直属上级或直接下属报告阻塞 |
 
-A task run cannot ask the user a question; it reports a blocker instead. Everything else, models included, belongs to the user and the Manager (`agent_management`); the service refuses it from members, and members cannot subscribe to snapshots. An empty-workspace member starts with the model chosen for its creator's folder; a worktree member follows its repository's.
+任务运行期间不能直接向用户弹出提问卡，而必须通过 `report` 提交阻塞项。除上述两项外的全部管理能力（含模型设置）均归属用户与 Manager（`agent_management`），服务端拒绝来自普通成员的管理调用与快照订阅。新建空工作区成员默认继承创建者目录的模型，新建 worktree 成员继承所属仓库的模型。
 
-Nobody polls. Whoever delegated hears back once all of its delegated work has settled (delivered, blocked, failed): a parent task runs again and is told the results instead of its brief, and a conversation — a member's or the Manager's — gets them as its next turn through the Runtime's `rind/session/deliver`. A result for a conversation the Runtime does not host waits in the service and arrives when it is hosted again. Delivered files are copied to `state/artifacts/<team>/<recipient>/<task>/<id>/<name>` and named by path in the results; the recipient reads them with `read_file`. The path is guidance, not a sandbox: Rind's file tools have no directory boundary.
+全程零轮询：委派方在其派出的所有子工作全部收敛（已交付、已阻塞或失败）后自动收到汇总唤醒——若父级是任务则重新拉起并将子结果作为输入，若父级是成员或 Manager 的交互会话则通过 Runtime 的 `rind/session/deliver` 作为下一轮消息投递；若目标会话当前未被 Runtime 托管，结果会暂存在管理服务中并在会话下次挂载时立即送达。已交付产物文件会复制到 `state/artifacts/<team>/<recipient>/<task>/<id>/<name>` 并在汇总中附上路径，接收方用 `read_file` 读取（路径仅作指引，Rind 文件工具本身不设沙箱边界）。
 
-A conversation that handed work out says so while nothing in it runs: after the delegate call the window shows `─ Waiting for <member>` until the delivery arrives, and the delivery turn is marked (`turn_started` with `delivery` and `delivery_text`), rendered as a `Delivery` report, and stored as a user message with `meta.kind = "team_delivery"` so a later replay shows the same report instead of a message the user typed. The report names the member, the task, `delivered:` outcome, summary, evidence, file paths and the next action.
+派出了子工作的交互会话在空闲等待期间会明确显示 `─ Waiting for <member>`；交付到达时触发带 `delivery` 与 `delivery_text` 标记的 `turn_started` 事件，渲染为 `Delivery` 报告，并以 `meta.kind = "team_delivery"` 存入用户消息历史，确保后续重放仍呈现为团队交付报告而非普通用户输入。报告完整列出成员、任务、结果、摘要、证据、产物路径与后续建议。
 
-## Boundaries
+## 架构边界（Boundaries）
 
-The service owns authorization, persistence, scheduling, workspace locks, reports and subscriptions. The adapter connects to the shared Runtime and translates lifecycle events. The management service observes session status from the execution host; it never treats closing a CLI as execution completion. Python receives a generic external tool configuration per Session — each host tool declared with its own name, description and JSON schema — and an optional list of absolute Skill files; it has no Team model. Model credentials cannot publish lifecycle facts, and host credentials cannot call management mutations. Manager sessions have every Rind tool plus the management tool, so the Manager can read members' files and check their deliveries. Its instructions keep every change to the organization, and every approval, on the management tool and keep it from editing member workspaces; that is an instruction, not a sandbox. Its `snapshot` is an overview: members, open tasks, the five latest deliveries, active runs and approvals, with a count of the tasks left out; `getTeam`, `getTask` and `readArtifact` give the details. The Agents page keeps the full snapshot.
+管理服务独占授权、持久化、任务调度、工作区锁、交付报告与快照订阅；适配器连接共享 Runtime 并翻译生命周期事件。管理服务仅根据执行宿主报告的会话状态判定运行情况，绝不把关闭 CLI 窗口视为任务完成。Runtime 按 Session 接收通用外部工具声明（名称、描述与 JSON Schema）及可选的绝对路径 Skill 文件列表，Runtime 自身不包含任何 Team 概念。模型凭据无法伪造生命周期事件，宿主凭据也无法调用管理变更接口。Manager 会话同时拥有全部 Rind 工具与 `agent_management` 工具，可读取成员文件以核验交付；其系统指令约束它只通过管理接口调整组织与发起审批、不直接改动成员工作区文件（这是指令约定而非沙箱隔离）。Manager 获取的 `snapshot` 是精简概览（成员、未结任务、最近 5 条交付、活跃运行与审批项及省略计数），需要详情时再调用 `getTeam`、`getTask` 与 `readArtifact`；Agents 界面则持有完整快照。
 
-Reviewing and removing work goes through the same boundary. `reviewTask { taskId, decision: "accept" | "rework", feedback }` is user-only and applies once per delivery; rework is a new task (`reworkOf`) for the same owner. `deleteTeam { teamId, confirmName }` requires the exact name from the user, refuses while the team has a run, and removes the team along with its tasks and published artifacts; importing a deleted legacy team again recreates it. A conversation released while a window shows it keeps a teamless registration (`released`) so its turns and detach still work, and is dropped on detach. Only the folders an operation released are unregistered, and only when nothing live refers to them and they have no instructions or skills. The Manager's `deleteTeam` on a team with members, tasks or conversations and its `cancelRun` return `{ approval }` instead of acting; snapshots for the user carry `approvals`, which are removed as soon as their target is gone, and `resolveApproval { approvalId, approve }` (user-only) carries one out or declines it.
+审阅交付与删除团队同样走统一边界：`reviewTask { taskId, decision: "accept" | "rework", feedback }` 仅限用户调用且每次交付只生效一次（返工会为同一负责人生成带 `reworkOf` 的新任务）；`deleteTeam { teamId, confirmName }` 要求用户输入精确团队名，存在运行项时拒绝执行，通过后清理团队、任务与已发布产物（旧版团队再次导入可重建）。释放成员时若其会话正被窗口打开，则转为无团队注册态（`released`）以保证当前轮次与脱离正常完成，脱离后自动清理；仅当目录无活跃引用且无自定义指令或 Skill 时才注销该目录注册。Manager 对非空团队调用 `deleteTeam` 或调用 `cancelRun` 时不会直接生效，而是返回 `{ approval }` 写入用户快照的 `approvals` 列表（目标消失时自动清除），由用户独占的 `resolveApproval { approvalId, approve }` 批准执行或拒绝。
 
-The old Python Team discovery, `agent_create` and in-Worker `delegate` paths are removed. The read-only importer is the sole legacy bridge. `rind-runtime-client/` is shared by the CLI and adapter so the transport is not duplicated.
+旧版内置于 Worker 的团队发现、`agent_create` 与内置 `delegate` 路径已彻底移除，只读导入器是唯一的旧版迁移入口。CLI 与适配器共享 `rind-runtime-client/`，避免重复实现传输层。
 
-## Distribution
+## 分发打包（Distribution）
 
-The source repository's external Windows distribution can stage the new components with:
+外部 Windows 分发流水线可通过以下命令暂存全部组件：
 
 ```sh
 node agent-management/stage.mjs C:/tmp/rind-cli-stage
 ```
 
-The destination must not exist. The script builds TypeScript, copies the CLI, service, shared runtime client and YAML dependency, and writes package metadata from `agent/version.py`. A packaged Worker is supplied by the normal runtime distribution, or selected with `RIND_RUNTIME_PATH`.
+目标目录必须尚不存在。该脚本会编译 TypeScript，复制 CLI、Runtime（含 `node_modules` 与 `skills`）、管理服务、共享客户端及 YAML 依赖，并从 `runtime/src/version.ts` 写入包版本元数据。仍可通过 `RIND_RUNTIME_PATH` 指定自定义 Worker 路径。
 
-## Recovery
+## 故障恢复（Recovery）
 
-History is bounded so writes stay fast: the newest 512 request receipts (used only for retries), the latest finished run of each conversation and the last 10 runs of each task are kept; active and unconfirmed runs are never pruned. The service refuses to silently rebuild a corrupt journal. An incomplete final line is discarded; an earlier malformed record or sequence gap stops startup and leaves the files for repair. On management restart, active runs first become `unknown`; shared Sessions are reconciled against the still-running Runtime. Queued dispatch markers are cleared. A crashed Runtime is never automatically replayed as a new execution. Resolve an unknown run only after confirming its old process has stopped, then explicitly retry the task. Published artifacts are copied into the user-private Team/Task delivery directory and checked against the task owner workspace.
+运行历史有界裁剪以保持写入高速：仅保留最新 512 条请求回执（供幂等重试）、每个会话最近一次已结束运行以及每个任务最近 10 次运行；活跃与 `unknown` 运行绝不裁剪。服务拒绝静默重建损坏的日志：末尾未写完的半行会被安全丢弃，但更早位置的损坏记录或序号断层会阻止启动并保留现场供排查修复。管理服务重启时，原先的活跃运行首先置为 `unknown`，随后与仍在运行的共享 Runtime 对账恢复；排队派发标记会被清空；已崩溃的 Runtime 绝不会自动重放执行。请仅在确认旧进程已退出后解决 `unknown` 运行并显式重试任务。发布产物在复制到用户私有的团队/任务交付目录前会校验其确实位于任务负责人工作区内。
 
-If a process dies between creating a folder/worktree and registering it, an existing target is never overwritten on retry. Add the resulting folder on the Agents page (**Add member › Existing folder**), or choose a different name. Repository changes and registry commits are separate local operations, not a filesystem transaction.
+若进程在创建目录/worktree 之后、写入注册表之前意外退出，重试时绝不会覆盖已存在的目录；可在 Agents 页面通过 **Add member › Existing folder** 挂载该目录，或另起名称。代码仓库操作与注册表提交是各自独立的本地步骤，不构成跨文件系统事务。
 
+## 交互与调度设计参考
 
-## Interaction and scheduling references
+Agents 页面直接复用 Rind 现有的 TUI 渲染引擎、行编辑器、输入框光标计算与主题系统，不引入任何额外终端框架：
 
-The page reuses Rind's TUI engine, line editor, composer cursor maths and theme; it adds no terminal framework.
+- Codex `codex-rs/tui`（`resume_picker.rs`、`footer.rs`、`key_hint.rs`、`list_selection_view.rs`）：按键加粗/说明暗色的优先级底栏（空间不足整项隐藏）、数字快捷键选择、紧凑相对时间以及按实体标识稳定保持选中项。
+- Crush `internal/ui`（`dialog/sessions.go`、`dialog/common.go`、`model/status.go`）：随上下文变化的简短底栏提示配 `?` 全量帮助浮层、默认预选安全项的原地危险确认框，以及自动过期的带类型状态提示。
+- Orca（`docs/reference/agent-status-store.md`、`worktree-status.ts`、`smart-attention.ts`）：单一状态投影、折叠分支与团队的最差状态向上聚合、注意力优先排序（待处理 › 未确认 › 运行中 › 空闲），以及将 `unconfirmed` 视为“缺少证据”而非直接判败。
+- Paperclip（`ui/src/pages/Agents.tsx` `filterOrgTree`、`lib/attention.ts`、`doc/execution-semantics.md`）：保留匹配节点祖先链的组织树过滤、聚焦人工决策的统一 Inbox、队列优先级排序、显式取消与可操作阻塞项。
 
-- Codex `codex-rs/tui` (`resume_picker.rs`, `footer.rs`, `key_hint.rs`, `list_selection_view.rs`): the key-bold/label-dim hint bar that drops whole hints by priority, numbered choice shortcuts, compact relative time and identity-stable selection.
-- Crush `internal/ui` (`dialog/sessions.go`, `dialog/common.go`, `model/status.go`): context-dependent short help with a full `?` overlay, in-place destructive confirmation with the safe choice preselected, and a typed status message that expires.
-- Orca (`docs/reference/agent-status-store.md`, `worktree-status.ts`, `smart-attention.ts`): one status projection, the worst-status roll-up for collapsed branches and teams, attention-first ordering (needs you, unconfirmed, working, idle) and "unconfirmed" as missing evidence rather than failure.
-- Paperclip (`ui/src/pages/Agents.tsx` `filterOrgTree`, `lib/attention.ts`, `doc/execution-semantics.md`): a filtered org tree that keeps matching branches' ancestors, one inbox of what needs the human, queue ordering, explicit cancellation and actionable blockers.
+任务备注与运行记录直接构成活动轨迹，无需再维护第二套活动数据库、公司模型或复杂权限框架。
 
-Task notes and run records provide the activity trail without a second activity database, company model or permissions framework.
+## 共享 Runtime（Shared Runtime）
 
-## Shared Runtime
+受管 Rind 会话与后台任务共享位于 `RIND_HOME/runtime` 下的单一本地执行宿主。宿主使用现有 Runtime JSONL 协议与私有本地端点，生命周期独立于任何 CLI 窗口；原有的未注册独立运行、网关与 WebSocket 入口同样保持可用。
 
-Managed Rind conversations and background tasks share one local execution host under `RIND_HOME/runtime`. The host uses the existing Runtime JSONL protocol and a private local endpoint. It owns the Worker independently of any CLI window. Existing unregistered Rind, gateway and WebSocket entry paths remain available.
+每个 `RIND_HOME` 严格只运行一个宿主实例：启动过程由锁文件串行化（仅在旧进程确认死亡后回收陈旧锁），端点本身也采用独占发布——先绑定私有临时名，再通过原子链接/重命名覆盖规范端点（且仅替换已被证实死亡的旧端点），确保并发启动者（多终端窗口、`rind run`、`rind config`、管理服务）全部收敛到同一个宿主与同一个 Worker。
 
-Exactly one host serves a `RIND_HOME`. Starting is serialized by a lock file whose stale records are reclaimed only after their process died; the endpoint itself is owned exclusively — a server binds a private name and publishes it over the canonical name with link/rename, replacing only an entry it has itself proven dead — so concurrent starters (windows, `rind run`, `rind config`, the management service) converge on one host and one Worker instead of opening a second kernel.
+停止过程彻底且绝不阻塞下一代宿主：宿主先释放端点（让新宿主可在旧 Worker 收尾期间立即绑定），再断开所有窗口连接，最后按需强制终结 Worker；即使 Worker 在关闭途中提前退出，`runtime/shutdown` 也必定返回确认，绝不留下半关闭僵尸宿主。宿主同时在 `runtime/host.json` 记录自身 PID：若宿主不再响应协议，下一个客户端会先据此终结失响应进程再启动新实例；若 Worker 意外退出，其宿主也会随之退出。
 
-Stopping is total and never blocks the next host. A host releases its endpoint first (the next host can bind while the old Worker drains), then lets every window go, then ends the Worker with force as the last resort; `runtime/shutdown` always acknowledges, even when the Worker already died mid-shutdown, and nothing in that path can leave a half-closed host behind. A host also publishes `runtime/host.json` with its pid; a host that stops answering its own protocol is ended through that record by the next client before a fresh one starts. A Worker that dies on its own takes its host with it.
+`rind-runtime-client` 包独立负责传输与宿主托管，不含任何 Team 依赖。`session/open` 作为本地宿主操作校验目标工作区、创建或恢复 Session 并挂载外部工具配置（普通远程 WebSocket 客户端无权注入外部工具）。各 Session 的容器、模型请求、工作区、工具授权、提问卡与取消信号彼此隔离；不可变基础服务跨会话共享，空闲执行容器自动释放。
 
-The `rind-runtime-client` package owns transport and hosting; it has no Team dependency. `session/open` is a local-host operation that validates the requested workspace, creates or resumes a Session, and installs its external tool configuration. Ordinary WebSocket clients cannot inject this configuration. Session containers, model requests, workspaces, tool grants, questions and cancellation remain isolated. Shared immutable services are reused; idle execution containers are released.
+同一 Session 同时至多运行一个活跃轮次；多个窗口可同步观察、通过现有控制协议追加 steer/follow-up 输入或抢答待处理提问（仅首次回答生效）。关闭或脱离 CLI 窗口不会停止执行，重新接入即可恢复完整历史与实时轮次而不会产生重复运行。宿主失联会标记为 Unconfirmed，重新打开会话即可重连核查现场后再决定是否重试。共享 Runtime 本身是常驻后台服务，停止管理服务不会误关无关的独立会话。
 
-One Session has one active prompt request. Additional windows can observe it, steer/queue input through the existing Runtime controls, or answer a pending question once. Detaching a CLI does not stop the execution. Returning to it restores history and the live turn without creating a second run. A lost host produces Unconfirmed state; reopen the session to reconnect and inspect before retrying uncertain work. The Runtime itself remains a persistent background service; stopping management does not shut down unrelated direct sessions.
-
-A member's page lists the conversations registered to that team (up to 100 saved conversations per workspace plus registered live Sessions); the Manager's page lists Manager history. A conversation keeps the scope it was created with; opening a team never adopts independent or other-team history. LLM tracing is host-wide: set `RIND_TRACE_LLM=1` before starting the host; per-window `--trace-llm` is rejected rather than silently ignored. Shared history is stored in `RIND_HOME/sessions`; use `RIND_HOME` to select another installation rather than a custom `--session-dir`. The first adapter remains Rind.
+成员页面仅列出注册到该团队的会话（每工作区最多 100 条已保存会话加已注册活跃会话），Manager 页面列出 Manager 历史；会话终身保持创建时的作用域，打开团队绝不会混入独立会话或其他团队历史。LLM 追踪为宿主级开关：请在启动宿主前设置 `RIND_TRACE_LLM=1`（单窗口传入 `--trace-llm` 会明确报错拒绝而非静默忽略）。共享历史统一存放在 `RIND_HOME/sessions`，切换隔离环境请设置 `RIND_HOME` 而非自定义 `--session-dir`。当前首个执行适配器为 Rind。

@@ -2,6 +2,7 @@
 // formatter is unit tested. Caps follow frontend-cli/lib/tool-display.js.
 // Nothing here ever echoes raw arguments, JSON or file contents by default.
 
+import { toolTruncationMeta, unwrapNestedToolData } from "../../../rind-runtime-client/tool-semantics.js"
 import { extractDiffText, parseDiffLines, type DiffLine } from "./diff-text.ts"
 import { clipLine, fileMutationPreview, formatDuration, type ToolEntry } from "./timeline-model.ts"
 
@@ -135,7 +136,7 @@ function grep(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
     const file = str(match.file)
     if (file) byFile.set(file, (byFile.get(file) || 0) + 1)
   }
-  const truncated = tool.result?.meta.truncated === true
+  const { truncated } = toolTruncationMeta(tool.result?.meta)
   const done = tool.status === "completed" && tool.result?.ok === true
   const meta: MetaPart[] = !done ? [] : matches.length
     ? [{ text: `${plural(matches.length, "match", "matches")}${truncated ? "+" : ""} in ${plural(byFile.size, "file")}` }]
@@ -147,7 +148,7 @@ function grep(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
 function glob(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {
   const paths = arr(tool.result?.data).map((item) => str(rec(item).path)).filter(Boolean)
   const done = tool.status === "completed" && tool.result?.ok === true
-  const truncated = tool.result?.meta.truncated === true
+  const { truncated } = toolTruncationMeta(tool.result?.meta)
   const pattern = str(tool.arguments.glob) || str(tool.arguments.pattern)
   const meta: MetaPart[] = !done ? [] : [{ text: paths.length ? `${plural(paths.length, "file")}${truncated ? "+" : ""}` : "No files" }]
   return { verb: "Found", target: pattern, path: false, meta, body: listBody(paths.map((label) => ({ label })), bodyCaps.listPreview, bodyCaps.listMax) }
@@ -222,18 +223,7 @@ function terminalBody(tool: ToolEntry, data: Record<string, unknown>): ToolBody 
 // ---------- agents, goals ----------
 
 function unwrapData(rawData: unknown): Record<string, unknown> {
-  let current = rec(rawData)
-  if (typeof rawData === "string") {
-    try {
-      current = rec(JSON.parse(rawData))
-    } catch {
-      // Plain string data.
-    }
-  }
-  if (current.result && typeof current.result === "object" && !Array.isArray(current.result)) {
-    return rec(current.result)
-  }
-  return current
+  return unwrapNestedToolData(rawData)
 }
 
 function delegate(tool: ToolEntry): Omit<ToolView, "hidden" | "error"> {

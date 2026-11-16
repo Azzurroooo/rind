@@ -23,6 +23,6 @@ If disk holds an assistant call c1 but no result for c1, the projection builds a
 
 Finding a valid compact pair and running the post-projection boundary check are two steps: when no matching valid compaction pair exists, that compaction is not applied; only if the tool/handoff structure is invalid after it has been applied is that projection rejected. Options such as include_internal, include_ids, and compacted decide which view a reader needs and do not change the on-disk original.
 
-Code entry points: [message projection](../../../agent/infrastructure/persistence/message_projector.py), [boundary validation](../../../agent/domain/message_boundary.py). Verification: [compaction projection](../../../test/test_compact_pipeline.py), [replay timing](../../../test/test_replay_message_time.py).
+Code entry points: [message projection](../../../runtime/src/infrastructure/persistence/session-store.ts), [boundary validation](../../../runtime/src/domain/models.ts). Verification: [compaction projection](../../../runtime/test/context-and-turn.test.js), [replay timing](../../../runtime/test/server-protocol.test.js).
 
 [Back to the series map](../README.md)

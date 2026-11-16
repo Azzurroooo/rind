@@ -42,16 +42,14 @@ Agents 章节全部通过交互操作教学，不展示管理子命令：空输�
 
 ## 从源码运行
 
-需要 Python 3.12+、Node.js 18+。先在仓库根目录创建虚拟环境：
+需要 Node.js 20+ 与 Git。先在仓库根目录构建 TypeScript Runtime 与 Agents Management，再安装并运行 CLI：
 
 ~~~sh
-python -m venv .venv
-~~~
-
-Windows PowerShell 用 `.\.venv\Scripts\Activate.ps1`，macOS/Linux 用 `source .venv/bin/activate` 激活，再安装并运行：
-
-~~~sh
-python -m pip install -r requirements-runtime.txt
+npm install --prefix runtime
+npm run build --prefix runtime
+npm install --prefix agent-management
+npm run build --prefix agent-management
+npm install --prefix frontend-cli
 node frontend-cli/bin/rind.js
 ~~~
 

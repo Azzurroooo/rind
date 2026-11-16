@@ -4,6 +4,7 @@ import { defaultNewChatProjectPath, projectForPath as findProjectForPath, samePr
 import { replayMarkdown } from "../session-actions.ts"
 import { createTaskMonitorState } from "../task-monitor.ts"
 import { createConversation } from "../timeline-model.ts"
+import { clearProjectAttachments } from "./attachments-ui.ts"
 import { closeComposerSelectMenus } from "./composer-menus.ts"
 import { autoGrowPrompt } from "./composer.ts"
 import { projectList, prompt, requiredElement, sessionTitle } from "./dom.ts"
@@ -302,6 +303,7 @@ export async function removeProject(path: string) {
   const removesChatProject = samePath(path, state.chatProjectPath)
   const overview = await window.api.projects.remove(path)
   applyOverview(overview)
+  clearProjectAttachments(path)
   delete state.drafts[path]
   if (removesViewedProject || removesChatProject) {
     state.agentChatContext = null

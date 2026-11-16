@@ -30,6 +30,6 @@ live_turn 只存在于仍活着的 Worker，供界面恢复尚未落盘的文字
 
 任务采用单独快照，是因为进程可以跨过多个 turn。after_cursor 不计任务快照，客户端也不应把一次快照应用误算成新的对话事件。Worker 重启后没有旧的实时尾部，恢复应诚实展示磁盘边界，而非把半条流式输出补成完整答案。
 
-代码入口：[Worker.replay](../../../agent/runtime/server/worker.py)、[durable 投影](../../../agent/runtime/server/replay_events.py)、[Dispatcher replay](../../../agent/runtime/server/dispatcher.py)。验证：[协议重放](../../../test/test_runtime_server_protocol.py)、[会话恢复预览](../../../test/test_resume_preview.py)。
+代码入口：[Worker.replay](../../../runtime/src/server/worker.ts)、[durable 投影](../../../runtime/src/server/protocol.ts)、[Dispatcher replay](../../../runtime/src/server/dispatcher.ts)。验证：[协议重放](../../../runtime/test/server-protocol.test.js)、[会话恢复预览](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -342,7 +342,18 @@ function overlay(base, panel, width) {
 
 function renderDelivery(view, width, height) {
   const inner = Math.max(1, width - 2);
-  const lines = view.detail.render ? wrap(view.detail.render(inner, view.detail), inner) : wrap(view.detail.lines.map(clean), inner);
+  const detail = view.detail;
+  const cacheKey = `${inner}:${detail.expanded ? 1 : 0}`;
+  let lines = detail.cachedKey === cacheKey && detail.cachedRender === detail.render && detail.cachedLinesRef === detail.lines
+    ? detail.cachedWrapped
+    : null;
+  if (!lines) {
+    lines = detail.render ? wrap(detail.render(inner, detail), inner) : wrap(detail.lines.map(clean), inner);
+    detail.cachedKey = cacheKey;
+    detail.cachedRender = detail.render;
+    detail.cachedLinesRef = detail.lines;
+    detail.cachedWrapped = lines;
+  }
   const room = Math.max(1, height - 2);
   const offset = Math.min(view.detail.offset, Math.max(0, lines.length - room));
   view.detail.offset = offset;

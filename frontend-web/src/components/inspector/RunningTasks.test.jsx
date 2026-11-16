@@ -93,3 +93,28 @@ it("keeps a selected history cursor across background refreshes", async () => {
   expect(screen.getByText("older output")).not.toBeNull();
   expect(request.mock.calls.filter(([method]) => method === "rind/task/read")).toHaveLength(reads);
 });
+
+it("labels auto-resume vs service tasks and prunes cached output when a task exits", async () => {
+  vi.useFakeTimers();
+  let active = [task("a", { notify: "on_exit" }), task("svc", { notify: "manual" })];
+  let readCount = 0;
+  const request = vi.fn(async (method) => method === "rind/task/list"
+    ? { tasks: active }
+    : { stdout: `output-${++readCount}`, start_cursor: "start" });
+  render(<RunningTasks sessionId="one" request={request} />); await flush();
+  expect(screen.getByText("a · running · auto-resume")).not.toBeNull();
+  expect(screen.getByText("svc · running · service")).not.toBeNull();
+  fireEvent.click(screen.getByText("command a")); await flush();
+  fireEvent.click(screen.getByText("Read from start")); await flush();
+  expect(screen.getByText("output-2")).not.toBeNull();
+
+  active = [task("svc", { notify: "manual" })];
+  await act(() => vi.advanceTimersByTimeAsync(4000));
+  expect(screen.queryByText("command a")).toBeNull();
+  expect(screen.queryByText("output-2")).toBeNull();
+
+  active = [task("a", { notify: "on_exit" }), task("svc", { notify: "manual" })];
+  await act(() => vi.advanceTimersByTimeAsync(4000));
+  fireEvent.click(screen.getByText("command a")); await flush();
+  expect(screen.getByText("output-3")).not.toBeNull();
+});

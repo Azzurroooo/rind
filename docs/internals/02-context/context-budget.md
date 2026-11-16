@@ -25,6 +25,6 @@ With a usable anchor, the active estimate is approximately: last server-side inp
 
 When there is no reliable model window, the default window is 256,000 tokens, and known model capabilities override it. Locally, cl100k_base is preferred, falling back to CJK/other-text heuristics when no tokenizer is available. The 90% trigger line therefore provides headroom, but it does not guarantee that a provider will never reject a request; the context-length error recovery path is still needed.
 
-Code entry points: [estimator](../../../agent/application/context/estimator.py), [anchor logic](../../../agent/application/context/manager.py), [usage normalization](../../../agent/application/context/token_usage.py). Verification: [estimation regression](../../../test/test_context_estimator.py), [budget regression](../../../test/test_compact_budget.py).
+Code entry points: [estimator](../../../runtime/src/application/context-manager.ts), [anchor logic](../../../runtime/src/application/context-manager.ts), [usage normalization](../../../runtime/src/application/context-manager.ts). Verification: [estimation regression](../../../runtime/test/context-and-turn.test.js), [budget regression](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

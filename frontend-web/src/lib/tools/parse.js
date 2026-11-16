@@ -1,74 +1,26 @@
 // Parsing helpers shared by the per-tool formatters. Tool entries carry
 // `args` (a JSON string that may still be streaming, or an object) and
 // `result` (a `{ok, data, meta, error}` JSON payload, or plain text).
+import { parseStructuredToolPayload, partialJsonStrings } from "../../../../rind-runtime-client/tool-semantics.js";
+
+export { partialJsonStrings };
 
 const STACK_LINE = /^(Traceback \(most recent call last\)|\s+at\s|\s+File ")/;
 
 export function parseToolArguments(value) {
   if (value && typeof value === "object" && !Array.isArray(value)) return value;
   if (typeof value !== "string" || !value.trim()) return {};
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return partialJsonStrings(value);
-  }
-}
-
-// Arguments stream in as incomplete JSON. Pull out every `"key": "value"`
-// string pair seen so far (the last one may be unterminated) so the row
-// target and the write/edit body fill in while the model is still typing.
-export function partialJsonStrings(text) {
-  const source = String(text || "");
-  const pattern = /"([A-Za-z_][\w-]*)"\s*:\s*"/g;
-  const found = {};
-  let match = pattern.exec(source);
-  while (match) {
-    const { value, end } = readJsonString(source, pattern.lastIndex);
-    if (!(match[1] in found)) found[match[1]] = value;
-    pattern.lastIndex = end;
-    match = pattern.exec(source);
-  }
-  return found;
-}
-
-function readJsonString(source, start) {
-  let index = start;
-  let raw = "";
-  while (index < source.length) {
-    const char = source[index];
-    if (char === "\"") return { value: decodeJsonString(raw), end: index + 1 };
-    if (char === "\\") {
-      if (index + 1 >= source.length) break; // escape still streaming
-      raw += source.slice(index, index + 2);
-      index += 2;
-      continue;
-    }
-    raw += char;
-    index += 1;
-  }
-  return { value: decodeJsonString(raw), end: source.length };
-}
-
-function decodeJsonString(raw) {
-  const safe = raw.replace(/\\u(?![0-9a-fA-F]{4})[0-9a-fA-F]{0,3}$/, "");
-  try {
-    return JSON.parse(`"${safe}"`);
-  } catch {
-    return safe.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
-  }
+  const { structured, payload } = parseStructuredToolPayload(value);
+  return structured ? payload : partialJsonStrings(value);
 }
 
 export function parseToolResult(value) {
   if (value && typeof value === "object") return Array.isArray(value) ? { data: value } : value;
   if (typeof value !== "string" || !value) return {};
-  try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) return { data: parsed };
-    return parsed && typeof parsed === "object" ? parsed : { data: value };
-  } catch {
-    return { data: value }; // plain-text result is still renderable
-  }
+  const { structured, payload, parsed } = parseStructuredToolPayload(value);
+  if (structured) return payload;
+  if (Array.isArray(parsed)) return { data: parsed };
+  return { data: value }; // plain-text result is still renderable
 }
 
 export function payloadParts(tool) {

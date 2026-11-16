@@ -22,7 +22,7 @@ flowchart TB
     E --> D --> P --> S
 ~~~
 
-Server 和执行内核在**同一个 Python Worker 进程**里；两者之间没有第二层 RPC。CLI、Desktop 通过 stdio JSONL 连接，Web/Mobile 走 WebSocket，Gateway 通过自己的 WorkerClient 接入同一协议。Surface 负责输入、呈现和连接状态；Python 负责会话、上下文、模型、工具与任务。
+Server 和执行内核在**同一个 TypeScript Worker 进程**里；两者之间没有第二层 RPC。CLI、Desktop 通过 stdio JSONL 连接，Web/Mobile 走 WebSocket，Gateway 通过自己的 WorkerClient 接入同一协议。Surface 负责输入、呈现和连接状态；Runtime 负责会话、上下文、模型、工具与任务。
 
 这张图还有一条不该省略的反向边：会话事实写在磁盘，下一次执行重新读取。Worker 可以保留正在运行的任务和共享服务，却不为每个历史会话常驻一套 Agent。阅读后续文章时，始终区分**持久事实、当前执行、界面视图**三种状态。
 
@@ -36,6 +36,6 @@ Server 和执行内核在**同一个 Python Worker 进程**里；两者之间没
 
 例如浏览器刷新只丢掉第三层；Worker 仍可执行，重新订阅后从历史与快照恢复。Worker 重启会丢掉第二层，持久会话仍可打开，但旧进程不能凭一个 task_id 自动恢复为可控进程。沿这三层判断问题，比把“会话还在”理解为“所有状态都还在”更准确。
 
-代码入口：[main.py](../../../main.py)、[RuntimeWorker](../../../agent/runtime/server/worker.py)、[装配根](../../../agent/bootstrap/container.py)。验证：[架构边界测试](../../../test/test_agent_architecture.py)。
+代码入口：[cli.ts](../../../runtime/src/cli.ts)、[RuntimeWorker](../../../runtime/src/server/worker.ts)、[装配根](../../../runtime/src/core/turn-runner.ts)。验证：[架构边界测试](../../../runtime/test/architecture.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -317,25 +317,10 @@ export function taskGroupKey(task) {
   return "queued";
 }
 
-export function taskColumnKey(task) {
-  const status = String(task?.status || "queued");
-  if (status === "queued") return "queued";
-  if (status === "running") return "in_progress";
-  if (status === "blocked") {
-    return task?.blockedOn?.responder === "user" ? "needs_attention" : "in_progress";
-  }
-  if (status === "needs_attention") return "needs_attention";
-  if (status === "done") {
-    if (task?.report && !task?.review) return "needs_attention";
-    return "completed";
-  }
-  return "completed";
-}
-
 export function taskStatusMeta(task) {
   const status = String(task?.status || "queued");
   if (status === "running") {
-    return { label: "In progress", status: "Working", tone: "working", group: "working", column: "in_progress" };
+    return { label: "In progress", status: "Working", tone: "working", group: "working" };
   }
   if (status === "queued") {
     const reason =
@@ -349,7 +334,6 @@ export function taskStatusMeta(task) {
       status: "Queued",
       tone: "waiting",
       group: "queued",
-      column: "queued",
     };
   }
   if (status === "blocked") {
@@ -359,7 +343,6 @@ export function taskStatusMeta(task) {
         status: "Needs input",
         tone: "attention",
         group: "needs",
-        column: "needs_attention",
       };
     }
     return {
@@ -367,7 +350,6 @@ export function taskStatusMeta(task) {
       status: "Delegated",
       tone: "waiting",
       group: "delegated",
-      column: "in_progress",
     };
   }
   if (status === "needs_attention") {
@@ -376,7 +358,6 @@ export function taskStatusMeta(task) {
       status: "Needs input",
       tone: "attention",
       group: "needs",
-      column: "needs_attention",
     };
   }
   if (status === "done") {
@@ -386,7 +367,6 @@ export function taskStatusMeta(task) {
         status: "Done",
         tone: "attention",
         group: "done",
-        column: "needs_attention",
       };
     }
     if (task?.review?.decision === "rework") {
@@ -395,7 +375,6 @@ export function taskStatusMeta(task) {
         status: "Done",
         tone: "waiting",
         group: "done",
-        column: "completed",
       };
     }
     if (task?.review?.decision === "accepted") {
@@ -404,15 +383,14 @@ export function taskStatusMeta(task) {
         status: "Done",
         tone: "completed",
         group: "done",
-        column: "completed",
       };
     }
-    return { label: "Delivered", status: "Done", tone: "completed", group: "done", column: "completed" };
+    return { label: "Delivered", status: "Done", tone: "completed", group: "done" };
   }
   if (status === "cancelled") {
-    return { label: "Cancelled", status: "Cancelled", tone: "idle", group: "cancelled", column: "completed" };
+    return { label: "Cancelled", status: "Cancelled", tone: "idle", group: "cancelled" };
   }
-  return { label: status, status: "Idle", tone: "idle", group: "queued", column: "queued" };
+  return { label: status, status: "Idle", tone: "idle", group: "queued" };
 }
 
 export const taskSectionKey = taskGroupKey;
@@ -601,7 +579,6 @@ export function enrichTask(rawSnapshot, task) {
     brief: String(task.brief || ""),
     priority: task.priority === "high" || task.priority === "low" ? task.priority : "normal",
     group: meta.group,
-    column: meta.column,
     tone: meta.tone,
     statusLabel: meta.label,
     glyph: statusGlyph(meta.status),
@@ -623,13 +600,6 @@ export const TASK_SECTION_DEFS = Object.freeze([
   { id: "delegated", label: "Delegated to members", emptyText: "No tasks waiting on sub-delegations" },
   { id: "done", label: "Delivered", emptyText: "No delivered tasks yet" },
   { id: "cancelled", label: "Cancelled", emptyText: "No cancelled tasks" },
-]);
-
-export const KANBAN_COLUMNS = Object.freeze([
-  { id: "queued", label: "Queued", emptyText: "No queued tasks" },
-  { id: "in_progress", label: "In Progress", emptyText: "No tasks currently running" },
-  { id: "needs_attention", label: "Needs Review / Input", emptyText: "Nothing blocked or awaiting review" },
-  { id: "completed", label: "Completed", emptyText: "No completed tasks yet" },
 ]);
 
 export function groupTeamTasks(rawSnapshot, teamId = "") {
@@ -661,16 +631,9 @@ export function groupTeamTasks(rawSnapshot, teamId = "") {
     done: [],
     cancelled: [],
   };
-  const columns = {
-    queued: [],
-    in_progress: [],
-    needs_attention: [],
-    completed: [],
-  };
 
   for (const item of enriched) {
     groups[item.group]?.push(item);
-    columns[item.column]?.push(item);
   }
 
   const sections = TASK_SECTION_DEFS.map((def) => ({
@@ -682,7 +645,6 @@ export function groupTeamTasks(rawSnapshot, teamId = "") {
     all: enriched,
     groups,
     sections,
-    columns,
   };
 }
 

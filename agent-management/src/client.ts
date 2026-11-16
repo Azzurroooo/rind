@@ -1,4 +1,5 @@
 import net from "node:net";
+import { existsSync } from "node:fs";
 import { readFile, open, unlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -8,7 +9,10 @@ import { managementPaths, privateDirectory, resolveRindHome, type Paths } from "
 import { managementBuildId } from "./build.js";
 import { findServiceProcesses } from "./service-process.js";
 import { probeEndpoint } from "../../rind-runtime-client/endpoint.js";
+import { createLineBuffer } from "../../rind-runtime-client/ndjson.js";
 import { acquireProcessLock } from "../../rind-runtime-client/process-lock.js";
+
+const SPAWN_POLL_DELAYS_MS = [15, 20, 30, 50, 80];
 
 const sameFolder = (a: string, b: string) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 const active = (snapshot: any) => snapshot.runs.filter((run: any) => run.status === "starting" || run.status === "running").length;
@@ -42,15 +46,30 @@ function within<T>(work: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([work, new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms); })]).finally(() => clearTimeout(timer));
 }
 
-async function endStuckService(paths: Paths, connect?: () => Promise<ManagementClient>) {
-  const raw = await readFile(paths.record, "utf8").catch(() => null);
-  let recordedPid = 0;
+function parseRecordedPid(raw: string | null): number {
   try {
     const parsed = raw ? JSON.parse(raw) : null;
-    if (Number.isInteger(parsed?.pid) && parsed.pid > 0 && parsed.pid !== process.pid && /^[0-9a-f-]{36}$/.test(parsed?.nonce || "")) recordedPid = parsed.pid;
+    if (Number.isInteger(parsed?.pid) && parsed.pid > 0 && parsed.pid !== process.pid && /^[0-9a-f-]{36}$/.test(parsed?.nonce || "")) {
+      return parsed.pid;
+    }
   } catch {}
+  return 0;
+}
+
+async function endStuckService(paths: Paths, connect?: () => Promise<ManagementClient>) {
+  if (!existsSync(paths.state)) return false;
+  const raw = await readFile(paths.record, "utf8").catch(() => null);
+  const recordedPid = parseRecordedPid(raw);
+  const recordedAlive = Boolean(recordedPid && processAlive(recordedPid));
+  const startLockPath = path.join(paths.state, "service-start.lock");
+  if (!recordedAlive && !existsSync(startLockPath) && !(await probeEndpoint(paths.endpoint))) {
+    if (raw && recordedPid && await readFile(paths.record, "utf8").catch(() => null) === raw) {
+      await unlink(paths.record).catch(() => {});
+    }
+    return false;
+  }
   const pids = new Set<number>(await findServiceProcesses(fileURLToPath(new URL("./server.js", import.meta.url)), config => sameFolder(managementPaths(config.home).state, paths.state)));
-  if (recordedPid && processAlive(recordedPid)) pids.add(recordedPid);
+  if (recordedAlive) pids.add(recordedPid);
   if (!pids.size) return false;
   if (connect) {
     let client: ManagementClient | undefined;
@@ -88,6 +107,13 @@ export async function endLegacyService(client: ManagementClient, home?: string, 
 
 export async function stopManagementService({ home }: { home?: string } = {}) {
   const paths = managementPaths(home);
+  if (!existsSync(paths.state)) return false;
+  const startLockPath = path.join(paths.state, "service-start.lock");
+  if (existsSync(startLockPath)) {
+    const lock = await acquireProcessLock(startLockPath, 5000).catch(() => null);
+    await lock?.release();
+  }
+  const recordedPid = parseRecordedPid(await readFile(paths.record, "utf8").catch(() => null));
   let stopped = false;
   const client = await connectManagement({ home, start: false }).catch(() => null);
   if (client) {
@@ -96,7 +122,10 @@ export async function stopManagementService({ home }: { home?: string } = {}) {
     } finally {
       client.close();
     }
-    if (stopped) await waitForFreeEndpoint(paths, 5000);
+    if (stopped) {
+      await waitForFreeEndpoint(paths, 5000);
+      if (recordedPid) await waitForExit(recordedPid, 5000);
+    }
   }
   if (await endStuckService(paths)) {
     stopped = true;
@@ -118,27 +147,24 @@ export async function connectClient({ endpoint, token, runtimeSessionId, onSnaps
     socket.once("error", failed);
   });
   socket.setEncoding("utf8");
-  let buffer = "";
   let closed = false;
   const pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   socket.on("error", () => {});
   socket.on("close", () => { for (const p of pending.values()) { clearTimeout(p.timer); p.reject(clientError("CONNECTION_LOST", "Management connection lost; status is unconfirmed.")); } pending.clear(); if (!closed) onDisconnect?.(); });
-  socket.on("data", chunk => {
-    buffer += chunk;
-    if (buffer.length > 32 * 1024 * 1024) { socket.destroy(new Error("Management response too large.")); return; }
-    let end;
-    while ((end = buffer.indexOf("\n")) !== -1) {
-      const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
+  const lines = createLineBuffer(
+    line => {
       try {
         const message = JSON.parse(line);
-        if (message.event === "snapshot") { onSnapshot?.(message.snapshot); continue; }
-        const p = pending.get(message.id); if (!p) continue;
+        if (message.event === "snapshot") { onSnapshot?.(message.snapshot); return; }
+        const p = pending.get(message.id); if (!p) return;
         pending.delete(message.id); clearTimeout(p.timer);
         if (message.error) p.reject(Object.assign(new Error(message.error.message), { code: message.error.code, details: message.error.details }));
         else p.resolve(message.result);
       } catch { socket.destroy(new Error("Invalid management response.")); }
-    }
-  });
+    },
+    { maxBytes: 32 * 1024 * 1024, onOverflow: () => socket.destroy(new Error("Management response too large.")) },
+  );
+  socket.on("data", chunk => { lines.push(chunk); });
   return {
     request(method: string, params: Record<string, any> = {}): Promise<any> {
       const id = randomUUID();
@@ -153,7 +179,7 @@ export async function connectClient({ endpoint, token, runtimeSessionId, onSnaps
   };
 }
 export async function connectManagement(options: {
-  home?: string; python?: string; repoRoot?: string; runtimePath?: string; start?: boolean; stopSpawnedService?: boolean;
+  home?: string; repoRoot?: string; runtimePath?: string; start?: boolean; stopSpawnedService?: boolean;
   onSnapshot?: (snapshot: any) => void; onDisconnect?: () => void;
 } = {}) {
   const home = resolveRindHome(options.home);
@@ -241,17 +267,17 @@ export async function connectManagement(options: {
     if (taken) return taken;
     const log = await open(path.join(paths.state, "service.log"), "a", 0o600);
     const repoRoot = options.repoRoot || path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./server.js", import.meta.url)), JSON.stringify({ home, python: options.python || process.env.RIND_PYTHON || undefined, repoRoot, runtimePath: options.runtimePath || process.env.RIND_RUNTIME_PATH || "", ...(options.stopSpawnedService && !replaced ? { stopWhenIdle: true } : {}) }), "--rind-service-nonce=" + randomUUID()], { cwd: paths.state, detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd], env: process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env });
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./server.js", import.meta.url)), JSON.stringify({ home, repoRoot, runtimePath: options.runtimePath || process.env.RIND_RUNTIME_PATH || "", ...(options.stopSpawnedService && !replaced ? { stopWhenIdle: true } : {}) }), "--rind-service-nonce=" + randomUUID()], { cwd: paths.state, detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd], env: process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env });
     child.on("error", () => {}); child.unref(); await log.close();
     let last: unknown;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 43; i++) {
+      await delay(SPAWN_POLL_DELAYS_MS[i] ?? 100);
       // Only a service that accepts these credentials counts as started.
       try {
         const client = await connect();
         const service = await client.request("serviceInfo").catch(error => { if (error.code === "UNKNOWN_METHOD") return null; client.close(); throw error; });
         return attachHelpers(client, service, !replaced);
       } catch (error) { last = error; }
-      await delay(100);
     }
     throw new Error("Unable to start agents management. See " + path.join(paths.state, "service.log") + ": " + String(last));
   } finally {

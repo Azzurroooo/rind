@@ -64,7 +64,6 @@ function spawnCli(workspace, rindHome, env = {}, args = []) {
     env: {
       ...process.env,
       RIND_HOME: rindHome,
-      RIND_PYTHON: process.env.RIND_PYTHON || "python",
       NO_COLOR: "1",
       ...env,
     },
@@ -232,7 +231,7 @@ test("one-shot run works against a configured endpoint", async () => {
 
   const child = spawn(process.execPath, [path.join(repoRoot, "frontend-cli", "bin", "rind.js"), "run", "--prompt", "say hi"], {
     cwd: workspace,
-    env: { ...process.env, RIND_HOME: rindHome, RIND_PYTHON: process.env.RIND_PYTHON || "python", NO_COLOR: "1" },
+    env: { ...process.env, RIND_HOME: rindHome, NO_COLOR: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";

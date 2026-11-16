@@ -111,8 +111,28 @@ export function retryAttachment(chipId: string) {
   startAttachmentUpload(projectPath, chipId, entry)
 }
 
+export function revokeAttachmentUrl(chip: AttachmentChip) {
+  if (chip.previewUrl) {
+    URL.revokeObjectURL(chip.previewUrl)
+    chip.previewUrl = ""
+  }
+}
+
+export function clearProjectAttachments(projectPath: string) {
+  const list = state.attachments[projectPath]
+  if (!list?.length) return
+  for (const chip of list) {
+    revokeAttachmentUrl(chip)
+    chipFileBacklog.delete(chip.id)
+  }
+  delete state.attachments[projectPath]
+}
+
 export function removeAttachment(chipId: string) {
   const list = state.attachments[state.chatProjectPath] || []
+  for (const item of list) {
+    if (item.id === chipId) revokeAttachmentUrl(item)
+  }
   state.attachments[state.chatProjectPath] = list.filter((item) => item.id !== chipId)
   chipFileBacklog.delete(chipId)
   renderAttachments()

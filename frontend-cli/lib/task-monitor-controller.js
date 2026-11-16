@@ -7,8 +7,12 @@ const TERMINAL = new Set(["completed", "failed", "cancelled", "timed_out", "lost
 function summary(task, previous = {}, legacy = false) {
   if (TERMINAL.has(previous.status) && !TERMINAL.has(task.status)) return previous;
   const { stdout, stderr, output, meta, ...fields } = task;
-  return { ...previous, ...fields, bg_id: task.task_id || task.bg_id,
-    handoff: legacy || Boolean(previous.handoff || task.handoff) };
+  return {
+    ...previous,
+    ...fields,
+    bg_id: task.task_id || task.bg_id,
+    handoff: legacy || Boolean(previous.handoff || task.handoff),
+  };
 }
 
 function parseObject(value) {
@@ -19,6 +23,19 @@ function parseObject(value) {
   } catch {
     return {};
   }
+}
+
+function makePreview(id, stdout, stderr, extra = {}) {
+  const out = String(stdout || "");
+  const err = String(stderr || "");
+  const combined = [out, err].filter(Boolean).join("\n");
+  return {
+    id,
+    stdout: out,
+    stderr: err,
+    lines: combined ? combined.split(/\r?\n/) : null,
+    ...extra,
+  };
 }
 
 export function createTaskMonitorController({ request, state, redraw = () => {}, log = () => {}, notify = log, terminalUi = false }) {
@@ -35,51 +52,73 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   let selectionVersion = 0;
   let listLoading = false;
   let listError = "";
-  let backgroundItems = null;
-  let foregroundItems = null;
+  let orderedItems = null;
+
   const supportsTasks = () => state.sessionInfo?.capabilities?.includes("rind/tasks") === true;
-  const backgrounds = () => backgroundItems ??= [...tasks.values()].filter((task) => task.handoff)
-    .sort((a, b) => Number(ACTIVE.has(b.status)) - Number(ACTIVE.has(a.status))
+  const items = () => orderedItems ??= [...tasks.values()]
+    .filter((task) => ACTIVE.has(task.status) && (task.handoff || supportsTasks()))
+    .sort((a, b) => Number(Boolean(a.handoff)) - Number(Boolean(b.handoff))
       || (Number(b.started_at) || 0) - (Number(a.started_at) || 0)
       || String(a.bg_id).localeCompare(String(b.bg_id)));
-  const foregrounds = () => foregroundItems ??= supportsTasks() ? [...tasks.values()].filter((task) => !task.handoff && ACTIVE.has(task.status))
-    .sort((a, b) => (Number(b.started_at) || 0) - (Number(a.started_at) || 0)
-      || String(a.bg_id).localeCompare(String(b.bg_id))) : [];
-  const selectedBackground = () => tasks.get(monitor?.backgroundId) || backgrounds()[0];
-  const selectedForeground = () => tasks.get(monitor?.foregroundId) || foregrounds()[0];
+  const selected = () => tasks.get(monitor?.selectedId) || items()[0] || null;
+  const backgroundCount = () => [...tasks.values()].filter((task) => task.handoff && ACTIVE.has(task.status)).length;
 
-  function nearest(before, after, id, key) {
-    if (after.some((item) => item[key] === id)) return id;
-    const index = Math.max(0, before.findIndex((item) => item[key] === id));
-    return after[Math.min(index, after.length - 1)]?.[key] || null;
+  function nearest(before, after, id) {
+    if (after.some((item) => item.bg_id === id)) return id;
+    const index = Math.max(0, before.findIndex((item) => item.bg_id === id));
+    return after[Math.min(index, after.length - 1)]?.bg_id || null;
   }
 
-  function upsert(task, legacy = false) {
+  function reconcileMonitor(oldItems, { allowAutoExit = true, skipRedraw = false } = {}) {
+    if (!monitor) return;
+    const nextItems = items();
+    if (allowAutoExit && !nextItems.length && !listLoading && !listError) {
+      exitMonitor();
+      return;
+    }
+    const previousId = monitor.selectedId;
+    monitor.selectedId = nearest(oldItems, nextItems, previousId);
+    if (monitor.selectedId !== previousId) {
+      monitor.previewOffset = 0;
+      selectionVersion += 1;
+      preview = null;
+      if (monitor.selectedId) void readPreview();
+    } else if (preview?.id !== monitor.selectedId) {
+      preview = null;
+    }
+    if (!skipRedraw) redraw();
+  }
+
+  function upsert(task, legacy = false, { allowAutoExit = true, skipRedraw = false } = {}) {
     const id = String(task?.task_id || task?.bg_id || "").trim();
     if (!id) return;
-    const oldBackgrounds = monitor ? backgrounds() : [];
-    const oldForegrounds = monitor ? foregrounds() : [];
+    const oldItems = monitor ? items() : [];
     const next = summary(task, tasks.get(id), legacy);
-    if (supportsTasks() && TERMINAL.has(next.status) && !next.handoff) tasks.delete(id);
-    else tasks.set(id, next);
-    backgroundItems = null;
-    foregroundItems = null;
-    if (monitor) {
-      if (monitor.followId === id && next.handoff) {
-        monitor.backgroundId = id;
-        monitor.focus = "list";
-        monitor.followId = null;
-        selectionVersion += 1;
-        monitor.previewOffset = 0;
-      } else {
-        monitor.backgroundId = nearest(oldBackgrounds, backgrounds(), monitor.backgroundId, "bg_id");
-      }
-      monitor.foregroundId = nearest(oldForegrounds, foregrounds(), monitor.foregroundId, "bg_id");
-      if (monitor.focus === "foreground" && !foregrounds().length) monitor.focus = "list";
-      if (monitor.focus === "list" && !backgrounds().length && foregrounds().length) monitor.focus = "foreground";
-      if (preview?.id !== monitor.backgroundId) preview = null;
-      redraw();
+    if (TERMINAL.has(next.status) || !ACTIVE.has(next.status)) {
+      tasks.delete(id);
+    } else {
+      tasks.set(id, next);
     }
+    orderedItems = null;
+    reconcileMonitor(oldItems, { allowAutoExit, skipRedraw });
+    updateCount();
+  }
+
+  function evictOriginCall(callId) {
+    const target = String(callId || "").trim();
+    if (!target) return;
+    listUpdates?.add(`call:${target}`);
+    let removed = false;
+    const oldItems = monitor ? items() : [];
+    for (const [id, item] of tasks.entries()) {
+      if (!item.handoff && item.origin_tool_call_id === target) {
+        tasks.delete(id);
+        removed = true;
+      }
+    }
+    if (!removed) return;
+    orderedItems = null;
+    reconcileMonitor(oldItems);
     updateCount();
   }
 
@@ -87,50 +126,58 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     const task = event?.task;
     if (!task?.task_id || (event.session_id && event.session_id !== state.sessionInfo?.session_id)) return;
     listUpdates?.add(task.task_id);
-    const oldStatus = tasks.get(task.task_id)?.status;
-    upsert(task);
+    if (task.origin_tool_call_id && TERMINAL.has(task.status)) {
+      listUpdates?.add(`call:${task.origin_tool_call_id}`);
+    }
+    const previous = tasks.get(task.task_id);
+    const oldStatus = previous?.status;
+    const isHandoff = Boolean(task.handoff || previous?.handoff);
+    const willUpdateSelectedOutput = Boolean(
+      monitor &&
+      monitor.selectedId === task.task_id &&
+      event.type === "task_output" &&
+      !readInFlight &&
+      !monitor.previewOffset &&
+      ACTIVE.has(task.status),
+    );
+    upsert(task, false, { skipRedraw: willUpdateSelectedOutput });
     const current = tasks.get(task.task_id);
-    if (monitor?.page === "background" && monitor.focus === "list" && monitor.backgroundId === task.task_id && current?.handoff) {
-      if (event.type === "task_output" && !TERMINAL.has(current.status)) {
+    if (monitor && monitor.selectedId === task.task_id && current) {
+      if (event.type === "task_output") {
         if (!readInFlight && !monitor.previewOffset) {
-          preview = { id: task.task_id, stdout: String(task.stdout || ""), stderr: String(task.stderr || ""), limited: true };
+          preview = makePreview(task.task_id, task.stdout, task.stderr, { limited: true });
           redraw();
         }
-      } else if (TERMINAL.has(current.status) && !TERMINAL.has(oldStatus)) {
-        selectionVersion += 1;
-        void readPreview();
-      } else if (!preview && event.type !== "task_output") {
+      } else if (!preview) {
         void readPreview();
       }
     }
-    if (!terminalUi && event.type === "task_updated" && oldStatus !== task.status) {
+    if (!terminalUi && event.type === "task_updated" && isHandoff && oldStatus !== task.status) {
       notify(`Task ${task.task_id}: ${task.status}${task.notify ? ` (${task.notify})` : ""}`);
     }
   }
 
   async function controlSelected(action) {
-    if (!supportsTasks() || monitor?.page !== "background") return;
-    const foreground = monitor.focus === "foreground";
-    if (foreground && action !== "release") return;
-    const task = foreground ? selectedForeground() : selectedBackground();
+    if (!supportsTasks() || !monitor) return;
+    const task = selected();
     if (!task) return;
+    if (action === "release" && task.handoff) return;
+    if (action === "cancel" && !task.handoff) return;
     const currentGeneration = generation;
     const sessionId = state.sessionInfo?.session_id;
-    if (foreground) monitor.followId = task.bg_id;
     try {
-      const result = await request(action === "release" ? runtimeMethods.taskReleaseWait : runtimeMethods.taskCancel,
-        { task_id: task.bg_id });
+      const result = await request(
+        action === "release" ? runtimeMethods.taskReleaseWait : runtimeMethods.taskCancel,
+        { task_id: task.bg_id },
+      );
       if (generation !== currentGeneration || state.sessionInfo?.session_id !== sessionId) return;
-      if (foreground && result?.released) {
+      if (action === "release" && result?.released) {
         await refresh();
-        if (generation === currentGeneration) void readPreview();
-      } else if (monitor?.followId === task.bg_id) {
-        monitor.followId = null;
+        if (generation === currentGeneration && monitor) void readPreview();
       }
       if (result?.task_id) recordTask({ type: "task_updated", task: result });
     } catch (error) {
       if (generation !== currentGeneration) return;
-      if (monitor?.followId === task.bg_id) monitor.followId = null;
       notify(`Task control failed: ${error instanceof Error ? error.message : String(error)}`, { level: "error" });
     }
   }
@@ -146,24 +193,65 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     const promise = (async () => {
       let token = null;
       const seen = new Set();
+      const listedIds = new Set();
+      let completedAllPages = false;
       try {
         do {
-          const response = await request(supportsTasks() ? runtimeMethods.taskList : runtimeMethods.backgroundList,
-            token ? { page_token: token } : {});
+          const response = await request(
+            supportsTasks() ? runtimeMethods.taskList : runtimeMethods.backgroundList,
+            token ? { page_token: token } : {},
+          );
           if (generation !== currentGeneration) return;
+          const oldItems = monitor ? items() : [];
+          let changed = false;
           for (const task of Array.isArray(response?.tasks) ? response.tasks : []) {
-            if (!updates.has(task.task_id || task.bg_id)) upsert(task, !supportsTasks());
+            const id = String(task?.task_id || task?.bg_id || "").trim();
+            if (!id) continue;
+            listedIds.add(id);
+            const originId = task?.origin_tool_call_id ? `call:${task.origin_tool_call_id}` : "";
+            if (!updates.has(id) && !(originId && updates.has(originId))) {
+              const next = summary(task, tasks.get(id), !supportsTasks());
+              if (TERMINAL.has(next.status) || !ACTIVE.has(next.status)) {
+                changed = tasks.delete(id) || changed;
+              } else {
+                tasks.set(id, next);
+                changed = true;
+              }
+            }
+          }
+          if (changed) {
+            orderedItems = null;
+            reconcileMonitor(oldItems, { allowAutoExit: false });
+            updateCount();
           }
           token = supportsTasks() ? response?.next_page_token || null : null;
           if (token && seen.has(token)) throw new Error("Repeated task page token");
           if (token) seen.add(token);
         } while (token);
+        completedAllPages = true;
       } catch (error) {
-        if (generation === currentGeneration) listError = `Task list incomplete: ${error instanceof Error ? error.message : String(error)}`;
+        if (generation === currentGeneration) {
+          listError = `Task list incomplete: ${error instanceof Error ? error.message : String(error)}`;
+        }
       } finally {
         if (generation === currentGeneration) {
           listLoading = false;
           listUpdates = null;
+          if (completedAllPages) {
+            const oldItems = monitor ? items() : [];
+            let pruned = false;
+            for (const id of Array.from(tasks.keys())) {
+              if (!listedIds.has(id) && !updates.has(id)) {
+                tasks.delete(id);
+                pruned = true;
+              }
+            }
+            if (pruned) orderedItems = null;
+            updateCount();
+            if (monitor) {
+              reconcileMonitor(oldItems, { allowAutoExit: pruned || updates.size > 0 });
+            }
+          }
           if (monitor) redraw();
         }
       }
@@ -173,15 +261,15 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   }
 
   function updateCount() {
-    const backgroundCount = [...tasks.values()].filter((task) => task.handoff && ACTIVE.has(task.status)).length;
-    if (Number(state.sessionInfo?.background_count) !== backgroundCount) {
-      state.sessionInfo = { ...state.sessionInfo, background_count: backgroundCount };
+    const count = backgroundCount();
+    if (Number(state.sessionInfo?.background_count) !== count) {
+      state.sessionInfo = { ...state.sessionInfo, background_count: count };
       redraw();
     }
-    if (backgroundCount && !supportsTasks() && !refreshTimer && !state.runtimeClosing) {
+    if (count && !supportsTasks() && !refreshTimer && !state.runtimeClosing) {
       refreshTimer = setInterval(() => { void refresh(); }, 1000);
       refreshTimer.unref?.();
-    } else if (!backgroundCount && refreshTimer) {
+    } else if (!count && refreshTimer) {
       clearInterval(refreshTimer);
       refreshTimer = null;
     }
@@ -193,15 +281,12 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     listInFlight = null;
     listUpdates = null;
     tasks.clear();
-    backgroundItems = null;
-    foregroundItems = null;
+    orderedItems = null;
     preview = null;
     listLoading = false;
     listError = "";
     if (monitor) {
-      monitor.backgroundId = null;
-      monitor.foregroundId = null;
-      monitor.followId = null;
+      monitor.selectedId = null;
       monitor.previewOffset = 0;
     }
     if (refreshTimer) clearInterval(refreshTimer);
@@ -210,6 +295,9 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   }
 
   function recordResult(event) {
+    if (event?.tool_call_id) {
+      evictOriginCall(event.tool_call_id);
+    }
     const parsed = parseObject(event?.result);
     const data = parsed.data && typeof parsed.data === "object" ? parsed.data : parsed;
     if (!data?.task_id && !data?.bg_id) return;
@@ -218,29 +306,26 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
       return;
     }
     upsert(data, !supportsTasks());
-    if (monitor?.backgroundId === (data.task_id || data.bg_id)) void readPreview();
+    if (monitor?.selectedId === (data.task_id || data.bg_id)) void readPreview();
   }
 
   function enterMonitor() {
     if (monitor || state.runtimeClosing) return;
     monitorInputWasActive = state.inputActive;
-    monitor = { page: "background", pageChanged: false, backgroundId: backgrounds()[0]?.bg_id || null,
-      foregroundId: foregrounds()[0]?.bg_id || null,
-      focus: foregrounds().length ? "foreground" : "list", previewOffset: 0, followId: null };
+    monitor = { selectedId: items()[0]?.bg_id || null, previewOffset: 0 };
     const openedMonitor = monitor;
     state.inputActive = true;
+    const refreshing = refresh();
     redraw(true);
-    void refresh().then(() => {
+    void refreshing.then(() => {
       if (monitor !== openedMonitor) return;
-      if (!tasks.size && !listError) {
+      const currentItems = items();
+      if (!currentItems.length && !listError) {
         exitMonitor();
         notify("No background tasks. Press Left from an empty prompt for team tasks.");
         return;
       }
-      if (!monitor.pageChanged) {
-        monitor.page = "background";
-        monitor.focus = foregrounds().length ? "foreground" : "list";
-      }
+      monitor.selectedId ??= currentItems[0]?.bg_id || null;
       if (!supportsTasks() && !monitorTimer) {
         monitorTimer = setInterval(() => { void readPreview(); }, 500);
         monitorTimer.unref?.();
@@ -261,38 +346,49 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   }
 
   async function readPreview() {
-    if (!monitor || monitor.page !== "background" || monitor.focus !== "list" || state.runtimeClosing || readInFlight) return;
-    const id = selectedBackground()?.bg_id;
+    if (!monitor || state.runtimeClosing || readInFlight) return;
+    const id = selected()?.bg_id;
     if (!id) return;
     const currentGeneration = generation;
     const version = selectionVersion;
     readInFlight = true;
     try {
-      const response = await request(supportsTasks() ? runtimeMethods.taskRead : runtimeMethods.backgroundOutput,
-        { [supportsTasks() ? "task_id" : "bg_id"]: id, max_output_chars: 20000 });
+      const response = await request(
+        supportsTasks() ? runtimeMethods.taskRead : runtimeMethods.backgroundOutput,
+        { [supportsTasks() ? "task_id" : "bg_id"]: id, max_output_chars: 20000 },
+      );
       const task = supportsTasks() ? response : response?.task;
-      if (generation === currentGeneration && monitor?.page === "background" && monitor.focus === "list"
-        && monitor.backgroundId === id && selectionVersion === version && task && typeof task === "object") {
-        upsert(task, !supportsTasks());
-        preview = { id, stdout: String(task.stdout || task.output || ""), stderr: String(task.stderr || ""),
-          limited: Boolean(task.meta?.truncated || task.meta?.output_incomplete || task.truncated),
-          expired: Boolean(task.meta?.output_incomplete) };
-        redraw();
+      if (
+        generation === currentGeneration &&
+        monitor &&
+        monitor.selectedId === id &&
+        selectionVersion === version &&
+        task &&
+        typeof task === "object"
+      ) {
+        upsert(task, !supportsTasks(), { skipRedraw: ACTIVE.has(task.status) });
+        if (monitor && monitor.selectedId === id && tasks.has(id)) {
+          preview = makePreview(id, task.stdout || task.output, task.stderr, {
+            limited: Boolean(task.meta?.truncated || task.meta?.output_incomplete || task.truncated),
+            expired: Boolean(task.meta?.output_incomplete),
+          });
+          redraw();
+        }
       }
     } catch (error) {
-      if (generation === currentGeneration && monitor?.backgroundId === id && selectionVersion === version) {
+      if (generation === currentGeneration && monitor?.selectedId === id && selectionVersion === version) {
         preview = { id, stdout: "", stderr: "", error: error instanceof Error ? error.message : String(error) };
         redraw();
       }
     } finally {
       readInFlight = false;
-      if (monitor?.page === "background" && monitor.focus === "list"
-        && (generation !== currentGeneration || selectionVersion !== version)) void readPreview();
+      if (monitor && (generation !== currentGeneration || selectionVersion !== version)) {
+        void readPreview();
+      }
     }
   }
 
   function selectionChanged() {
-    monitor.pageChanged = true;
     monitor.previewOffset = 0;
     selectionVersion += 1;
     preview = null;
@@ -302,16 +398,11 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
 
   function moveSelection(delta) {
     if (!monitor) return;
-    // Waiting tasks precede handed-off tasks in one continuous navigation order.
-    const waiting = foregrounds();
-    const items = [...waiting, ...backgrounds()];
-    if (!items.length) return;
-    const field = monitor.focus === "foreground" ? "foregroundId" : "backgroundId";
-    const key = "bg_id";
-    const index = Math.max(0, items.findIndex((item) => item[key] === monitor[field]));
-    const next = ((index + delta) % items.length + items.length) % items.length;
-    monitor.focus = next < waiting.length ? "foreground" : "list";
-    monitor[next < waiting.length ? "foregroundId" : "backgroundId"] = items[next].bg_id;
+    const currentItems = items();
+    if (!currentItems.length) return;
+    const index = Math.max(0, currentItems.findIndex((item) => item.bg_id === monitor.selectedId));
+    const next = ((index + delta) % currentItems.length + currentItems.length) % currentItems.length;
+    monitor.selectedId = currentItems[next].bg_id;
     selectionChanged();
   }
 
@@ -319,11 +410,6 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     if (!monitor) return true;
     const modified = key.ctrl || key.alt || key.shift;
     if ((!modified && key.name === "escape") || (key.ctrl && key.name === "b")) { exitMonitor(); return true; }
-    if (!modified && key.name === "tab" && monitor.page === "background" && foregrounds().length && backgrounds().length) {
-      monitor.focus = monitor.focus === "foreground" ? "list" : "foreground";
-      selectionChanged();
-      return true;
-    }
     if (modified) return true;
     if (key.text === "r") { void controlSelected("release"); return true; }
     if (key.text === "c") { void controlSelected("cancel"); return true; }
@@ -336,17 +422,21 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   }
 
   function frame(width, height = 24) {
-    const page = "background";
-    const items = backgrounds();
-    const selected = selectedBackground();
-    const index = Math.max(0, items.findIndex((item) => item.bg_id === selected?.bg_id));
-    const foregroundItems = page === "background" ? foregrounds() : [];
-    const foreground = selectedForeground();
-    const foregroundIndex = foregroundItems.findIndex((item) => item === foreground);
-    return taskMonitorFrame({ page, backgroundCount: backgrounds().length,
-      items, index, selected, foreground, foregroundIndex, foregroundCount: foregroundItems.length,
-      focus: monitor?.focus || "list", preview: preview?.id === selected?.bg_id ? preview : null,
-      previewOffset: monitor?.previewOffset || 0, loading: listLoading, error: listError, width, height });
+    const currentItems = items();
+    const current = selected();
+    const index = Math.max(0, currentItems.findIndex((item) => item.bg_id === current?.bg_id));
+    return taskMonitorFrame({
+      backgroundCount: backgroundCount(),
+      items: currentItems,
+      index,
+      selected: current,
+      preview: preview?.id === current?.bg_id ? preview : null,
+      previewOffset: monitor?.previewOffset || 0,
+      loading: listLoading,
+      error: listError,
+      width,
+      height,
+    });
   }
 
   function stop() {
@@ -359,10 +449,20 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     monitor = null;
     preview = null;
     tasks.clear();
-    backgroundItems = null;
-    foregroundItems = null;
+    orderedItems = null;
   }
 
-  return { recordTask, refresh, recordResult,
-    enterMonitor, exitMonitor, handleInput, clear, stop, frame, isMonitoring: () => Boolean(monitor), moveSelection };
+  return {
+    recordTask,
+    refresh,
+    recordResult,
+    enterMonitor,
+    exitMonitor,
+    handleInput,
+    clear,
+    stop,
+    frame,
+    isMonitoring: () => Boolean(monitor),
+    moveSelection,
+  };
 }

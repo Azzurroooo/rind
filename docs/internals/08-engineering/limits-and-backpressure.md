@@ -36,6 +36,6 @@ If reading from the child process pipe stopped as soon as output exceeded the li
 
 Likewise, low load does not mean every cache is cleared: the Worker still holds managed tasks, bounded session/task caches, and connections, and the on-disk task journal needs maintenance to shrink. Bounds should be analyzed from the resource owner and the retirement conditions, not from a single array length.
 
-Source code: [stream backpressure](../../../agent/runtime/core/stream_pump.py), [CLI drain](../../../frontend-cli/lib/tui/tui.js). Mechanisms and test entry points: [input queues](../01-runtime/input-queues.md), [structured results](../04-tools/tool-results.md), [managed tasks](../05-autonomy/managed-tasks.md), [images](../02-context/image-input.md). Verification: [stream pump](../../../test/test_stream_pump.py), [runtime stream](../../../test/test_runtime_stream_pump.py).
+Source code: [stream backpressure](../../../runtime/src/core/turn-runner.ts), [CLI drain](../../../frontend-cli/lib/tui/tui.js). Mechanisms and test entry points: [input queues](../01-runtime/input-queues.md), [structured results](../04-tools/tool-results.md), [managed tasks](../05-autonomy/managed-tasks.md), [images](../02-context/image-input.md). Verification: [stream pump](../../../runtime/test/context-and-turn.test.js), [runtime stream](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

@@ -288,6 +288,7 @@ function renderPreferencesControls() {
 export function renderSettings() {
   if (state.settingsOpen && !settingsDialog.open) settingsDialog.showModal()
   if (!state.settingsOpen && settingsDialog.open) settingsDialog.close()
+  if (!state.settingsOpen) return
   renderPreferencesControls()
   renderSettingsTabs()
 }

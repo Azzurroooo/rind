@@ -8,7 +8,7 @@ export class DynamicBlock {
   render(width) {
     if (this.cacheWidth !== width || this.cacheLines === null) {
       const built = this.build(width);
-      this.cacheLines = Array.isArray(built) ? built : [];
+      this.cacheLines = Object.freeze(Array.isArray(built) ? built.slice() : []);
       this.cacheWidth = width;
     }
     return this.cacheLines;

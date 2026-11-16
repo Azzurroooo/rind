@@ -66,7 +66,7 @@ function renderSettings(props = {}) {
       json: async () => ({
         result: {
           provider: "openai",
-          model: "gpt-5",
+          model: "gpt-5.5",
           baseUrl: "",
           reasoningEffort: "xhigh",
           hasApiKey: true,
@@ -165,7 +165,7 @@ describe("SettingsDialog", () => {
     fireEvent.click(screen.getByLabelText("Default model"));
     const modelMenu = screen.getByRole("listbox", { name: "Default model options" });
     const modelOptionTexts = [...modelMenu.querySelectorAll('[role="option"]')].map((o) => o.textContent);
-    expect(modelOptionTexts).toContain("gpt-5");
+    expect(modelOptionTexts).toContain("gpt-5.5");
     expect(modelOptionTexts.some((t) => t.includes("Built-in") || t.includes("OAuth") || t.includes("Custom"))).toBe(
       false,
     );
@@ -177,7 +177,7 @@ describe("SettingsDialog", () => {
     // Selecting a reasoning model reveals Reasoning effort
     fireEvent.click(screen.getByLabelText("Default model"));
     fireEvent.click(
-      screen.getByRole("listbox", { name: "Default model options" }).querySelector('[data-value="gpt-5"]'),
+      screen.getByRole("listbox", { name: "Default model options" }).querySelector('[data-value="gpt-5.5"]'),
     );
     fireEvent.click(screen.getByLabelText("Reasoning effort"));
     fireEvent.click(
@@ -189,7 +189,7 @@ describe("SettingsDialog", () => {
       expect(handlers.request).toHaveBeenCalledWith("rind/folder_defaults/set", {
         scope: "global",
         provider_id: "openai",
-        model_id: "gpt-5",
+        model_id: "gpt-5.5",
         reasoning_effort: "xhigh",
       });
     });

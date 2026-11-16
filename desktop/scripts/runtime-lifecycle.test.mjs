@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url"
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
 const originalRuntimePath = process.env.RIND_RUNTIME_PATH
-const originalSourceEnv = Object.fromEntries(["ELECTRON_RENDERER_URL", "RIND_PYTHON", "RIND_HOME"].map(key => [key, process.env[key]]))
+const originalSourceEnv = Object.fromEntries(["ELECTRON_RENDERER_URL", "RIND_HOME"].map(key => [key, process.env[key]]))
 const testDirectory = await mkdtemp(join(tmpdir(), "rind-runtime-test-"))
 const workspace = join(testDirectory, "workspace")
 const fakeRuntime = join(dirname(fileURLToPath(import.meta.url)), "fake-runtime.mjs")
@@ -36,7 +36,6 @@ try {
   assert.equal(runtime.getRuntimeSnapshot(), undefined, "application shutdown must close the worker")
 
   delete process.env.RIND_RUNTIME_PATH
-  delete process.env.RIND_PYTHON
   process.env.ELECTRON_RENDERER_URL = "http://localhost:5173"
   process.env.RIND_HOME = join(testDirectory, "home")
   runtime.startRuntime(workspace)

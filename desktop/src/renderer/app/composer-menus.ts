@@ -249,7 +249,7 @@ export function toggleProjectMenu() {
 
 // ---------- reasoning effort switcher (B1) ----------
 
-// Mirrors the kernel's REASONING_EFFORTS (agent/infrastructure/settings.py).
+// Mirrors the kernel's REASONING_EFFORTS (runtime/src/infrastructure/settings.ts).
 export const reasoningEfforts = ["low", "medium", "high", "xhigh", "max"] as const
 
 export function displayedEffort() {

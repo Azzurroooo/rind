@@ -18,11 +18,11 @@ client 为请求分配 request_id，区分 event 与 response；连接建立后�
 
 Web 的 ticket 存在 sessionStorage；移动端通过原生 ticketFetch 禁止重定向，要求 HTTPS（本地配对地址除外）并使用有限超时。Desktop Gateway 的一次性 ticket 有 60 秒有效期，WebSocket 连接数和订阅数都有上限；Origin 只是来源校验，仍必须消费 ticket。
 
-Mobile 不运行 Python、模型或 shell；它是远程 Surface。前端配置的 Worker 地址必须是显式 ws/wss URL，不能携带用户名、密码、query 或 hash，避免把旧链接当成隐式重定向。
+Mobile 不运行本地运行时、模型或 shell；它是远程 Surface。前端配置的 Worker 地址必须是显式 ws/wss URL，不能携带用户名、密码、query 或 hash，避免把旧链接当成隐式重定向。
 
 ## 两种远程入口
 
-Desktop 远程访问直接复用其存活 Worker；独立部署则运行 Python app-server --web，浏览器关闭后服务继续存活。连接恢复后上层重新初始化、订阅并结合历史光标恢复视图，客户端不会自动重新发送所有失败请求，以免重复副作用。见[重放](../01-runtime/replay-and-resubscribe.zh-CN.md)。
+Desktop 远程访问直接复用其存活 Worker；独立部署则运行 TypeScript Runtime `app-server --web`，浏览器关闭后服务继续存活。连接恢复后上层重新初始化、订阅并结合历史光标恢复视图，客户端不会自动重新发送所有失败请求，以免重复副作用。见[重放](../01-runtime/replay-and-resubscribe.zh-CN.md)。
 
 独立 Docker 部署在仓库根目录的 .env 中设置：
 

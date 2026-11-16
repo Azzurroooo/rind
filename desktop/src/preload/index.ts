@@ -70,13 +70,7 @@ const api: DesktopApi = {
     remove: (sessionId) => runtimeRequest(runtimeMethods.sessionDelete, { session_id: sessionId }),
   },
   workspaceFiles: {
-    list: (path = "") => runtimeRequest(runtimeMethods.fileList, { path }),
-    read: (path) => runtimeRequest(runtimeMethods.fileRead, { path }),
     write: (projectPath, path, contentBase64) => ipcRenderer.invoke("project-files-upload", projectPath, path, contentBase64),
-  },
-  background: {
-    list: (sessionId) => runtimeRequest(runtimeMethods.backgroundList, { session_id: sessionId }),
-    output: (sessionId, bgId, maxOutputChars = 20_000) => runtimeRequest(runtimeMethods.backgroundOutput, { session_id: sessionId, bg_id: bgId, max_output_chars: maxOutputChars }),
   },
   goal: {
     get: (sessionId) => runtimeRequest(runtimeMethods.goalGet, { session_id: sessionId }),

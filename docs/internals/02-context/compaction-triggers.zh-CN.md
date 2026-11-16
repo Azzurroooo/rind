@@ -29,6 +29,6 @@ flowchart TD
 
 自动阈值看 ContextManager 的预算决策，不按“消息条数超过 N”触发。供应商仍可能比本地估算更早拒绝输入，所以错误恢复是必要补充；后续硬限制按 0.8 收紧，也不意味着无限重试直到碰巧成功。
 
-代码入口：[TurnRunner](../../../agent/runtime/core/turn_runner.py)、[CompactionService](../../../agent/application/context/compaction.py)、[手动入口](../../../agent/runtime/core/runtime.py)。验证：[压缩主线](../../../test/test_compact_pipeline.py)、[输入与压缩](../../../test/test_compact_input_lifecycle.py)。
+代码入口：[TurnRunner](../../../runtime/src/core/turn-runner.ts)、[CompactionService](../../../runtime/src/application/context-manager.ts)、[手动入口](../../../runtime/src/core/turn-runner.ts)。验证：[压缩主线](../../../runtime/test/context-and-turn.test.js)、[输入与压缩](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

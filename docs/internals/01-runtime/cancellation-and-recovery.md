@@ -23,6 +23,6 @@ Silence ends a model read as well: a request or stream that delivers nothing for
 
 A user interruption suppresses automatic continuation and sets the active Goal to paused; a failure sets the active Goal to blocked. A normal Worker shutdown tries to terminate the processes it owns and wait for monitor tasks to end; force-killing an unresponsive Worker cannot guarantee that every child process has been cleaned up.
 
-Code entry points: [the cancellation token](../../../agent/domain/cancellation.py), [TurnRunner](../../../agent/runtime/core/turn_runner.py), [the execution coordinator](../../../agent/runtime/server/execution.py). Verification: [cancellation tests](../../../test/test_cancellation_token.py), [task recovery](../../../test/test_task_continuation.py), [failure boundaries](../../../test/test_failure_boundaries.py), [a silent model](../../../test/test_model_idle_journey.py).
+Code entry points: [the cancellation token](../../../runtime/src/domain/cancellation.ts), [TurnRunner](../../../runtime/src/core/turn-runner.ts), [the execution coordinator](../../../runtime/src/server/execution.ts). Verification: [cancellation tests](../../../runtime/test/domain.test.js), [task recovery](../../../runtime/test/server-protocol.test.js), [failure boundaries](../../../runtime/test/context-and-turn.test.js), [a silent model](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

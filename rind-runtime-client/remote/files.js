@@ -90,7 +90,7 @@ async function previewText(path, absolutePath, size) {
     return { path, name: basename(path), kind: "unsupported", size, message: "Binary files cannot be previewed." };
   }
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(content.subarray(0, maxTextBytes));
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(content.subarray(0, maxTextBytes), { stream: content.length > maxTextBytes });
     return { path, name: basename(path), kind: "text", size, content: text, truncated: size > maxTextBytes };
   } catch {
     return { path, name: basename(path), kind: "unsupported", size, message: "Only UTF-8 text files can be previewed." };

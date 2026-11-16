@@ -108,18 +108,13 @@ Prefer a standalone package? Download CLI 0.10.0 from [Releases](https://github.
 
 ### Start from source
 
-Requires Python 3.12+, Node.js 18+ and Git. Clone the repository and create a Python environment:
+Requires Node.js 18+ and Git. Clone the repository, build the runtime and Agents Management, and start the CLI:
 
 ```bash
 git clone https://github.com/Azzurroooo/rind.git
 cd rind
-python -m venv .venv
-```
-
-Activate it with `source .venv/bin/activate` on macOS/Linux, or `.\.venv\Scripts\Activate.ps1` in Windows PowerShell. Then install the runtime dependencies, build Agents Management, and start the CLI:
-
-```bash
-python -m pip install -r requirements-runtime.txt
+npm install --prefix runtime
+npm run build --prefix runtime
 npm install --prefix agent-management
 npm run build --prefix agent-management
 npm install --prefix frontend-cli
@@ -146,7 +141,7 @@ Use `rind send` to steer a running conversation from another terminal. Team mana
 
 ### Extend Rind. Reuse its parts.
 
-Rind separates the runtime from its interfaces. Build another client on the [runtime protocol](agent/runtime/server/protocol.py), add a [tool](agent/infrastructure/tools/spec.py), or reuse the standalone [Agents Management service](agent-management).
+Rind separates the runtime from its interfaces. Build another client on the [runtime protocol](runtime/src/server/protocol.ts), add a [tool](runtime/src/infrastructure/tools/registry.ts), or reuse the standalone [Agents Management service](agent-management).
 
 Explore the [internals](docs/README.md), [system map](docs/internals/00-architecture/system-map.md) and [development guide](docs/internals/08-engineering/verification.md).
 

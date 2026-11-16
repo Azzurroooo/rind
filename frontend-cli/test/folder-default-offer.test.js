@@ -169,7 +169,7 @@ test("real TTY CLI: /login custom provider writes providers.json + auth.json, /m
   `;
   const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
     cwd: workspace,
-    env: { ...process.env, RIND_HOME: home, RIND_PYTHON: process.env.RIND_PYTHON || "python", NO_COLOR: "1" },
+    env: { ...process.env, RIND_HOME: home, OPENAI_API_KEY: "", NO_COLOR: "1" },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });

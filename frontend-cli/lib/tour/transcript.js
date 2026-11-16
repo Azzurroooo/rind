@@ -4,6 +4,17 @@ import { createTranscript } from "../tui/transcript.js";
 import { slashDisplayText, slashResultNotice, turnCompletedLine } from "../rendering.js";
 import { graphemes } from "../text-width.js";
 
+const blockGraphemesCache = new WeakMap();
+
+function cachedBlockGraphemes(block) {
+  let entry = blockGraphemesCache.get(block);
+  if (!entry || entry.text !== block.text) {
+    entry = { text: block.text, items: graphemes(block.text) };
+    blockGraphemesCache.set(block, entry);
+  }
+  return entry.items;
+}
+
 // Assemble fictional events through the live CLI's transcript controller.
 // This preserves block spacing, trailing-newline handling and unfinished
 // Markdown exactly as in a real turn. No terminal writes or tool timers.
@@ -23,7 +34,7 @@ export function renderTourTranscript(rind, width, expanded = false) {
         output.writeUserInput(block.text, block.source);
         break;
       case "assistant":
-        if (block.reveal > 0) output.assistantAppend(graphemes(block.text).slice(0, block.reveal).join(""));
+        if (block.reveal > 0) output.assistantAppend(cachedBlockGraphemes(block).slice(0, block.reveal).join(""));
         if (block.complete) output.closeAssistant();
         break;
       case "tool": {

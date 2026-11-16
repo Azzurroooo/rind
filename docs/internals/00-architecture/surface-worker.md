@@ -12,14 +12,14 @@ flowchart TB
     end
     C -->|"request_id + method"| B["Protocol boundary"]
     B -->|"response / session/update"| C
-    subgraph Worker["Worker: Python process"]
+    subgraph Worker["Worker: TypeScript runtime process"]
         B --> S["Runtime Server"]
         S --> R["Execution kernel"]
         R --> F[("Session files")]
     end
 ~~~
 
-The CLI's [runtime-client.js](../../../frontend-cli/lib/runtime-client.js) starts or connects to the Worker; input buffering, the cursor, and TTY rendering all stay in Node. On the desktop, Electron main owns the Worker subprocess, and the renderer can only call through the methods exposed by preload. Web connects over WebSocket; Mobile reuses the Web Surface, with Capacitor providing pairing and native capabilities, so there is no Python kernel on the phone.
+The CLI's [runtime-client.js](../../../frontend-cli/lib/runtime-client.js) starts or connects to the Worker; input buffering, the cursor, and TTY rendering all stay in the CLI Surface. On the desktop, Electron main owns the Worker subprocess, and the renderer can only call through the methods exposed by preload. Web connects over WebSocket; Mobile reuses the Web Surface, with Capacitor providing pairing and native capabilities, so there is no local execution kernel on the phone.
 
 **The benefit of the boundary is clear responsibilities.** Switching to a different interface does not require copying the model loop; changing tool semantics does not require scattering business decisions across multiple Surfaces. A protocol response marks the end of a request, while independent events represent changes during execution; an interface must not treat the two as two separate answers.
 

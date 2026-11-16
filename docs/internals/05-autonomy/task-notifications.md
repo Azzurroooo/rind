@@ -37,6 +37,6 @@ An idle session is woken by the ExecutionCoordinator, and that session still run
 
 This ordering reduces the risk of duplication and loss, but it does not promise that business actions execute exactly once globally. Whether an external process's side effects actually happened can still be uncertain at crash boundaries, and the task journal is honest about that with statuses such as lost.
 
-Code entry points: [TaskNotifications](../../../agent/application/task_notifications.py), [continuation coordination](../../../agent/runtime/server/execution.py). Verification: [notification delivery](../../../test/test_task_delivery.py), [automatic continuation](../../../test/test_task_continuation.py).
+Code entry points: [TaskNotifications](../../../runtime/src/application/context-manager.ts), [continuation coordination](../../../runtime/src/server/execution.ts). Verification: [notification delivery](../../../runtime/test/server-protocol.test.js), [automatic continuation](../../../runtime/test/server-protocol.test.js).
 
 [Back to the series map](../README.md)

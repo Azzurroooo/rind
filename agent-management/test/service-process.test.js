@@ -13,8 +13,8 @@ test("older services are matched by script and data folder from their command li
   const script = win("C:", "rind", "agent-management", "dist", "server.js");
   const json = config => B + Q + "{" + Object.entries(config).map(([k, v]) => B + Q + k + B + Q + ":" + B + Q + v.replaceAll(B, B + B) + B + Q).join(",") + "}" + B + Q;
   const list = [
-    "101\tnode " + script + " " + json({ python: "python", repoRoot: win("C:", "rind") }),
-    "102\tnode " + script + " " + json({ home: win("C:", "Temp", "test-home"), python: "python" }),
+    "101\tnode " + script + " " + json({ repoRoot: win("C:", "rind") }),
+    "102\tnode " + script + " " + json({ home: win("C:", "Temp", "test-home") }),
     "103\tnode " + win("C:", "other", "server.js") + " {}",
     "104\tnode " + win("C:", "rind", "rind-runtime-client", "shared-server.js") + " " + json({ rindHome: win("C:", "Temp", "test-home") }),
     "garbage line",

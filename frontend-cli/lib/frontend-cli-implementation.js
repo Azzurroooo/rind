@@ -43,7 +43,7 @@ import { createCliState } from "./cli-state.js";
 import { createCliRuntimeController } from "./cli-runtime-controller.js";
 import { createCliOutputController } from "./cli-output-controller.js";
 import { createCliInputActions } from "./cli-input-actions.js";
-import { cliHelp, oneShotHelp, runOneShot, tourHelp } from "./one-shot.js";
+import { cliHelp, oneShotHelp, runGateway, runOneShot, tourHelp } from "./one-shot.js";
 import { runSend, sendHelp } from "./send.js";
 import { configHelp, runConfig } from "./config-command.js";
 import { createWindowLog, guardStartup } from "./window-startup.js";
@@ -86,9 +86,9 @@ const handoffFile = takeHandoffPath();
 const handoffWindow = Boolean(handoffFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const python = process.env.RIND_PYTHON || undefined;
-const runtimePath = resolveInstalledRuntime({ repoRoot });
-const managementLaunch = { python, repoRoot, runtimePath };
+const installation = detectInstallation({ frontendRoot: path.resolve(scriptDir, "..") });
+const runtimePath = resolveInstalledRuntime({ repoRoot, installation });
+const managementLaunch = { repoRoot, runtimePath };
 if (cliArgs[0] === "agents") {
   try { await runAgentsCommand(cliArgs.slice(1), managementLaunch); }
   catch (error) { process.stderr.write(error.message + "\n"); process.exitCode = 2; }
@@ -135,6 +135,15 @@ if (cliArgs[0] === "send") {
   }
   return;
 }
+if (cliArgs[0] === "gateway") {
+  try {
+    process.exitCode = await runGateway({ args: cliArgs.slice(1), repoRoot, runtimePath });
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 2;
+  }
+  return;
+}
 if (cliArgs[0] === "tour") {
   if (cliArgs.some((arg) => arg === "--help" || arg === "-h")) {
     process.stdout.write(`${tourHelp}\n`);
@@ -163,14 +172,13 @@ if (cliArgs.some((arg) => arg === "--version" || arg === "--help" || arg === "-h
   if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
     process.stdout.write(`${cliHelp}\n\n`);
   }
-  process.exit(runHelpVersion({ python, repoRoot, runtimePath, cliArgs }));
+  process.exit(runHelpVersion({ repoRoot, runtimePath, cliArgs }));
 }
 
 if (cliArgs[0] === "run") {
   try {
     await runOneShot({
       args: cliArgs,
-      python,
       repoRoot,
       runtimePath,
       stderr: (text) => process.stderr.write(text),
@@ -186,7 +194,6 @@ if (cliArgs[0] === "run") {
 const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 let startupUpdateVersion = "";
 if (isTty && !handoffWindow) {
-  const installation = detectInstallation();
   const promptCandidate = shouldPromptStartupUpdate({ installation });
   if (promptCandidate) {
     const choice = await promptStartupUpdate({ installation, latestVersion: promptCandidate });
@@ -284,7 +291,6 @@ const {
 
 let remoteController;
 const runtimeClient = observeRuntime(createSharedRuntimeClient({
-  python,
   repoRoot,
   runtimePath,
   cliArgs,
@@ -380,8 +386,8 @@ const runtimeController = createCliRuntimeController({
   redraw: redrawInput,
 });
 remoteController = createCliRemoteController({
-  runtimeClient: runtimeController,
-  rawClient: runtimeClient,
+  runtimeController,
+  runtimeClient,
   askRemoteMenu: (...args) => inputActions.askRemoteMenu(...args),
   sessionState,
   redraw: redrawInput,
@@ -394,9 +400,6 @@ const request = runtimeController.request;
 turnController = createTurnController({
   request,
   state: turnState,
-  onTurnStart: () => {
-    displayState.assistantHeaderShown = false;
-  },
   output: {
     queueInput: (...args) => inputActions.addPendingInput(...args),
     writeUserInput: outputController.writeUserInput,
@@ -574,8 +577,6 @@ inputController = createInputController({
   askInput: (...args) => inputActions.ask(...args),
   onSubmit: (text) => turnController.submit(text),
   onCommand: (text) => commandController.handle(text),
-  onPaste: (...args) => inputActions.handleTerminalPaste(...args),
-  onInput: (...args) => inputActions.handleTerminalInput(...args),
   cancelInput,
   prompt: mainPromptText,
   placeholder: promptPlaceholderText,
@@ -846,6 +847,7 @@ async function renderEvent(message) {
       || (turnStateData.id && nextTurnId !== turnStateData.id)) {
       return;
     }
+    const wasInterrupted = (turnStateData.active || displayState.activeCompact) && turnStateData.interruptRequested;
     if (!turnStateData.active && !message.event.delivery && typeof message.event.input === "string" && message.event.input.trim()) {
       outputController.writeUserInput(message.event.input);
     }
@@ -854,11 +856,13 @@ async function renderEvent(message) {
     displayState.lastTurnId = nextTurnId;
     setTurnContext(nextTurnId);
     turnStateData.active = Boolean(turnStateData.id);
-    turnStateData.interruptRequested = false;
+    turnStateData.interruptRequested = wasInterrupted;
     displayState.activeCompact = message.event.operation === "compact";
     displayState.activityLabel = displayState.activeCompact ? "Compacting" : "Working";
-    displayState.assistantHeaderShown = false;
     refreshInputState();
+    if (wasInterrupted) {
+      void request(runtimeMethods.sessionCancel).catch(() => {});
+    }
   }
   if (message?.event?.type === "context_compacted") {
     if (displayState.activeCompact) notifyOutput("Compact complete.");
@@ -902,7 +906,6 @@ function restoreLiveTurn(value) {
   displayState.activityLabel = "Working";
   displayState.lastTurnId = turnId;
   setTurnContext(turnId);
-  displayState.assistantHeaderShown = false;
   const text = String(value.assistant_text || "");
   if (text) outputController.assistantAppend(text);
   for (const item of Array.isArray(value.pending_inputs) ? value.pending_inputs : []) {
@@ -918,12 +921,10 @@ function composeFrame(width = process.stdout.columns || 80) {
     return null;
   }
   const choiceMenu = ["model", "settings", "remote", "sessions", "fork", "choice-dialog"].includes(session.mode);
-  if (session.mode === "prompt" && session.menuState) {
-    session.menuState.setInput(session.editor.input());
-  }
-  const slashMenuOpen = session.mode === "prompt"
-    && session.menuState
-    && session.menuState.matches().length > 0;
+  const slashMatches = session.mode === "prompt" && session.menuState
+    ? (session.menuState.setInput(session.editor.input()), session.menuState.matches())
+    : [];
+  const slashMenuOpen = slashMatches.length > 0;
   const showCaret = (!choiceMenu && !slashMenuOpen)
     || (session.mode === "question" && session.questionState.isEditing());
   if (session.mode === "model") {
@@ -1038,9 +1039,11 @@ function composeFrame(width = process.stdout.columns || 80) {
         : "",
     };
   }
-  const matches = session.menuState
-    ? (session.menuState.setInput(session.editor.input()), session.menuState.matches())
-    : [];
+  const matches = session.mode === "prompt"
+    ? slashMatches
+    : session.menuState
+      ? (session.menuState.setInput(session.editor.input()), session.menuState.matches())
+      : [];
   if (typeof session.editor.setViewportWidth === "function") {
     session.editor.setViewportWidth(width);
   }

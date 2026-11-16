@@ -18,7 +18,7 @@ flowchart TD
 
 | 设计主张 | 合适的证据 |
 | --- | --- |
-| 多 Surface 理解同一种事件 | Python 协议测试与 Node golden fixture 读取同一份消息样本 |
+| 多 Surface 理解同一种事件 | Runtime 协议测试与 golden fixture 读取同一份消息样本 |
 | 取消能解除满队列等待 | fake stream 填满队列再取消，验证任务退出与资源关闭 |
 | 持久工具结果不重复执行 | 构造未闭合调用与已有结果，恢复后检查执行计数和消息配对 |
 | CLI 刷新保住输入与光标 | 虚拟终端测试最终屏幕、光标位置、宽度和输入缓冲 |
@@ -29,8 +29,9 @@ flowchart TD
 从仓库根目录执行，先安装对应开发依赖；按修改范围选文件即可：
 
 ~~~sh
-python -m pip install -r requirements.txt
-python -m pytest test/ -q
+npm --prefix runtime install
+npm --prefix runtime test
+npm --prefix agent-management test
 npm --prefix frontend-cli ci
 npm --prefix frontend-cli test
 npm --prefix frontend-web test
@@ -39,7 +40,7 @@ npm --prefix desktop test
 npm --prefix mobile test
 ~~~
 
-Python 和 CLI 测试在 test/、frontend-cli/test/；Web/Mobile 使用 Vitest，Desktop 的 scripts 测试以 Node 运行。fake provider 即使启动了真实子进程，也仍属于确定性回归；不能因为机器上有 API key 就转接真实服务。
+Runtime、Agents Management 和 CLI 测试在 runtime/test/、agent-management/test/、frontend-cli/test/；Web/Mobile 使用 Vitest，Desktop 的 scripts 测试以 Node 运行。fake provider 即使启动了真实子进程，也仍属于确定性回归；不能因为机器上有 API key 就转接真实服务。
 
 ## 手动验收与文档维护
 
@@ -47,6 +48,6 @@ Python 和 CLI 测试在 test/、frontend-cli/test/；Web/Mobile 使用 Vitest�
 
 文档本身的检查包括：52 篇主题是否齐全，源码/测试/互链是否存在，Mermaid 是否可解析和渲染，数值与默认值是否有源码依据。后续代码改动应更新相应机制篇，而非另建一份描述同一流程的旧式总览。
 
-依据：[测试分类](../../../test/README.md)、[手动验收目录](../../../test/manual/README.md)、[协议样本](../../../test/fixtures/runtime_protocol.golden.jsonl)、[Python 协议测试](../../../test/test_runtime_server_protocol.py)、[CLI 协议测试](../../../frontend-cli/test/runtime-protocol.test.js)、[虚拟终端集成](../../../frontend-cli/test/tui-integration.test.js)。
+依据：[测试分类](../../../test/README.md)、[手动验收目录](../../../test/manual/README.md)、[协议样本](../../../runtime/test/fixtures/runtime_protocol.golden.jsonl)、[Runtime 协议测试](../../../runtime/test/server-protocol.test.js)、[CLI 协议测试](../../../frontend-cli/test/runtime-protocol.test.js)、[虚拟终端集成](../../../frontend-cli/test/tui-integration.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

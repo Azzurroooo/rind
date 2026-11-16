@@ -27,18 +27,18 @@ The event pump maintains the conversation cursor and reactions: a valid numeric 
 When starting from source, run the Worker in one terminal and the wizard and gateway in another:
 
 ~~~sh
-python main.py app-server --web --host 127.0.0.1 --port 8765 --cwd /absolute/path/to/project
+node runtime/dist/cli.js app-server --web --host 127.0.0.1 --port 8765 --cwd /absolute/path/to/project
 ~~~
 
 ~~~sh
-python main.py gateway init --workspace /absolute/path/to/project
-python main.py gateway --config /absolute/path/to/project/.rind/gateway.yaml
+node frontend-cli/bin/rind.js gateway init --workspace /absolute/path/to/project
+node frontend-cli/bin/rind.js gateway --config /absolute/path/to/project/.rind/gateway.yaml
 ~~~
 
-The wizard writes .rind/gateway.yaml into the chosen workspace; channel SDKs, platform accounts, and callback requirements are decided by the corresponding adapter. If the Worker enables authentication, a connection token must also be configured. `gateway doctor` checks configuration and dependencies, and `gateway approve <CODE>` approves a pairing; both should use the same configuration and workspace as the running instance.
+The wizard writes .rind/gateway.yaml into the chosen workspace; channel SDKs, platform accounts, and callback requirements are decided by the corresponding adapter. If the Worker enables authentication, a connection token must also be configured. `rind gateway doctor` checks configuration and dependencies, and `rind gateway approve <CODE>` approves a pairing; both should use the same configuration and workspace as the running instance.
 
-The gateway/ described here is the messaging channel process, and it is different from Desktop's internal HTTP/WebSocket Gateway. The former turns chat messages into session input, while the latter exposes the same graphical Surface to remote devices.
+The `runtime/src/gateway/` module described here is the messaging channel command (`rind gateway`), and it is different from Desktop's internal HTTP/WebSocket Gateway. The former turns chat messages into session input, while the latter exposes the same graphical Surface to remote devices.
 
-Source: [routing](../../../gateway/router.py), [pump](../../../gateway/pump.py), [security gate](../../../gateway/security.py), [transports](../../../gateway/transports.py). Verification: [routing](../../../test/test_gateway_router.py), [security](../../../test/test_gateway_security.py), [pump](../../../test/test_gateway_pump.py), [stdio shutdown](../../../test/test_gateway_stdio_shutdown.py).
+Source: [routing](../../../runtime/src/gateway/router.ts), [pump](../../../runtime/src/gateway/pump.ts), [security gate](../../../runtime/src/gateway/security.ts), [transports](../../../runtime/src/gateway/transports.ts). Verification: [routing](../../../runtime/src/gateway/router.ts), [security](../../../runtime/src/gateway/security.ts), [pump](../../../runtime/src/gateway/fake-worker.ts), [stdio shutdown](../../../runtime/src/gateway/transports.ts).
 
 [Back to the series map](../README.md)

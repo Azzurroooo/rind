@@ -1,0 +1,30 @@
+{
+  "name": "@rind-ai/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "rind-runtime": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "test": "npm run build && node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
+    "@silvia-odwyer/photon-node": "^0.3.4",
+    "imapflow": "^1.0.171",
+    "nodemailer": "^7.0.5",
+    "postal-mime": "^2.5.0",
+    "undici": "^7.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/nodemailer": "^7.0.0",
+    "typescript": "^5.7.0"
+  }
+}

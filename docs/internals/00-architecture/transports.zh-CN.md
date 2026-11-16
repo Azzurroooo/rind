@@ -26,12 +26,12 @@ WebSocket 入口还要验证连接凭证；它不是“把 stdio 换成网络端
 | --- | --- | --- |
 | 本地 CLI / one-shot | Surface 启动 stdio 子进程 | Surface 负责发起正常关闭并等待退出 |
 | Desktop 本地界面 | renderer → preload → main → stdio | main 拥有 Worker，不由单个 UI 组件持有 |
-| 独立 Web | WebSocket → Python WebRuntimeServer | 单个 socket 关闭不等于服务退出 |
+| 独立 Web | WebSocket → Runtime WebRuntimeServer | 单个 socket 关闭不等于服务退出 |
 | Desktop 远程访问 | WebSocket → Electron Gateway → 本地 Worker | 远程入口撤销可以保留本地执行 |
 | 消息 Gateway | 自有 WorkerClient 选择 stdio 或 WebSocket | 自己启动的进程与仅连接的服务有不同清理责任 |
 
-图中的 WebRuntimeServer 是独立 Python Web 模式；Desktop 远程 Gateway 则是另一条桥接路线。它们共用协议语义，不能据此把认证、进程归属和退出流程画成完全相同的实现。
+图中的 WebRuntimeServer 是独立 Runtime Web 模式；Desktop 远程 Gateway 则是另一条桥接路线。它们共用协议语义，不能据此把认证、进程归属和退出流程画成完全相同的实现。
 
-代码入口：[stdio](../../../agent/runtime/server/stdio.py)、[WebSocket](../../../agent/runtime/server/websocket.py)、[Desktop bridge](../../../desktop/src/preload/types.ts)。验证：[Web Runtime 测试](../../../test/test_web_runtime.py)、[stdio 关闭测试](../../../test/test_gateway_stdio_shutdown.py)。
+代码入口：[stdio](../../../runtime/src/server/transports.ts)、[WebSocket](../../../runtime/src/server/transports.ts)、[Desktop bridge](../../../desktop/src/preload/types.ts)。验证：[Web Runtime 测试](../../../runtime/test/server-protocol.test.js)、[stdio 关闭测试](../../../runtime/src/gateway/transports.ts)。
 
 [返回系列地图](../README.zh-CN.md)

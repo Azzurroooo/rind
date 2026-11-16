@@ -36,6 +36,7 @@ export function normalizeTask(record: unknown): DesktopBackgroundTask {
     bg_id: String(value.task_id || value.bg_id || "").trim(),
     status: String(value.status || "unknown"),
     handoff: value.handoff === true,
+    notify: typeof value.notify === "string" ? value.notify : undefined,
     command: typeof value.command === "string" ? value.command : undefined,
     elapsed_ms: typeof value.elapsed_ms === "number" && Number.isFinite(value.elapsed_ms) ? value.elapsed_ms : undefined,
     exit_code: typeof value.exit_code === "number" ? value.exit_code : undefined,
@@ -68,6 +69,23 @@ export function mergeTasks(current: DesktopBackgroundTask[], listed: unknown): D
     .sort((left, right) => left.bg_id.localeCompare(right.bg_id))
 }
 
+export function pruneTaskState(state: TaskMonitorState) {
+  const activeIds = new Set(state.tasks.map((task) => task.bg_id))
+  if (state.expandedId && !activeIds.has(state.expandedId)) state.expandedId = ""
+  for (const id of Object.keys(state.outputs)) {
+    if (!activeIds.has(id)) delete state.outputs[id]
+  }
+  for (const id of Object.keys(state.cursors)) {
+    if (!activeIds.has(id)) delete state.cursors[id]
+  }
+  for (const id of Object.keys(state.reads)) {
+    if (!activeIds.has(id)) delete state.reads[id]
+  }
+  for (const id of Array.from(state.reading)) {
+    if (!activeIds.has(id)) state.reading.delete(id)
+  }
+}
+
 export async function refreshTasks(state: TaskMonitorState, fetchPage: () => Promise<unknown>) {
   if (state.refreshing) return
   state.refreshing = true
@@ -76,7 +94,7 @@ export async function refreshTasks(state: TaskMonitorState, fetchPage: () => Pro
     const result = await fetchPage() as { tasks?: unknown[] }
     state.tasks = mergeTasks(state.tasks, [...(Array.isArray(result?.tasks) ? result.tasks : []), ...Object.values(state.updates)])
     state.loaded = true
-    if (!state.tasks.some((task) => task.bg_id === state.expandedId)) state.expandedId = ""
+    pruneTaskState(state)
     state.error = ""
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error)
@@ -136,7 +154,7 @@ export function renderTaskMonitor(dock: HTMLElement, state: TaskMonitorState, wa
       <div class="task-monitor-item${expanded ? " open" : ""}" data-key="${escapeHtml(task.bg_id)}" data-task-id="${escapeHtml(task.bg_id)}">
         <button type="button" class="task-monitor-trigger" data-toggle-task="${escapeHtml(task.bg_id)}" aria-expanded="${String(expanded)}">
           <span class="status-pip ${taskStatusClass(task)}"></span>
-          <span class="task-monitor-identity"><code class="task-monitor-command">${escapeHtml(task.command || task.bg_id)}</code><span class="task-monitor-id">${escapeHtml(task.bg_id)} · ${escapeHtml(task.status)}</span></span>
+          <span class="task-monitor-identity"><code class="task-monitor-command">${escapeHtml(task.command || task.bg_id)}</code><span class="task-monitor-id">${escapeHtml(task.bg_id)} · ${escapeHtml(task.status)}${task.notify ? ` · ${escapeHtml(task.notify === "manual" ? "service" : "auto-resume")}` : ""}</span></span>
           ${typeof task.elapsed_ms === "number" && task.elapsed_ms > 0 ? `<span class="task-monitor-status">${formatDuration(task.elapsed_ms)}</span>` : ""}
         </button>
         ${expanded ? `<div class="task-monitor-output">${outputText ? `<pre><code>${escapeHtml(outputText)}</code></pre>` : `<p class="subtle">${state.reading.has(task.bg_id) ? "Loading output…" : "No output yet."}</p>`}

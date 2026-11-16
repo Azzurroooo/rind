@@ -165,18 +165,6 @@ export class DesktopProjectStore {
     return this.overview()
   }
 
-  async isActive(path: string) {
-    const state = await this.readState()
-    return Boolean(state.activeProjectPath && samePath(state.activeProjectPath, path))
-  }
-
-  async findSession(sessionId: string) {
-    const cleanId = sessionId.trim()
-    if (!cleanId) return undefined
-    const state = await this.readState()
-    return (await readSessionIndex(this.sessionIndexFile)).find((session) => session.id === cleanId && this.sessionBelongsToProjects(session, state.projects))
-  }
-
   private async readState(): Promise<StoredProjectState> {
     const [raw, shared, legacyRecentSessions] = await Promise.all([
       readJsonObject(this.configFile),

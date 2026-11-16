@@ -11,7 +11,7 @@ Manual address and access-code entry is available in the desktop dialog as a fal
 
 Remote access is off by default. Keep Desktop running. **Generate new code** disconnects
 previous devices; **Turn off remote access** stops sharing without stopping local tasks.
-See [Desktop remote access](../docs/internals/07-surfaces/desktop.md#构建与远程访问) for HTTPS/private-network setup
+See [Desktop remote access](../docs/internals/07-surfaces/desktop.md#build-and-remote-access) for HTTPS/private-network setup
 and [verification](../docs/internals/08-engineering/verification.md) for validation boundaries.
 
 ## One-command deployment
@@ -22,7 +22,7 @@ Install Docker Desktop or Docker Engine with Compose v2. Set `RIND_SERVER_TOKEN`
 docker compose up -d --build
 ```
 
-Open `http://localhost:8080`. The command builds the web surface and starts the long-lived WebSocket worker behind the same origin. The current directory is mounted as the workspace and `./.rind` stores settings and sessions. Set `RIND_WORKSPACE`, `RIND_HOME`, `RIND_WEB_PORT`, `RIND_WEB_BIND`, `RIND_PYPI_INDEX_URL`, or `RIND_DEBIAN_MIRROR` in a `.env` file to override them. The default bind is `127.0.0.1`.
+Open `http://localhost:8080`. The command builds the web surface and starts the long-lived WebSocket worker behind the same origin. The current directory is mounted as the workspace and `./.rind` stores settings and sessions. Set `RIND_WORKSPACE`, `RIND_HOME`, `RIND_WEB_PORT`, `RIND_WEB_BIND`, or `RIND_DEBIAN_MIRROR` in a `.env` file to override them. The default bind is `127.0.0.1`.
 
 Stop the deployment with:
 
@@ -35,7 +35,7 @@ docker compose down
 Set `RIND_SERVER_TOKEN` in the worker terminal to a long random value, then start the worker from the repository root:
 
 ```bash
-python main.py app-server --web --host 127.0.0.1 --port 8765 --cwd <workspace>
+node runtime/dist/cli.js app-server --web --host 127.0.0.1 --port 8765 --cwd <workspace>
 ```
 
 Leave out `--session-dir` to share the default `~/.rind/sessions` and session index with the CLI. If the CLI uses a custom `--session-dir` or `RIND_HOME`, start the Web worker with the same setting.
@@ -57,7 +57,7 @@ The default worker bind host is loopback. Use a reverse proxy with authenticatio
 
 ## Typography & contrast rulebook
 
-Codified from the shipped UI (`src/styles.css`). New components must follow these rules; if a rule does not fit, change the rule here first — not just the CSS.
+Codified from the shipped UI (`src/styles/index.css`). New components must follow these rules; if a rule does not fit, change the rule here first — not just the CSS.
 
 ### Token tiers
 

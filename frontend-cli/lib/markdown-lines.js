@@ -1,8 +1,10 @@
 import { textWidth, wrapTextWithAnsi } from "./text-width.js";
+import { currentTheme, paintRaw } from "./theme.js";
 
 const INLINE_TOKEN_RE = /(\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*)/g;
 const PLAIN_TEXT_RE = /[`*#>|\[]/;
 const TABLE_SEPARATOR_CELL_RE = /^:?-{3,}:?$/;
+const tableRowCache = new WeakMap();
 
 export function renderMarkdownishLine(line, color) {
   const heading = line.match(/^(#{1,6})\s+(.+?)\s*$/);
@@ -132,37 +134,60 @@ export function finishTableState(state) {
   return null;
 }
 
+function getTableRowEntry(row, columnCount) {
+  let entry = tableRowCache.get(row);
+  if (!entry || entry.columnCount !== columnCount) {
+    const normalized = Array.from({ length: columnCount }, (_, index) => String(row?.[index] || ""));
+    const isSeparator = normalized.every((cell) => TABLE_SEPARATOR_CELL_RE.test(cell));
+    const natural = new Array(columnCount);
+    const minimum = new Array(columnCount);
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+      const plain = renderInline(normalized[columnIndex], false);
+      natural[columnIndex] = Math.max(1, textWidth(plain));
+      minimum[columnIndex] = Math.max(1, longestWordWidth(plain, 30));
+    }
+    entry = { columnCount, normalized, isSeparator, natural, minimum, wrapped: new Map() };
+    if (row && typeof row === "object") {
+      tableRowCache.set(row, entry);
+    }
+  }
+  return entry;
+}
+
 export function renderTableBlock(rows, color, width) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return "";
   }
-  const columnCount = Math.max(...rows.map((row) => Array.isArray(row) ? row.length : 0), 0);
+  let columnCount = 0;
+  for (let i = 0; i < rows.length; i += 1) {
+    if (Array.isArray(rows[i]) && rows[i].length > columnCount) {
+      columnCount = rows[i].length;
+    }
+  }
   if (!columnCount) {
     return "";
   }
-  const normalizedRows = rows.map((row) => Array.from({ length: columnCount }, (_, index) => String(row?.[index] || "")));
-  const header = normalizedRows[0];
-  const bodyRows = normalizedRows.slice(1).filter((row) => !row.every((cell) => TABLE_SEPARATOR_CELL_RE.test(cell)));
-  const displayRows = [header, ...bodyRows];
+  const entries = rows.map((row) => getTableRowEntry(row, columnCount));
   const availableWidth = Math.max(1, Number(width) || 1);
   const borderOverhead = 3 * columnCount + 1;
   const availableCells = availableWidth - borderOverhead;
   if (availableCells < columnCount) {
-    return normalizedRows.map((row) => row.map((cell) => renderInline(cell, color)).join(dim(" | ", color))).join("\n");
+    return entries.map((entry) => entry.normalized.map((cell) => renderInline(cell, color)).join(dim(" | ", color))).join("\n");
   }
 
+  const displayEntries = [entries[0], ...entries.slice(1).filter((entry) => !entry.isSeparator)];
   const naturalWidths = Array(columnCount).fill(1);
   const minimumWidths = Array(columnCount).fill(1);
-  displayRows.forEach((row, rowIndex) => {
-    row.forEach((cell, columnIndex) => {
-      const plain = renderInline(cell, false);
-      naturalWidths[columnIndex] = Math.max(naturalWidths[columnIndex], textWidth(plain));
-      minimumWidths[columnIndex] = Math.max(minimumWidths[columnIndex], longestWordWidth(plain, 30));
-      if (rowIndex === 0) {
-        minimumWidths[columnIndex] = Math.max(minimumWidths[columnIndex], 1);
+  for (const entry of displayEntries) {
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+      if (entry.natural[columnIndex] > naturalWidths[columnIndex]) {
+        naturalWidths[columnIndex] = entry.natural[columnIndex];
       }
-    });
-  });
+      if (entry.minimum[columnIndex] > minimumWidths[columnIndex]) {
+        minimumWidths[columnIndex] = entry.minimum[columnIndex];
+      }
+    }
+  }
 
   const minimumTotal = minimumWidths.reduce((sum, value) => sum + value, 0);
   if (minimumTotal > availableCells) {
@@ -184,14 +209,27 @@ export function renderTableBlock(rows, color, width) {
     }
   }
 
+  const themeKey = color ? currentTheme().name : "plain";
   const border = (left, joiner, right) => `${left}─${columnWidths.map((value) => "─".repeat(value)).join(`─${joiner}─`)}─${right}`;
+  const midBorder = border("├", "┼", "┤");
   const lines = [border("┌", "┬", "┐")];
-  displayRows.forEach((row, rowIndex) => {
-    const cells = row.map((cell, columnIndex) => {
-      const rendered = renderInline(cell, color, rowIndex === 0 ? "tableHeader" : "");
-      return wrapTextWithAnsi(rendered, columnWidths[columnIndex], columnWidths[columnIndex]);
+  displayEntries.forEach((entry, rowIndex) => {
+    const isHeader = rowIndex === 0;
+    const cells = entry.normalized.map((cell, columnIndex) => {
+      const colWidth = columnWidths[columnIndex];
+      const cacheKey = `${themeKey}:${isHeader ? 1 : 0}:${columnIndex}:${colWidth}`;
+      let wrapped = entry.wrapped.get(cacheKey);
+      if (!wrapped) {
+        const rendered = renderInline(cell, color, isHeader ? "tableHeader" : "");
+        wrapped = wrapTextWithAnsi(rendered, colWidth, colWidth);
+        entry.wrapped.set(cacheKey, wrapped);
+      }
+      return wrapped;
     });
-    const height = Math.max(...cells.map((cell) => cell.length));
+    let height = 0;
+    for (let i = 0; i < cells.length; i += 1) {
+      if (cells[i].length > height) height = cells[i].length;
+    }
     for (let lineIndex = 0; lineIndex < height; lineIndex += 1) {
       const renderedCells = cells.map((cell, columnIndex) => {
         const value = cell[lineIndex] || "";
@@ -199,10 +237,8 @@ export function renderTableBlock(rows, color, width) {
       });
       lines.push(`│ ${renderedCells.join(" │ ")} │`);
     }
-    if (rowIndex === 0) {
-      lines.push(border("├", "┼", "┤"));
-    } else if (rowIndex < displayRows.length - 1) {
-      lines.push(border("├", "┼", "┤"));
+    if (rowIndex < displayEntries.length - 1) {
+      lines.push(midBorder);
     }
   });
   lines.push(border("└", "┴", "┘"));
@@ -220,7 +256,7 @@ export function codeOpenLabel(label) {
   return label ? `┌ code ${label}` : "┌ code";
 }
 
-import { paintRaw } from "./theme.js";
+
 
 export function styled(text, color, style) {
   if (!text || !color || !style) {

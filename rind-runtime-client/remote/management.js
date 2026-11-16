@@ -3,8 +3,8 @@ import { open, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveRindHome } from "../local-files.js";
-import { buildRuntimeEnv, resolveSourcePython } from "../runtime-env.js";
 import { runtimeMethods } from "../runtime-protocol.js";
+import { readRawSessionIndexEntries } from "./workspaces.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(currentDir, "../..");
@@ -23,6 +23,7 @@ export function emptyAgentsSnapshot() {
     folderDefaultsVersion: 0,
     notices: [],
     approvals: [],
+    archivedTeams: [],
     notes: [],
     artifacts: [],
   };
@@ -35,42 +36,16 @@ function normalizeWorkspaceKey(target) {
 }
 
 async function readSessionIndexEntries(rindHome) {
-  const indexPath = join(rindHome, "session_index.json");
-  try {
-    const raw = JSON.parse(await readFile(indexPath, "utf8"));
-    if (Array.isArray(raw?.sessions)) {
-      return raw.sessions
-        .filter((value) => value && typeof value === "object")
-        .map((value) => ({
-          session_id: String(value.id || value.session_id || ""),
-          title: String(value.name || value.title || ""),
-          updated_at: String(value.updated_at || value.created_at || ""),
-          workspace_root: String(value.workspace_root || ""),
-          message_count: Number(value.message_count ?? (value.has_user_message ? 1 : 0)),
-          last_model: String(value.last_model || ""),
-          last_user_message: String(value.last_user_message || value.preview || ""),
-        }));
-    }
-    const map =
-      raw && typeof raw === "object" && raw.sessions && typeof raw.sessions === "object"
-        ? raw.sessions
-        : raw && typeof raw === "object"
-          ? raw
-          : {};
-    return Object.entries(map)
-      .filter(([, value]) => value && typeof value === "object")
-      .map(([id, value]) => ({
-        session_id: String(value.id || value.session_id || id),
-        title: String(value.name || value.title || ""),
-        updated_at: String(value.updated_at || value.created_at || ""),
-        workspace_root: String(value.workspace_root || ""),
-        message_count: Number(value.message_count || 0),
-        last_model: String(value.last_model || ""),
-        last_user_message: String(value.last_user_message || value.preview || ""),
-      }));
-  } catch {
-    return [];
-  }
+  const entries = await readRawSessionIndexEntries(join(rindHome, "session_index.json"));
+  return entries.map((entry) => ({
+    session_id: entry.id,
+    title: entry.title,
+    updated_at: entry.updatedAt,
+    workspace_root: entry.workspaceRoot,
+    message_count: entry.messageCount,
+    last_model: entry.lastModel,
+    last_user_message: entry.preview,
+  }));
 }
 
 async function tailFile(filePath, maxBytes = 16384) {
@@ -106,14 +81,11 @@ export function createManagementBridge({
   getRindHome = () => resolveRindHome(process.env.RIND_HOME),
   repoRoot = defaultRepoRoot,
   getRuntimePath = () => process.env.RIND_RUNTIME_PATH || "",
-  getPython = () => {
-    const rtPath = getRuntimePath();
-    return rtPath ? undefined : resolveSourcePython(process.env.RIND_PYTHON, repoRoot);
-  },
   requestRuntime,
   ensureRuntimeForWorkspace = async () => {},
   isSharedRuntime = () => true,
   allowSharedObserver = false,
+  autoStartOnGetState = false,
 } = {}) {
   let managementModulePromise;
   let sharedRuntimeModulePromise;
@@ -161,8 +133,7 @@ export function createManagementBridge({
   function launchOptions() {
     const home = getRindHome();
     const runtimePath = getRuntimePath();
-    const python = getPython();
-    return { home, python, repoRoot, runtimePath };
+    return { home, repoRoot, runtimePath };
   }
 
   function getManagementState() {
@@ -383,7 +354,6 @@ export function createManagementBridge({
     connecting = (async () => {
       const { connectManagement } = await loadManagementModule();
       const opts = launchOptions();
-      buildRuntimeEnv(repoRoot, process.env, { sourceRuntime: !opts.runtimePath, rindHome: opts.home });
       const connected = await connectManagement({
         ...opts,
         start,
@@ -413,7 +383,7 @@ export function createManagementBridge({
         },
       });
       if (closing) {
-        connected.close();
+        await connected.closeSpawned();
         throw new Error("Management is closing.");
       }
       client = connected;
@@ -560,7 +530,7 @@ export function createManagementBridge({
       }
     }
 
-    if (!manager && !teamId && !agentId && explicitWorkspace) {
+    if (!manager && !teamId && !agentId && explicitWorkspace && typeof requestRuntime === "function") {
       await ensureRuntimeForWorkspace(explicitWorkspace);
       const opened = await requestRuntime(runtimeMethods.sessionOpen, {
         workspace_root: explicitWorkspace,
@@ -596,7 +566,7 @@ export function createManagementBridge({
       ...(runtimeSessionId ? { runtimeSessionId } : {}),
       shared: isSharedRuntime(),
     });
-    const externalTools = await active.request("sessionTools", { sessionId: attached.id });
+    const externalTools = await active.request("sessionTools", { sessionId: attached.id }).catch(() => null);
     let snap = await active.request("snapshot");
     acceptSnapshot(snap);
 
@@ -606,13 +576,48 @@ export function createManagementBridge({
       agentRecord?.canonicalWorkspace ||
         (manager ? managementPaths(launchOptions().home).manager : explicitWorkspace),
     );
-    if (!workspaceRoot) {
+    if (!workspaceRoot && typeof requestRuntime === "function") {
       throw new Error("Could not resolve workspace for this agent.");
     }
 
     if (await reconcileStaleWorkspaceRuns(active, snap, String(attached.agentId || agentId), workspaceRoot)) {
       snap = await active.request("snapshot");
       acceptSnapshot(snap);
+    }
+
+    if (typeof requestRuntime !== "function") {
+      if (runtimeSessionId && !attached.runtimeSessionId) {
+        await active
+          .request("bindSession", {
+            sessionId: attached.id,
+            runtimeSessionId,
+          })
+          .catch(() => {});
+        acceptSnapshot(await active.request("snapshot"));
+      }
+      const resolvedId = String(runtimeSessionId || attached.runtimeSessionId || "");
+      const attachment = {
+        managementSessionId: String(attached.id),
+        agentId: String(attached.agentId || agentId),
+        teamId: String(attached.teamId || teamId),
+        manager,
+        workspaceRoot,
+        runtimeSessionId: resolvedId,
+        externalTools,
+      };
+      attachmentsByManagementId.set(attachment.managementSessionId, attachment);
+      if (resolvedId) {
+        attachmentsByRuntimeId.set(resolvedId, attachment);
+      }
+      return {
+        managementSessionId: attachment.managementSessionId,
+        agentId: attachment.agentId,
+        teamId: attachment.teamId,
+        manager: attachment.manager,
+        workspaceRoot: attachment.workspaceRoot,
+        runtimeSessionId: resolvedId,
+        externalTools: externalTools || null,
+      };
     }
 
     await ensureRuntimeForWorkspace(workspaceRoot);
@@ -768,7 +773,7 @@ export function createManagementBridge({
   async function requestManagement(method, params = {}) {
     if (method === "getState") {
       if (!client && !explicitlyStopped) {
-        await ensureManagementConnected({ start: hasInitializedManagementState() }).catch(() => {});
+        await ensureManagementConnected({ start: autoStartOnGetState || hasInitializedManagementState() }).catch(() => {});
       }
       return getManagementState();
     }
@@ -786,7 +791,7 @@ export function createManagementBridge({
     }
     if (method === "listSessions") {
       if (!client && !explicitlyStopped) {
-        await ensureManagementConnected({ start: hasInitializedManagementState() }).catch(() => {});
+        await ensureManagementConnected({ start: autoStartOnGetState || hasInitializedManagementState() }).catch(() => {});
       }
       return listManagedSessionsLocal(params);
     }
@@ -895,7 +900,7 @@ export function createManagementBridge({
     if (method === "serviceInfo" && result && typeof result === "object") {
       serviceInfo = { ...result, ...(active.stale ? { stale: active.stale } : {}) };
       broadcastState();
-    } else if (method !== "snapshot" && method !== "subscribe") {
+    } else if (!["getTask", "readArtifact", "previewCopy", "previewImport", "listModels", "getMemberModel", "listFolderDefaults", "listSessions", "serviceInfo", "snapshot", "subscribe"].includes(method)) {
       try {
         acceptSnapshot(await active.request("snapshot"));
       } catch {
@@ -991,17 +996,23 @@ export function createManagementBridge({
     };
   }
 
+  let cachedAgentRootsSnapshot = null;
+  let cachedAgentRoots = new Set();
+  let cachedMgmtPathsHome = "";
+  let cachedMgmtPaths = null;
+
   async function isManagedWorkspacePath(targetPath) {
     if (!targetPath) return false;
     const normalizedTarget = resolve(targetPath).toLowerCase();
-    for (const agent of currentSnapshot.agents) {
-      if (
-        typeof agent.canonicalWorkspace === "string" &&
-        resolve(agent.canonicalWorkspace).toLowerCase() === normalizedTarget
-      ) {
-        return true;
-      }
+    if (cachedAgentRootsSnapshot !== currentSnapshot) {
+      cachedAgentRootsSnapshot = currentSnapshot;
+      cachedAgentRoots = new Set(
+        currentSnapshot.agents
+          .filter((agent) => typeof agent.canonicalWorkspace === "string" && agent.canonicalWorkspace)
+          .map((agent) => resolve(agent.canonicalWorkspace).toLowerCase()),
+      );
     }
+    if (cachedAgentRoots.has(normalizedTarget)) return true;
     for (const attachment of attachmentsByManagementId.values()) {
       if (
         attachment.workspaceRoot &&
@@ -1011,14 +1022,20 @@ export function createManagementBridge({
       }
     }
     try {
-      const { managementPaths } = await loadManagementModule();
-      const paths = managementPaths(launchOptions().home);
-      const managerPath = resolve(paths.manager).toLowerCase();
-      const workspacesRoot = resolve(paths.workspaces).toLowerCase();
+      const home = launchOptions().home;
+      if (!cachedMgmtPaths || cachedMgmtPathsHome !== home) {
+        const { managementPaths } = await loadManagementModule();
+        const paths = managementPaths(home);
+        cachedMgmtPathsHome = home;
+        cachedMgmtPaths = {
+          managerPath: resolve(paths.manager).toLowerCase(),
+          workspacesRoot: resolve(paths.workspaces).toLowerCase(),
+        };
+      }
       if (
-        normalizedTarget === managerPath ||
-        normalizedTarget.startsWith(`${workspacesRoot}\\`) ||
-        normalizedTarget.startsWith(`${workspacesRoot}/`)
+        normalizedTarget === cachedMgmtPaths.managerPath ||
+        normalizedTarget.startsWith(`${cachedMgmtPaths.workspacesRoot}\\`) ||
+        normalizedTarget.startsWith(`${cachedMgmtPaths.workspacesRoot}/`)
       ) {
         return true;
       }
@@ -1030,6 +1047,7 @@ export function createManagementBridge({
 
   async function closeManagement() {
     closing = true;
+    await Promise.allSettled([connecting, sharedObserverConnecting]);
     const current = client;
     client = undefined;
     if (current) {

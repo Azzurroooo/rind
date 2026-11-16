@@ -92,7 +92,6 @@ export function createRemoteHost(options: {
   getFallbackConfigFile?: () => string;
   repoRoot?: string;
   getRuntimePath?: () => string;
-  getPython?: () => string | undefined;
   initializeRuntime: () => Promise<any>;
   requestRuntime: (method: string, params?: Record<string, unknown>) => Promise<any>;
   subscribeRuntime?: (listener: (event: any) => void) => () => void;

@@ -27,6 +27,6 @@ Compaction, for example, writes its record first and the boundary message afterw
 
 plan.json is also an on-demand session control file. The raw conversation, the current plan, and the process logs are read and written separately, so replaying history need not load every large output, and a plan change does not require rewriting the conversation.
 
-Code entry points: [JsonlSessionStore](../../../agent/infrastructure/persistence/jsonl_session_store.py), [SessionFiles](../../../agent/infrastructure/persistence/session_files.py). Verification: [asynchronous session store](../../../test/test_async_session_store.py), [session fork](../../../test/test_persistence_session_fork.py).
+Code entry points: [JsonlSessionStore](../../../runtime/src/infrastructure/persistence/session-store.ts), [SessionFiles](../../../runtime/src/infrastructure/persistence/session-store.ts). Verification: [asynchronous session store](../../../runtime/test/persistence.test.js), [session fork](../../../runtime/test/persistence.test.js).
 
 [Back to the series map](../README.md)

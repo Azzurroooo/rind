@@ -96,11 +96,13 @@ export function createOneShotProgress({ stderr, stream = null } = {}) {
     },
 
     note(text) {
+      lastPendingToolId = null;
       emit(`${c.dim}· ${text}${c.reset}\n`);
       resumeSpinner();
     },
 
     systemNotice(text, level) {
+      lastPendingToolId = null;
       emit(`${systemNoticeLine(text, { level, color: useColor })}\n`);
       resumeSpinner();
     },

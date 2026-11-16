@@ -108,18 +108,13 @@ rind
 
 ### 从源码启动
 
-需要 Python 3.12+、Node.js 18+ 与 Git。先克隆仓库，创建 Python 虚拟环境：
+需要 Node.js 18+ 与 Git。克隆仓库，构建 Runtime 与 Agents Management，并启动 CLI：
 
 ```bash
 git clone https://github.com/Azzurroooo/rind.git
 cd rind
-python -m venv .venv
-```
-
-macOS / Linux 用 `source .venv/bin/activate` 激活环境，Windows PowerShell 用 `.\.venv\Scripts\Activate.ps1`。然后安装运行依赖，构建 Agents Management，并启动 CLI：
-
-```bash
-python -m pip install -r requirements-runtime.txt
+npm install --prefix runtime
+npm run build --prefix runtime
 npm install --prefix agent-management
 npm run build --prefix agent-management
 npm install --prefix frontend-cli
@@ -146,7 +141,7 @@ rind run --prompt "Review the current diff and identify actionable issues." > re
 
 ### 扩展 Rind，复用它的能力
 
-Rind 将执行引擎与交互界面分开。你可以基于 [Runtime 协议](agent/runtime/server/protocol.py) 构建新客户端，添加[工具](agent/infrastructure/tools/spec.py)，或复用独立的 [Agents Management 服务](agent-management)。
+Rind 将执行引擎与交互界面分开。你可以基于 [Runtime 协议](runtime/src/server/protocol.ts) 构建新客户端，添加[工具](runtime/src/infrastructure/tools/registry.ts)，或复用独立的 [Agents Management 服务](agent-management)。
 
 进一步阅读[内部原理](docs/README.zh-CN.md)、[系统地图](docs/internals/00-architecture/system-map.zh-CN.md)与[开发指南](docs/internals/08-engineering/verification.zh-CN.md)。
 

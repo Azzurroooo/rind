@@ -26,12 +26,12 @@ The WebSocket entry point also validates connection credentials; it is not as si
 | --- | --- | --- |
 | Local CLI / one-shot | The Surface starts the stdio subprocess | The Surface initiates a normal shutdown and waits for exit |
 | Desktop local interface | renderer → preload → main → stdio | main owns the Worker, not a single UI component |
-| Standalone Web | WebSocket → Python WebRuntimeServer | Closing a single socket is not a service exit |
+| Standalone Web | WebSocket → Runtime WebRuntimeServer | Closing a single socket is not a service exit |
 | Desktop remote access | WebSocket → Electron Gateway → local Worker | Revoking a remote entry point can preserve local execution |
 | Messaging Gateway | Its own WorkerClient chooses stdio or WebSocket | A process you start yourself and a service you merely connect to carry different cleanup responsibilities |
 
-The WebRuntimeServer in the diagram is the standalone Python Web mode; the Desktop remote Gateway is a different bridging route. They share protocol semantics, but that does not make authentication, process ownership, and exit flows the same implementation.
+The WebRuntimeServer in the diagram is the standalone Runtime Web mode; the Desktop remote Gateway is a different bridging route. They share protocol semantics, but that does not make authentication, process ownership, and exit flows the same implementation.
 
-Code entry points: [stdio](../../../agent/runtime/server/stdio.py), [WebSocket](../../../agent/runtime/server/websocket.py), [Desktop bridge](../../../desktop/src/preload/types.ts). Verification: [Web Runtime tests](../../../test/test_web_runtime.py), [stdio shutdown tests](../../../test/test_gateway_stdio_shutdown.py).
+Code entry points: [stdio](../../../runtime/src/server/transports.ts), [WebSocket](../../../runtime/src/server/transports.ts), [Desktop bridge](../../../desktop/src/preload/types.ts). Verification: [Web Runtime tests](../../../runtime/test/server-protocol.test.js), [stdio shutdown tests](../../../runtime/src/gateway/transports.ts).
 
 [Back to the series map](../README.md)

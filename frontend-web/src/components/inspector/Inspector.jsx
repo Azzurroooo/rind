@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import { Maximize2, Minimize2, X } from "lucide-react";
 import { FileTree } from "../FileTree.jsx";
 import { methods } from "../../methods.js";
@@ -29,7 +29,7 @@ export function visibleTabs(info) {
 
 // Inspector (spec section 2), after LobeHub's right panel: a 360px column of
 // tabs (Context, Activity, Files) scoped strictly to the current session and its folder.
-export function Inspector({
+export const Inspector = memo(function Inspector({
   tab,
   onTab,
   onClose,
@@ -152,4 +152,4 @@ export function Inspector({
       </div>
     </aside>
   );
-}
+});

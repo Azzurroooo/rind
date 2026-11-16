@@ -23,6 +23,6 @@ assistant 的 tool_calls 元数据与工具记录按 call ID 对齐；如果结�
 
 有效 compact pair 的查找与投影后边界校验是两步：没有匹配的有效压缩对时不应用那次压缩；应用后如果工具/交接结构不合法才拒绝该投影。include_internal、include_ids、compacted 等选项决定读者需要的视图，不改变磁盘原文。
 
-代码入口：[消息投影](../../../agent/infrastructure/persistence/message_projector.py)、[边界校验](../../../agent/domain/message_boundary.py)。验证：[压缩投影](../../../test/test_compact_pipeline.py)、[重放时间](../../../test/test_replay_message_time.py)。
+代码入口：[消息投影](../../../runtime/src/infrastructure/persistence/session-store.ts)、[边界校验](../../../runtime/src/domain/models.ts)。验证：[压缩投影](../../../runtime/test/context-and-turn.test.js)、[重放时间](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

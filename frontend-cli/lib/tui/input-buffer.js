@@ -3,41 +3,6 @@ const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 const DEFAULT_INPUT_TIMEOUT_MS = 10;
 
-function sequenceStatus(value) {
-  if (!value.startsWith(ESC)) {
-    return "not-escape";
-  }
-  if (value.length === 1) {
-    return "incomplete";
-  }
-
-  const type = value[1];
-  if (type === "[") {
-    if (value.startsWith(`${ESC}[M`)) {
-      return value.length >= 6 ? "complete" : "incomplete";
-    }
-    return csiStatus(value);
-  }
-  if (type === "O") {
-    return value.length >= 3 ? "complete" : "incomplete";
-  }
-  if (type === "]" || type === "P" || type === "_") {
-    return value.includes("\x07") || value.includes(`${ESC}\\`) ? "complete" : "incomplete";
-  }
-  const codepoint = value.codePointAt(1);
-  if (codepoint >= 0xd800 && codepoint <= 0xdbff && value.length < 3) {
-    return "incomplete";
-  }
-  return "complete";
-}
-
-function csiStatus(value) {
-  if (value.length < 3) {
-    return "incomplete";
-  }
-  const final = value.charCodeAt(value.length - 1);
-  return final >= 0x40 && final <= 0x7e ? "complete" : "incomplete";
-}
 
 export function createInputBuffer(options = {}) {
   const onSequence = typeof options.onSequence === "function" ? options.onSequence : () => {};
@@ -200,14 +165,42 @@ export function splitSequences(value) {
 }
 
 function findEscapeEnd(value, start) {
-  for (let end = start + 1; end <= value.length; end += 1) {
-    const status = sequenceStatus(value.slice(start, end));
-    if (status === "complete") {
-      return end;
-    }
-    if (status === "not-escape") {
-      return start + 1;
-    }
+  if (value[start] !== ESC) {
+    return start + 1;
   }
-  return -1;
+  if (start + 1 >= value.length) {
+    return -1;
+  }
+  const type = value[start + 1];
+  if (type === "[") {
+    if (value.startsWith(`${ESC}[M`, start)) {
+      return value.length - start >= 6 ? start + 6 : -1;
+    }
+    for (let index = start + 2; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      if (code >= 0x40 && code <= 0x7e) {
+        return index + 1;
+      }
+    }
+    return -1;
+  }
+  if (type === "O") {
+    return value.length - start >= 3 ? start + 3 : -1;
+  }
+  if (type === "]" || type === "P" || type === "_") {
+    const bel = value.indexOf("\x07", start + 2);
+    const st = value.indexOf(`${ESC}\\`, start + 2);
+    if (bel === -1 && st === -1) {
+      return -1;
+    }
+    if (bel !== -1 && (st === -1 || bel < st)) {
+      return bel + 1;
+    }
+    return st + 2;
+  }
+  const codepoint = value.codePointAt(start + 1);
+  if (codepoint >= 0xd800 && codepoint <= 0xdbff) {
+    return value.length - start >= 3 ? start + 3 : -1;
+  }
+  return start + 2;
 }

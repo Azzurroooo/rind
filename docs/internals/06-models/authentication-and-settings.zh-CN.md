@@ -70,8 +70,8 @@ CLI 中用 /login 保存供应商 API key，用 /model 选择模型，/effort �
 
 ## 保存方式的真实边界
 
-auth.json 是本地 JSON 文件，使用文件锁、临时文件替换和尽力设置的文件权限；它没有操作系统密钥链或加密存储承诺。单次读写有锁，也不等于整个读—改—写事务一直持锁。移动端的安全存储保存的是远程连接凭证，与 Python 供应商凭证不是同一个系统。
+auth.json 是本地 JSON 文件，使用文件锁、临时文件替换和尽力设置的文件权限；它没有操作系统密钥链或加密存储承诺。单次读写有锁，也不等于整个读—改—写事务一直持锁。移动端的安全存储保存的是远程连接凭证，与本地运行时供应商凭证不是同一个系统。
 
-源码：[设置加载](../../../agent/infrastructure/settings.py)、[文件夹默认](../../../agent/infrastructure/workspace_defaults.py)、[凭证存储](../../../agent/infrastructure/credentials.py)、[ChatGPT 登录](../../../agent/infrastructure/llm/chatgpt_oauth.py)、[解析和登录](../../../agent/infrastructure/llm/provider_service.py)。验证：[设置加载](../../../test/test_settings_loader.py)、[文件夹默认](../../../test/test_workspace_defaults.py)、[协议](../../../test/test_folder_defaults_protocol.py)、[供应商认证](../../../test/test_provider_auth.py)、[ChatGPT 登录](../../../test/test_chatgpt_oauth.py)、[协议认证交互](../../../test/test_runtime_server_auth.py)。
+源码：[设置加载](../../../runtime/src/infrastructure/settings.ts)、[文件夹默认](../../../runtime/src/infrastructure/settings.ts)、[凭证存储](../../../runtime/src/infrastructure/settings.ts)、[ChatGPT 登录](../../../runtime/src/infrastructure/chatgpt-oauth.ts)、[解析和登录](../../../runtime/src/infrastructure/llm/provider-service.ts)。验证：[设置加载](../../../runtime/test/persistence.test.js)、[文件夹默认](../../../runtime/test/persistence.test.js)、[协议](../../../runtime/test/server-protocol.test.js)、[供应商认证](../../../runtime/test/context-and-turn.test.js)、[ChatGPT 登录](../../../runtime/test/context-and-turn.test.js)、[协议认证交互](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -1,7 +1,7 @@
 import type { Configuration } from "electron-builder"
 import { readRindVersion } from "./src/main/version"
 
-const version = readRindVersion(new URL("../agent/version.py", import.meta.url))
+const version = readRindVersion(new URL("../runtime/src/version.ts", import.meta.url))
 
 const config: Configuration = {
   appId: "ai.rind.desktop",
@@ -15,6 +15,8 @@ const config: Configuration = {
   files: ["out/**/*"],
   extraResources: [
     { from: "resources/runtime", to: "runtime" },
+    { from: "resources/rind-runtime-client", to: "rind-runtime-client" },
+    { from: "resources/agent-management", to: "agent-management" },
     { from: "resources/icon.ico", to: "icon.ico" },
     { from: "resources/icon.png", to: "icon.png" },
     { from: "../frontend-web/dist", to: "web" },

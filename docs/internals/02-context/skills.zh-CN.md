@@ -6,7 +6,7 @@ Rind 不在每次模型请求里放入全部 SKILL.md。目录告诉模型有哪
 
 ~~~mermaid
 flowchart LR
-    LAYERS["八个层级，按优先级排列"] --> SCAN["用 PyYAML 解析 frontmatter"]
+    LAYERS["八个层级，按优先级排列"] --> SCAN["解析 YAML frontmatter"]
     IMPORTS["会话 skill_sources"] --> SCAN
     SCAN --> INDEX["会话目录：名称 · 描述 · 位置"]
     INDEX --> CM["ContextManager 注入 available_skills"]
@@ -34,13 +34,13 @@ SkillRepository 读取八个层级；同名（不分大小写）时，后面的�
 
 ## 内置 Skill
 
-内置 Skill 随安装包以 `agent/skills` 发布，运行时从 `RIND_HOME/skills/.system` 读取。因此各种安装方式（安装包、npm、便携包、源码）共用同一段代码，不需要任何安装步骤。Worker 启动时，`install_system_skills` 把安装包里文件的 SHA-256 与 `.system` 中的 `.bundle` 标记比较：一致时只是读一个小文件；不一致时（升级后或首次启动），在文件锁内把安装包复制到 `.system` 旁边，再用重命名整体替换，读取方看到的要么是旧版本，要么是新版本，不会是混合状态。中断复制留下的残留目录会被清理。同步失败只记录日志，不会阻止 Worker 启动；`.system` 里没有任何 Skill 时，`/skill` 会报告内置 Skill 缺失。
+内置 Skill 随安装包以 `runtime/skills` 发布，运行时从 `RIND_HOME/skills/.system` 读取。因此各种安装方式（安装包、npm、便携包、源码）共用同一段代码，不需要任何安装步骤。Worker 启动时，`installSystemSkills` 把安装包里文件的 SHA-256 与 `.system` 中的 `.bundle` 标记比较：一致时只是读一个小文件；不一致时（升级后或首次启动），在文件锁内把安装包复制到 `.system` 旁边，再用重命名整体替换，读取方看到的要么是旧版本，要么是新版本，不会是混合状态。中断复制留下的残留目录会被清理。同步失败只记录日志，不会阻止 Worker 启动；`.system` 里没有任何 Skill 时，`/skill` 会报告内置 Skill 缺失。
 
 `.system` 归 Rind 所有，升级时会被替换。在 `RIND_HOME/skills` 放一个同名 Skill，即可覆盖内置 Skill。
 
 ## 解析与问题
 
-frontmatter 是 YAML，用 `yaml.safe_load` 读取；值里出现未加引号的 `key: a: b` 冒号时，会加上引号重新解析。只读取三个顶层字段：
+frontmatter 是 YAML，由运行时的 frontmatter 解析器读取；值里出现未加引号的 `key: a: b` 冒号时，会加上引号重新解析。只读取三个顶层字段：
 
 - `name`：缺省时取目录名，只能包含字母、数字、连字符和下划线。与目录名不一致时只给警告。
 - `description`：必填。空白（包括 `|`、`>` 多行块里的换行）合并成一行。目录里最多显示 1024 个字符。
@@ -62,6 +62,6 @@ frontmatter 是 YAML，用 `yaml.safe_load` 读取；值里出现未加引号的
 
 Skill 正文是说明，不是执行器，也不会授予任何工具。SKILL.md 描述的事情，仍然只能通过容器已有的工具完成，而 `read_file` 没有目录边界。克隆来的仓库里项目级的 `.claude`、`.agents` 目录会像 `RIND.md` 一样进入目录；`/skill` 会标明每个 Skill 的来源，`/import` 可以关掉这些层级。如何编写 Skill，见内置的 `skill-creator`。
 
-代码入口：[SkillRepository](../../../agent/infrastructure/skills.py)、[解析与目录](../../../agent/domain/skills.py)、[目录与调用](../../../agent/application/skill_selection.py)、[/skill](../../../agent/runtime/server/commands/skill.py)、[/import](../../../agent/runtime/server/commands/import_skills.py)。验证：[Skill 仓库](../../../test/test_skill_repository.py)、[目录与会话](../../../test/test_skill_catalog_session.py)、[命令](../../../test/test_skill_commands.py)。
+代码入口：[SkillRepository](../../../runtime/src/infrastructure/skills.ts)、[解析与目录](../../../runtime/src/domain/models.ts)、[目录与调用](../../../runtime/src/infrastructure/skills.ts)、[/skill](../../../runtime/src/server/commands.ts)、[/import](../../../runtime/src/server/commands.ts)。验证：[Skill 仓库](../../../runtime/test/tools.test.js)、[目录与会话](../../../runtime/test/tools.test.js)、[命令](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

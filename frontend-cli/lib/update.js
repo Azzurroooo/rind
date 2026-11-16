@@ -136,6 +136,10 @@ export function standaloneRuntimeBinary(installRoot, platform = process.platform
   return path.join(installRoot, "runtime", "rind-runtime", binaryName);
 }
 
+export function standaloneRuntimeScript(installRoot) {
+  return path.join(installRoot, "runtime", "dist", "cli.js");
+}
+
 export function npmRuntimePackageName(platform = process.platform, arch = process.arch) {
   if (platform === "win32" && arch === "x64") return "@rind-ai/runtime-win32-x64";
   if (platform === "linux" && arch === "x64") return "@rind-ai/runtime-linux-x64";
@@ -146,6 +150,8 @@ export function npmRuntimePackageName(platform = process.platform, arch = proces
 }
 
 function resolveNpmRuntimeBinary(installRoot, platform = process.platform, arch = process.arch) {
+  const bundledScript = standaloneRuntimeScript(installRoot);
+  if (existsSync(bundledScript)) return bundledScript;
   const packageName = npmRuntimePackageName(platform, arch);
   if (!packageName) return "";
   const binaryName = platform === "win32" ? "rind-runtime.exe" : "rind-runtime";
@@ -210,8 +216,8 @@ export function detectInstallation({
   const installRoot = path.dirname(canonicalFrontend);
   const version = readInstallationVersion(installRoot, canonicalFrontend);
   const isSource =
-    existsSync(path.join(installRoot, "main.py")) &&
-    existsSync(path.join(installRoot, "agent", "version.py"));
+    existsSync(path.join(installRoot, "runtime", "src", "cli.ts")) &&
+    existsSync(path.join(installRoot, "runtime", "src", "version.ts"));
   if (isSource) {
     return {
       channel: "source",
@@ -227,10 +233,14 @@ export function detectInstallation({
   }
 
   const rootPkg = readPackageJson(installRoot);
-  const bundledRuntime = standaloneRuntimeBinary(installRoot, platform);
-  const hasBundledRuntime = existsSync(bundledRuntime);
+  const tsBundledRuntime = standaloneRuntimeScript(installRoot);
+  const legacyBundledRuntime = standaloneRuntimeBinary(installRoot, platform);
+  const hasTsBundledRuntime = existsSync(tsBundledRuntime);
+  const hasLegacyBundledRuntime = existsSync(legacyBundledRuntime);
+  const hasBundledRuntime = hasTsBundledRuntime || hasLegacyBundledRuntime;
   const isNpmPackage =
     existsSync(path.join(installRoot, "lib", "runtime-check.mjs")) ||
+    existsSync(path.join(installRoot, "bin", "rind-npm.mjs")) ||
     (rootPkg?.name === "@rind-ai/cli" && !hasBundledRuntime);
 
   if (isNpmPackage) {
@@ -249,6 +259,7 @@ export function detectInstallation({
   }
 
   if (hasBundledRuntime) {
+    const bundledRuntime = hasTsBundledRuntime ? tsBundledRuntime : legacyBundledRuntime;
     const posixRoot = normalizePosix(installRoot);
     let channel = "linux-portable";
     let label = "Linux portable archive";
@@ -292,10 +303,14 @@ function isForeignPackagedRuntime(envRuntimePath, installRoot, platform = proces
   if (!envRuntimePath) return false;
   const resolved = safeRealpath(envRuntimePath);
   const normalized = normalizePosix(resolved).toLowerCase();
+  const isPackagedTsRuntime =
+    normalized.endsWith("/runtime/dist/cli.js") &&
+    !existsSync(path.join(path.dirname(path.dirname(resolved)), "src", "cli.ts"));
   const isPackagedBinaryName =
     normalized.endsWith("/runtime/rind-runtime/rind-runtime") ||
     normalized.endsWith("/runtime/rind-runtime/rind-runtime.exe") ||
-    normalized.includes("/@rind-ai/runtime-");
+    normalized.includes("/@rind-ai/runtime-") ||
+    isPackagedTsRuntime;
   if (!isPackagedBinaryName) return false;
   if (isSubpath(resolved, installRoot, platform)) return false;
   const parentNodeModules = path.dirname(installRoot);
@@ -310,12 +325,12 @@ export function resolveInstalledRuntime({
   envRuntimePath = process.env.RIND_RUNTIME_PATH,
   platform = process.platform,
   arch = process.arch,
-} = {}) {
-  const installation = detectInstallation({
+  installation = detectInstallation({
     frontendRoot: path.join(repoRoot, "frontend-cli"),
     platform,
     arch,
-  });
+  }),
+} = {}) {
   const cleanEnv = String(envRuntimePath || "").trim();
   if (cleanEnv && !isForeignPackagedRuntime(cleanEnv, installation.installRoot, platform)) {
     return cleanEnv;
@@ -516,7 +531,10 @@ export async function checkLatestRelease({
       throw new Error("npm registry returned an invalid @rind-ai/cli version.");
     }
     const runtimePkg = npmRuntimePackageName(installation.platform, installation.arch);
-    if (runtimePkg) {
+    const requiresRuntimePkg = Boolean(
+      runtimePkg && (cliMeta?.optionalDependencies?.[runtimePkg] || cliMeta?.dependencies?.[runtimePkg]),
+    );
+    if (requiresRuntimePkg) {
       const encodedRuntime = runtimePkg.replace("/", "%2f");
       const runtimeMeta = await fetchJson(`${cleanRegistry}/${encodedRuntime}/${encodeURIComponent(resolvedVersion)}`, {
         fetchImpl,
@@ -850,8 +868,12 @@ function installPortableArchive({ archivePath, installRoot, expectedVersion, spa
       throw new Error(`Failed to extract archive: ${(extractResult.stderr || extractResult.stdout || "").trim()}`);
     }
     const stagedRoot = findExtractedPortableRoot(stagingDir);
-    const stagedRuntime = standaloneRuntimeBinary(stagedRoot, platform);
-    const smoke = spawnSyncImpl(stagedRuntime, ["--version"], {
+    const stagedTsRuntime = standaloneRuntimeScript(stagedRoot);
+    const useTsRuntime = existsSync(stagedTsRuntime);
+    const stagedRuntime = useTsRuntime ? stagedTsRuntime : standaloneRuntimeBinary(stagedRoot, platform);
+    const smokeCommand = useTsRuntime ? process.execPath : stagedRuntime;
+    const smokeArgs = useTsRuntime ? [stagedRuntime, "--version"] : ["--version"];
+    const smoke = spawnSyncImpl(smokeCommand, smokeArgs, {
       encoding: "utf8",
       windowsHide: true,
       env: { ...process.env, RIND_RUNTIME_PATH: stagedRuntime },
@@ -902,7 +924,7 @@ export async function runUpdate({
 
   if (installation.channel === "source" && !options.check) {
     stdout(`Rind v${installation.version} is running from a source checkout (${installation.installRoot}).`);
-    stdout("Update your checkout with: git pull && python -m pip install -r requirements-runtime.txt && npm run build --prefix agent-management");
+    stdout("Update your checkout with: git pull && npm run build --prefix runtime && npm run build --prefix agent-management");
     if (conflictReport) stdout(`\n${conflictReport}`);
     return 0;
   }

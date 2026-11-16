@@ -40,6 +40,6 @@ Suppose bash is still running when its wait window expires: the tool returns a t
 
 So "low load" comes from separating lifetimes, not from making every resource stateless. Shared services also do not mean sharing a single model client that never closes; that belongs to the active container.
 
-Code entry points: [Worker](../../../agent/runtime/server/worker.py), [the execution coordinator](../../../agent/runtime/server/execution.py), [the composition root](../../../agent/bootstrap/container.py). Verification: [idle release tests](../../../test/test_runtime_worker.py), [Shell lifecycle](../../../test/test_worker_shell_lifecycle.py).
+Code entry points: [Worker](../../../runtime/src/server/worker.ts), [the execution coordinator](../../../runtime/src/server/execution.ts), [the composition root](../../../runtime/src/core/turn-runner.ts). Verification: [idle release tests](../../../runtime/test/server-protocol.test.js), [Shell lifecycle](../../../runtime/test/tools.test.js).
 
 [Back to the series map](../README.md)

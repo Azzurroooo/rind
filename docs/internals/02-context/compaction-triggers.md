@@ -29,6 +29,6 @@ The compaction service only generates and commits the handoff; **whether to cont
 
 The automatic threshold follows ContextManager's budget decision; it does not trigger on "more than N messages". A provider can still reject input sooner than the local estimate predicts, so error recovery is a necessary complement, and tightening the hard limit by 0.8 for later attempts does not mean retrying without bound until something happens to succeed.
 
-Code entry points: [TurnRunner](../../../agent/runtime/core/turn_runner.py), [CompactionService](../../../agent/application/context/compaction.py), [manual entrance](../../../agent/runtime/core/runtime.py). Verification: [compaction mainline](../../../test/test_compact_pipeline.py), [input and compaction](../../../test/test_compact_input_lifecycle.py).
+Code entry points: [TurnRunner](../../../runtime/src/core/turn-runner.ts), [CompactionService](../../../runtime/src/application/context-manager.ts), [manual entrance](../../../runtime/src/core/turn-runner.ts). Verification: [compaction mainline](../../../runtime/test/context-and-turn.test.js), [input and compaction](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

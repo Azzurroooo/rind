@@ -7,6 +7,7 @@ import { createRuntimeClient } from "./runtime-client.js";
 import { sharedRuntimePaths } from "./shared-runtime.js";
 import { listenOwned } from "./endpoint.js";
 import { runtimeBuildId } from "./build-id.js";
+import { createLineBuffer } from "./ndjson.js";
 import { createLiveSessions } from "./live-sessions.js";
 import { createRemoteHost } from "./remote/host.js";
 import { registerSharedWorkspace, samePath } from "./remote/workspaces.js";
@@ -188,7 +189,6 @@ export async function startSharedServer(options) {
       getRindHome: () => rindHome,
       repoRoot: options.repoRoot,
       getRuntimePath: () => options.runtimePath || "",
-      getPython: () => options.python,
       initializeRuntime: () => initialize(),
       requestRuntime: (method, params) => requestFromRemote(method, params),
       subscribeRuntime: (listener) => {
@@ -210,7 +210,7 @@ export async function startSharedServer(options) {
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   ready.catch(() => {});
   const server = net.createServer(socket => {
-    socket.setEncoding("utf8"); let buffer = "";
+    socket.setEncoding("utf8");
     const peer = { socket, sessions: new Set(), prompts: new Map(), requestPrompts: new Map(), observe: false, oneShot: false, window: false, workspace: "", send(message) { if (!socket.destroyed) { if (socket.writableLength > 32 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
     peers.add(peer); touchActivity(); socket.on("error", () => {});
     socket.on("close", () => {
@@ -228,11 +228,8 @@ export async function startSharedServer(options) {
       }
       if (isIdle()) touchActivity();
     });
-    socket.on("data", chunk => {
-      buffer += chunk;
-      if (buffer.length > 32 * 1024 * 1024) { socket.destroy(); return; }
-      let end; while ((end = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); void handle(line); }
-    });
+    const lines = createLineBuffer(line => { void handle(line); }, { maxBytes: 32 * 1024 * 1024, onOverflow: () => socket.destroy() });
+    socket.on("data", chunk => { lines.push(chunk); });
     async function handle(line) {
       let id, sessionId, holdsSession = false, deletesSession = false;
       try {
@@ -254,7 +251,7 @@ export async function startSharedServer(options) {
           opening.set(sessionId, (opening.get(sessionId) || 0) + 1); holdsSession = true;
         }
         // Answered without starting the worker, so a client can decide whether
-        // this host is current, and stop it, without spawning Python.
+        // this host is current, and stop it, without spawning a worker.
         // Windows count as attached; the management service only observes and
         // follows a replaced host by itself, so it never blocks an update.
         if (method === "runtime/info") {

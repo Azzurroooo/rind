@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { copyText } from "../lib/clipboard.js";
 import { tokenizeCode } from "../lib/syntaxHighlight.js";
 
-export function MarkdownContent({ value, className = "" }) {
-  const blocks = parseBlocks(value);
+export const MarkdownContent = memo(function MarkdownContent({ value, className = "" }) {
+  const blocks = useMemo(() => parseBlocks(value), [value]);
   return <div className={`message-content markdown-content ${className}`.trim()}>{blocks.map((block, index) => renderBlock(block, index))}</div>;
-}
+});
 
 function parseBlocks(value) {
   const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
@@ -103,7 +103,7 @@ function splitTableRow(value) {
   return row.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|").trim());
 }
 
-function CodeBlock({ language, value }) {
+const CodeBlock = memo(function CodeBlock({ language, value }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef(null);
 
@@ -118,7 +118,7 @@ function CodeBlock({ language, value }) {
     }
   }
 
-  const tokens = tokenizeCode(value, language);
+  const tokens = useMemo(() => tokenizeCode(value, language), [value, language]);
   return (
     <div className="markdown-code-block">
       <div className="markdown-code-head">
@@ -139,7 +139,9 @@ function CodeBlock({ language, value }) {
       </pre>
     </div>
   );
-}
+});
+
+const INLINE_PATTERN = /(`[^`\n]+`|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*]+)\*|_([^_]+)_)/g;
 
 function renderBlock(block, key) {
   if (block.type === "code") return <CodeBlock key={key} language={block.language} value={block.value} />;
@@ -152,17 +154,20 @@ function renderBlock(block, key) {
     const Tag = block.type === "ordered-list" ? "ol" : "ul";
     return <Tag key={key}>{block.items.map((item, index) => <li key={index}>{renderInline(item)}</li>)}</Tag>;
   }
-  if (block.type === "quote") return <blockquote key={key}>{block.value.split("\n").map((line, index) => <span key={index}>{renderInline(line)}{index < block.value.split("\n").length - 1 && <br />}</span>)}</blockquote>;
+  if (block.type === "quote") {
+    const lines = block.value.split("\n");
+    return <blockquote key={key}>{lines.map((line, index) => <span key={index}>{renderInline(line)}{index < lines.length - 1 && <br />}</span>)}</blockquote>;
+  }
   if (block.type === "table") return <table key={key}><thead><tr>{block.rows[0].map((cell, index) => <th key={index}>{renderInline(cell)}</th>)}</tr></thead><tbody>{block.rows.slice(1).map((row, rowIndex) => <tr key={rowIndex}>{block.rows[0].map((_, index) => <td key={index}>{renderInline(row[index] || "")}</td>)}</tr>)}</tbody></table>;
-  return <p key={key}>{block.value.split("\n").map((line, index) => <span key={index}>{renderInline(line)}{index < block.value.split("\n").length - 1 && <br />}</span>)}</p>;
+  const lines = block.value.split("\n");
+  return <p key={key}>{lines.map((line, index) => <span key={index}>{renderInline(line)}{index < lines.length - 1 && <br />}</span>)}</p>;
 }
 
 function renderInline(value) {
   const source = String(value || "");
-  const pattern = /(`[^`\n]+`|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*]+)\*|_([^_]+)_)/g;
   const children = [];
   let last = 0;
-  for (const match of source.matchAll(pattern)) {
+  for (const match of source.matchAll(INLINE_PATTERN)) {
     if (match.index > last) children.push(source.slice(last, match.index));
     if (match[0].startsWith("`") ) children.push(<code key={match.index}>{match[0].slice(1, -1)}</code>);
     else if (match[2]) children.push(<a key={match.index} href={safeHref(match[3])} target="_blank" rel="noreferrer">{renderInline(match[2])}</a>);

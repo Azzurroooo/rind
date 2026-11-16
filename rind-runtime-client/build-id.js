@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 // process reports, so an update is noticed instead of silently serving old
 // behaviour. Only file contents count, so a reinstall of identical code is a match.
 const cache = new Map();
-const SKIP = new Set(["node_modules", "__pycache__", ".git", "test", "tests"]);
+const SKIP = new Set(["node_modules", ".git", "test", "tests"]);
 
 async function files(root, extensions) {
   let entries;
@@ -24,11 +24,11 @@ async function files(root, extensions) {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-// The shared Runtime is this transport plus the Python worker (or the
+// The shared Runtime is this transport plus the TypeScript worker (or the
 // packaged worker binary when one is configured).
 export const runtimeBuildId = ({ repoRoot = "", runtimePath = "" } = {}) => buildId([
   { root: here, extensions: [".js"] },
-  ...(runtimePath ? [{ file: runtimePath }] : [{ root: path.join(repoRoot, "agent"), extensions: [".py"] }, { file: path.join(repoRoot, "main.py") }]),
+  ...(runtimePath ? [{ file: runtimePath }] : [{ root: path.join(repoRoot, "runtime", "dist"), extensions: [".js"] }]),
 ]);
 
 // Streams a file into the hash, so a large packaged worker is not read into memory.

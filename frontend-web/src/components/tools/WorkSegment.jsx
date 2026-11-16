@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { formatDuration } from "../../lib/toolDisplay.js";
 import { liveWindow } from "../../lib/workSegments.js";
@@ -9,7 +9,7 @@ import { ToolStatusIcon } from "./ToolStatusIcon.jsx";
 // plus the last two finished with "+N earlier". Ended: collapsed to the
 // summary unless a call failed or waits on the user. A user toggle wins over
 // the automatic rule. A single-call segment is just its row.
-export function WorkSegment({ segment, onOpenFile }) {
+export const WorkSegment = memo(function WorkSegment({ segment, onOpenFile }) {
   const [override, setOverride] = useState(null);
   const [showEarlier, setShowEarlier] = useState(false);
   const single = segment.calls.length === 1;
@@ -59,4 +59,4 @@ export function WorkSegment({ segment, onOpenFile }) {
       </div></div>
     </section>
   );
-}
+});

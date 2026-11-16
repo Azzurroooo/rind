@@ -12,14 +12,14 @@ flowchart TB
     end
     C -->|"request_id + method"| B["协议边界"]
     B -->|"response / session/update"| C
-    subgraph Worker["Worker：Python 进程"]
+    subgraph Worker["Worker：TypeScript 运行时进程"]
         B --> S["Runtime Server"]
         S --> R["执行内核"]
         R --> F[("会话文件")]
     end
 ~~~
 
-CLI 的 [runtime-client.js](../../../frontend-cli/lib/runtime-client.js) 启动或连接 Worker；输入缓冲、光标、TTY 渲染留在 Node。Desktop 的 Electron main 管 Worker 子进程，renderer 只能通过 preload 暴露的方法调用。Web 连接 WebSocket；Mobile 复用 Web Surface，以 Capacitor 提供配对和原生能力，手机上没有 Python 内核。
+CLI 的 [runtime-client.js](../../../frontend-cli/lib/runtime-client.js) 启动或连接 Worker；输入缓冲、光标、TTY 渲染留在 CLI Surface。Desktop 的 Electron main 管 Worker 子进程，renderer 只能通过 preload 暴露的方法调用。Web 连接 WebSocket；Mobile 复用 Web Surface，以 Capacitor 提供配对和原生能力，手机上没有本地执行内核。
 
 **边界的收益是职责清楚。** 换一种界面不用复制模型循环；修改工具语义也不必把业务判断散落到多个 Surface。协议响应表示请求结束，独立的事件表示执行中的变化；界面不能把两者当作两次回答。
 

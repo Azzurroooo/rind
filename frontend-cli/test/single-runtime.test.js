@@ -17,13 +17,13 @@ import { removeRindHome } from "./helpers/rind-home.js";
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const rindBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));
 const runtimeModule = new URL("../../rind-runtime-client/shared-runtime.js", import.meta.url).href;
-const runtimeOptions = home => ({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot });
+const runtimeOptions = home => ({ rindHome: home, repoRoot });
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function runCli(home, cwd, ...args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [rindBin, ...args], { cwd, env: { ...process.env, RIND_HOME: home, RIND_PYTHON: process.env.RIND_PYTHON || "python", NO_COLOR: "1" }, windowsHide: true });
+    const child = spawn(process.execPath, [rindBin, ...args], { cwd, env: { ...process.env, RIND_HOME: home, NO_COLOR: "1" }, windowsHide: true });
     let stdout = "", stderr = "";
     child.stdout.on("data", chunk => { stdout += chunk; });
     child.stderr.on("data", chunk => { stderr += chunk; });
@@ -186,14 +186,14 @@ test("the management service reports one Runtime pid across connections", { time
   const host = await connectSharedRuntime(runtimeOptions(home));
   const hostInfo = await host.request("runtime/info");
   const { connectManagement } = await import("../../agent-management/dist/client.js");
-  const management = await connectManagement({ home, python: process.env.RIND_PYTHON || "python", repoRoot, start: false });
+  const management = await connectManagement({ home, repoRoot, start: false });
   t.after(() => { management.close(); host.close(); });
   await management.request("listSessions", { independent: true });
   const info = await management.request("serviceInfo");
   assert.ok(info.runtime, "the service is attached to the shared Runtime");
   assert.equal(info.runtime.pid, hostInfo.pid, "management reports the live Runtime pid");
   assert.equal(info.runtime.startedAt, hostInfo.startedAt);
-  const second = await connectManagement({ home, python: process.env.RIND_PYTHON || "python", repoRoot, start: false });
+  const second = await connectManagement({ home, repoRoot, start: false });
   t.after(() => second.close());
   assert.equal((await second.request("serviceInfo")).pid, info.pid, "one management service");
 });

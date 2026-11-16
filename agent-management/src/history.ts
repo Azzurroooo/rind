@@ -29,6 +29,16 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
     requireValue(scope.agentId && state.agents[scope.agentId], "NOT_FOUND", "Agent not found.");
     agentIds = [scope.agentId];
   }
+  const byWorkspace = new Map<string, Promise<Array<Record<string, unknown>>>>();
+  const listWorkspace = (workspace: string) => {
+    const key = workspaceKey(workspace);
+    let pending = byWorkspace.get(key);
+    if (!pending) {
+      pending = list(workspace);
+      byWorkspace.set(key, pending);
+    }
+    return pending;
+  };
   const groups = await Promise.all(agentIds.map(async agentId => {
     const registered = Object.values(state.sessions).filter(s => s.agentId === agentId && s.runtimeSessionId);
     const registeredByRuntimeId = new Map(registered.map(s => [s.runtimeSessionId, s]));
@@ -39,7 +49,7 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
     const defaultTeamId = activeTeams.length === 1 ? activeTeams[0] : undefined;
     const seen = new Set<string>();
     const entries: HistoryEntry[] = [];
-    for (const raw of await list(state.agents[agentId].canonicalWorkspace)) {
+    for (const raw of await listWorkspace(state.agents[agentId].canonicalWorkspace)) {
       const runtimeSessionId = string(raw.id) || string(raw.session_id);
       if (!runtimeSessionId || seen.has(runtimeSessionId)) continue;
       const owner = registeredByRuntimeId.get(runtimeSessionId);

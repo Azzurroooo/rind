@@ -6,7 +6,7 @@ Rind does not put every SKILL.md into every model request. The catalog tells the
 
 ~~~mermaid
 flowchart LR
-    LAYERS["Eight layers, in precedence order"] --> SCAN["Parse frontmatter with PyYAML"]
+    LAYERS["Eight layers, in precedence order"] --> SCAN["Parse YAML frontmatter"]
     IMPORTS["Session skill_sources"] --> SCAN
     SCAN --> INDEX["Session catalog: name · description · location"]
     INDEX --> CM["ContextManager injects available_skills"]
@@ -34,13 +34,13 @@ Each folder contributes its direct `<name>/SKILL.md` children. Folders starting 
 
 ## Built-in skills
 
-Built-in skills ship in the install as `agent/skills` and are read from `RIND_HOME/skills/.system`, so every way of installing Rind (installer, npm, portable, source) uses the same code and needs no install step. When a Worker starts, `install_system_skills` compares a SHA-256 of the bundled files with the `.bundle` marker in `.system`. A match costs one small read. A mismatch, after an update or on first start, copies the bundle beside `.system` under a file lock and swaps it in by renaming, so a reader sees the old copy or the new one, never a mix. Leftovers of an interrupted copy are removed. A failure is logged and does not stop the Worker; when `.system` holds no skill, `/skill` reports that built-in skills are missing.
+Built-in skills ship in the install as `runtime/skills` and are read from `RIND_HOME/skills/.system`, so every way of installing Rind (installer, npm, portable, source) uses the same code and needs no install step. When a Worker starts, `installSystemSkills` compares a SHA-256 of the bundled files with the `.bundle` marker in `.system`. A match costs one small read. A mismatch, after an update or on first start, copies the bundle beside `.system` under a file lock and swaps it in by renaming, so a reader sees the old copy or the new one, never a mix. Leftovers of an interrupted copy are removed. A failure is logged and does not stop the Worker; when `.system` holds no skill, `/skill` reports that built-in skills are missing.
 
 `.system` belongs to Rind and is replaced on update. A skill with the same name in `RIND_HOME/skills` overrides a built-in one.
 
 ## Parsing and problems
 
-The frontmatter is YAML and is read with `yaml.safe_load`. A value with an unquoted `key: a: b` colon is quoted and parsed again. Only three top-level fields count:
+The frontmatter is YAML and is parsed by the runtime's frontmatter parser. A value with an unquoted `key: a: b` colon is quoted and parsed again. Only three top-level fields count:
 
 - `name` defaults to the folder name and must use letters, digits, hyphens and underscores. A name that differs from its folder only warns.
 - `description` is required. Whitespace, including the lines of a `|` or `>` block, is joined into one line. The catalog shows at most 1024 characters.
@@ -62,6 +62,6 @@ SkillTurnCoordinator parses `/skill:name` and `$name` when user input is persist
 
 A skill body is instructions, not an executor, and it grants no tools. What a SKILL.md describes can still only be done through the tools the container already has, and `read_file` has no directory boundary. Project-level `.claude` and `.agents` folders in a cloned repository enter the catalog like `RIND.md` does; `/skill` shows where each skill comes from, and `/import` switches those layers off. The built-in `skill-creator` skill explains how to write one.
 
-Code entry points: [SkillRepository](../../../agent/infrastructure/skills.py), [parsing and catalog](../../../agent/domain/skills.py), [catalog and invocation](../../../agent/application/skill_selection.py), [/skill](../../../agent/runtime/server/commands/skill.py), [/import](../../../agent/runtime/server/commands/import_skills.py). Verification: [Skill repository](../../../test/test_skill_repository.py), [catalog and session](../../../test/test_skill_catalog_session.py), [commands](../../../test/test_skill_commands.py).
+Code entry points: [SkillRepository](../../../runtime/src/infrastructure/skills.ts), [parsing and catalog](../../../runtime/src/domain/models.ts), [catalog and invocation](../../../runtime/src/infrastructure/skills.ts), [/skill](../../../runtime/src/server/commands.ts), [/import](../../../runtime/src/server/commands.ts). Verification: [Skill repository](../../../runtime/test/tools.test.js), [catalog and session](../../../runtime/test/tools.test.js), [commands](../../../runtime/test/server-protocol.test.js).
 
 [Back to the series map](../README.md)

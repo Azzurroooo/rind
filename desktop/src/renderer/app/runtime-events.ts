@@ -1,5 +1,5 @@
 import { type RuntimeEvent } from "../../preload/types.ts"
-import { mergeTasks, normalizeTask } from "../task-monitor.ts"
+import { isYieldedRunning, mergeTasks, normalizeTask, pruneTaskState } from "../task-monitor.ts"
 import { createConversation, reduceEvent } from "../timeline-model.ts"
 import { decideTurnEvent } from "../turn-state.ts"
 import { asRecordText } from "./html.ts"
@@ -93,8 +93,12 @@ export function handleRuntimeEvent(envelope: RuntimeEvent) {
       if (task.bg_id) {
         if (state.taskMonitor.refreshing) state.taskMonitor.updates[task.bg_id] = task
         state.taskMonitor.tasks = mergeTasks(state.taskMonitor.tasks, [...state.taskMonitor.tasks, task])
-        if (!state.taskMonitor.cursors[task.bg_id] && !state.taskMonitor.reading.has(task.bg_id) && (task.stdout !== undefined || task.stderr !== undefined)) {
-          state.taskMonitor.outputs[task.bg_id] = task
+        if (isYieldedRunning(task)) {
+          if (!state.taskMonitor.cursors[task.bg_id] && !state.taskMonitor.reading.has(task.bg_id) && (task.stdout !== undefined || task.stderr !== undefined)) {
+            state.taskMonitor.outputs[task.bg_id] = task
+          }
+        } else {
+          pruneTaskState(state.taskMonitor)
         }
         renderTaskBadge()
         if (state.inspectorOpen && state.inspectorTab === "activity") renderTasksSection()

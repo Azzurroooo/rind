@@ -1,19 +1,14 @@
 // Formatters for process-like tools: bash, bash_output, task_control, delegate.
+import { classifyTaskStatus, unwrapNestedToolData } from "../../../../rind-runtime-client/tool-semantics.js";
 import { CAPS, meta } from "./caps.js";
 import { firstLine, firstText, plural, singleLine, textLines } from "./parse.js";
 
-const TASK_RUNNING = new Set(["starting", "running", "cancelling"]);
-const TASK_FAILED = new Set(["failed", "timed_out", "lost"]);
 const STOP_ACTIONS = new Set(["stop", "cancel", "kill", "terminate", "interrupt"]);
 const DELEGATE_TASK_MAX = 80;
 
 // Background task status (same mapping as the CLI's taskFinishState).
 export function taskFinishState(status) {
-  const value = String(status || "").toLowerCase();
-  if (TASK_RUNNING.has(value)) return "running";
-  if (TASK_FAILED.has(value)) return "error";
-  if (value === "cancelled" || value === "canceled") return "cancelled";
-  return value ? "success" : "";
+  return classifyTaskStatus(status);
 }
 
 function outputLines(record, text) {
@@ -77,19 +72,7 @@ export function formatTaskControl(tool, args, parts) {
 }
 
 function unwrapRecord(record, data) {
-  let current = record && typeof record === "object" ? record : {};
-  if (typeof data === "string") {
-    try {
-      const parsed = JSON.parse(data);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) current = parsed;
-    } catch {
-      // Plain string data.
-    }
-  }
-  if (current.result && typeof current.result === "object" && !Array.isArray(current.result)) {
-    return current.result;
-  }
-  return current;
+  return unwrapNestedToolData(typeof data === "string" ? data : record);
 }
 
 export function formatDelegate(tool, args, parts) {

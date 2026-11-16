@@ -14,7 +14,7 @@ flowchart LR
     R --> SURFACE["Surface"]
 ~~~
 
-stream_pump.py 把文本和工具参数按字符边界拆开，队列同时约束条数和序列化字节数；过大的非文本事件会明确失败。相邻助手文本最多等待 25 ms 或累积 8 KiB，工具参数、用量和终止边界不乱序。消费者慢时生产者等待空间，不无限堆积事件。
+`turn-runner.ts` 中的流泵把文本和工具参数按字符边界拆开，队列同时约束条数和序列化字节数；过大的非文本事件会明确失败。相邻助手文本最多等待 25 ms 或累积 8 KiB，工具参数、用量和终止边界不乱序。消费者慢时生产者等待空间，不无限堆积事件。
 
 取消会打断正在读取的模型流；生产结束和取消通过独立唤醒信号通知消费者，不依赖向已满队列塞结束标记。解析器收集完整文本、tool calls、reasoning 和 finish reason，只有用量被正规化后才写入用量记录。
 
@@ -24,6 +24,6 @@ stream_pump.py 把文本和工具参数按字符边界拆开，队列同时约�
 
 这层队列约束的是待转发事件，不等于完整回答或 SDK 内部缓冲也只有 1 MiB。消费者停止、取消或解析失败时都必须关闭底层 stream 并结束读取任务，否则“有界队列”仍可能留下活着的网络资源。相关测试要同时检查顺序、背压和清理。
 
-代码入口：[流泵](../../../agent/runtime/core/stream_pump.py)、[解析器](../../../agent/runtime/core/stream_parser.py)。验证：[流泵边界](../../../test/test_stream_pump.py)、[消息解析](../../../test/test_message_stream_parser.py)。
+代码入口：[流泵](../../../runtime/src/core/turn-runner.ts)、[解析器](../../../runtime/src/core/turn-runner.ts)。验证：[流泵边界](../../../runtime/test/context-and-turn.test.js)、[消息解析](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

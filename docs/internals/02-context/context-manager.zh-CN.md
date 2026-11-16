@@ -27,6 +27,6 @@ ContextBuildResult 同时携带 messages、internal_messages、stats 和 decisio
 
 历史读取失败会变成 PersistenceError；不能把读取异常当作“这是一个空会话”继续执行。这是投影入口的关键失败边界。
 
-代码入口：[ContextManager](../../../agent/application/context/manager.py)、[会话投影](../../../agent/infrastructure/persistence/message_projector.py)、[上下文快照](../../../agent/application/context/snapshot.py)。验证：[ContextManager 测试](../../../test/test_context_manager.py)、[上下文快照](../../../test/test_context_snapshot.py)。
+代码入口：[ContextManager](../../../runtime/src/application/context-manager.ts)、[会话投影](../../../runtime/src/infrastructure/persistence/session-store.ts)、[上下文快照](../../../runtime/src/application/context-manager.ts)。验证：[ContextManager 测试](../../../runtime/test/context-and-turn.test.js)、[上下文快照](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

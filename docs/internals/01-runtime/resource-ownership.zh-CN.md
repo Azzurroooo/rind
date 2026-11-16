@@ -40,6 +40,6 @@ ExecutionCoordinator 只保留活跃会话的容器；回合完成且没有排�
 
 因此“低负载”来自寿命分离，而非所有资源都无状态。共享服务也不意味着共享一个永不关闭的模型客户端；后者属于活跃容器。
 
-代码入口：[Worker](../../../agent/runtime/server/worker.py)、[执行协调](../../../agent/runtime/server/execution.py)、[装配根](../../../agent/bootstrap/container.py)。验证：[空闲释放测试](../../../test/test_runtime_worker.py)、[Shell 生命周期](../../../test/test_worker_shell_lifecycle.py)。
+代码入口：[Worker](../../../runtime/src/server/worker.ts)、[执行协调](../../../runtime/src/server/execution.ts)、[装配根](../../../runtime/src/core/turn-runner.ts)。验证：[空闲释放测试](../../../runtime/test/server-protocol.test.js)、[Shell 生命周期](../../../runtime/test/tools.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { ArrowDown, ChevronDown, ChevronRight, FileDiff, FileText, Quote } from "lucide-react";
 import { QuestionCard } from "../QuestionCard.jsx";
 import { WorkSegment } from "../tools/WorkSegment.jsx";
@@ -11,21 +11,11 @@ import { AssistantMessage, StreamingMessage, SystemNote, UserMessage } from "./M
 // and auto-follow pauses.
 const DETACH_THRESHOLD_PX = 48;
 
-// Fork point for an assistant reply: the next server-known user message after
-// it (fork keeps everything before that message). Null forks the whole session.
-function forkPointAfter(entries, index) {
-  for (let cursor = index + 1; cursor < entries.length; cursor += 1) {
-    const entry = entries[cursor];
-    if (entry.role === "user" && isServerMessageId(entry.id)) return entry.id;
-  }
-  return null;
-}
-
 // Conversation column (spec section 4): an 800px reading column with user
 // bubbles, full-width assistant prose, folded work segments, questions, the
 // streaming caret. Working status lives in the fixed chat header. Auto-follow sticks to the
 // bottom unless the user scrolled up; "Jump to latest" offers the way back.
-export const Conversation = forwardRef(function Conversation({
+export const Conversation = memo(forwardRef(function Conversation({
   messages,
   draft,
   active,
@@ -130,11 +120,26 @@ export const Conversation = forwardRef(function Conversation({
     }
   }
 
-  function forkHandler(entry) {
-    if (!canFork || !onFork) return undefined;
-    const index = entries.indexOf(entry);
-    return () => onFork(forkPointAfter(entries, index));
-  }
+  const forkPointsByEntry = useMemo(() => {
+    const map = new Map();
+    let nextUserMessageId = null;
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      map.set(entry, nextUserMessageId);
+      if (entry.role === "user" && isServerMessageId(entry.id)) {
+        nextUserMessageId = entry.id;
+      }
+    }
+    return map;
+  }, [entries]);
+  const handleForkEntry = useCallback(
+    (entry) => {
+      if (!onFork) return;
+      onFork(forkPointsByEntry.get(entry) ?? null);
+    },
+    [onFork, forkPointsByEntry],
+  );
+  const effectiveForkHandler = canFork && onFork ? handleForkEntry : undefined;
 
   function renderEntry(item) {
     const entry = item.entry;
@@ -151,7 +156,7 @@ export const Conversation = forwardRef(function Conversation({
           key={item.key}
           message={entry}
           latest={entry.id === lastAssistantId && !active}
-          onFork={forkHandler(entry)}
+          onFork={effectiveForkHandler}
           onQuote={onQuote}
         />
       );
@@ -285,6 +290,6 @@ export const Conversation = forwardRef(function Conversation({
       )}
     </section>
   );
-});
+}));
 
 export default Conversation;

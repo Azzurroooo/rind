@@ -17,6 +17,6 @@ PNG, JPEG, WebP, GIF, and BMP are supported; animated images use the first frame
 
 Attachments are persisted along with messages and tool results, and a fork copies the relevant snapshots. After compaction, old images are not automatically attached to model requests again; the handoff saves references for later inspection with read_file. Image I/O runs on a thread, and cancellation must wait for started Pillow operations to finish; trace masks the image bytes.
 
-Code entry points: [image processing](../../../agent/infrastructure/images.py), [request preparation](../../../agent/application/images.py), [attachment storage](../../../agent/infrastructure/persistence/image_attachments.py). Verification: [image attachments](../../../test/test_image_attachments.py), [request serialization](../../../test/test_image_requests.py).
+Code entry points: [image processing](../../../runtime/src/infrastructure/images.ts), [request preparation](../../../runtime/src/infrastructure/images.ts), [attachment storage](../../../runtime/src/infrastructure/images.ts). Verification: [image attachments](../../../runtime/test/persistence.test.js), [request serialization](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

@@ -22,6 +22,6 @@ flowchart TB
 
 Web 内容仍是外部数据，不因为转成 Markdown 就变成可信指令。取消在下载块、重定向及提取阶段边界检查；同步网络调用正在等待时，响应速度仍受请求 timeout 约束。
 
-代码入口：[搜索](../../../agent/infrastructure/tools/web/search.py)、[抓取](../../../agent/infrastructure/tools/web/fetch.py)、[会话池](../../../agent/infrastructure/tools/web/session_pool.py)。验证：[本地 Web 工具回归](../../../test/test_web_tool.py)。
+代码入口：[搜索](../../../runtime/src/infrastructure/tools/web-tools.ts)、[抓取](../../../runtime/src/infrastructure/tools/web-tools.ts)、[会话池](../../../runtime/src/infrastructure/tools/web-tools.ts)。验证：[本地 Web 工具回归](../../../runtime/test/tools.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

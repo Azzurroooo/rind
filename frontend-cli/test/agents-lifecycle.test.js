@@ -36,7 +36,7 @@ test("resuming a plain conversation from another folder opens it in the folder i
 
 test("running Rind inside the Manager's folder enters the Manager, not a plain session", { timeout: 90000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-manager-entry-"));
-  const launch = { home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  const launch = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   const managerFolder = path.join(home, "agents-management", "manager");
   await mkdir(managerFolder, { recursive: true });
   const stopServices = () => new Promise(resolve => {
@@ -152,7 +152,7 @@ async function cli(t, { handoff, columns = 100, rows = 26, tty = true, baseUrl =
     const { runFrontendCliApp } = await import(${JSON.stringify(new URL("../lib/frontend-cli-implementation.js", import.meta.url).href)});
     await runFrontendCliApp(['--cwd', ${JSON.stringify(workspace)}]);
   `;
-  const env = { ...process.env, RIND_HOME: home, RIND_PYTHON: process.env.RIND_PYTHON || "python", NO_COLOR: "1", ...(handoff ? { [HANDOFF_ENV]: handoff.file } : {}) };
+  const env = { ...process.env, RIND_HOME: home, NO_COLOR: "1", ...(handoff ? { [HANDOFF_ENV]: handoff.file } : {}) };
   if (!handoff) delete env[HANDOFF_ENV];
   const child = spawn(process.execPath, ["--input-type=module", "-e", script], { cwd: workspace, env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   const output = createVirtualOutput({ columns, rows });

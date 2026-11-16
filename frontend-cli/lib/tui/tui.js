@@ -605,6 +605,17 @@ export function createTui(options = {}) {
     if (value.includes("\n") || value.includes("\r")) {
       value = value.replace(/\r?\n/g, " ");
     }
+    if (value.length <= width && !value.includes("\x1b")) {
+      let ascii = true;
+      for (let i = 0; i < value.length; i += 1) {
+        const c = value.charCodeAt(i);
+        if (c < 0x20 || c > 0x7e) {
+          ascii = false;
+          break;
+        }
+      }
+      if (ascii) return value;
+    }
     const measured = textWidth(value);
     if (measured > width) {
       value = truncateToWidth(value, width);

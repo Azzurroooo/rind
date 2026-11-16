@@ -1,3 +1,9 @@
+import {
+  classifyTaskStatus,
+  parseStructuredToolPayload,
+  toolTruncationMeta,
+  unwrapNestedToolData,
+} from "../../rind-runtime-client/tool-semantics.js";
 import { clipCells } from "./text-width.js";
 import { breathingAccent, paintRaw } from "./theme.js";
 
@@ -64,18 +70,8 @@ export function parseToolArguments(event) {
 }
 
 export function parseToolResult(result) {
-  if (result && typeof result === "object" && !Array.isArray(result)) {
-    return result;
-  }
-  try {
-    const parsed = JSON.parse(String(result || ""));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return parsed;
-  } catch {
-    return {};
-  }
+  const { structured, payload } = parseStructuredToolPayload(result);
+  return structured ? payload : {};
 }
 
 // Blocks created from argless events (bare announce, session replay) can
@@ -144,14 +140,8 @@ function resultDataFromRaw(result) {
 export function delegatedTask(result) {
   const payload = parseToolResult(result);
   if (payload.ok === false) return null;
-  let data = payload.data;
-  if (typeof data === "string") {
-    data = parseToolResult(data);
-  }
-  if (data && typeof data === "object" && !Array.isArray(data) && data.result && typeof data.result === "object") {
-    data = data.result;
-  }
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
+  const data = unwrapNestedToolData(payload.data);
+  if (!Object.keys(data).length) {
     return null;
   }
   if (Array.isArray(data.settled)) {
@@ -464,8 +454,9 @@ function shellOutputLines(context, limit) {
     all.pop();
   }
   const lines = all.slice(-limit).map((line) => dim(`    ${clipText(line, context.width ?? 80, 6)}`));
-  if (meta.truncated && meta.total_bytes) {
-    lines.push(dim(`    … output truncated (${Number(meta.total_bytes)} bytes total)`));
+  const { truncated, totalBytes } = toolTruncationMeta(meta);
+  if (truncated && totalBytes) {
+    lines.push(dim(`    … output truncated (${totalBytes} bytes total)`));
   }
   return { lines, total: all.length };
 }
@@ -589,9 +580,10 @@ const BASH_OUTPUT_RENDERER = {
 
 function taskFinishState(state, data) {
   if (state.kind !== "ok") return state;
-  if (["starting", "running", "cancelling"].includes(data.status)) return { kind: "running" };
-  if (["failed", "timed_out", "lost"].includes(data.status)) return { kind: "error" };
-  if (data.status === "cancelled") return { kind: "cancelled" };
+  const classified = classifyTaskStatus(data?.status);
+  if (classified === "running" || classified === "error" || classified === "cancelled") {
+    return { kind: classified };
+  }
   return state;
 }
 
@@ -624,8 +616,8 @@ const READ_RENDERER = {
       return titleFor(state, main);
     }
     const { meta } = resultData(context);
-    const morePages = meta.truncated || (meta.next_offset !== undefined && meta.next_offset !== null);
-    return titleFor(state, morePages ? `${main} ${dim("(more pages)")}` : main);
+    const { hasMorePages } = toolTruncationMeta(meta);
+    return titleFor(state, hasMorePages ? `${main} ${dim("(more pages)")}` : main);
   },
   body(context, width, limit) {
     const { payload } = resultData(context);

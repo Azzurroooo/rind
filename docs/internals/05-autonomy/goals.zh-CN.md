@@ -28,6 +28,6 @@ Plan 保存当前步骤，Goal 保存整体目标，Task 保存真实进程状�
 
 例如目标是“修复并验证”，模型启动测试后可以结束当前回合。若还有 on_exit 测试任务，协调器等待通知而不是不停发“继续”；测试终态送达后走普通回合，模型据结果修复或调用 update_goal。省下空转来自门控条件，而不是强迫模型永远保持一条长连接。
 
-代码入口：[Goal 模型](../../../agent/domain/goal.py)、[Goal 工具](../../../agent/infrastructure/tools/goal.py)、[检查点提示](../../../agent/prompts.py)、[调度](../../../agent/runtime/server/execution.py)。验证：[运行时流程](../../../test/test_async_runtime.py)、[续接与 Goal](../../../test/test_task_continuation.py)。
+代码入口：[Goal 模型](../../../runtime/src/domain/models.ts)、[Goal 工具](../../../runtime/src/infrastructure/tools/control-tools.ts)、[检查点提示](../../../runtime/src/prompts.ts)、[调度](../../../runtime/src/server/execution.ts)。验证：[运行时流程](../../../runtime/test/context-and-turn.test.js)、[续接与 Goal](../../../runtime/test/server-protocol.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

@@ -33,6 +33,6 @@ flowchart LR
 
 摘要模型的 reasoning 不作为新的业务推理历史保留；投影为 handoff 使用固定的非空 reasoning 标记满足相应兼容要求。压缩记录与边界消息分开落盘，只有匹配的有效对才被采用；这不是跨文件 ACID 事务，详见[会话存储](../03-persistence/session-store.zh-CN.md)。
 
-代码入口：[压缩服务](../../../agent/application/context/compaction.py)、[handoff 构造](../../../agent/application/context/handoff.py)、[投影](../../../agent/infrastructure/persistence/message_projector.py)。验证：[压缩服务](../../../test/test_compaction_service.py)、[边界恢复](../../../test/test_compact_pipeline.py)。
+代码入口：[压缩服务](../../../runtime/src/application/context-manager.ts)、[handoff 构造](../../../runtime/src/application/context-manager.ts)、[投影](../../../runtime/src/infrastructure/persistence/session-store.ts)。验证：[压缩服务](../../../runtime/test/context-and-turn.test.js)、[边界恢复](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

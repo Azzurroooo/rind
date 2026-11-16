@@ -2,19 +2,20 @@
 
 | 类型 | 位置 | 何时执行 | 模型 |
 | --- | --- | --- | --- |
-| 自动回归 | `test/test_*.py`、`frontend-cli/test/*.test.js`，以及各前端已有测试 | 修改代码后按影响范围自动执行；可进入 CI | mock 或本地 fake provider，不消耗真实模型 token |
+| 自动回归 | `runtime/test/*.test.js`、`agent-management/test/*.test.js`、`frontend-cli/test/*.test.js`，以及各前端已有测试 | 修改代码后按影响范围自动执行；可进入 CI | mock 或本地 fake provider，不消耗真实模型 token |
 | 用户流程验收 | [`manual/`](manual/README.md) | 用户明确要求后，按指定场景执行 | 按用例使用真实模型，或不调用模型 |
 
-自动回归包括单元、模块集成和可重复的进程级测试。`test_journeys_user.py`、`test_context_journeys.py`、`frontend-cli/test/auth-journey.test.js` 等现有脚本使用本地模拟模型，仍属于自动回归。它们验证流程契约，但不能证明真实模型会遵循 RIND.md、保留压缩后的任务信息或完成目标。
+自动回归包括单元、模块集成和可重复的进程级测试。`runtime/test/server-protocol.test.js`、`frontend-cli/test/auth-journey.test.js` 等现有脚本使用本地模拟模型，仍属于自动回归。它们验证流程契约，但不能证明真实模型会遵循 RIND.md、保留压缩后的任务信息或完成目标。
 
-保留现有自动测试路径，避免为分类搬动导入和测试入口。第二类使用独立目录和人工验收文档，不新增自动执行器；Markdown 不会被 pytest 或 Node 测试命令收集。
+保留现有自动测试路径，避免为分类搬动导入和测试入口。第二类使用独立目录和人工验收文档，不新增自动执行器；Markdown 不会被 Node 测试命令收集。
 
 ## 自动回归入口
 
 在仓库根目录执行，可按改动范围选择单个文件：
 
 ```sh
-python -m pytest test/ -q
+npm --prefix runtime test
+npm --prefix agent-management test
 npm --prefix frontend-cli test
 ```
 

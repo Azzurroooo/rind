@@ -17,6 +17,6 @@ flowchart LR
 
 附件跟随消息和工具结果持久化；fork 会复制相关快照。压缩后旧图片不会自动再次附着到模型请求，handoff 保存引用供后续 read_file 查看。图片 I/O 在线程中进行，取消要等待已开始的 Pillow 操作收尾；trace 会遮盖图片字节。
 
-代码入口：[图片处理](../../../agent/infrastructure/images.py)、[请求准备](../../../agent/application/images.py)、[附件存储](../../../agent/infrastructure/persistence/image_attachments.py)。验证：[图片附件](../../../test/test_image_attachments.py)、[请求序列化](../../../test/test_image_requests.py)。
+代码入口：[图片处理](../../../runtime/src/infrastructure/images.ts)、[请求准备](../../../runtime/src/infrastructure/images.ts)、[附件存储](../../../runtime/src/infrastructure/images.ts)。验证：[图片附件](../../../runtime/test/persistence.test.js)、[请求序列化](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

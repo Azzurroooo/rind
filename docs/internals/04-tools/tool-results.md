@@ -25,6 +25,6 @@ The unified payload uses ok, tool, data or error, and may carry error_type, meta
 
 The saved model_content is the basis for replay; later changes to the display rules do not re-truncate old sessions. Complete output is not guaranteed indefinitely either: Shell has its own output quota and expiry cleanup, and when output is missing the reason must be reported.
 
-Code entry points: [result normalization](../../../agent/application/tools/result_normalizer.py), [result contract](../../../agent/domain/tool_result.py), [output storage](../../../agent/infrastructure/persistence/tool_output_store.py). Verification: [normalization tests](../../../test/test_tool_result_normalizer.py), [file paging](../../../test/test_file_paging.py).
+Code entry points: [result normalization](../../../runtime/src/infrastructure/persistence/result-normalizer.ts), [result contract](../../../runtime/src/domain/models.ts), [output storage](../../../runtime/src/infrastructure/persistence/session-store.ts). Verification: [normalization tests](../../../runtime/test/persistence.test.js), [file paging](../../../runtime/test/tools.test.js).
 
 [Back to the series map](../README.md)

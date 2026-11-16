@@ -38,7 +38,7 @@ for (const name of ['README.md', 'README.zh-CN.md']) {
   assert.ok(text.indexOf('agents-management.png') < text.indexOf('rind-clients.png'));
   assert.ok(!text.includes('rind agents team create'));
   assert.doesNotMatch(text, /<details>|<summary>/);
-  assert.match(text, /python -m pip install -r requirements-runtime\.txt/);
+  assert.match(text, /npm run build --prefix runtime/);
   assert.match(text, /npm run build --prefix agent-management/);
   assert.match(text, /node frontend-cli\/bin\/rind\.js/);
   for (const match of text.matchAll(/(?:\]\(|(?:href|src)=")([^\s"\)]+)/g)) {

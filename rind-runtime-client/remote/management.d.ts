@@ -42,7 +42,6 @@ export function createManagementBridge(options: {
   getRindHome?: () => string;
   repoRoot?: string;
   getRuntimePath?: () => string;
-  getPython?: () => string | undefined;
   requestRuntime: (method: string, params?: Record<string, unknown>) => Promise<any>;
   ensureRuntimeForWorkspace?: (workspaceRoot?: string) => Promise<void>;
   isSharedRuntime?: () => boolean;

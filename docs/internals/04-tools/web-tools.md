@@ -22,6 +22,6 @@ Fetching uses a streaming download bounded to a 10 MiB body, follows at most 5 r
 
 Web content is still external data, and does not become a trusted instruction just because it was converted to Markdown. Cancellation is checked at the download-chunk, redirect, and extraction stage boundaries; while a synchronous network call is waiting, the response speed is still constrained by the request timeout.
 
-Code entry points: [search](../../../agent/infrastructure/tools/web/search.py), [fetch](../../../agent/infrastructure/tools/web/fetch.py), [session pool](../../../agent/infrastructure/tools/web/session_pool.py). Verification: [local web tool regression](../../../test/test_web_tool.py).
+Code entry points: [search](../../../runtime/src/infrastructure/tools/web-tools.ts), [fetch](../../../runtime/src/infrastructure/tools/web-tools.ts), [session pool](../../../runtime/src/infrastructure/tools/web-tools.ts). Verification: [local web tool regression](../../../runtime/test/tools.test.js).
 
 [Back to the series map](../README.md)

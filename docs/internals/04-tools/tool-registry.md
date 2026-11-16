@@ -25,6 +25,6 @@ The advertised schema determines what the model can request; the handler signatu
 
 Adding a tool is therefore not only writing a function; it must also answer three questions: how the arguments are normalized, how success and failure form a structured result, and under which container configuration the tool is exposed. Large results and results carrying images then go through the unified normalization and attachment path, so that a single tool cannot bypass the whole system's output budget.
 
-Code entry points: [ToolSpec](../../../agent/infrastructure/tools/spec.py), [catalog](../../../agent/infrastructure/tools/catalog.py), [registry](../../../agent/infrastructure/tools/registry.py). Verification: [registry tests](../../../test/test_tool_registry.py).
+Code entry points: [ToolSpec](../../../runtime/src/infrastructure/tools/registry.ts), [catalog](../../../runtime/src/infrastructure/tools/control-tools.ts), [registry](../../../runtime/src/infrastructure/tools/registry.ts). Verification: [registry tests](../../../runtime/test/tools.test.js).
 
 [Back to the series map](../README.md)

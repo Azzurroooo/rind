@@ -28,6 +28,6 @@ A Plan holds the current step, a Goal the overall objective, and a Task the real
 
 For example, given the objective "fix and verify", the model may end the current turn once it has started the tests. If an on_exit test task remains, the coordinator waits for the notification instead of repeatedly sending "continue"; once the test's terminal state arrives, it runs an ordinary turn, and the model either fixes the issue or calls update_goal based on the result. The saved busy-waiting comes from these gating conditions, not from forcing the model to keep a single long connection alive forever.
 
-Code entry points: [Goal model](../../../agent/domain/goal.py), [Goal tool](../../../agent/infrastructure/tools/goal.py), [checkpoint prompt](../../../agent/prompts.py), [scheduling](../../../agent/runtime/server/execution.py). Verification: [runtime flow](../../../test/test_async_runtime.py), [continuation and Goal](../../../test/test_task_continuation.py).
+Code entry points: [Goal model](../../../runtime/src/domain/models.ts), [Goal tool](../../../runtime/src/infrastructure/tools/control-tools.ts), [checkpoint prompt](../../../runtime/src/prompts.ts), [scheduling](../../../runtime/src/server/execution.ts). Verification: [runtime flow](../../../runtime/test/context-and-turn.test.js), [continuation and Goal](../../../runtime/test/server-protocol.test.js).
 
 [Back to the series map](../README.md)

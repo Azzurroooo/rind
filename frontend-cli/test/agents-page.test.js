@@ -34,7 +34,7 @@ test("real CLI empty-prompt entry returns to an editable conversation repeatedly
     const { runFrontendCliApp } = await import(${JSON.stringify(new URL("../lib/frontend-cli-implementation.js", import.meta.url).href)});
     await runFrontendCliApp(['--cwd', ${JSON.stringify(workspace)}, '--standalone']);
   `;
-  const child = spawn(process.execPath, ["--input-type=module", "-e", script], { cwd: workspace, env: { ...process.env, RIND_HOME: home, RIND_PYTHON: process.env.RIND_PYTHON || "python", NO_COLOR: "1" }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const child = spawn(process.execPath, ["--input-type=module", "-e", script], { cwd: workspace, env: { ...process.env, RIND_HOME: home, NO_COLOR: "1" }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   const output = createVirtualOutput({ columns: 100, rows: 26 });
   child.stdout.on("data", value => output.output.write(value));
   let errors = ""; child.stderr.on("data", value => { errors += value; });

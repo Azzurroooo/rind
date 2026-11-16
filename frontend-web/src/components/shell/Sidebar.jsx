@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   Archive,
@@ -35,7 +35,7 @@ import { sessionIdOf } from "../../methods.js";
 
 const DEFAULT_SIDEBAR_SESSIONS_LIMIT = 5;
 
-export function Sidebar({
+export const Sidebar = memo(function Sidebar({
   sessions,
   activeId,
   unreadIds,
@@ -981,4 +981,4 @@ export function Sidebar({
       />
     </aside>
   );
-}
+});

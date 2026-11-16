@@ -37,10 +37,11 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   let startupKey = "";
   let turnContext = "";
   let frameTime = now();
+  let batchDepth = 0;
   const runningTools = new Set();
 
   function redraw(force = false) {
-    if (!terminalUi || state.runtime.status === "closing") {
+    if (!terminalUi || state.runtime.status === "closing" || (batchDepth > 0 && !force)) {
       return;
     }
     if (startupBlock) {
@@ -60,6 +61,8 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     const backgroundWait = waitingForBackground();
     const delegatedWait = waitingForDelegations();
     const inputSession = state.input.session;
+    const rawElapsedMs = running && state.display.activityStartedAt ? Math.max(0, frameTime - state.display.activityStartedAt)
+      : backgroundWait ? Math.max(0, frameTime - backgroundWait.started_at * 1000) : 0;
     return {
       running,
       backgroundWait,
@@ -68,13 +71,14 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         ? "Compacting"
         : "Working"),
       frame: state.display.activityFrame,
-      elapsedMs: running && state.display.activityStartedAt ? Math.max(0, frameTime - state.display.activityStartedAt)
-        : backgroundWait ? Math.max(0, frameTime - backgroundWait.started_at * 1000) : 0,
+      elapsedMs: Math.floor(rawElapsedMs / 1000) * 1000,
       pendingInputs: state.input.pending,
       inputMode: inputSession?.mode || "prompt",
       menuOpen: Boolean(inputSession?.menuState?.matches?.()?.length),
       emptyInput: inputSession?.mode === "prompt" && inputSession.editor?.input() === "",
       leaveArmed: Boolean(state.display.leaveArmed),
+      backgroundCount: Number(state.session?.info?.background_count) || 0,
+      hasActiveBash: [...runningTools].some((tool) => tool.name === "bash"),
     };
   }
 
@@ -181,6 +185,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function settleToolGroup() {
+    runningTools.clear();
     if (!activeToolGroup) {
       return false;
     }
@@ -352,11 +357,9 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         transcript.changed();
         assistantMessage = null;
       }
-      state.display.assistantHeaderShown = false;
       return;
     }
     legacyRenderer.finish();
-    state.display.assistantHeaderShown = false;
   }
 
   function beginQuestion(event) {
@@ -365,14 +368,14 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       log(() => questionText(event));
       return;
     }
-    const state = { event, answer: null };
+    const questionEntry = { event, answer: null };
     const block = new DynamicBlock(() => {
-      const text = state.answer === null
-        ? questionText(state.event)
-        : questionAnswerText(state.event, state.answer);
+      const text = questionEntry.answer === null
+        ? questionText(questionEntry.event)
+        : questionAnswerText(questionEntry.event, questionEntry.answer);
       return text.split("\n");
     });
-    questionBlock = { state, block };
+    questionBlock = { state: questionEntry, block };
     appendBlock(block);
   }
 
@@ -482,8 +485,8 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       toolBlocks.set(key, block);
       appendToolBlock(block);
     }
-    block.finish(event, fileChange);
     runningTools.delete(block);
+    block.finish(event, fileChange);
   }
 
   // Another conversation replaces this one on screen; none of its blocks are kept.
@@ -537,102 +540,107 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function renderHistory(messages, { notice = "", pendingDelegations = null } = {}) {
-    if (notice) {
-      appendBlock(new TextBlock(outputBlockText(notice), { leading: blockCount > 0 }));
-    }
-    const pendingTools = new Map();
-    const delegated = state.display.pendingDelegations ||= new Map();
-    delegated.clear();
-    const flushPendingTools = () => {
-      for (const [toolCallId, tool] of pendingTools.entries()) {
-        beginTool({
-          tool_call_id: toolCallId,
-          tool_name: tool.name,
-          args_preview: tool.arguments,
-        });
-        finishTool({
-          tool_call_id: toolCallId,
-          tool_name: tool.name,
-          status: "completed",
-          result: "",
-        });
+    batchDepth += 1;
+    try {
+      if (notice) {
+        appendBlock(new TextBlock(outputBlockText(notice), { leading: blockCount > 0 }));
       }
-      pendingTools.clear();
-    };
-    for (const message of Array.isArray(messages) ? messages : []) {
-      const role = String(message?.role || "");
-      if (role === "user") {
-        flushPendingTools();
-        closeAssistant();
-        const content = messageText(message?.content);
-        if (message?._rind_meta?.kind === "team_delivery" || content.startsWith("Delegated work settled:\n")) {
-          for (const taskId of settledDelegations(content)) {
-            delegated.delete(taskId);
-          }
-          writeDelivery(content);
-        } else {
-          writeUserInput(content);
-        }
-        continue;
-      }
-      if (role === "assistant") {
-        flushPendingTools();
-        const content = messageText(message?.content);
-        if (content.trim()) {
-          assistantAppend(content);
-          closeAssistant();
-        }
-        for (const call of Array.isArray(message?.tool_calls) ? message.tool_calls : []) {
-          const toolCallId = String(call?.id || "");
-          const toolName = String(call?.function?.name || "tool");
-          if (toolCallId) {
-            pendingTools.set(toolCallId, {
-              name: toolName,
-              arguments: String(call?.function?.arguments || ""),
-            });
-          }
-        }
-        continue;
-      }
-      if (role === "tool") {
-        const toolCallId = String(message?.tool_call_id || "");
-        const tool = pendingTools.get(toolCallId) || { name: "tool", arguments: "" };
-        pendingTools.delete(toolCallId);
-        const content = messageText(message?.content);
-        if (tool.name === "delegate") {
-          rememberDelegation(delegated, content, state.session.info.session_id);
-        }
-        beginTool({
-          tool_call_id: toolCallId,
-          tool_name: tool.name,
-          args_preview: tool.arguments,
-        });
-        finishTool({
-          tool_call_id: toolCallId,
-          tool_name: tool.name,
-          status: String(message?.status || "completed"),
-          ...(message?.error_type ? { error_type: String(message.error_type) } : {}),
-          ...(Number.isFinite(message?.duration_ms) ? { duration_ms: Number(message.duration_ms) } : {}),
-          result: content,
-        });
-      }
-    }
-    flushPendingTools();
-    settleToolGroup();
-    closeAssistant();
-    // A tail page may omit the delegate call. Management owns the full task
-    // state and overrides reconstruction when that snapshot is available.
-    if (Array.isArray(pendingDelegations)) {
+      const pendingTools = new Map();
+      const delegated = state.display.pendingDelegations ||= new Map();
       delegated.clear();
-      for (const task of pendingDelegations) delegated.set(task.taskId, task);
+      const flushPendingTools = () => {
+        for (const [toolCallId, tool] of pendingTools.entries()) {
+          beginTool({
+            tool_call_id: toolCallId,
+            tool_name: tool.name,
+            args_preview: tool.arguments,
+          });
+          finishTool({
+            tool_call_id: toolCallId,
+            tool_name: tool.name,
+            status: "completed",
+            result: "",
+          });
+        }
+        pendingTools.clear();
+      };
+      for (const message of Array.isArray(messages) ? messages : []) {
+        const role = String(message?.role || "");
+        if (role === "user") {
+          flushPendingTools();
+          closeAssistant();
+          const content = messageText(message?.content);
+          if (message?._rind_meta?.kind === "team_delivery" || content.startsWith("Delegated work settled:\n")) {
+            for (const taskId of settledDelegations(content)) {
+              delegated.delete(taskId);
+            }
+            writeDelivery(content);
+          } else {
+            writeUserInput(content);
+          }
+          continue;
+        }
+        if (role === "assistant") {
+          flushPendingTools();
+          const content = messageText(message?.content);
+          if (content.trim()) {
+            assistantAppend(content);
+            closeAssistant();
+          }
+          for (const call of Array.isArray(message?.tool_calls) ? message.tool_calls : []) {
+            const toolCallId = String(call?.id || "");
+            const toolName = String(call?.function?.name || "tool");
+            if (toolCallId) {
+              pendingTools.set(toolCallId, {
+                name: toolName,
+                arguments: String(call?.function?.arguments || ""),
+              });
+            }
+          }
+          continue;
+        }
+        if (role === "tool") {
+          const toolCallId = String(message?.tool_call_id || "");
+          const tool = pendingTools.get(toolCallId) || { name: "tool", arguments: "" };
+          pendingTools.delete(toolCallId);
+          const content = messageText(message?.content);
+          if (tool.name === "delegate") {
+            rememberDelegation(delegated, content, state.session.info.session_id);
+          }
+          beginTool({
+            tool_call_id: toolCallId,
+            tool_name: tool.name,
+            args_preview: tool.arguments,
+          });
+          finishTool({
+            tool_call_id: toolCallId,
+            tool_name: tool.name,
+            status: String(message?.status || "completed"),
+            ...(message?.error_type ? { error_type: String(message.error_type) } : {}),
+            ...(Number.isFinite(message?.duration_ms) ? { duration_ms: Number(message.duration_ms) } : {}),
+            result: content,
+          });
+        }
+      }
+      flushPendingTools();
+      settleToolGroup();
+      closeAssistant();
+      // A tail page may omit the delegate call. Management owns the full task
+      // state and overrides reconstruction when that snapshot is available.
+      if (Array.isArray(pendingDelegations)) {
+        delegated.clear();
+        for (const task of pendingDelegations) delegated.set(task.taskId, task);
+      }
+      // Restoring a leader that still waits for delegated work says so, the same
+      // way a finished turn does.
+      if (delegated.size) {
+        const assignees = [...delegated.values()].map(task => task.assignee);
+        log(() => delegatedWaitingLine(assignees));
+      }
+      refreshInputState();
+    } finally {
+      batchDepth -= 1;
     }
-    // Restoring a leader that still waits for delegated work says so, the same
-    // way a finished turn does.
-    if (delegated.size) {
-      const assignees = [...delegated.values()].map(task => task.assignee);
-      log(() => delegatedWaitingLine(assignees));
-    }
-    refreshInputState();
     redraw(true);
   }
 

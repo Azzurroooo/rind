@@ -27,6 +27,6 @@ User input, task completion notifications, and Goal checkpoints can all arrive a
 
 A manual compact also needs the exclusive position; if a turn is already active or a start is queued, compaction is rejected rather than rewriting the context in parallel. An explicit user business input can lift the suppression after an interruption; a maintenance compact keeps the suppression marker. This distinction prevents a user who only wants to tidy up the context from accidentally restarting a long-running goal that has already stopped.
 
-Code entry points: [ExecutionCoordinator](../../../agent/runtime/server/execution.py), [AgentRuntime](../../../agent/runtime/core/runtime.py). Verification: [automatic continuation](../../../test/test_task_continuation.py), [runtime input queues](../../../test/test_runtime_input_queues.py).
+Code entry points: [ExecutionCoordinator](../../../runtime/src/server/execution.ts), [AgentRuntime](../../../runtime/src/core/turn-runner.ts). Verification: [automatic continuation](../../../runtime/test/server-protocol.test.js), [runtime input queues](../../../runtime/test/context-and-turn.test.js).
 
 [Back to the series map](../README.md)

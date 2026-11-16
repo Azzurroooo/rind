@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
-const source = await readFile(new URL("../../agent/version.py", import.meta.url), "utf8");
-const version = source.match(/__version__ = "([^"]+)"/)?.[1];
+const source = await readFile(new URL("../../runtime/src/version.ts", import.meta.url), "utf8");
+const version = source.match(/RIND_VERSION\s*=\s*["']([^"']+)["']/)?.[1];
 if (!version) throw new Error("Could not read the Rind version.");
 const project = new URL("../ios/App/App.xcodeproj/project.pbxproj", import.meta.url);
 const text = await readFile(project, "utf8");

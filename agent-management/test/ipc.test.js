@@ -328,3 +328,54 @@ test("openStore rejects while store.lock is held, and a busy server steps down o
   user2.close();
   await server2.close();
 });
+
+test("burst subscriber notifications reuse per-principal snapshots without leaking across principals", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-sub-batch-"));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const server = await startServer({ home, repoRoot });
+  const clients = [];
+  t.after(async () => { clients.forEach(c => c.close()); await server.close(); await rm(home, { recursive: true, force: true }); });
+  const token = (await readFile(server.paths.token, "utf8")).trim();
+  const connect = async (credential = token, runtimeSessionId) => {
+    const client = await connectClient({ endpoint: server.paths.endpoint, token: credential, runtimeSessionId });
+    clients.push(client);
+    return client;
+  };
+
+  const user1 = await connect();
+  const mgrSession = await user1.request("attachSession", { manager: true });
+  await user1.request("bindSession", { sessionId: mgrSession.id, runtimeSessionId: "rt-mgr" });
+  const mgrTools = await user1.request("sessionTools", { sessionId: mgrSession.id });
+
+  const user1Snaps = [];
+  const user2Snaps = [];
+  const mgrSnaps = [];
+  const s1 = await connectClient({ endpoint: server.paths.endpoint, token, onSnapshot: s => user1Snaps.push(s) });
+  const s2 = await connectClient({ endpoint: server.paths.endpoint, token, onSnapshot: s => user2Snaps.push(s) });
+  const sm = await connectClient({ endpoint: server.paths.endpoint, token: mgrTools.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "rt-mgr", onSnapshot: s => mgrSnaps.push(s) });
+  clients.push(s1, s2, sm);
+
+  await s1.request("subscribe", {});
+  await s2.request("subscribe", {});
+  await sm.request("subscribe", {});
+
+  await Promise.all([
+    user1.request("createTeam", { name: "Alpha" }),
+    user1.request("createTeam", { name: "Beta" }),
+  ]);
+
+  for (let i = 0; i < 30; i++) {
+    if (user1Snaps.at(-1)?.teams?.length === 2 && user2Snaps.at(-1)?.teams?.length === 2 && mgrSnaps.at(-1)?.teams?.length === 2) break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+
+  assert.equal(user1Snaps.at(-1)?.teams?.length, 2);
+  assert.equal(user2Snaps.at(-1)?.teams?.length, 2);
+  assert.equal(mgrSnaps.at(-1)?.teams?.length, 2);
+  assert.ok("notices" in user1Snaps.at(-1));
+  assert.ok("notices" in user2Snaps.at(-1));
+  assert.equal("notices" in mgrSnaps.at(-1), false, "manager snapshot must never receive user-only notices");
+  assert.equal("live" in mgrSnaps.at(-1), false, "manager snapshot must never receive user-only live sessions");
+  assert.equal("folderDefaultsVersion" in mgrSnaps.at(-1), false, "manager snapshot must never receive user-only folderDefaultsVersion");
+  assert.ok("omittedTasks" in (await sm.request("snapshot")), "manager request('snapshot') returns managerOverview");
+});

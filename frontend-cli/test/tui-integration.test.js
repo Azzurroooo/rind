@@ -310,17 +310,27 @@ test("background monitor preserves preview, Unicode input and caret through resi
   const editor = createLineEditor(originalInput);
   const savedCursor = editor.cursorPosition();
   const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: true };
+  const activeTasks = Array.from({ length: 120 }, (_, i) => ({
+    task_id: `task-${i}`,
+    command: `task-${i} 命令 👩‍💻`,
+    status: "running",
+    handoff: true,
+    notify: "on_exit",
+    started_at: i,
+  }));
   const reads = [];
   const monitor = createTaskMonitorController({ state, terminalUi: true, redraw: () => tui.requestRender(),
     request: async (method, params) => {
-      if (method === "rind/task/list") return { tasks: [] };
+      if (method === "rind/task/list") return { tasks: activeTasks };
       reads.push(params.task_id);
-      return { task_id: params.task_id, status: "completed", handoff: true,
+      if (params.task_id === "waiting") {
+        return { task_id: "waiting", status: "running", handoff: false, stdout: "waiting-preview" };
+      }
+      return { task_id: params.task_id, status: "running", handoff: true, notify: "on_exit",
         stdout: Array.from({ length: 80 }, (_, i) => `output-${i} 回测`).join("\n") };
     },
   });
-  for (let i = 0; i < 120; i += 1) monitor.recordTask({ task: { task_id: `task-${i}`,
-    command: "命令 👩‍💻", status: "completed", handoff: true, started_at: i } });
+  for (const item of activeTasks) monitor.recordTask({ task: item });
   const composer = new ComposerArea(() => ({ prompt: "  model · workspace\n  ▷ ",
     inputText: editor.input(), cursor: editor.cursorPosition() }));
   const stack = new MonitorStack({ composer, monitor, rows: () => tui.rows });
@@ -365,7 +375,7 @@ test("background monitor preserves preview, Unicode input and caret through resi
     monitor.recordTask({ task: { task_id: "waiting", command: "waiting command", status: "running", handoff: false } });
     input.send("\x1b[A");
     await settle(virtual);
-    assert.match(virtual.getViewport().join("\n"), /› Waiting 1\/1/);
+    assert.match(virtual.getViewport().join("\n"), /› waiting command.*foreground/);
     assert.doesNotMatch(virtual.getViewport().join("\n"), /output-79/);
     input.send("\x1b[B");
     await settle(virtual);
@@ -374,13 +384,13 @@ test("background monitor preserves preview, Unicode input and caret through resi
     assert.equal(editor.input(), originalInput);
     assert.deepEqual(editor.cursorPosition(), savedCursor);
     assert.deepEqual(virtual.getCursorPosition(), caret);
-    assert.deepEqual(reads, ["task-119", "task-119"]);
+    assert.deepEqual(reads, ["task-119", "waiting", "task-119"]);
     input.send("\x02");
     await settle(virtual);
     assert.equal(monitor.isMonitoring(), false);
     monitor.recordTask({ task: { task_id: "new", status: "running", handoff: true } });
     await settle(virtual);
-    assert.deepEqual(reads, ["task-119", "task-119"]);
+    assert.deepEqual(reads, ["task-119", "waiting", "task-119"]);
     assert.equal(editor.input(), originalInput);
   } finally {
     monitor.stop();

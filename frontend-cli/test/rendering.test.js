@@ -10,7 +10,6 @@ import { stripAnsi, textWidth } from "../lib/text-width.js";
 import {
   answerPromptText,
   answerPlaceholderText,
-  backgroundMonitorText,
   cancelledText,
   contextBuiltLine,
   systemNoticeLine,
@@ -42,7 +41,7 @@ import {
   startupText,
   welcomeText,
   resumeLineText,
-  taskMonitorTabs,
+  taskMonitorFrame,
   settingsMenuText,
   toolRequestedLine,
   toolResultLine,
@@ -229,16 +228,24 @@ test("promptText colors the composer marker with the accent color", () => {
   }
 });
 
-test("promptText keeps the activity line separate from the input chrome", () => {
+test("promptText keeps the activity line separate from the input chrome and only shows ctrl+b when tasks or bash are active", () => {
   assert.equal(
     promptText({}, {}, { running: true, frame: 1, elapsedMs: 1250 }),
     [
       "",
       "  ◓ Working (1s) ctrl+c interrupt",
-      "  enter steer · tab queue · ctrl+c stop · ctrl+b tasks",
+      "  enter steer · tab queue · ctrl+c stop",
       `  ${"─".repeat(78)}`,
       "  ▷ ",
     ].join("\n"),
+  );
+  assert.match(
+    promptText({}, {}, { running: true, hasActiveBash: true, frame: 1, elapsedMs: 1250 }),
+    /enter steer · tab queue · ctrl\+c stop · ctrl\+b tasks/,
+  );
+  assert.match(
+    promptText({ background_count: 1 }, {}, { emptyInput: true }),
+    /← agents · \/ commands · ↑↓ history · ctrl\+b tasks/,
   );
 });
 
@@ -260,7 +267,7 @@ test("promptText keeps pending input inside the live composer", () => {
       "  Queue: then summarize",
       "    alt+up recall queue · alt+right steer now · alt+down recall steer",
       "  m1 · E:\\project",
-      "  enter steer · tab queue · ctrl+c stop · ctrl+b tasks",
+      "  enter steer · tab queue · ctrl+c stop",
       `  ${"─".repeat(78)}`,
       "  ▷ ",
     ].join("\n"),
@@ -849,9 +856,10 @@ test("startupText shows an active goal without changing the empty-goal banner", 
   assert.match(text, /\/goal resume/);
 });
 
-test("prompt shows background task count after cwd with monitor hint", () => {
+test("prompt shows compact background task count badge after cwd", () => {
   const text = promptText({ model: "m1", cwd: "E:\\project", background_count: 2 });
-  assert.match(text, /m1 · E:\\project · \[bg:2\] \(ctrl\+b monitor\)/);
+  assert.match(text, /m1 · E:\\project · \[bg:2\]/);
+  assert.doesNotMatch(text, /\(ctrl\+b monitor\)/);
 });
 
 test("settingsMenuText brief, theme, and spinner submenus render options with current marker", () => {
@@ -908,23 +916,26 @@ test("settingsMenuText brief, theme, and spinner submenus render options with cu
   }
 });
 
-test("task monitor header directs background work without obsolete delegate tabs", () => {
-  const tabs = taskMonitorTabs("background", 2);
-  assert.match(tabs, /› Background \[2\]/);
-  assert.doesNotMatch(tabs, /Delegates/);
-});
-
-test("background monitor renders selection and latest output", () => {
-  const text = backgroundMonitorText(
-    [
-      { bg_id: "bg_1", status: "running", command: "server", stdout: "tick-1\ntick-2" },
-      { bg_id: "bg_2", status: "completed", command: "build", stdout: "done" },
-    ],
-    0,
-  );
-  assert.match(text, /› bg_1/);
+test("taskMonitorFrame renders command-first rows, role tags, and latest output without obsolete tabs", () => {
+  const items = [
+    { bg_id: "bg_1", status: "running", handoff: true, notify: "manual", command: "npm run dev" },
+    { bg_id: "bg_2", status: "running", handoff: true, notify: "on_exit", command: "pytest -q" },
+  ];
+  const text = stripAnsi(taskMonitorFrame({
+    backgroundCount: 2,
+    items,
+    index: 0,
+    selected: items[0],
+    preview: { id: "bg_1", stdout: "tick-1\ntick-2", stderr: "" },
+    width: 80,
+    height: 16,
+  }).lines.join("\n"));
+  assert.match(text, /› Background \[2\]/);
+  assert.doesNotMatch(text, /Delegates/);
+  assert.match(text, /› npm run dev\s+service/);
+  assert.match(text, /· pytest -q\s+auto-resume/);
+  assert.match(text, /bg_1 · running · service/);
   assert.match(text, /tick-2/);
-  assert.match(text, /bg_2/);
 });
 
 test("toolRequestedLine keeps large file content out of the status", () => {

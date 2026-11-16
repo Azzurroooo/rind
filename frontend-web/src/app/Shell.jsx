@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { UsageDialog } from "../components/inspector/UsageDialog.jsx";
 import { LoginGate } from "../components/LoginGate.jsx";
 import { CommandPalette } from "../components/CommandPalette.jsx";
@@ -27,22 +27,12 @@ export function Shell() {
   const { ctx, actions, view, agents, request, fileRequest, openFile } = useAppController();
   const { layout, info, connection, refs } = ctx;
 
-  if (connection.phase === "login") {
-    return (
-      <LoginGate
-        onSubmit={actions.handleLogin}
-        busy={ctx.authBusy}
-        error={connection.message}
-        initialToken={ctx.loginToken}
-      />
-    );
-  }
-
   const sessionId = info.session_id || "";
   const compacting = ctx.compacting || ctx.conversation.operation === "compact";
   const available = info.methods || [];
   const canFork = available.includes(methods.sessionFork);
-  const tabs = visibleTabs(info);
+  const canBrowseDirs = available.includes(methods.workspaceDirs);
+  const tabs = useMemo(() => visibleTabs(info), [info]);
   const connected = connection.phase === "online" || connection.phase === "syncing";
   const drawerOpen = layout.narrow && Boolean(layout.drawer);
   const isChatSurface = agents.surface.kind === "chat";
@@ -57,6 +47,223 @@ export function Shell() {
     );
     return member?.sessions || [];
   }, [agents.activeSessionContext, agents.teamSummaries]);
+
+  const guardedFork = useCallback(
+    (beforeMessageId) => {
+      void actions.forkSession(sessionId, beforeMessageId || "");
+    },
+    [actions, sessionId],
+  );
+
+  const handleQuote = useCallback(
+    (text) => {
+      const quoted = String(text || "")
+        .trim()
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n");
+      if (!quoted) return;
+      ctx.setInput((prev) =>
+        prev && prev.trim() ? `${prev.trimEnd()}\n\n${quoted}\n\n` : `${quoted}\n\n`,
+      );
+      refs.composer.current?.focus();
+    },
+    [ctx.setInput, refs.composer],
+  );
+
+  const handleSuggestion = useCallback(
+    (value) => {
+      ctx.setInput(value);
+      refs.composer.current?.focus();
+    },
+    [ctx.setInput, refs.composer],
+  );
+
+  const handleCompact = useCallback(() => {
+    void actions.compact();
+  }, [actions]);
+
+  const handleBrowseDirs = useCallback(
+    (path) => request(methods.workspaceDirs, path ? { path } : {}),
+    [request],
+  );
+
+  const handleSelectWorkspace = useCallback(
+    (path) => {
+      agents.clearAgentOverride();
+      agents.openChatSurface();
+      void actions.selectWorkspace(path);
+    },
+    [agents.clearAgentOverride, agents.openChatSurface, actions],
+  );
+
+  const sidebarProject = useMemo(
+    () => ({
+      workspace: ctx.selectedWorkspace,
+      workspaces: ctx.workspaces,
+      busy: ctx.workspaceBusy,
+      message: ctx.workspaceMessage,
+      draft: ctx.workspaceDraft,
+      onDraftChange: ctx.setWorkspaceDraft,
+      allowCustomFolder: true,
+      onBrowseDirs: canBrowseDirs ? handleBrowseDirs : undefined,
+      onSelect: handleSelectWorkspace,
+    }),
+    [
+      ctx.selectedWorkspace,
+      ctx.workspaces,
+      ctx.workspaceBusy,
+      ctx.workspaceMessage,
+      ctx.workspaceDraft,
+      ctx.setWorkspaceDraft,
+      canBrowseDirs,
+      handleBrowseDirs,
+      handleSelectWorkspace,
+    ],
+  );
+
+  const handleOpenManager = useCallback(
+    (opts = {}) => void agents.openAgentConversation({ manager: true, ...opts }),
+    [agents.openAgentConversation],
+  );
+  const handleOpenMemberChat = useCallback(
+    (target) => void agents.openAgentConversation(target),
+    [agents.openAgentConversation],
+  );
+  const handleCreateTeam = useCallback(
+    async (name, createRoot) => {
+      const created = await agents.runAction(
+        "createTeam",
+        { name, ...(createRoot ? { createRoot } : {}) },
+        `Created team "${name}"`,
+      );
+      if (created?.id) agents.openTeam(created.id, "organization");
+    },
+    [agents.runAction, agents.openTeam],
+  );
+
+  const sidebarAgents = useMemo(
+    () => ({
+      snapshot: agents.snapshot,
+      teamSummaries: agents.teamSummaries,
+      managerSummary: agents.managerSummary,
+      surface: agents.surface,
+      activeSessionContext: agents.activeSessionContext,
+      inboxCount: agents.inboxCount,
+      bgCount: agents.bgCount,
+      busy: agents.busy,
+      onOpenInbox: agents.openInbox,
+      onOpenManagerView: agents.openManagerView,
+      onOpenManager: handleOpenManager,
+      onOpenBackground: agents.openBackground,
+      onOpenArchive: agents.openArchive,
+      onOpenTeam: agents.openTeam,
+      onOpenMemberChat: handleOpenMemberChat,
+      onDeleteAgentSession: agents.deleteAgentConversation,
+      onCreateTeam: handleCreateTeam,
+    }),
+    [
+      agents.snapshot,
+      agents.teamSummaries,
+      agents.managerSummary,
+      agents.surface,
+      agents.activeSessionContext,
+      agents.inboxCount,
+      agents.bgCount,
+      agents.busy,
+      agents.openInbox,
+      agents.openManagerView,
+      handleOpenManager,
+      agents.openBackground,
+      agents.openArchive,
+      agents.openTeam,
+      handleOpenMemberChat,
+      agents.deleteAgentConversation,
+      handleCreateTeam,
+    ],
+  );
+
+  const handleSidebarNew = useCallback(() => {
+    agents.clearAgentOverride();
+    agents.openChatSurface();
+    void actions.createSession();
+  }, [agents.clearAgentOverride, agents.openChatSurface, actions]);
+
+  const handleSidebarSelect = useCallback(
+    (id) => {
+      agents.openChatSurface();
+      const sessCtx = resolveSessionAgentContext(
+        agents.snapshot,
+        id,
+        ctx.selectedWorkspace || info?.workspace_root,
+      );
+      if (sessCtx.kind === "member") {
+        void agents.openAgentConversation({
+          teamId: sessCtx.teamId,
+          agentId: sessCtx.agentId,
+          runtimeSessionId: id,
+        });
+        return;
+      }
+      if (sessCtx.kind === "manager") {
+        void agents.openAgentConversation({
+          manager: true,
+          runtimeSessionId: id,
+        });
+        return;
+      }
+      agents.clearAgentOverride();
+      void actions.handleSelectSession(id);
+    },
+    [
+      agents.openChatSurface,
+      agents.snapshot,
+      agents.openAgentConversation,
+      agents.clearAgentOverride,
+      ctx.selectedWorkspace,
+      info?.workspace_root,
+      actions,
+    ],
+  );
+
+  const handleSidebarFork = useCallback((id) => void actions.forkSession(id, ""), [actions]);
+  const handleSidebarExport = useCallback((id) => void actions.exportSession(id), [actions]);
+  const handleOpenSettings = useCallback(() => ctx.setSettingsOpen(true), [ctx.setSettingsOpen]);
+  const handleOpenUsage = useCallback(() => setUsageOpen(true), []);
+
+  const sidebarPanelAttrs = useMemo(
+    () => panelAttrs({ narrow: layout.narrow, visible: layout.sidebarVisible }),
+    [layout.narrow, layout.sidebarVisible],
+  );
+  const sidebarStyle = useMemo(
+    () => (layout.narrow ? undefined : { width: layout.sidebarWidth }),
+    [layout.narrow, layout.sidebarWidth],
+  );
+  const inspectorVisibleOnChat = isChatSurface && layout.inspectorVisible;
+  const inspectorPanelAttrs = useMemo(
+    () => panelAttrs({ narrow: layout.narrow, visible: inspectorVisibleOnChat }),
+    [layout.narrow, inspectorVisibleOnChat],
+  );
+  const inspectorStyle = useMemo(
+    () =>
+      layout.narrow
+        ? undefined
+        : layout.inspectorMaximized
+          ? { width: "min(680px, 52vw)" }
+          : { width: layout.inspectorWidth },
+    [layout.narrow, layout.inspectorMaximized, layout.inspectorWidth],
+  );
+
+  if (connection.phase === "login") {
+    return (
+      <LoginGate
+        onSubmit={actions.handleLogin}
+        busy={ctx.authBusy}
+        error={connection.message}
+        initialToken={ctx.loginToken}
+      />
+    );
+  }
 
   const activeHeaderTitle =
     agents.surface.kind === "inbox"
@@ -78,10 +285,6 @@ export function Shell() {
                   messages: view.messages,
                 });
 
-  function guardedFork(beforeMessageId) {
-    void actions.forkSession(sessionId, beforeMessageId || "");
-  }
-
   return (
     <div className={`app-shell${layout.narrow ? " is-narrow" : ""}`}>
       <ConnectionStrip
@@ -98,92 +301,23 @@ export function Shell() {
           unreadIds={ctx.unreadIds}
           runningIds={ctx.runningIds}
           hasMore={ctx.hasMoreSessions}
-          project={{
-            workspace: ctx.selectedWorkspace,
-            workspaces: ctx.workspaces,
-            busy: ctx.workspaceBusy,
-            message: ctx.workspaceMessage,
-            draft: ctx.workspaceDraft,
-            onDraftChange: ctx.setWorkspaceDraft,
-            allowCustomFolder: true,
-            onBrowseDirs: available.includes(methods.workspaceDirs)
-              ? (path) => request(methods.workspaceDirs, path ? { path } : {})
-              : undefined,
-            onSelect: (path) => {
-              agents.clearAgentOverride();
-              agents.openChatSurface();
-              void actions.selectWorkspace(path);
-            },
-          }}
-          agents={{
-            snapshot: agents.snapshot,
-            teamSummaries: agents.teamSummaries,
-            managerSummary: agents.managerSummary,
-            surface: agents.surface,
-            activeSessionContext: agents.activeSessionContext,
-            inboxCount: agents.inboxCount,
-            bgCount: agents.bgCount,
-            busy: agents.busy,
-            onOpenInbox: agents.openInbox,
-            onOpenManagerView: agents.openManagerView,
-            onOpenManager: (opts = {}) => void agents.openAgentConversation({ manager: true, ...opts }),
-            onOpenBackground: agents.openBackground,
-            onOpenArchive: agents.openArchive,
-            onOpenTeam: agents.openTeam,
-            onOpenMemberChat: (target) => void agents.openAgentConversation(target),
-            onDeleteAgentSession: (sid, meta) => agents.deleteAgentConversation(sid, meta),
-            onCreateTeam: async (name, createRoot) => {
-              const created = await agents.runAction(
-                "createTeam",
-                { name, ...(createRoot ? { createRoot } : {}) },
-                `Created team "${name}"`,
-              );
-              if (created?.id) agents.openTeam(created.id, "organization");
-            },
-          }}
+          project={sidebarProject}
+          agents={sidebarAgents}
           canFork={canFork}
           canExport
           notificationPermission={ctx.notificationPermission}
-          onNew={() => {
-            agents.clearAgentOverride();
-            agents.openChatSurface();
-            void actions.createSession();
-          }}
-          onSelect={(id) => {
-            agents.openChatSurface();
-            const sessCtx = resolveSessionAgentContext(
-              agents.snapshot,
-              id,
-              ctx.selectedWorkspace || ctx.info?.workspace_root,
-            );
-            if (sessCtx.kind === "member") {
-              void agents.openAgentConversation({
-                teamId: sessCtx.teamId,
-                agentId: sessCtx.agentId,
-                runtimeSessionId: id,
-              });
-              return;
-            }
-            if (sessCtx.kind === "manager") {
-              void agents.openAgentConversation({
-                manager: true,
-                runtimeSessionId: id,
-              });
-              return;
-            }
-            agents.clearAgentOverride();
-            void actions.handleSelectSession(id);
-          }}
-          onFork={(id) => void actions.forkSession(id, "")}
-          onExport={(id) => void actions.exportSession(id)}
+          onNew={handleSidebarNew}
+          onSelect={handleSidebarSelect}
+          onFork={handleSidebarFork}
+          onExport={handleSidebarExport}
           onDelete={actions.deleteSession}
           onLoadMore={actions.loadMoreSessions}
           onEnableNotifications={actions.enableNotifications}
-          onOpenSettings={() => ctx.setSettingsOpen(true)}
-          onOpenUsage={tabs.usage || tabs.auth ? () => setUsageOpen(true) : undefined}
+          onOpenSettings={handleOpenSettings}
+          onOpenUsage={tabs.usage || tabs.auth ? handleOpenUsage : undefined}
           panelRef={layout.sidebarPanelRef}
-          panelAttrs={panelAttrs({ narrow: layout.narrow, visible: layout.sidebarVisible })}
-          style={layout.narrow ? undefined : { width: layout.sidebarWidth }}
+          panelAttrs={sidebarPanelAttrs}
+          style={sidebarStyle}
         />
         {!layout.narrow && layout.sidebarVisible && (
           <ResizeHandle
@@ -377,14 +511,7 @@ export function Shell() {
               }
               onDeleteSession={(sid) => agents.deleteAgentConversation(sid, { manager: true })}
               onOpenTeam={agents.openTeam}
-              onCreateTeam={async (name, createRoot) => {
-                const created = await agents.runAction(
-                  "createTeam",
-                  { name, ...(createRoot ? { createRoot } : {}) },
-                  `Created team "${name}"`,
-                );
-                if (created?.id) agents.openTeam(created.id, "organization");
-              }}
+              onCreateTeam={handleCreateTeam}
               onSwitchMode={(nextMode) =>
                 nextMode === "archive" ? agents.openArchive() : agents.openManagerView()
               }
@@ -480,22 +607,8 @@ export function Shell() {
                 onRetry={actions.retryTurn}
                 onEdit={actions.editMessage}
                 onFork={guardedFork}
-                onQuote={(text) => {
-                  const quoted = String(text || "")
-                    .trim()
-                    .split("\n")
-                    .map((line) => `> ${line}`)
-                    .join("\n");
-                  if (!quoted) return;
-                  ctx.setInput((prev) =>
-                    prev && prev.trim() ? `${prev.trimEnd()}\n\n${quoted}\n\n` : `${quoted}\n\n`,
-                  );
-                  refs.composer.current?.focus();
-                }}
-                onSuggestion={(value) => {
-                  ctx.setInput(value);
-                  refs.composer.current?.focus();
-                }}
+                onQuote={handleQuote}
+                onSuggestion={handleSuggestion}
                 onOpenFile={openFile}
               />
               {/* Invariant: the composer is never disabled by connection state. */}
@@ -551,7 +664,7 @@ export function Shell() {
           />
         )}
         <Inspector
-          visible={isChatSurface && layout.inspectorVisible}
+          visible={inspectorVisibleOnChat}
           tab={layout.inspectorTab}
           onTab={layout.setInspectorTab}
           onClose={layout.closeInspector}
@@ -566,7 +679,7 @@ export function Shell() {
           goal={ctx.goal}
           connected={connected}
           compacting={compacting || view.active}
-          onCompact={() => void actions.compact()}
+          onCompact={handleCompact}
           onGoalAction={actions.handleGoalAction}
           request={request}
           workspace={info.workspace_root || ctx.selectedWorkspace}
@@ -574,17 +687,8 @@ export function Shell() {
           readFile={actions.readFile}
           fileRequest={fileRequest}
           panelRef={layout.inspectorPanelRef}
-          panelAttrs={panelAttrs({
-            narrow: layout.narrow,
-            visible: isChatSurface && layout.inspectorVisible,
-          })}
-          style={
-            layout.narrow
-              ? undefined
-              : layout.inspectorMaximized
-                ? { width: "min(680px, 52vw)" }
-                : { width: layout.inspectorWidth }
-          }
+          panelAttrs={inspectorPanelAttrs}
+          style={inspectorStyle}
         />
       </div>
       <SettingsDialog

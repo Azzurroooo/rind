@@ -35,6 +35,6 @@ flowchart TD
 
 这让目录的失效方式保持局部：一次网络刷新失败不阻止离线打开模型菜单，未知能力也不会伪装成确定承诺。
 
-源码：[内建定义](../../../agent/infrastructure/llm/catalog.py)、[缓存和能力解析](../../../agent/infrastructure/llm/provider_service.py)。验证：[目录](../../../test/test_model_catalog.py)、[刷新与端点隔离](../../../test/test_model_cache_refresh.py)。关联：[上下文预算](../02-context/context-budget.zh-CN.md)、[图片输入](../02-context/image-input.zh-CN.md)。
+源码：[内建定义](../../../runtime/src/infrastructure/providers.ts)、[缓存和能力解析](../../../runtime/src/infrastructure/llm/provider-service.ts)。验证：[目录](../../../runtime/test/context-and-turn.test.js)、[刷新与端点隔离](../../../runtime/test/context-and-turn.test.js)。关联：[上下文预算](../02-context/context-budget.zh-CN.md)、[图片输入](../02-context/image-input.zh-CN.md)。
 
 [返回系列地图](../README.zh-CN.md)

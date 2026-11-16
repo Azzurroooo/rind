@@ -31,6 +31,6 @@ flowchart LR
 
 重试策略仍有供应商差异：Chat 客户端的 OpenAI SDK 配置 max_retries=14，Responses 使用默认构造参数 2；模型目录刷新另设 0 次 SDK 重试和 10 秒总时限。这些不能合并成“内核统一重试 N 次”。协议兼容也不保证模型会正确调用工具，行为验证仍需区分本地模拟与真实供应商。
 
-源码：[端口](../../../agent/application/ports/chat_client.py)、[客户端装配](../../../agent/infrastructure/llm/provider_service.py)、[Chat](../../../agent/infrastructure/llm/openai_chat.py)、[Responses](../../../agent/infrastructure/llm/openai_responses.py)、[Anthropic](../../../agent/infrastructure/llm/anthropic_messages.py)、[Google](../../../agent/infrastructure/llm/google_generative_ai.py)、[取消辅助器](../../../agent/infrastructure/llm/cancellation.py)。验证：[供应商生命周期](../../../test/test_provider_lifecycle.py)、[模拟供应商集成](../../../test/test_provider_e2e.py)。
+源码：[端口](../../../runtime/src/domain/models.ts)、[客户端装配](../../../runtime/src/infrastructure/llm/provider-service.ts)、[Chat](../../../runtime/src/infrastructure/llm/openai-chat.ts)、[Responses](../../../runtime/src/infrastructure/llm/openai-responses.ts)、[Anthropic](../../../runtime/src/infrastructure/llm/anthropic-messages.ts)、[Google](../../../runtime/src/infrastructure/llm/google-generative-ai.ts)、[取消辅助器](../../../runtime/src/infrastructure/llm/sse.ts)。验证：[供应商生命周期](../../../runtime/test/context-and-turn.test.js)、[模拟供应商集成](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

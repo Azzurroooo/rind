@@ -36,6 +36,6 @@ flowchart TB
 
 同样，低负载不意味着任何缓存都清零：Worker 仍保有受管任务、有限会话/任务缓存和连接；磁盘任务日志需要维护才能缩减。应从资源拥有者和退役条件分析上限，不能只看一个数组长度。
 
-源码：[流式背压](../../../agent/runtime/core/stream_pump.py)、[CLI drain](../../../frontend-cli/lib/tui/tui.js)。机制与测试入口：[输入队列](../01-runtime/input-queues.zh-CN.md)、[结构化结果](../04-tools/tool-results.zh-CN.md)、[后台任务](../05-autonomy/managed-tasks.zh-CN.md)、[图片](../02-context/image-input.zh-CN.md)。验证：[流 pump](../../../test/test_stream_pump.py)、[运行时流](../../../test/test_runtime_stream_pump.py)。
+源码：[流式背压](../../../runtime/src/core/turn-runner.ts)、[CLI drain](../../../frontend-cli/lib/tui/tui.js)。机制与测试入口：[输入队列](../01-runtime/input-queues.zh-CN.md)、[结构化结果](../04-tools/tool-results.zh-CN.md)、[后台任务](../05-autonomy/managed-tasks.zh-CN.md)、[图片](../02-context/image-input.zh-CN.md)。验证：[流 pump](../../../runtime/test/context-and-turn.test.js)、[运行时流](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

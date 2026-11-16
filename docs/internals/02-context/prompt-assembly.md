@@ -22,6 +22,6 @@ The base prompt describes the tools every session has. Guidance for a tool only 
 
 Runtime messages are inserted after the first system message, and recent session messages keep their original order. A Goal checkpoint is transient input for a single continuation, and the goal the user states is marked as data rather than a higher-priority instruction. Every category of injection is visible in context stats/decisions, so "why does the model know this?" no longer has to be guessed.
 
-Code entry points: [system prompt](../../../agent/prompts.py), [RIND.md loading](../../../agent/infrastructure/rind_docs.py), [context assembly](../../../agent/application/context/manager.py). Verification: [prompt regression](../../../test/test_prompts.py), [RIND.md regression](../../../test/test_rind_docs.py).
+Code entry points: [system prompt](../../../runtime/src/prompts.ts), [RIND.md loading](../../../runtime/src/infrastructure/rind-docs.ts), [context assembly](../../../runtime/src/application/context-manager.ts). Verification: [prompt regression](../../../runtime/test/domain.test.js), [RIND.md regression](../../../runtime/test/architecture.test.js).
 
 [Back to the series map](../README.md)

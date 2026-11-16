@@ -140,3 +140,27 @@ test("history carries what each conversation runs on, and whether its connection
   const [group] = await independentHistory(state, "/w/manager", async () => ({ sessions: [{ id: "r-free", title: "Free", workspace_root: "/w/free", provider: "openai", model: "gpt-5.5" }] }));
   assert.deepEqual([group.sessions[0].provider, group.sessions[0].model, group.sessions[0].reasoningEffort], ["openai", "gpt-5.5", undefined]);
 });
+
+test("team history deduplicates concurrent workspace queries when members share a workspace", async () => {
+  const state = emptyState();
+  state.agents.coal = { id: "coal", name: "Coal Analyst", canonicalWorkspace: "/w/shared", adapter: "rind" };
+  state.agents.macro = { id: "macro", name: "Macro Analyst", canonicalWorkspace: "/w/shared/", adapter: "rind" };
+  state.teams.res = { id: "res", name: "Research", leaderAgentId: "coal", createRoot: "/w" };
+  state.memberships["res/coal"] = { teamId: "res", agentId: "coal" };
+  state.memberships["res/macro"] = { teamId: "res", agentId: "macro", reportsToAgentId: "coal" };
+  state.sessions.s1 = { id: "s1", agentId: "coal", teamId: "res", runtimeSessionId: "r-coal", origin: "direct" };
+  state.sessions.s2 = { id: "s2", agentId: "macro", teamId: "res", runtimeSessionId: "r-macro", origin: "managed" };
+
+  let calls = 0;
+  const list = async () => {
+    calls += 1;
+    return [
+      { id: "r-coal", title: "Coal supply model", updated_at: "2026-11-10T08:00:00Z" },
+      { id: "r-macro", title: "PMI outlook", updated_at: "2026-11-10T09:00:00Z" },
+    ];
+  };
+  const rows = await sessionHistory(state, { teamId: "res" }, list);
+  assert.equal(calls, 1, "shared workspace is queried only once");
+  assert.ok(rows.some(r => r.agentId === "coal" && r.runtimeSessionId === "r-coal"));
+  assert.ok(rows.some(r => r.agentId === "macro" && r.runtimeSessionId === "r-macro"));
+});

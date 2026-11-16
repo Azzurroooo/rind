@@ -178,8 +178,8 @@ export class AssistantMessage {
     const lines = this.pending
       ? [...this.finalizedLines, ...this.wrapLogical(previewPending(this.pending, this.inCodeBlock, this.color), width)]
       : this.finalizedLines.slice();
-    this.cacheLines = lines;
-    return lines;
+    this.cacheLines = Object.freeze(lines);
+    return this.cacheLines;
   }
 
   wrapLogical(logical, width) {

@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
+import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
 import {
   createRemoteHost,
-  resolveRindHome,
   resolveWebRoot,
 } from "../../rind-runtime-client/remote/host.js";
 import { registerSharedWorkspace } from "../../rind-runtime-client/remote/workspaces.js";
@@ -128,6 +128,7 @@ export function createRemoteMenuState({
 }
 
 export function createCliRemoteController({
+  runtimeController,
   runtimeClient,
   rawClient,
   sessionState,
@@ -143,6 +144,7 @@ export function createCliRemoteController({
   const eventListeners = new Set();
   const pendingPromptInputs = new Map();
   const client = rawClient || runtimeClient;
+  const controller = runtimeController || runtimeClient;
   const rindHome = explicitRindHome
     ? resolve(explicitRindHome)
     : managementLaunch?.home
@@ -196,7 +198,6 @@ export function createCliRemoteController({
       getRindHome: () => rindHome,
       repoRoot: managementLaunch?.repoRoot,
       getRuntimePath: () => managementLaunch?.runtimePath || "",
-      getPython: () => managementLaunch?.python,
       initializeRuntime: async () => {
         const initInfo = getInitInfo?.() || {};
         return {
@@ -211,7 +212,7 @@ export function createCliRemoteController({
       },
       requestRuntime: async (method, params = {}) => {
         if (method === "session/new" || method === "session/create") {
-          const target = !sessionState?.info?.session_id && runtimeClient?.request ? runtimeClient : client;
+          const target = !sessionState?.info?.session_id && controller?.request ? controller : client;
           const result = await target.request("session/create", params);
           bindCliSessionIfEmpty(result, params.workspace_root);
           return result;

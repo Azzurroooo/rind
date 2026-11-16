@@ -253,7 +253,7 @@ function sessionIndexPath() {
 }
 
 function appVersion() {
-  return app.isPackaged ? app.getVersion() : readRindVersion(join(app.getAppPath(), "..", "agent", "version.py"))
+  return app.isPackaged ? app.getVersion() : readRindVersion(join(app.getAppPath(), "..", "runtime", "src", "version.ts"))
 }
 
 function legacyRecentSessionsPath() {
@@ -429,8 +429,10 @@ function registerIpc() {
       prefs.notificationsEnabled = input.notificationsEnabled
     }
     const overview = await projectStore().updatePrefs(prefs)
-    applyThemeSurface(overview.theme)
-    notifyThemeChanged(overview.theme)
+    if (prefs.theme !== undefined) {
+      applyThemeSurface(overview.theme)
+      notifyThemeChanged(overview.theme)
+    }
     return overview
   })
   ipcMain.handle("notify", async (_event, payload: unknown) => {

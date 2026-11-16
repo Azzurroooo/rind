@@ -1,6 +1,6 @@
 import { createSharedRuntimeClient } from "../../../rind-runtime-client/shared-runtime.js";
 import { ManagementError, type Adapter } from "../model.js";
-export function createRindAdapter(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string }): Adapter {
+export function createRindAdapter(options: { home?: string; repoRoot: string; runtimePath?: string }): Adapter {
   return {
     async start(input, emit) {
       let sequence = 0;

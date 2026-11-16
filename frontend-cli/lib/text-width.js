@@ -27,7 +27,8 @@ const CLUSTERING_RE = /[\r\u200d\p{Grapheme_Extend}\p{Mc}\u0e33\u0eb3\p{Emoji_Mo
 export const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 
 export function stripAnsi(value) {
-  return String(value || "").replace(ANSI_RE, "");
+  const s = typeof value === "string" ? value : String(value || "");
+  return s.includes("\x1b") ? s.replace(ANSI_RE, "") : s;
 }
 
 export function graphemes(value) {
@@ -39,8 +40,41 @@ export function graphemes(value) {
 const WIDTH_CACHE_MAX = 4096;
 const widthCache = new Map();
 
+function asciiAnsiWidth(text) {
+  let width = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code === 0x1b) {
+      if (i + 1 >= text.length || text.charCodeAt(i + 1) !== 0x5b) return -1;
+      let j = i + 2;
+      while (j < text.length) {
+        const c = text.charCodeAt(j);
+        if (c < 0x30 || c > 0x3f) break;
+        j += 1;
+      }
+      while (j < text.length) {
+        const c = text.charCodeAt(j);
+        if (c < 0x20 || c > 0x2f) break;
+        j += 1;
+      }
+      if (j >= text.length) return -1;
+      const finalByte = text.charCodeAt(j);
+      if (finalByte < 0x40 || finalByte > 0x7e) return -1;
+      i = j;
+      continue;
+    }
+    if (code < 0x20 || code > 0x7e) return -1;
+    width += 1;
+  }
+  return width;
+}
+
 export function textWidth(value) {
-  const text = stripAnsi(value);
+  const raw = typeof value === "string" ? value : String(value || "");
+  if (!raw) return 0;
+  const fast = asciiAnsiWidth(raw);
+  if (fast !== -1) return fast;
+  const text = raw.includes("\x1b") ? raw.replace(ANSI_RE, "") : raw;
   if (PRINTABLE_ASCII_RE.test(text)) return text.length;
   if (text.length <= 512) {
     const cached = widthCache.get(text);
@@ -216,8 +250,8 @@ function tokenizeLine(line) {
 
   let index = 0;
   while (index < line.length) {
-    const char = line[index];
-    if (char === "\x1b") {
+    const code = line.charCodeAt(index);
+    if (code === 0x1b) {
       const end = findCsiEnd(line, index);
       if (end !== -1) {
         flushWord();
@@ -227,22 +261,38 @@ function tokenizeLine(line) {
         continue;
       }
     }
+    if (code === 0x20) {
+      let end = index + 1;
+      while (end < line.length && line.charCodeAt(end) === 0x20) end += 1;
+      flushWord();
+      spaces += line.slice(index, end);
+      spaceCount += end - index;
+      index = end;
+      continue;
+    }
+    if (code >= 0x21 && code <= 0x7e) {
+      let end = index + 1;
+      while (end < line.length) {
+        const nextCode = line.charCodeAt(end);
+        if (nextCode < 0x21 || nextCode > 0x7e) break;
+        end += 1;
+      }
+      flushSpaces();
+      word += line.slice(index, end);
+      wordWidth += end - index;
+      index = end;
+      continue;
+    }
     const codePoint = line.codePointAt(index);
     const segment = String.fromCodePoint(codePoint);
-    if (segment === " ") {
+    flushSpaces();
+    const width = segmentWidth(segment);
+    if (width > 1) {
       flushWord();
-      spaces += segment;
-      spaceCount += 1;
+      tokens.push({ kind: "word", text: segment, width });
     } else {
-      flushSpaces();
-      const width = segmentWidth(segment);
-      if (width > 1) {
-        flushWord();
-        tokens.push({ kind: "word", text: segment, width });
-      } else {
-        word += segment;
-        wordWidth += width;
-      }
+      word += segment;
+      wordWidth += width;
     }
     index += segment.length;
   }

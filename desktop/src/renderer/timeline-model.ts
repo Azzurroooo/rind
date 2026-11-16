@@ -1,3 +1,4 @@
+import { parseStructuredToolPayload } from "../../../rind-runtime-client/tool-semantics.js"
 import type { RuntimeEvent } from "../preload/types"
 import { appendInput, partialArguments } from "./tool-input.ts"
 import {
@@ -583,12 +584,10 @@ function parseArguments(value: string): Record<string, unknown> {
 
 export function parseToolResult(value: string): ToolResult {
   const raw = boundText(value)
-  try {
-    const payload = asRecord(JSON.parse(value))
-    if (typeof payload.ok === "boolean" && typeof payload.tool === "string") {
-      return { raw, ok: payload.ok, toolName: payload.tool, data: payload.data, meta: asRecord(payload.meta), error: asString(payload.error), errorType: asString(payload.error_type) }
-    }
-  } catch { /* Raw tool output remains available as a fallback. */ }
+  const { structured, payload } = parseStructuredToolPayload(value)
+  if (structured && typeof payload.ok === "boolean" && typeof payload.tool === "string") {
+    return { raw, ok: payload.ok, toolName: payload.tool, data: payload.data, meta: asRecord(payload.meta), error: asString(payload.error), errorType: asString(payload.error_type) }
+  }
   return { raw, ok: null, toolName: "", data: undefined, meta: {}, error: "", errorType: "" }
 }
 

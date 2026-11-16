@@ -1,11 +1,4 @@
-# Python & Environment
-__pycache__/
-*.py[cod]
-*$py.class
-venv/
-env/
-.venv/
-.venv-build/
+# Environment & Dependencies
 .env
 node_modules/
 
@@ -13,17 +6,10 @@ node_modules/
 # Runtime data defaults to RIND_HOME or ~/.rind.
 .rind/
 sessions/
+logs/
 build/
 dist/
 release/
-packaging/vendor/
-
-# Testing & Cache
-.pytest_cache/
-.pytest-basetemp/
-.pytest-*/
-.coverage
-.tox/
 
 # IDEs
 .vscode/
@@ -36,16 +22,15 @@ packaging/vendor/
 /cheer.txt
 /poem.txt
 /session_index.json
-/test_image.py
-/test_pdf.py
 /*.pdf
 plan/
 claude_code_system_prompt_analysis.md
 claude_code_system_prompt_cn.md
 prompt.txt
-test_web.py
 test.txt
 src/
+!runtime/src/
+!runtime/src/**
 !agent-management/src/
 !agent-management/src/**
 !frontend-web/src/
@@ -72,7 +57,6 @@ figs/
 # Local scratch artifacts
 /.tmp_crops/
 /.feishu_oauth_code
-/preview_themes.py
 
 # Local exploratory QA harness and runs; never tracked
 /qa/

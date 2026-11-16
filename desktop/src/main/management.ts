@@ -1,7 +1,4 @@
-import { dirname, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
 import { resolveRindHome } from "../../../rind-runtime-client/local-files.js"
-import { resolveSourcePython } from "../../../rind-runtime-client/runtime-env.js"
 import {
   createManagementBridge,
   emptyAgentsSnapshot,
@@ -14,13 +11,12 @@ import {
   initializeRuntime,
   isSharedRuntime,
   requestRuntime,
+  resolveDesktopRepoRoot,
+  resolvePackagedRuntimePath,
   startRuntime,
 } from "./runtime.ts"
 
 export { emptyAgentsSnapshot, type AgentsSnapshot, type ManagementStatePayload }
-
-const currentDir = dirname(fileURLToPath(import.meta.url))
-const repoRoot = resolve(currentDir, "../../..")
 
 async function ensureRuntimeForWorkspace(workspaceRoot?: string) {
   const snap = getRuntimeSnapshot()
@@ -35,12 +31,10 @@ async function ensureRuntimeForWorkspace(workspaceRoot?: string) {
 
 export const managementBridge = createManagementBridge({
   getRindHome: () => resolveRindHome(process.env.RIND_HOME),
-  repoRoot,
-  getRuntimePath: () => process.env.RIND_RUNTIME_PATH || "",
-  getPython: () => {
-    const runtimePath = process.env.RIND_RUNTIME_PATH || ""
-    return runtimePath ? undefined : resolveSourcePython(process.env.RIND_PYTHON, repoRoot)
-  },
+  repoRoot: resolveDesktopRepoRoot(),
+  getRuntimePath: () =>
+    process.env.RIND_RUNTIME_PATH ||
+    (!process.env.ELECTRON_RENDERER_URL && process.resourcesPath ? resolvePackagedRuntimePath() : ""),
   requestRuntime: (method, params) => requestRuntime(method as RuntimeMethod, params),
   ensureRuntimeForWorkspace,
   isSharedRuntime,
@@ -48,8 +42,6 @@ export const managementBridge = createManagementBridge({
 })
 
 export const getManagementState = () => managementBridge.getManagementState()
-export const ensureManagementConnected = (options?: { start?: boolean }) =>
-  managementBridge.ensureManagementConnected(options)
 export const requestManagement = (method: string, params?: Record<string, unknown>) =>
   managementBridge.requestManagement(method, params)
 export const openAgentSession = (params: Record<string, unknown>) =>

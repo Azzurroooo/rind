@@ -1,6 +1,5 @@
-export function resolveSourcePython(python: string | null | undefined, repoRoot: string): string;
 export function buildRuntimeEnv(
   repoRoot: string,
   baseEnv?: Record<string, string | undefined>,
-  options?: { sourceRuntime?: boolean; rindHome?: string },
+  options?: { sourceRuntime?: boolean; command?: string; rindHome?: string },
 ): Record<string, string | undefined>;

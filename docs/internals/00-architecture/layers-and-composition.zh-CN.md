@@ -6,7 +6,7 @@ English | [简体中文](layers-and-composition.md)
 
 ~~~mermaid
 flowchart TB
-    S["runtime/server<br/>协议与协调"] --> B["bootstrap/container.py<br/>唯一生产装配根"]
+    S["runtime/server<br/>协议与协调"] --> B["buildAgentContainer<br/>唯一生产装配根"]
     B --> C["runtime/core<br/>回合与流"]
     B --> I["infrastructure<br/>模型 / 存储 / 工具"]
     C --> A["application<br/>上下文 / 工具编排 / ports"]
@@ -15,7 +15,7 @@ flowchart TB
     I -. "实现 ports" .-> A
 ~~~
 
-[AgentContainer](../../../agent/bootstrap/container.py) 显式接收会话 store、模型客户端、ShellTools、WebSessions 和共享资源，再组装 ContextManager、ToolCallProcessor、TurnRunner、AgentRuntime。runtime/core 不反向导入 runtime/server、bootstrap 或具体 infrastructure；Surface 也不持有 Python 业务对象。
+[AgentContainer](../../../runtime/src/core/turn-runner.ts) 显式接收会话 store、模型客户端、ShellTools、WebSessions 和共享资源，再组装 ContextManager、ToolCallProcessor、TurnRunner、AgentRuntime。当前实现中，[turn-runner.ts](../../../runtime/src/core/turn-runner.ts) 同时承载回合执行内核（`TurnRunner`、`AgentRuntime`）与生产装配根（`buildAgentContainer`、`SharedRuntimeResources`）：`runtime/core` 绝不反向导入 `runtime/server` 或 `gateway`，而装配函数直接在该模块内绑定具体的 `infrastructure` 实现，避免制造多余的单实现包装接口。Surface 也不持有运行时业务对象。
 
 这让生命周期可被看清：Worker 级资源由 RuntimeWorker 创建，单次活跃执行在 ExecutionCoordinator 中装配，application 依赖抽象端口，infrastructure 在边界外实现它们。新增 Provider 或工具时，通常改变适配与装配，而不是改写回合循环。
 
@@ -23,8 +23,8 @@ flowchart TB
 
 一个工具需要会话 ID、取消信号和输出存储，不代表它应该自行寻找全局 Worker。ToolSpec 声明调用契约，容器注入依赖，执行器补入私有运行时参数，具体 handler 再执行动作。依赖来源可沿构造函数追溯，测试也能用本地实现替换模型与文件边界。
 
-Server 还承担执行互斥、跨回合续接和连接订阅，不能把它缩写为“只转发请求”。Core 管一轮内部的采样与工具循环；application 提供可复用服务。依赖图表示模块方向，不是进程隔离图，生产运行中这些 Python 模块在同一进程里。
+Server 还承担执行互斥、跨回合续接和连接订阅，不能把它缩写为“只转发请求”。Core 管一轮内部的采样与工具循环；application 提供可复用服务。依赖图表示模块方向，不是进程隔离图，生产运行中这些 TypeScript 运行时模块在同一 Worker 进程里。
 
-代码入口：[装配根](../../../agent/bootstrap/container.py)、[应用端口](../../../agent/application/ports/)、[领域事件](../../../agent/domain/events.py)。验证：[依赖方向测试](../../../test/test_agent_architecture.py)、[容器测试](../../../test/test_agent_container.py)。
+代码入口：[装配根](../../../runtime/src/core/turn-runner.ts)、[领域模型与端口](../../../runtime/src/domain/models.ts)、[领域事件](../../../runtime/src/domain/events.ts)。验证：[依赖方向测试](../../../runtime/test/architecture.test.js)、[容器测试](../../../runtime/test/context-and-turn.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

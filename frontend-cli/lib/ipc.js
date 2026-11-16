@@ -1,7 +1,8 @@
 import { mkdir, unlink } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import net from "node:net";
+import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
+import { createLineBuffer } from "../../rind-runtime-client/ndjson.js";
 
 const CONNECT_TIMEOUT_MS = 2000;
 
@@ -13,7 +14,7 @@ export function ipcEndpointName(sessionId) {
   if (process.platform === "win32") {
     return `\\\\.\\pipe\\rind-${id}`;
   }
-  return path.join(process.env.RIND_HOME || path.join(homedir(), ".rind"), "ipc", `${id}.sock`);
+  return path.join(resolveRindHome(), "ipc", `${id}.sock`);
 }
 
 export async function listenIpc({ sessionId, getSessionId, dispatch, net: netImpl = net, onUnavailable = () => {} }) {
@@ -25,17 +26,14 @@ export async function listenIpc({ sessionId, getSessionId, dispatch, net: netImp
   let recovering = false;
 
   server.on("connection", (socket) => {
-    socket.setEncoding("utf8");
-    let buffer = "";
-    socket.on("data", (chunk) => {
-      buffer += chunk;
-      const newlineIndex = buffer.indexOf("\n");
-      if (newlineIndex === -1) {
-        return;
-      }
+    let handled = false;
+    const lines = createLineBuffer((line) => {
+      if (handled) return;
+      handled = true;
       socket.removeAllListeners("data");
-      respond(socket, buffer.slice(0, newlineIndex));
+      respond(socket, line);
     });
+    socket.on("data", lines.push);
     socket.on("error", () => {});
   });
 
@@ -144,7 +142,6 @@ export function sendIpc({ session, input, timeoutMs = CONNECT_TIMEOUT_MS, net: n
     const socket = netImpl.connect(endpoint);
     let timer = null;
     let settled = false;
-    let buffer = "";
     const finish = (result) => {
       if (settled) {
         return;
@@ -156,24 +153,18 @@ export function sendIpc({ session, input, timeoutMs = CONNECT_TIMEOUT_MS, net: n
       socket.destroy();
       resolve(result);
     };
-    socket.setEncoding("utf8");
     socket.on("connect", () => {
       socket.write(`${JSON.stringify({ input: String(input || "") })}\n`);
     });
-    socket.on("data", (chunk) => {
-      buffer += chunk;
-      const newlineIndex = buffer.indexOf("\n");
-      if (newlineIndex === -1) {
-        return;
-      }
+    socket.on("data", createLineBuffer((line) => {
       let payload = null;
       try {
-        payload = JSON.parse(buffer.slice(0, newlineIndex));
+        payload = JSON.parse(line);
       } catch {
         payload = null;
       }
       finish(payload && typeof payload === "object" ? payload : { ok: false, message: "Invalid response from the rind session." });
-    });
+    }).push);
     socket.on("error", () => finish({ ok: false, message: notRunningMessage(session) }));
     timer = setTimeout(() => {
       finish({ ok: false, message: notRunningMessage(session) });

@@ -59,7 +59,7 @@ test("independent listing is one bounded page per folder with truthful counts", 
   for (let i = 0; i < 5; i++) { const at = Date.now(); await client.request("listSessions", { independent: true }); times.push(Date.now() - at); }
   assert.ok(Math.max(...times) < 1500, `overview loads stay cheap: ${times.join(", ")} ms (first ${elapsed} ms)`);
 
-  // Exercise paging through management IPC and the actual Python index, rather
+  // Exercise paging through management IPC and the actual Runtime session index, rather
   // than a mock that already understands the exclusion protocol.
   index.sessions.push(...Array.from({ length: 200 }, (_, i) => entry(`older_${i}`, beta, "2025-01-01T00:00:00Z")));
   await writeFile(path.join(home, "session_index.json"), JSON.stringify(index));

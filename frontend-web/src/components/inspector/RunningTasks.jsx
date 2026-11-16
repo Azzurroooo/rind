@@ -79,7 +79,19 @@ export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = t
         const result = await requestRef.current(legacy ? methods.backgroundList : methods.taskList, { session_id: sessionId });
         if (current !== generation.current) return;
         const listed = listedTasks(result?.tasks, legacy);
+        const activeIds = new Set(listed.map(taskId));
         setTasks(listed); setLoaded(true); setError("");
+        setOutputs((rows) => {
+          const keys = Object.keys(rows);
+          if (keys.every((key) => activeIds.has(key))) return rows;
+          return Object.fromEntries(Object.entries(rows).filter(([key]) => activeIds.has(key)));
+        });
+        for (const key of Object.keys(cursors.current)) {
+          if (!activeIds.has(key)) delete cursors.current[key];
+        }
+        for (const key of Object.keys(reads.current)) {
+          if (!activeIds.has(key)) delete reads.current[key];
+        }
         const id = selected.current;
         if (id && !listed.some((task) => taskId(task) === id)) {
           selected.current = ""; setExpanded("");
@@ -136,7 +148,7 @@ export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = t
       return <li key={id} data-task-id={id}>
         <button type="button" className={"task-row" + (open ? " selected" : "")} aria-expanded={open} onClick={() => toggle(id)}>
           <span className={"task-pip " + task.status} aria-hidden="true" />
-          <span className="task-identity"><span className="task-command">{task.command || id}</span><span className="task-id">{id} · {task.status}</span></span>
+          <span className="task-identity"><span className="task-command">{task.command || id}</span><span className="task-id">{id} · {task.status}{task.notify ? " · " + (task.notify === "manual" ? "service" : "auto-resume") : ""}</span></span>
           {Number(task.elapsed_ms) > 0 && <span className="task-elapsed">{formatDuration(task.elapsed_ms)}</span>}
         </button>
         {open && <div className="task-detail">

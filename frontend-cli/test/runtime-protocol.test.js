@@ -72,7 +72,7 @@ test("runtime protocol validates response, event, and initialization schemas", (
 });
 
 test("runtime protocol recognizes the shared golden event fixture", () => {
-  const fixture = readFileSync(new URL("../../test/fixtures/runtime_protocol.golden.jsonl", import.meta.url), "utf8");
+  const fixture = readFileSync(new URL("../../runtime/test/fixtures/runtime_protocol.golden.jsonl", import.meta.url), "utf8");
   const messages = fixture.trim().split("\n").map((line) => JSON.parse(line));
   const events = messages.filter((message) => message.kind === "event");
   const responses = messages.filter((message) => message.kind === "response");

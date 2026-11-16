@@ -63,11 +63,18 @@ export async function openStore(directory: string, rotateEvery = 256) {
         if (fatal) throw fatal;
         const changes: Changes = {};
         for (const table of Object.keys(state).filter(k => k !== "seq") as (keyof Changes)[]) {
+          const beforeTable = state[table] as Record<string, unknown>;
+          const afterTable = next[table] as Record<string, unknown>;
+          if (beforeTable === afterTable) continue;
           const delta: Record<string, unknown> = {};
-          for (const id of new Set([...Object.keys(state[table]), ...Object.keys(next[table])])) {
-            const before = (state[table] as Record<string, unknown>)[id];
-            const after = (next[table] as Record<string, unknown>)[id];
-            if (JSON.stringify(before) !== JSON.stringify(after)) delta[id] = after ?? null;
+          for (const id of Object.keys(beforeTable)) {
+            const before = beforeTable[id];
+            const after = afterTable[id];
+            if (after === undefined) delta[id] = null;
+            else if (before !== after && JSON.stringify(before) !== JSON.stringify(after)) delta[id] = after;
+          }
+          for (const id of Object.keys(afterTable)) {
+            if (!(id in beforeTable)) delta[id] = afterTable[id];
           }
           if (Object.keys(delta).length) changes[table] = delta;
         }

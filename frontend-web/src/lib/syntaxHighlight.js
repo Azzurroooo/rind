@@ -31,7 +31,7 @@ const KEYWORDS = new Set([
   "function", "global", "go", "if", "impl", "import", "in", "interface",
   "is", "lambda", "let", "match", "mod", "mut", "new", "nil", "none",
   "nonlocal", "not", "null", "of", "or", "package", "pass", "pub", "raise",
-  " return", "return", "self", "static", "struct", "super", "switch", "then",
+  "return", "self", "static", "struct", "super", "switch", "then",
   "this", "throw", "trait", "true", "try", "type", "typeof", "undefined",
   "use", "var", "void", "while", "with", "yield", "True", "False", "None",
 ]);
