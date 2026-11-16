@@ -7,38 +7,78 @@ import { LIVE_FINISHED_WINDOW } from "./tools/caps.js";
 import { basename, plural } from "./tools/parse.js";
 
 const PROSE_ROLES = new Set(["user", "assistant", "queued"]);
+const settledToolViewCache = new WeakMap();
+const settledSegmentCache = new WeakMap();
+
+function cachedToolView(entry, live) {
+  if (live || !entry || typeof entry !== "object" || entry.status === "running" || entry.status === "pending") {
+    return toolView(entry, { settled: !live });
+  }
+  let view = settledToolViewCache.get(entry);
+  if (!view) {
+    view = toolView(entry, { settled: true });
+    settledToolViewCache.set(entry, view);
+  }
+  return view;
+}
+
+function sameSegmentEntries(left, right) {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+}
 
 // entries -> [{type:"message"|"system"|"question", key, entry} | segment]
 export function buildTimeline(entries, { active = false } = {}) {
   const list = Array.isArray(entries) ? entries : [];
   const groups = [];
   let open = -1;
-  list.forEach((entry, index) => {
+  for (let index = 0; index < list.length; index += 1) {
+    const entry = list[index];
     const key = String(entry?.id || `${entry?.role || "entry"}-${index}`);
     if (entry?.role === "tool") {
       if (open < 0) {
         groups.push({ type: "segment", key: `segment:${key}`, entries: [] });
         open = groups.length - 1;
       }
-      groups[open] = { ...groups[open], entries: [...groups[open].entries, entry] };
-      return;
+      groups[open].entries.push(entry);
+      continue;
     }
     if (PROSE_ROLES.has(entry?.role)) open = -1;
     const type = entry?.role === "question" ? "question" : entry?.role === "system" ? "system" : "message";
     groups.push({ type, key, entry });
-  });
+  }
   const lastSegment = open; // only a segment with no prose after it can be live
-  return groups
-    .map((group, index) => (group.type === "segment" ? toSegment(group, active && index === lastSegment) : group))
-    .filter((group) => group.type !== "segment" || group.calls.length > 0);
+  const timeline = [];
+  for (let index = 0; index < groups.length; index += 1) {
+    const group = groups[index];
+    if (group.type !== "segment") {
+      timeline.push(group);
+      continue;
+    }
+    const segment = toSegment(group, active && index === lastSegment);
+    if (segment.calls.length > 0) timeline.push(segment);
+  }
+  return timeline;
 }
 
 function toSegment(group, live) {
-  const views = group.entries.map((entry) => toolView(entry, { settled: !live }));
+  const firstEntry = group.entries[0];
+  if (!live && firstEntry && typeof firstEntry === "object") {
+    const cached = settledSegmentCache.get(firstEntry);
+    if (cached && cached.key === group.key && sameSegmentEntries(cached.entries, group.entries)) {
+      return cached.segment;
+    }
+  }
+  const views = group.entries.map((entry) => cachedToolView(entry, live));
   const calls = views.filter((view) => !view.hidden);
   const waiting = views.some((view) => view.status === "waiting");
   const summary = summarizeCalls(calls);
-  return {
+  let durationMs = 0;
+  for (let i = 0; i < calls.length; i += 1) durationMs += Number(calls[i].duration_ms) || 0;
+  const segment = {
     type: "segment",
     key: group.key,
     calls,
@@ -46,9 +86,18 @@ function toSegment(group, live) {
     waiting,
     status: segmentStatus(calls, waiting),
     summary,
-    duration_ms: calls.reduce((sum, call) => sum + (Number(call.duration_ms) || 0), 0),
+    duration_ms: durationMs,
     autoOpen: live || waiting || summary.failed > 0,
   };
+  if (
+    !live &&
+    firstEntry &&
+    typeof firstEntry === "object" &&
+    group.entries.every((entry) => entry && typeof entry === "object" && entry.status !== "running" && entry.status !== "pending")
+  ) {
+    settledSegmentCache.set(firstEntry, { key: group.key, entries: group.entries, segment });
+  }
+  return segment;
 }
 
 export function segmentStatus(calls, waiting = false) {
@@ -76,11 +125,13 @@ export function summarizeCalls(calls) {
   const groups = new Map();
   for (const call of calls) {
     const key = call.kind === "create" ? `create-${call.noun}` : call.kind;
-    if (!groups.has(key)) {
-      groups.set(key, []);
+    let bucket = groups.get(key);
+    if (!bucket) {
+      bucket = [];
+      groups.set(key, bucket);
       order.push(key);
     }
-    groups.set(key, [...groups.get(key), call]);
+    bucket.push(call);
   }
   const phrases = order.map((key) => phrase(key, groups.get(key))).filter(Boolean);
   const failed = calls.filter((call) => call.status === "error").length;

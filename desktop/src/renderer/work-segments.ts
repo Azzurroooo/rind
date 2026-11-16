@@ -37,11 +37,11 @@ export function foldWorkSegments(entries: readonly Entry[], options: FoldOptions
     trailing = []
   }
   for (const entry of entries) {
-    if (entry.kind === "tool") tools = [...tools, entry]
+    if (entry.kind === "tool") tools.push(entry)
     else if (isBoundary(entry)) {
       flush(false)
       items.push(entry)
-    } else trailing = [...trailing, entry]
+    } else trailing.push(entry)
   }
   flush(true)
   return items
@@ -118,20 +118,35 @@ const groupKeys: Record<string, string> = {
 
 /** "Read 4 files, searched 2 patterns, ran 3 commands, edited app.ts +12 -3". */
 export function segmentSummary(tools: readonly ToolEntry[]): SegmentSummary {
-  const groups = tools.reduce<Group[]>((acc, tool) => {
+  const byKey = new Map<string, ToolEntry[]>()
+  for (const tool of tools) {
     const key = groupKeys[tool.toolName] || `tool:${tool.toolName}`
-    const index = acc.findIndex((group) => group.key === key)
-    return index < 0
-      ? [...acc, { key, tools: [tool] }]
-      : acc.map((group, at) => at === index ? { ...group, tools: [...group.tools, tool] } : group)
-  }, [])
-  const phrases = groups.map(groupPhrase).filter(Boolean)
+    let bucket = byKey.get(key)
+    if (!bucket) {
+      bucket = []
+      byKey.set(key, bucket)
+    }
+    bucket.push(tool)
+  }
+  const phrases: string[] = []
+  for (const [key, bucket] of byKey) {
+    const text = groupPhrase({ key, tools: bucket })
+    if (text) phrases.push(text)
+  }
   const text = phrases.join(", ")
+  let failed = 0
+  let cancelled = 0
+  let durationMs = 0
+  for (const tool of tools) {
+    if (tool.status === "error") failed += 1
+    else if (tool.status === "cancelled") cancelled += 1
+    durationMs += Math.max(0, tool.durationMs)
+  }
   return {
     text: text ? `${text[0].toUpperCase()}${text.slice(1)}` : "",
-    failed: tools.filter((tool) => tool.status === "error").length,
-    cancelled: tools.filter((tool) => tool.status === "cancelled").length,
-    durationMs: tools.reduce((total, tool) => total + Math.max(0, tool.durationMs), 0),
+    failed,
+    cancelled,
+    durationMs,
   }
 }
 
