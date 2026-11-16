@@ -262,30 +262,6 @@ export interface ContextEstimate {
 const CJK_PATTERN =
   /[\u4e00-\u9fff\u3400-\u4dbf\u{20000}-\u{2a6df}\u{2a700}-\u{2ebef}\u{30000}-\u{323af}]/u;
 
-interface CachedMessageTokens {
-  keyCount: number;
-  contentRef: unknown;
-  reasoningRef: unknown;
-  toolCallsRef: unknown;
-  toolCallsSig: number;
-  attachmentsRef: unknown;
-  tokens: number;
-  chars: number;
-}
-
-function toolCallsSignature(toolCalls: unknown): number {
-  if (!Array.isArray(toolCalls)) return 0;
-  let sig = toolCalls.length + 1;
-  for (let i = 0; i < toolCalls.length; i += 1) {
-    const fn = (toolCalls[i] as Record<string, unknown> | null)?.function as
-      | Record<string, unknown>
-      | undefined;
-    const argsLen = typeof fn?.arguments === "string" ? fn.arguments.length : 0;
-    sig = (sig * 31 + argsLen + i) | 0;
-  }
-  return sig;
-}
-
 function stripInternalMessageFields(message: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(message)) {
@@ -295,11 +271,7 @@ function stripInternalMessageFields(message: Record<string, unknown>): Record<st
 }
 
 export class ContextEstimator {
-  private static readonly MAX_CACHE_ENTRIES = 2048;
   private readonly _budget: ContextBudget;
-  private readonly tokenCache = new Map<string, number>();
-  private readonly messageCache = new WeakMap<object, CachedMessageTokens>();
-  private readonly schemaCache = new WeakMap<readonly Record<string, unknown>[], number>();
 
   constructor(budget?: ContextBudget) {
     this._budget = budget ?? ContextBudget.default();
@@ -311,17 +283,17 @@ export class ContextEstimator {
 
   estimateMessages(
     messages: readonly Record<string, unknown>[],
-    options?: { tokenCache?: Map<string, number> },
+    options?: { toolSchemas?: readonly Record<string, unknown>[] | null },
   ): ContextEstimate {
     let systemTokens = 0;
     let conversationTokens = 0;
-    let toolTokens = 0;
+    let toolTokens = this.estimateToolSchemas(options?.toolSchemas);
     let systemChars = 0;
     let conversationChars = 0;
     let toolChars = 0;
 
     for (const message of messages) {
-      const [tokens, chars] = this.estimateMessageTokens(message, options?.tokenCache);
+      const [tokens, chars] = this.estimateMessageTokens(message);
       if (message.role === "system") {
         systemTokens += tokens;
         systemChars += chars;
@@ -350,17 +322,11 @@ export class ContextEstimator {
 
   estimateToolSchemas(toolSchemas?: readonly Record<string, unknown>[] | null): number {
     if (!toolSchemas || toolSchemas.length === 0) return 0;
-    const cached = this.schemaCache.get(toolSchemas);
-    if (cached !== undefined) return cached;
-    const [tokens] = this.estimateMessageTokens({ tools: toolSchemas });
-    const resolved = Math.max(0, tokens);
-    this.schemaCache.set(toolSchemas, resolved);
-    return resolved;
+    return this.estimateMessageTokens({ tools: toolSchemas })[0];
   }
 
   private estimateMessageTokens(
     message: Record<string, unknown>,
-    externalCache?: Map<string, number>,
   ): [number, number] {
     const attachments = Array.isArray(message.attachments)
       ? (message.attachments as Array<Record<string, unknown>>)
@@ -372,69 +338,6 @@ export class ContextEstimator {
         const h = Number(item.height ?? 0);
         imageTokens += Math.ceil(w / 32) * Math.ceil(h / 32) * 2;
       }
-    }
-
-    if (!externalCache) {
-      const keyCount = Object.keys(message).length;
-      const sig = toolCallsSignature(message.tool_calls);
-      const hit = this.messageCache.get(message);
-      if (
-        hit &&
-        hit.keyCount === keyCount &&
-        hit.contentRef === message.content &&
-        hit.reasoningRef === message.reasoning_content &&
-        hit.toolCallsRef === message.tool_calls &&
-        hit.toolCallsSig === sig &&
-        hit.attachmentsRef === message.attachments
-      ) {
-        return [hit.tokens + imageTokens, hit.chars];
-      }
-
-      let payload: string;
-      if (!("attachments" in message)) {
-        try {
-          payload = JSON.stringify(message);
-        } catch {
-          payload = String(message);
-        }
-      } else {
-        const { attachments: _ignored, ...stripped } = message;
-        try {
-          payload = JSON.stringify(stripped);
-        } catch {
-          payload = String(stripped);
-        }
-      }
-      const chars = payload.length;
-      const cacheKey =
-        chars <= 512
-          ? payload
-          : `${chars}:${createHash("sha1").update(payload, "utf8").digest("base64")}`;
-      let tokens = this.tokenCache.get(cacheKey);
-      if (tokens !== undefined) {
-        this.tokenCache.delete(cacheKey);
-        this.tokenCache.set(cacheKey, tokens);
-      } else {
-        tokens = CJK_PATTERN.test(payload) ? Math.ceil(chars / 1.5) : Math.ceil(chars / 3.5);
-        this.tokenCache.set(cacheKey, tokens);
-        if (this.tokenCache.size > ContextEstimator.MAX_CACHE_ENTRIES) {
-          const oldestKey = this.tokenCache.keys().next().value;
-          if (oldestKey !== undefined) {
-            this.tokenCache.delete(oldestKey);
-          }
-        }
-      }
-      this.messageCache.set(message, {
-        keyCount,
-        contentRef: message.content,
-        reasoningRef: message.reasoning_content,
-        toolCallsRef: message.tool_calls,
-        toolCallsSig: sig,
-        attachmentsRef: message.attachments,
-        tokens,
-        chars,
-      });
-      return [tokens + imageTokens, chars];
     }
 
     let payload: string;
@@ -453,12 +356,7 @@ export class ContextEstimator {
       }
     }
     const chars = payload.length;
-    const cached = externalCache.get(payload);
-    if (cached !== undefined) {
-      return [cached + imageTokens, chars];
-    }
     const tokens = CJK_PATTERN.test(payload) ? Math.ceil(chars / 1.5) : Math.ceil(chars / 3.5);
-    externalCache.set(payload, tokens);
     return [tokens + imageTokens, chars];
   }
 }
@@ -1368,6 +1266,7 @@ export class ContextManager {
       allowRescue?: boolean;
       includeSkillCatalog?: boolean;
       includeIds?: boolean;
+      toolSchemas?: readonly Record<string, unknown>[] | null;
     },
   ): Promise<ContextBuildResult> {
     let persistedMessages: Record<string, unknown>[];
@@ -1416,7 +1315,7 @@ export class ContextManager {
     const hotMessageCount = Math.min(this.hotMessageLimit, hotConversationCount);
 
     let finalMessages = messages.map(m => stripInternalMessageFields(m));
-    let finalEstimate = this._estimator.estimateMessages(messages);
+    let finalEstimate = this._estimator.estimateMessages(messages, { toolSchemas: options?.toolSchemas });
 
     let droppedCount = 0;
     while (
@@ -1426,7 +1325,7 @@ export class ContextManager {
     ) {
       const previousTokens = finalEstimate.estimated_input_tokens;
       [messages, finalMessages] = this.rescueContext(messages, finalMessages);
-      finalEstimate = this._estimator.estimateMessages(messages);
+      finalEstimate = this._estimator.estimateMessages(messages, { toolSchemas: options?.toolSchemas });
       droppedCount += 1;
       if (droppedCount > 50 || finalEstimate.estimated_input_tokens >= previousTokens) {
         break;
@@ -1453,6 +1352,7 @@ export class ContextManager {
       system_tokens: finalEstimate.system_tokens,
       conversation_tokens: finalEstimate.conversation_tokens,
       tool_tokens: finalEstimate.tool_tokens,
+      tool_schema_tokens: this._estimator.estimateToolSchemas(options?.toolSchemas),
       context_window_tokens: contextWindowTokens,
       auto_compact_token_limit_percent: budget.resolvedAutoCompactTokenLimitPercent(),
       auto_compact_token_limit: budget.resolvedAutoCompactTokenLimit(),
@@ -1863,7 +1763,7 @@ export function buildContextSnapshot(
   if (estimatedTotal === null) {
     estimatedTotal = sections.reduce((sum, s) => sum + Number(s.tokens || 0), 0);
   } else {
-    estimatedTotal += toolSchemaTokens;
+    estimatedTotal += toolSchemaTokens - (positiveInt(safeStats.tool_schema_tokens) ?? 0);
   }
   const orderedSections = sections
     .sort((a, b) => Number(a._order) - Number(b._order))

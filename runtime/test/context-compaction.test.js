@@ -27,6 +27,7 @@ import {
   applyLatestCompactBoundary,
   attachContextAnchor,
   buildPlanSnapshot,
+  buildContextSnapshot,
   buildRindDocContext,
   buildUsageRecord,
   extractUsageDict,
@@ -799,4 +800,29 @@ test("compaction boundary persistence, RIND.md + active skill re-injection, and 
     .join("\n");
   assert.match(followUpNonSystem, /Handoff summary: initial deploy-check setup completed\./);
   assert.match(followUpNonSystem, /Step 1: Verify health endpoint\./);
+});
+
+
+test("context estimates track nested mutations and include tool schemas in pressure exactly once", async t => {
+  const estimator = new ContextEstimator(new ContextBudget({ contextWindowTokens: 1000, hardLimitTokens: 900 }));
+  const message = { role: "assistant", tool_calls: [{ function: { name: "read", arguments: "a".repeat(100) } }] };
+  const before = estimator.estimateMessages([message]).estimated_input_tokens;
+  message.tool_calls[0].function.arguments = "中".repeat(100);
+  assert.ok(estimator.estimateMessages([message]).estimated_input_tokens > before);
+  const schemas = [{ type: "function", function: { name: "read", description: "a".repeat(4000) } }];
+  const schemaBefore = estimator.estimateToolSchemas(schemas);
+  schemas[0].function.description = "中".repeat(4000);
+  assert.ok(estimator.estimateToolSchemas(schemas) > schemaBefore);
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-schema-budget-"));
+  t.after(() => rm(tmp, { recursive: true, force: true }));
+  const store = new JsonlSessionStore({ sessionDir: path.join(tmp, "sessions"), workspaceRoot: tmp });
+  await store.initialize();
+  await store.persistUserInput("hello");
+  const manager = new ContextManager({ estimator });
+  const context = await manager.buildMessagesAsync(store, { includeSkillCatalog: false, toolSchemas: schemas });
+  assert.equal(estimator.estimateMessages(context.internal_messages, { toolSchemas: schemas }).over_hard_limit, true);
+  assert.equal(context.decisions.auto_compact_token_limit_reached, true);
+  const snapshot = buildContextSnapshot(context.internal_messages, context.stats, "turn", { estimator, toolSchemas: schemas });
+  assert.equal(snapshot.estimated_total, context.stats.estimated_input_tokens);
+  assert.equal(context.stats.tool_schema_tokens, estimator.estimateToolSchemas(schemas));
 });

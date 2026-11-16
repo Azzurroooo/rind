@@ -1125,14 +1125,16 @@ export class TurnRunner {
     },
   ): Promise<ContextBuildResult> {
     const includeSkillCatalog = options?.includeSkillCatalog ?? true;
+    const toolSchemas = await this.toolsForSession(session);
     const context = await this.contextManager.buildMessagesAsync(session, {
       transientSystemMessages: options?.transientSystemMessages ?? null,
       allowRescue: options?.allowRescue ?? false,
       includeSkillCatalog,
       includeIds: options?.includeIds ?? false,
+      toolSchemas,
     });
     if (includeSkillCatalog) {
-      await this.captureContextBreakdown(session, context, options?.turnId ?? "");
+      await this.captureContextBreakdown(session, context, options?.turnId ?? "", toolSchemas);
     }
     return context;
   }
@@ -1141,12 +1143,13 @@ export class TurnRunner {
     session: JsonlSessionStore,
     context: ContextBuildResult,
     turnId: string,
+    toolSchemas: readonly Record<string, unknown>[],
   ): Promise<void> {
     try {
       const messages =
         context.internal_messages.length > 0 ? context.internal_messages : context.messages;
       const snapshot = buildContextSnapshot(messages, context.stats, turnId, {
-        toolSchemas: await this.toolsForSession(session),
+        toolSchemas,
         estimator: this.contextManager.estimator,
       });
       await session.persistContextBreakdown(snapshot);
