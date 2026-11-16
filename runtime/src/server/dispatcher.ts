@@ -1256,7 +1256,10 @@ export class RuntimeDispatcher {
   private async contextInspect(request: Record<string, unknown>): Promise<void> {
     const sessionId = await this.requiredSessionId(request);
     if (sessionId === null) return;
-    const meta = await this.worker.repository.metadata(sessionId);
+    const store = this.worker.execution.activeContainer(sessionId)?.session_store;
+    const meta = store
+      ? await store.getMetadata()
+      : await this.worker.repository.metadata(sessionId);
     const breakdown = meta.latest_context_breakdown;
     const usage = meta.latest_assistant_sampling_usage;
     await this.respond(request, {

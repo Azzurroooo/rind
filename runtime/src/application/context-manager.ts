@@ -256,6 +256,7 @@ export interface ContextEstimate {
   readonly system_tokens: number;
   readonly conversation_tokens: number;
   readonly tool_tokens: number;
+  readonly tool_schema_tokens: number;
   readonly over_hard_limit: boolean;
 }
 
@@ -287,7 +288,8 @@ export class ContextEstimator {
   ): ContextEstimate {
     let systemTokens = 0;
     let conversationTokens = 0;
-    let toolTokens = this.estimateToolSchemas(options?.toolSchemas);
+    const schemaTokens = this.estimateToolSchemas(options?.toolSchemas);
+    let toolTokens = schemaTokens;
     let systemChars = 0;
     let conversationChars = 0;
     let toolChars = 0;
@@ -316,6 +318,7 @@ export class ContextEstimator {
       system_tokens: systemTokens,
       conversation_tokens: conversationTokens,
       tool_tokens: toolTokens,
+      tool_schema_tokens: schemaTokens,
       over_hard_limit: estimatedTokens >= this._budget.resolvedHardLimitTokens(),
     };
   }
@@ -1352,7 +1355,7 @@ export class ContextManager {
       system_tokens: finalEstimate.system_tokens,
       conversation_tokens: finalEstimate.conversation_tokens,
       tool_tokens: finalEstimate.tool_tokens,
-      tool_schema_tokens: this._estimator.estimateToolSchemas(options?.toolSchemas),
+      tool_schema_tokens: finalEstimate.tool_schema_tokens,
       context_window_tokens: contextWindowTokens,
       auto_compact_token_limit_percent: budget.resolvedAutoCompactTokenLimitPercent(),
       auto_compact_token_limit: budget.resolvedAutoCompactTokenLimit(),

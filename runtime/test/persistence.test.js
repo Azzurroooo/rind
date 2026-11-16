@@ -411,3 +411,43 @@ test("concurrent multi-process session writes and continuous index reads complet
   const finalSessions = JsonlSessionStore.list_session_metadata({ sessionDir: sessionsDir, limit: 100 });
   assert.deepEqual(finalSessions.map(s => s.id).sort(), expectedIds);
 });
+
+
+test("context diagnostics coalesce into the next durable metadata commit", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rind-meta-coalesce-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new JsonlSessionStore({ sessionDir: root, workspaceRoot: root });
+  await store.initialize();
+  await store.persistUserInput("hello");
+  const original = SESSION_FILES.writeJson;
+  let writes = 0;
+  t.mock.method(SESSION_FILES, "writeJson", function (...args) { writes++; return original.apply(this, args); });
+  const file = path.join(store.sessionBasePath, "meta.json");
+  const before = await readFile(file, "utf8");
+  for (let i = 0; i < 100; i++) await store.updateContextBreakdown({ estimated_total: i });
+  assert.equal(writes, 0);
+  assert.equal((await store.getMetadata()).latest_context_breakdown.estimated_total, 99);
+  assert.equal(await readFile(file, "utf8"), before);
+  await store.persistTurnState("turn", "completed");
+  assert.ok(writes >= 1);
+  const writesAfterTurn = writes;
+  await store.flushContextBreakdown();
+  assert.equal(writes, writesAfterTurn);
+
+  await store.updateContextBreakdown({ estimated_total: 123 });
+  assert.equal(writes, writesAfterTurn);
+  await store.flushContextBreakdown();
+  assert.equal(writes, writesAfterTurn + 1);
+  await store.flushContextBreakdown();
+  assert.equal(writes, writesAfterTurn + 1);
+
+  await store.updateContextBreakdown({ estimated_total: 456 });
+  store.mark_deleted();
+  await store.flushContextBreakdown();
+  assert.equal(writes, writesAfterTurn + 1);
+
+  const restored = new JsonlSessionStore({ sessionDir: root, sessionId: store.sessionId, workspaceRoot: root });
+  await restored.initialize();
+  assert.equal((await restored.getMetadata()).latest_context_breakdown.estimated_total, 123);
+  assert.equal((await restored.getTurnState()).status, "completed");
+});

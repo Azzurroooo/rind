@@ -1340,7 +1340,7 @@ export class ExecutionCoordinator {
     if (released !== null) {
       this.repository.releasePersistedDraft();
       this.shellTools.pool.close(sessionId);
-      await closeExecution(released);
+      await closeExecution(released, { flush: !options?.permanent });
     }
   }
 
@@ -1387,11 +1387,17 @@ export class ExecutionCoordinator {
   }
 }
 
-async function closeContainer(container: AgentContainer): Promise<void> {
+async function closeContainer(container: AgentContainer, options?: { flush?: boolean }): Promise<void> {
+  if (options?.flush !== false) {
+    await container.session_store.flushContextBreakdown().catch(() => {});
+  }
   await container.chat_client.close();
 }
 
-async function closeExecution(execution: ActiveExecution): Promise<void> {
+async function closeExecution(execution: ActiveExecution, options?: { flush?: boolean }): Promise<void> {
+  if (options?.flush !== false) {
+    await execution.container.session_store.flushContextBreakdown().catch(() => {});
+  }
   await (execution.chatClient ?? execution.container.chat_client).close();
 }
 

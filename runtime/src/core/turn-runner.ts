@@ -1152,7 +1152,7 @@ export class TurnRunner {
         toolSchemas,
         estimator: this.contextManager.estimator,
       });
-      await session.persistContextBreakdown(snapshot);
+      await session.updateContextBreakdown(snapshot);
     } catch {}
   }
 

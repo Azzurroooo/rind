@@ -1078,6 +1078,7 @@ export class JsonlSessionStore {
   private _hasUserMessage = false;
   private _indexEntry: Record<string, unknown> | null = null;
   private _lastPreview = "";
+  private _dirtyContextBreakdown = false;
   private _projectedCaches = new Map<string, [string, Record<string, unknown>[]]>();
   private _messagesCache: [string, Record<string, unknown>[]] | null = null;
   private _toolRecordsCache: [string, Record<string, unknown>[], Map<string, Record<string, unknown>>] | null = null;
@@ -1391,6 +1392,7 @@ export class JsonlSessionStore {
     this._sessionPaths = sessionId ? this._getSessionPaths(sessionId) : {};
     this._hasUserMessage = false;
     this._lastPreview = "";
+    this._dirtyContextBreakdown = false;
     this._msgRepo = null;
     this._toolRepo = null;
     this._compactionRepo = null;
@@ -1424,6 +1426,7 @@ export class JsonlSessionStore {
 
     this._setupRepos();
     this._invalidateProjectionCache();
+    this._dirtyContextBreakdown = false;
 
     this._sessionMeta = meta;
     if ("goal" in this._sessionMeta) {
@@ -1503,11 +1506,15 @@ export class JsonlSessionStore {
   private _switchSessionSync(sessionId: string): Record<string, unknown>[] {
     this._setupPaths();
     const clean = this._validateExistingSessionSync(sessionId);
+    if (this._dirtyContextBreakdown && this.is_persisted && this._sessionMeta && this._createMissing) {
+      this._persistMetaSync();
+    }
     const previous = {
       sessionId: this._sessionId,
       sessionPaths: this._sessionPaths,
       sessionMeta: this._sessionMeta,
       lastPreview: this._lastPreview,
+      dirtyContextBreakdown: this._dirtyContextBreakdown,
       indexEntry: this._indexEntry,
       projectedCaches: new Map(this._projectedCaches),
       messagesCache: this._messagesCache,
@@ -1529,6 +1536,7 @@ export class JsonlSessionStore {
       this._sessionPaths = previous.sessionPaths;
       this._sessionMeta = previous.sessionMeta;
       this._lastPreview = previous.lastPreview;
+      this._dirtyContextBreakdown = previous.dirtyContextBreakdown;
       this._indexEntry = previous.indexEntry;
       this._projectedCaches = previous.projectedCaches;
       this._messagesCache = previous.messagesCache;
@@ -1650,8 +1658,12 @@ export class JsonlSessionStore {
   private _persistMetaSync(updatedAt?: string | null): void {
     if (!this._sessionMeta) return;
     this._sessionMeta.updated_at = updatedAt || this.now_iso();
-    if (!this.is_persisted) return;
+    if (!this.is_persisted) {
+      this._dirtyContextBreakdown = false;
+      return;
+    }
     this._files.writeJson(this._sessionPaths.meta, this._sessionMeta);
+    this._dirtyContextBreakdown = false;
     this._updateIndex();
   }
 
@@ -2275,10 +2287,20 @@ export class JsonlSessionStore {
     return this._latestMetaUsage("latest_sampling_usage");
   }
 
-  async persist_context_breakdown(snapshot: Record<string, unknown>): Promise<void> {
+  async updateContextBreakdown(snapshot: Record<string, unknown>): Promise<void> {
     await this._writeLock.runExclusive(() => {
       if (!this._sessionMeta || !this._sessionPaths.meta) return;
-      this._sessionMeta.latest_context_breakdown = { ...(snapshot || {}) };
+      this._sessionMeta.latest_context_breakdown = structuredClone(snapshot);
+      this._dirtyContextBreakdown = true;
+    });
+  }
+
+  async flushContextBreakdown(): Promise<void> {
+    await this._writeLock.runExclusive(() => {
+      if (!this._dirtyContextBreakdown || !this.is_persisted || !this._sessionMeta || !this._createMissing) {
+        this._dirtyContextBreakdown = false;
+        return;
+      }
       this._persistMetaSync();
     });
   }
@@ -2518,10 +2540,6 @@ export class JsonlSessionStore {
 
   getLatestAssistantSamplingUsage(): Promise<Record<string, unknown> | null> {
     return this.get_latest_assistant_sampling_usage();
-  }
-
-  persistContextBreakdown(snapshot: Record<string, unknown>): Promise<void> {
-    return this.persist_context_breakdown(snapshot);
   }
 
   persistTurnState(
