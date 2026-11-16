@@ -392,7 +392,7 @@ export class RuntimeWorker {
     const sessionId = String(info.session_id || "");
     if (params.name) {
       const store = await this.repository.openStore(sessionId);
-      await store.set_name(String(params.name));
+      await store.rename(String(params.name));
     }
     if (
       params.skill_sources &&
@@ -400,7 +400,7 @@ export class RuntimeWorker {
       !Array.isArray(params.skill_sources)
     ) {
       const store = await this.repository.openStore(sessionId);
-      await store.set_skill_sources(params.skill_sources as Record<string, boolean>);
+      await store.setSkillSources(params.skill_sources as Record<string, boolean>);
     }
     if ("external_tools" in params || "enable_user_question" in params) {
       const tool = params.external_tools

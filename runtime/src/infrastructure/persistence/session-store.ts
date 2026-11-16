@@ -1107,19 +1107,19 @@ export class JsonlSessionStore {
     this._parentSessionId = options.parentSessionId ?? null;
   }
 
-  get session_id(): string | null {
+  get sessionId(): string | null {
     return this._sessionId;
   }
 
-  get is_persisted(): boolean {
+  get persisted(): boolean {
     return this._msgRepo !== null;
   }
 
-  mark_deleted(): void {
+  markDeleted(): void {
     this._createMissing = false;
   }
 
-  async get_metadata(): Promise<Record<string, unknown>> {
+  async getMetadata(): Promise<Record<string, unknown>> {
     return this._writeLock.runExclusive(() => structuredClone(this._sessionMeta ?? {}));
   }
 
@@ -1131,62 +1131,58 @@ export class JsonlSessionStore {
     return this._provider;
   }
 
-  get reasoning_effort(): string {
+  get reasoningEffort(): string {
     return this._reasoningEffort;
   }
 
-  get selection_source(): Record<string, string> {
+  get selectionSource(): Record<string, string> {
     return { ...this._selectionSource };
   }
 
-  get system_prompt(): string {
-    return this._systemPrompt;
+  get sessionRoot(): string {
+    return this._sessionRoot || JsonlSessionStore.resolveSessionRoot(this._sessionDir);
   }
 
-  get session_root(): string {
-    return this._sessionRoot || JsonlSessionStore.resolve_session_root(this._sessionDir);
+  get directory(): string {
+    return this.sessionBasePath || "";
   }
 
-  get session_base_path(): string | null {
+  get sessionBasePath(): string | null {
     if (!this._sessionId) return null;
-    return this._sessionPaths.base || resolveSessionBase(this.session_root, this._sessionId);
+    return this._sessionPaths.base || resolveSessionBase(this.sessionRoot, this._sessionId);
   }
 
-  get workspace_root(): string | null {
+  get workspaceRoot(): string | null {
     if (this._sessionMeta && typeof this._sessionMeta.workspace_root === "string" && this._sessionMeta.workspace_root.trim()) {
       return this._sessionMeta.workspace_root;
     }
     return this._workspaceRoot;
   }
 
-  now_iso(): string {
+  nowIso(): string {
     return new Date().toISOString();
   }
 
-  static default_rind_home(): string {
-    return resolveRindHome();
-  }
-
-  static resolve_session_root(sessionDir?: string | null): string {
+  static resolveSessionRoot(sessionDir?: string | null): string {
     if (sessionDir) {
       const expanded = sessionDir.startsWith("~")
         ? path.join(os.homedir(), sessionDir.slice(1))
         : sessionDir;
       return path.resolve(expanded);
     }
-    return path.join(JsonlSessionStore.default_rind_home(), "sessions");
+    return path.join(resolveRindHome(), "sessions");
   }
 
-  static index_path_for(sessionDir?: string | null): string {
+  static indexPathFor(sessionDir?: string | null): string {
     if (sessionDir) {
-      return path.join(JsonlSessionStore.resolve_session_root(sessionDir), "index.json");
+      return path.join(JsonlSessionStore.resolveSessionRoot(sessionDir), "index.json");
     }
-    return path.join(JsonlSessionStore.default_rind_home(), "session_index.json");
+    return path.join(resolveRindHome(), "session_index.json");
   }
 
-  static load_session_metadata(sessionId: string, sessionDir?: string | null): Record<string, unknown> {
+  static loadSessionMetadata(sessionId: string, sessionDir?: string | null): Record<string, unknown> {
     const clean = validateSessionId(sessionId);
-    const root = JsonlSessionStore.resolve_session_root(sessionDir);
+    const root = JsonlSessionStore.resolveSessionRoot(sessionDir);
     const base = resolveSessionBase(root, clean);
     const metaPath = path.join(base, "meta.json");
     if (!fs.existsSync(base) || !fs.statSync(base).isDirectory()) {
@@ -1197,7 +1193,7 @@ export class JsonlSessionStore {
     return meta;
   }
 
-  static list_session_metadata(options: {
+  static listSessionMetadata(options: {
     sessionDir?: string | null;
     limit?: number;
     workspaceRoot?: string | null;
@@ -1208,7 +1204,7 @@ export class JsonlSessionStore {
     return sessions;
   }
 
-  static list_session_metadata_by_workspace(options: {
+  static listSessionMetadataByWorkspace(options: {
     sessionDir?: string | null;
     limit?: number;
     perWorkspaceLimit?: number;
@@ -1231,7 +1227,7 @@ export class JsonlSessionStore {
     perWorkspaceLimit?: number | null;
   }): [Record<string, unknown>[], { workspace_root: string; count: number }[]] {
     const limit = Math.max(0, Math.trunc(options.limit ?? 20));
-    const indexPath = JsonlSessionStore.index_path_for(options.sessionDir);
+    const indexPath = JsonlSessionStore.indexPathFor(options.sessionDir);
     const index = new SessionIndexRepository(SESSION_FILES, indexPath).loadIndex();
     const roots = new Map<string, string>();
 
@@ -1352,13 +1348,13 @@ export class JsonlSessionStore {
   }
 
   private _setupPaths(): void {
-    this._sessionRoot = JsonlSessionStore.resolve_session_root(this._sessionDir);
-    this._indexPath = JsonlSessionStore.index_path_for(this._sessionDir);
+    this._sessionRoot = JsonlSessionStore.resolveSessionRoot(this._sessionDir);
+    this._indexPath = JsonlSessionStore.indexPathFor(this._sessionDir);
     this._indexRepo = new SessionIndexRepository(this._files, this._indexPath);
   }
 
   private _getSessionPaths(sessionId: string, sessionRoot?: string | null): Record<string, string> {
-    const base = resolveSessionBase(sessionRoot || this._sessionRoot || this.session_root, sessionId);
+    const base = resolveSessionBase(sessionRoot || this._sessionRoot || this.sessionRoot, sessionId);
     return {
       base,
       meta: path.join(base, "meta.json"),
@@ -1401,7 +1397,7 @@ export class JsonlSessionStore {
     this._sessionMeta = sessionId
       ? newSessionMeta({
           sessionId,
-          now: this.now_iso(),
+          now: this.nowIso(),
           model: this._model,
           cwd: ws,
           workspaceRoot: ws,
@@ -1506,7 +1502,7 @@ export class JsonlSessionStore {
   private _switchSessionSync(sessionId: string): Record<string, unknown>[] {
     this._setupPaths();
     const clean = this._validateExistingSessionSync(sessionId);
-    if (this._dirtyContextBreakdown && this.is_persisted && this._sessionMeta && this._createMissing) {
+    if (this._dirtyContextBreakdown && this.persisted && this._sessionMeta && this._createMissing) {
       this._persistMetaSync();
     }
     const previous = {
@@ -1569,7 +1565,7 @@ export class JsonlSessionStore {
       workspace_root: meta.workspace_root ?? null,
       session_type: meta.session_type ?? null,
       parent_session_id: meta.parent_session_id ?? null,
-      draft: !this.is_persisted,
+      draft: !this.persisted,
     };
   }
 
@@ -1657,8 +1653,8 @@ export class JsonlSessionStore {
 
   private _persistMetaSync(updatedAt?: string | null): void {
     if (!this._sessionMeta) return;
-    this._sessionMeta.updated_at = updatedAt || this.now_iso();
-    if (!this.is_persisted) {
+    this._sessionMeta.updated_at = updatedAt || this.nowIso();
+    if (!this.persisted) {
       this._dirtyContextBreakdown = false;
       return;
     }
@@ -1690,7 +1686,7 @@ export class JsonlSessionStore {
         ? priorCache[1]
         : null;
     const msg = this._msgRepo!.persistMessage(
-      this.now_iso(),
+      this.nowIso(),
       role,
       content,
       toolCallId,
@@ -1809,7 +1805,7 @@ export class JsonlSessionStore {
 
   private _ensureSessionSync(): Record<string, unknown>[] {
     this._setupPaths();
-    if (this._sessionMeta !== null && !this.is_persisted) {
+    if (this._sessionMeta !== null && !this.persisted) {
       return [];
     }
     if (this._sessionId !== null) {
@@ -1849,7 +1845,7 @@ export class JsonlSessionStore {
   }
 
   private _materializeDraftSync(): void {
-    if (this.is_persisted) return;
+    if (this.persisted) return;
     if (!this._createMissing) {
       throw new LookupError(`Session not found: ${this._sessionId || "unknown"}`);
     }
@@ -1870,12 +1866,6 @@ export class JsonlSessionStore {
     });
   }
 
-  async discard_if_empty(): Promise<void> {
-    await this._writeLock.runExclusive(() => {
-      this._discardIfEmptySync();
-    });
-  }
-
   private _discardIfEmptySync(): void {
     if (!this._sessionId || !this._sessionPaths.base) return;
     const messages = this._loadMessagesSync();
@@ -1888,7 +1878,7 @@ export class JsonlSessionStore {
     fs.rmSync(base, { recursive: true, force: true });
   }
 
-  async switch_session(sessionId: string): Promise<Record<string, unknown>> {
+  async switchSession(sessionId: string): Promise<Record<string, unknown>> {
     return this._writeLock.runExclusive(() => {
       const messages = this._switchSessionSync(sessionId);
       this._initializeHistorySync(messages);
@@ -1896,7 +1886,7 @@ export class JsonlSessionStore {
     });
   }
 
-  async create_session(options: { sessionId?: string | null } = {}): Promise<Record<string, unknown>> {
+  async createSession(options: { sessionId?: string | null } = {}): Promise<Record<string, unknown>> {
     const clean = options.sessionId !== undefined && options.sessionId !== null
       ? validateSessionId(options.sessionId)
       : null;
@@ -1910,20 +1900,7 @@ export class JsonlSessionStore {
     });
   }
 
-  async update_model(model: string): Promise<void> {
-    const clean = String(model || "").trim();
-    if (!clean) {
-      throw new Error("Model name is required.");
-    }
-    await this._writeLock.runExclusive(() => {
-      this._model = clean;
-      if (!this._sessionMeta || !this._sessionPaths.meta) return;
-      this._sessionMeta.model = clean;
-      this._persistMetaSync();
-    });
-  }
-
-  async set_name(name: string | null): Promise<{ name: string | null; title: string }> {
+  async rename(name: string | null): Promise<{ name: string | null; title: string }> {
     const clean = name !== null && name !== undefined ? normalizeName(name) : null;
     return this._writeLock.runExclusive(() => {
       const meta = this._sessionMeta ?? {};
@@ -1941,13 +1918,18 @@ export class JsonlSessionStore {
     });
   }
 
-  async update_selection(provider: string, model: string, options: { source?: string } = {}): Promise<void> {
+  async updateSelection(
+    provider: string,
+    model: string,
+    optionsOrSource?: { source?: string } | string,
+  ): Promise<void> {
     const cleanProvider = String(provider || "").trim();
     const cleanModel = String(model || "").trim();
     if (!cleanProvider || !cleanModel) {
       throw new Error("Provider and model are required.");
     }
-    const source = options.source ?? "session";
+    const opts = typeof optionsOrSource === "string" ? { source: optionsOrSource } : optionsOrSource;
+    const source = opts?.source ?? "session";
     await this._writeLock.runExclusive(() => {
       this._provider = cleanProvider;
       this._model = cleanModel;
@@ -1961,12 +1943,16 @@ export class JsonlSessionStore {
     });
   }
 
-  async update_reasoning_effort(effort: string, options: { source?: string } = {}): Promise<void> {
+  async updateReasoningEffort(
+    effort: string,
+    optionsOrSource?: { source?: string } | string,
+  ): Promise<void> {
     const clean = normalizeReasoningEffort(effort);
     if (!clean) {
       throw new Error("Reasoning effort is required.");
     }
-    const source = options.source ?? "session";
+    const opts = typeof optionsOrSource === "string" ? { source: optionsOrSource } : optionsOrSource;
+    const source = opts?.source ?? "session";
     await this._writeLock.runExclusive(() => {
       this._reasoningEffort = clean;
       this._selectionSource = { ...this._selectionSource, effort: source };
@@ -1977,13 +1963,13 @@ export class JsonlSessionStore {
     });
   }
 
-  async get_skill_catalog(): Promise<{ name: string; description: string; location: string }[]> {
+  async getSkillCatalog(): Promise<{ name: string; description: string; location: string }[]> {
     return this._writeLock.runExclusive(() =>
       normalizeSkillCatalog(this._sessionMeta ? this._sessionMeta.skill_catalog : []),
     );
   }
 
-  async set_skill_catalog(entries: { name: string; description: string; location: string }[]): Promise<void> {
+  async setSkillCatalog(entries: { name: string; description: string; location: string }[]): Promise<void> {
     const normalized = normalizeSkillCatalog(entries);
     await this._writeLock.runExclusive(() => {
       if (!this._sessionMeta || !this._sessionPaths.meta) return;
@@ -1996,13 +1982,13 @@ export class JsonlSessionStore {
     });
   }
 
-  async get_skill_sources(): Promise<Record<string, boolean>> {
+  async getSkillSources(): Promise<Record<string, boolean>> {
     return this._writeLock.runExclusive(() =>
       normalizeSkillSources(this._sessionMeta ? this._sessionMeta.skill_sources : null),
     );
   }
 
-  async set_skill_sources(sources: Record<string, boolean>): Promise<void> {
+  async setSkillSources(sources: Record<string, boolean>): Promise<void> {
     const normalized = normalizeSkillSources(sources);
     await this._writeLock.runExclusive(() => {
       const meta = this._sessionMeta ?? {};
@@ -2012,24 +1998,32 @@ export class JsonlSessionStore {
     });
   }
 
-  capture_image(filePath: string, cancellationToken?: CancellationToken | null): [ImageAttachment, string] {
-    if (!this.session_base_path || !this.is_persisted) {
+  captureImage(filePath: string, cancellationToken?: CancellationToken | null): [ImageAttachment, string] {
+    if (!this.sessionBasePath || !this.persisted) {
       throw new Error("Image reading requires an active persisted session.");
     }
-    return captureImage(this.session_base_path, filePath, cancellationToken);
+    return captureImage(this.sessionBasePath, filePath, cancellationToken);
   }
 
-  async load_image(attachment: ImageAttachment): Promise<Buffer> {
-    const base = this.session_base_path;
+  async loadImage(attachment: ImageAttachment): Promise<Buffer> {
+    const base = this.sessionBasePath;
     if (!base) {
       throw new Error("No active session for image loading.");
     }
     return loadImage(base, attachment);
   }
 
-  async persist_user_input(content: string, options: { meta?: Record<string, unknown> } = {}): Promise<void> {
+  async persistUserInput(
+    content: string,
+    optionsOrMeta?: { meta?: Record<string, unknown> | null } | Record<string, unknown> | null,
+  ): Promise<void> {
+    const meta = optionsOrMeta
+      ? ("meta" in optionsOrMeta && (optionsOrMeta.meta === null || typeof optionsOrMeta.meta === "object")
+          ? (optionsOrMeta.meta as Record<string, unknown> | null | undefined)
+          : (optionsOrMeta as Record<string, unknown>))
+      : undefined;
     await this._writeLock.runExclusive(() => {
-      const paths = uploadPaths(content, this.workspace_root);
+      const paths = uploadPaths(content, this.workspaceRoot);
       checkImageBudget(paths.map(() => ({ path: "", mime_type: "", width: 0, height: 0, size_bytes: 0 })));
       const processed = paths.map(p => processImage(p));
       checkImageBudget(
@@ -2037,12 +2031,12 @@ export class JsonlSessionStore {
       );
       const attachments: ImageAttachment[] = [];
       const created: string[] = [];
-      const wasDraft = !this.is_persisted;
+      const wasDraft = !this.persisted;
       const draftMetadata = wasDraft && this._sessionMeta ? structuredClone(this._sessionMeta) : null;
       try {
         if (processed.length > 0) {
           this._materializeDraftSync();
-          const base = this.session_base_path!;
+          const base = this.sessionBasePath!;
           const attDir = path.join(base, "attachments");
           const existing = new Set<string>(
             fs.existsSync(attDir) ? fs.readdirSync(attDir).map(n => path.join(attDir, n)) : [],
@@ -2085,24 +2079,57 @@ export class JsonlSessionStore {
         text,
         null,
         null,
-        options.meta ?? null,
+        meta ?? null,
         null,
         attachments.length > 0 ? attachments : null,
       );
     });
   }
 
-  async persist_message(
+  async persistMessage(
     role: string,
     content: string,
-    toolCallId?: string | null,
+    optionsOrToolCallId?:
+      | {
+          toolCallId?: string | null;
+          toolName?: string | null;
+          meta?: Record<string, unknown> | null;
+          reasoningContent?: string | null;
+          attachments?: unknown[] | null;
+        }
+      | string
+      | null,
     toolName?: string | null,
     meta?: Record<string, unknown> | null,
     reasoningContent?: string | null,
     attachments?: unknown[] | null,
   ): Promise<void> {
+    const resolved =
+      optionsOrToolCallId && typeof optionsOrToolCallId === "object" && !Array.isArray(optionsOrToolCallId)
+        ? {
+            toolCallId: optionsOrToolCallId.toolCallId ?? null,
+            toolName: optionsOrToolCallId.toolName ?? null,
+            meta: optionsOrToolCallId.meta ?? null,
+            reasoningContent: optionsOrToolCallId.reasoningContent ?? null,
+            attachments: optionsOrToolCallId.attachments ?? null,
+          }
+        : {
+            toolCallId: (optionsOrToolCallId as string | null) ?? null,
+            toolName: toolName ?? null,
+            meta: meta ?? null,
+            reasoningContent: reasoningContent ?? null,
+            attachments: attachments ?? null,
+          };
     await this._writeLock.runExclusive(() => {
-      this._persistMessageSync(role, content, toolCallId, toolName, meta, reasoningContent, attachments);
+      this._persistMessageSync(
+        role,
+        content,
+        resolved.toolCallId,
+        resolved.toolName,
+        resolved.meta,
+        resolved.reasoningContent,
+        resolved.attachments,
+      );
     });
   }
 
@@ -2121,7 +2148,7 @@ export class JsonlSessionStore {
         !Array.isArray(meta) &&
         CONTEXT_RECORD_KINDS.has(String(meta.kind || "")),
     );
-    if (!this.is_persisted) {
+    if (!this.persisted) {
       if (role !== "user" || !String(content || "").trim() || isContextRecord) {
         return;
       }
@@ -2156,7 +2183,7 @@ export class JsonlSessionStore {
     this._persistMetaSync();
   }
 
-  async persist_tool_call(
+  async persistToolCall(
     callId: string,
     name: string,
     parsedArgs: Record<string, unknown>,
@@ -2203,7 +2230,7 @@ export class JsonlSessionStore {
     });
   }
 
-  async load_messages(): Promise<Record<string, unknown>[]> {
+  async loadMessages(): Promise<Record<string, unknown>[]> {
     return this._loadMessagesSync().map(m => ({ ...m }));
   }
 
@@ -2212,7 +2239,7 @@ export class JsonlSessionStore {
     return latestCompaction(this._loadMessagesSync(), this._loadCompactionsSync());
   }
 
-  async get_messages_slice(options: {
+  async getMessagesSlice(options: {
     start?: number | null;
     end?: number | null;
     roles?: readonly string[] | null;
@@ -2234,7 +2261,7 @@ export class JsonlSessionStore {
     return builtMessages.slice(start, end).map(m => ({ ...m }));
   }
 
-  async list_recent_sessions(limit: number = 10): Promise<Record<string, unknown>[]> {
+  async listSessions(limit: number = 20): Promise<Record<string, unknown>[]> {
     this._setupPaths();
     const indexData = this._indexRepo ? this._indexRepo.loadIndex() : { sessions: [] };
     const sessions = indexData.sessions.filter(
@@ -2250,11 +2277,13 @@ export class JsonlSessionStore {
     return sessions.slice(0, limit);
   }
 
-  async get_tool_records(options: {
-    limit?: number | null;
-    callIds?: readonly string[] | null;
-  } = {}): Promise<Record<string, unknown>[]> {
+  async getToolRecords(
+    optionsOrCallIds?: { limit?: number | null; callIds?: readonly string[] | null } | readonly string[],
+  ): Promise<Record<string, unknown>[]> {
     if (!this._toolRepo) return [];
+    const options = Array.isArray(optionsOrCallIds)
+      ? { callIds: optionsOrCallIds as readonly string[] }
+      : ((optionsOrCallIds as { limit?: number | null; callIds?: readonly string[] | null } | undefined) ?? {});
     const [allRecords, byId] = this._loadToolRecordsWithMapSync();
     if (options.callIds && options.callIds.length === 1) {
       const hit = byId.get(String(options.callIds[0]));
@@ -2271,20 +2300,16 @@ export class JsonlSessionStore {
     return records.map(r => ({ ...r }));
   }
 
-  async persist_sampling_usage(usage: Record<string, unknown>): Promise<void> {
+  async persistSamplingUsage(usage: Record<string, unknown>): Promise<void> {
     await this._writeLock.runExclusive(() => {
       if (!this._sessionMeta || !this._sessionPaths.meta) return;
-      const latest: Record<string, unknown> = { ...(usage || {}), updated_at: this.now_iso() };
+      const latest: Record<string, unknown> = { ...(usage || {}), updated_at: this.nowIso() };
       this._sessionMeta.latest_sampling_usage = latest;
       if (latest.sampling_kind === "assistant") {
         this._sessionMeta.latest_assistant_sampling_usage = { ...latest };
       }
       this._persistMetaSync(String(latest.updated_at));
     });
-  }
-
-  async get_latest_sampling_usage(): Promise<Record<string, unknown> | null> {
-    return this._latestMetaUsage("latest_sampling_usage");
   }
 
   async updateContextBreakdown(snapshot: Record<string, unknown>): Promise<void> {
@@ -2297,7 +2322,7 @@ export class JsonlSessionStore {
 
   async flushContextBreakdown(): Promise<void> {
     await this._writeLock.runExclusive(() => {
-      if (!this._dirtyContextBreakdown || !this.is_persisted || !this._sessionMeta || !this._createMissing) {
+      if (!this._dirtyContextBreakdown || !this.persisted || !this._sessionMeta || !this._createMissing) {
         this._dirtyContextBreakdown = false;
         return;
       }
@@ -2305,7 +2330,7 @@ export class JsonlSessionStore {
     });
   }
 
-  async get_latest_assistant_sampling_usage(): Promise<Record<string, unknown> | null> {
+  async getLatestAssistantSamplingUsage(): Promise<Record<string, unknown> | null> {
     return this._latestMetaUsage("latest_assistant_sampling_usage");
   }
 
@@ -2317,10 +2342,10 @@ export class JsonlSessionStore {
       : null;
   }
 
-  async persist_turn_state(
+  async persistTurnState(
     turnId: string,
     status: string,
-    ts: string,
+    ts?: string | null,
     recoveryAttempt?: number | null,
   ): Promise<void> {
     const cleanTurnId = String(turnId || "").trim();
@@ -2333,7 +2358,7 @@ export class JsonlSessionStore {
       const state: Record<string, unknown> = {
         turn_id: cleanTurnId,
         status: cleanStatus,
-        ts: String(ts || this.now_iso()),
+        ts: String(ts || this.nowIso()),
       };
       if (recoveryAttempt !== undefined && recoveryAttempt !== null) {
         if (typeof recoveryAttempt !== "number" || !Number.isInteger(recoveryAttempt) || recoveryAttempt < 1) {
@@ -2346,7 +2371,7 @@ export class JsonlSessionStore {
     });
   }
 
-  async get_turn_state(): Promise<Record<string, unknown> | null> {
+  async getTurnState(): Promise<Record<string, unknown> | null> {
     if (!this._sessionMeta) return null;
     const state = this._sessionMeta.turn_state;
     return state && typeof state === "object" && !Array.isArray(state)
@@ -2354,7 +2379,7 @@ export class JsonlSessionStore {
       : null;
   }
 
-  async get_goal(): Promise<GoalRecord | null> {
+  async getGoal(): Promise<GoalRecord | null> {
     if (!this._sessionMeta) return null;
     const goal = this._sessionMeta.goal;
     return goal && typeof goal === "object" && !Array.isArray(goal)
@@ -2362,7 +2387,7 @@ export class JsonlSessionStore {
       : null;
   }
 
-  async set_goal(objective: string): Promise<GoalRecord> {
+  async setGoal(objective: string): Promise<GoalRecord> {
     const normalized = normalizeGoalObjective(objective);
     return this._writeLock.runExclusive(() => {
       if (!this._sessionMeta) {
@@ -2376,7 +2401,7 @@ export class JsonlSessionStore {
     });
   }
 
-  async set_goal_status(status: string): Promise<GoalRecord> {
+  async setGoalStatus(status: string): Promise<GoalRecord> {
     const normalizedStatus = normalizeGoalStatus(status);
     return this._writeLock.runExclusive(() => {
       if (!this._sessionMeta) {
@@ -2393,7 +2418,7 @@ export class JsonlSessionStore {
     });
   }
 
-  async clear_goal(): Promise<void> {
+  async clearGoal(): Promise<void> {
     await this._writeLock.runExclusive(() => {
       if (this._sessionMeta) {
         delete this._sessionMeta.goal;
@@ -2402,18 +2427,18 @@ export class JsonlSessionStore {
     });
   }
 
-  async get_compact_generation(): Promise<number> {
+  async getCompactGeneration(): Promise<number> {
     return this._writeLock.runExclusive(() => Number(this._autoCompactWindowSync().ordinal || 1));
   }
 
-  async persist_compaction(compaction: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async persistCompaction(compaction: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this._writeLock.runExclusive(() => {
       if (!this._compactionRepo || !this._msgRepo || !this._sessionMeta) {
         throw new Error("Send a message before compacting this draft session.");
       }
       const candidate: Record<string, unknown> = { ...compaction };
       if (!candidate.id) candidate.id = randomUUID().replace(/-/g, "");
-      if (!candidate.created_at) candidate.created_at = this.now_iso();
+      if (!candidate.created_at) candidate.created_at = this.nowIso();
       if (!candidate.policy_version) candidate.policy_version = "compact_boundary_v1";
       const compPath = this._sessionPaths.compactions;
       const priorCompCache = this._compactionsCache;
@@ -2448,283 +2473,14 @@ export class JsonlSessionStore {
     });
   }
 
-  async get_latest_compaction(): Promise<Record<string, unknown> | null> {
+  async getLatestCompaction(): Promise<Record<string, unknown> | null> {
     return this._latestCompactionSync();
   }
 
-  // --- camelCase aliases for unified TypeScript ergonomics ---
-
-  get sessionId(): string | null {
-    return this.session_id;
-  }
-
-  get persisted(): boolean {
-    return this.is_persisted;
-  }
-
-  get directory(): string {
-    return this.session_base_path || "";
-  }
-
-  get sessionBasePath(): string | null {
-    return this.session_base_path;
-  }
-
-  get reasoningEffort(): string {
-    return this.reasoning_effort;
-  }
-
-  get selectionSource(): Record<string, string> {
-    return this.selection_source;
-  }
-
-  get workspaceRoot(): string | null {
-    return this.workspace_root;
-  }
-
-  nowIso(): string {
-    return this.now_iso();
-  }
-
-  static resolveSessionRoot(sessionDir?: string | null): string {
-    return JsonlSessionStore.resolve_session_root(sessionDir);
-  }
-
-  getMetadata(): Promise<Record<string, unknown>> {
-    return this.get_metadata();
-  }
-
-  loadMessages(): Promise<Record<string, unknown>[]> {
-    return this.load_messages();
-  }
-
-  loadToolRecords(options?: { limit?: number | null; callIds?: readonly string[] | null }): Promise<Record<string, unknown>[]> {
-    return this.get_tool_records(options);
-  }
-
-  getToolRecords(
-    optionsOrCallIds?: { limit?: number | null; callIds?: readonly string[] | null } | readonly string[],
-  ): Promise<Record<string, unknown>[]> {
-    if (Array.isArray(optionsOrCallIds)) {
-      return this.get_tool_records({ callIds: optionsOrCallIds as readonly string[] });
-    }
-    return this.get_tool_records(optionsOrCallIds as { limit?: number | null; callIds?: readonly string[] | null } | undefined);
-  }
-
-  getMessagesSlice(options?: {
-    start?: number | null;
-    end?: number | null;
-    roles?: readonly string[] | null;
-    includeIds?: boolean;
-    compacted?: boolean;
-    includeInternal?: boolean;
-  }): Promise<Record<string, unknown>[]> {
-    return this.get_messages_slice(options);
-  }
-
-  persistCompaction(compaction: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.persist_compaction(compaction);
-  }
-
-  getLatestCompaction(): Promise<Record<string, unknown> | null> {
-    return this.get_latest_compaction();
-  }
-
-  getCompactGeneration(): Promise<number> {
-    return this.get_compact_generation();
-  }
-
-  persistSamplingUsage(usage: Record<string, unknown>): Promise<void> {
-    return this.persist_sampling_usage(usage);
-  }
-
-  getLatestAssistantSamplingUsage(): Promise<Record<string, unknown> | null> {
-    return this.get_latest_assistant_sampling_usage();
-  }
-
-  persistTurnState(
-    turnId: string,
-    status: string,
-    ts?: string | null,
-    recoveryAttempt?: number | null,
-  ): Promise<void> {
-    return this.persist_turn_state(turnId, status, ts || this.now_iso(), recoveryAttempt);
-  }
-
-  getTurnState(): Promise<Record<string, unknown> | null> {
-    return this.get_turn_state();
-  }
-
-  getGoal(): Promise<GoalRecord | null> {
-    return this.get_goal();
-  }
-
-  setGoal(objective: string): Promise<GoalRecord> {
-    return this.set_goal(objective);
-  }
-
-  setGoalStatus(status: string): Promise<GoalRecord> {
-    return this.set_goal_status(status);
-  }
-
-  clearGoal(): Promise<void> {
-    return this.clear_goal();
-  }
-
-  async saveGoal(goal: Record<string, unknown> | null): Promise<void> {
-    if (goal === null) {
-      await this.clear_goal();
-      return;
-    }
-    const normalized = normalizeGoal(goal);
-    if (!normalized) {
-      await this.clear_goal();
-      return;
-    }
-    await this._writeLock.runExclusive(() => {
-      this._materializeDraftSync();
-      if (this._sessionMeta) {
-        this._sessionMeta.goal = normalized;
-        this._persistMetaSync();
-      }
-    });
-  }
-
-  getSkillCatalog(): Promise<{ name: string; description: string; location: string }[]> {
-    return this.get_skill_catalog();
-  }
-
-  setSkillCatalog(entries: { name: string; description: string; location: string }[]): Promise<void> {
-    return this.set_skill_catalog(entries);
-  }
-
-  getSkillSources(): Promise<Record<string, boolean>> {
-    return this.get_skill_sources();
-  }
-
-  setSkillSources(sources: Record<string, boolean>): Promise<void> {
-    return this.set_skill_sources(sources);
-  }
-
-  captureImage(filePath: string, cancellationToken?: CancellationToken | null): [ImageAttachment, string] {
-    return this.capture_image(filePath, cancellationToken);
-  }
-
-  loadImage(attachment: ImageAttachment): Promise<Buffer> {
-    return this.load_image(attachment);
-  }
-
-  persistUserInput(
-    content: string,
-    optionsOrMeta?: { meta?: Record<string, unknown> | null } | Record<string, unknown> | null,
-  ): Promise<void> {
-    if (!optionsOrMeta) {
-      return this.persist_user_input(content);
-    }
-    if ("meta" in optionsOrMeta && (optionsOrMeta.meta === null || typeof optionsOrMeta.meta === "object")) {
-      return this.persist_user_input(content, { meta: (optionsOrMeta.meta as Record<string, unknown>) ?? undefined });
-    }
-    return this.persist_user_input(content, { meta: optionsOrMeta as Record<string, unknown> });
-  }
-
-  persistMessage(
-    role: string,
-    content: string,
-    optionsOrToolCallId?:
-      | {
-          toolCallId?: string | null;
-          toolName?: string | null;
-          meta?: Record<string, unknown> | null;
-          reasoningContent?: string | null;
-          attachments?: unknown[] | null;
-        }
-      | string
-      | null,
-    toolName?: string | null,
-    meta?: Record<string, unknown> | null,
-    reasoningContent?: string | null,
-    attachments?: unknown[] | null,
-  ): Promise<void> {
-    if (optionsOrToolCallId && typeof optionsOrToolCallId === "object" && !Array.isArray(optionsOrToolCallId)) {
-      return this.persist_message(
-        role,
-        content,
-        optionsOrToolCallId.toolCallId ?? null,
-        optionsOrToolCallId.toolName ?? null,
-        optionsOrToolCallId.meta ?? null,
-        optionsOrToolCallId.reasoningContent ?? null,
-        optionsOrToolCallId.attachments ?? null,
-      );
-    }
-    return this.persist_message(
-      role,
-      content,
-      (optionsOrToolCallId as string | null) ?? null,
-      toolName ?? null,
-      meta ?? null,
-      reasoningContent ?? null,
-      attachments ?? null,
-    );
-  }
-
-  persistToolCall(
-    callId: string,
-    name: string,
-    parsedArgs: Record<string, unknown>,
-    rawArgs: string,
-    tsStart: string,
-    tsEnd: string,
-    resultPayload: string,
-    modelContent: string,
-    modelContentFormat?: string | null,
-    modelContentPolicy?: Record<string, unknown> | null,
-    attachments?: unknown[] | null,
-  ): Promise<void> {
-    return this.persist_tool_call(
-      callId,
-      name,
-      parsedArgs,
-      rawArgs,
-      tsStart,
-      tsEnd,
-      resultPayload,
-      modelContent,
-      modelContentFormat,
-      modelContentPolicy,
-      attachments,
-    );
-  }
-
-  switchSession(sessionId: string): Promise<Record<string, unknown>> {
-    return this.switch_session(sessionId);
-  }
-
-  createSession(options?: { sessionId?: string | null }): Promise<Record<string, unknown>> {
-    return this.create_session(options);
-  }
-
-  updateSelection(provider: string, model: string, optionsOrSource?: { source?: string } | string): Promise<void> {
-    const opts = typeof optionsOrSource === "string" ? { source: optionsOrSource } : optionsOrSource;
-    return this.update_selection(provider, model, opts);
-  }
-
-  updateReasoningEffort(effort: string, optionsOrSource?: { source?: string } | string): Promise<void> {
-    const opts = typeof optionsOrSource === "string" ? { source: optionsOrSource } : optionsOrSource;
-    return this.update_reasoning_effort(effort, opts);
-  }
-
-  rename(name: string | null): Promise<{ name: string | null; title: string }> {
-    return this.set_name(name);
-  }
-
-  listSessions(limit = 20): Promise<Record<string, unknown>[]> {
-    return this.list_recent_sessions(limit);
-  }
-
   async getStats(): Promise<Record<string, any>> {
-    const meta = await this.get_metadata();
-    const messages = await this.load_messages();
-    const toolRecords = await this.get_tool_records();
+    const meta = await this.getMetadata();
+    const messages = await this.loadMessages();
+    const toolRecords = await this.getToolRecords();
     const compactions = this._loadCompactionsSync();
     let messagesBytes = 0;
     try {
@@ -2736,7 +2492,7 @@ export class JsonlSessionStore {
     }
     return {
       session_id: this._sessionId || "draft",
-      session_dir: this.session_base_path || this.session_root,
+      session_dir: this.sessionBasePath || this.sessionRoot,
       message_count: messages.length,
       user_messages: messages.filter((m) => m.role === "user").length,
       assistant_messages: messages.filter((m) => m.role === "assistant").length,
@@ -2796,7 +2552,7 @@ export function forkSession(
   options: { beforeMessageId?: string | null } = {},
 ): string {
   const clean = validateSessionId(sourceId);
-  const root = JsonlSessionStore.resolve_session_root(sessionDir);
+  const root = JsonlSessionStore.resolveSessionRoot(sessionDir);
   const sourceBase = resolveSessionBase(root, clean);
   const files = SESSION_FILES;
 
@@ -2912,7 +2668,7 @@ export function forkSession(
         break;
       }
     }
-    new SessionIndexRepository(files, JsonlSessionStore.index_path_for(sessionDir)).updateIndex(
+    new SessionIndexRepository(files, JsonlSessionStore.indexPathFor(sessionDir)).updateIndex(
       sessionIndexEntry(newId, forkedMeta, {
         messageCount,
         toolCallCount: toolCalls.length,

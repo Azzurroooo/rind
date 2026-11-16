@@ -24,7 +24,6 @@ import {
   chatMessages,
   imageDataUrl,
   isContextOverflow,
-  makeTrace,
   parseSseEvents,
   promptCacheKey,
   providerError,
@@ -124,7 +123,7 @@ test("sse.ts: isContextOverflow and providerError classification, cancellation, 
   assert.throws(() => providerError(abortErr), CancelledError);
 });
 
-test("sse.ts: redactImageText, separateToolImages, chatMessages, promptCacheKey, and makeTrace JSONL byte redaction", async t => {
+test("sse.ts: redactImageText, separateToolImages, chatMessages, and promptCacheKey", async () => {
   const inlineUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/";
   const longBase64 = "QWxhZGRpbjpvcGVuIHNlc2FtZQ".repeat(4); // > 80 chars
   const redacted = redactImageText(`url=${inlineUrl} raw: ${longBase64} ok=shortToken123`);
@@ -171,57 +170,6 @@ test("sse.ts: redactImageText, separateToolImages, chatMessages, promptCacheKey,
   assert.equal(rejectsPromptCacheKey(new Error("Unknown parameter: 'prompt_cache_key'.")), true);
   assert.equal(rejectsPromptCacheKey(new Error("extra_forbidden: prompt_cache_key")), true);
   assert.equal(rejectsPromptCacheKey(new Error("Invalid API key")), false);
-
-  // makeTrace via RIND_LLM_TRACE_PATH writes JSONL with prefix_hashes and scrubs Buffer/Uint8Array
-  const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-llm-trace-"));
-  const traceFile = path.join(tmp, "traces", "calls.jsonl");
-  const prevTrace = process.env.RIND_LLM_TRACE_PATH;
-  delete process.env.RIND_LLM_TRACE_PATH;
-  t.after(async () => {
-    if (prevTrace === undefined) delete process.env.RIND_LLM_TRACE_PATH;
-    else process.env.RIND_LLM_TRACE_PATH = prevTrace;
-    await rm(tmp, { recursive: true, force: true });
-  });
-
-  assert.equal(makeTrace(), null);
-  process.env.RIND_LLM_TRACE_PATH = traceFile;
-  const trace = makeTrace();
-  assert.ok(trace);
-
-  trace.record(
-    "openai-responses",
-    "stream",
-    {
-      model: "gpt-5.4",
-      prompt_cache_key: keyA1,
-      reasoning: { effort: "high" },
-      input: [
-        { role: "system", content: "sys" },
-        { role: "user", content: "hi", raw_image: Buffer.from([1, 2, 3, 4, 5]) },
-      ],
-      tools: [{ name: "read_file" }, { function: { name: "bash" } }],
-    },
-    {
-      sessionId: "session-alpha",
-      baseUrl: "https://api.openai.com/v1",
-      status: "ok",
-      usage: { input_tokens: 42, raw_bytes: new Uint8Array([9, 8, 7]) },
-    },
-  );
-
-  const lines = (await readFile(traceFile, "utf8")).trim().split("\n");
-  assert.equal(lines.length, 1);
-  const entry = JSON.parse(lines[0]);
-  assert.equal(entry.session_id, "session-alpha");
-  assert.equal(entry.api, "openai-responses");
-  assert.equal(entry.prompt_cache_key, keyA1);
-  assert.equal(entry.reasoning_effort, "high");
-  assert.equal(entry.message_count, 2);
-  assert.equal(entry.prefix_hashes.length, 2);
-  assert.notEqual(entry.prefix_hashes[0], entry.prefix_hashes[1]);
-  assert.deepEqual(entry.tool_names, ["read_file", "bash"]);
-  assert.equal(entry.payload.input[1].raw_image, "<bytes:5>");
-  assert.equal(entry.usage.raw_bytes, "<bytes:3>");
 });
 
 test("sse.ts: parseSseEvents handles multi-line data, CRLF, comments, split chunks, trailing EOF flush, and cancellation", async () => {

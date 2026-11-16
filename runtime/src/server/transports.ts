@@ -623,7 +623,7 @@ function resolveWorkspaceRoot(
 ): string {
   let workspaceRoot = cwd ? path.resolve(expandTilde(cwd)) : null;
   if (session) {
-    const meta = JsonlSessionStore.load_session_metadata(session, sessionDir);
+    const meta = JsonlSessionStore.loadSessionMetadata(session, sessionDir);
     const storedWorkspace = String(meta.workspace_root || "").trim();
     if (!storedWorkspace) {
       throw new Error(`Session has no workspace directory: ${session}`);

@@ -819,7 +819,7 @@ export class ExecutionCoordinator {
             return;
           }
           if (checkpoint) {
-            await execution.container.session_store.persist_message(
+            await execution.container.session_store.persistMessage(
               "user",
               buildGoalCheckpointPrompt(checkpoint),
               null,
@@ -1255,7 +1255,7 @@ export class ExecutionCoordinator {
     const selection: ModelSelection = {
       provider_id: String(store.provider || ""),
       model_id: String(store.model || ""),
-      reasoning_effort: String(store.reasoning_effort || ""),
+      reasoning_effort: String(store.reasoningEffort || ""),
     };
     if (
       !selection.model_id ||

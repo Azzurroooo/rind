@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import type { CancellationToken } from "../../domain/cancellation.js";
 import { CancelledError, ProviderError } from "../../domain/errors.js";
-import { sha256Hex, type RequestImage } from "../../domain/models.js";
+import type { RequestImage } from "../../domain/models.js";
 
 const OVERFLOW_RE =
   /prompt is too long|input is too long for requested model|exceeds the context window|input token count[\s\S]*exceeds the maximum|maximum prompt length is \d+|reduce the length of the messages|maximum context length|exceeds the limit of \d+|exceeds the available context size|greater than the context length|context window exceeds limit|exceeded model token limit|context length of only \d+|context[_ ]length[_ ]exceeded|context_overflow|request_too_large|too many tokens|token limit exceeded/i;
@@ -320,94 +318,6 @@ export function rejectsPromptCacheKey(exc: unknown): boolean {
       text.includes(marker),
     )
   );
-}
-
-export interface LlmCallTrace {
-  record(
-    api: string,
-    operation: string,
-    payload: Record<string, unknown>,
-    options?: {
-      sessionId?: string;
-      baseUrl?: string;
-      status?: string;
-      usage?: unknown;
-      error?: string | null;
-    },
-  ): void;
-}
-
-export function makeTrace(tracePath?: string | null): LlmCallTrace | null {
-  const resolved = tracePath || process.env.RIND_LLM_TRACE_PATH;
-  if (!resolved) {
-    return null;
-  }
-  const filePath = path.resolve(resolved);
-  return {
-    record(api, operation, payload, options = {}) {
-      try {
-        fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        const messages = Array.isArray(payload.messages)
-          ? (payload.messages as Record<string, unknown>[])
-          : Array.isArray(payload.input)
-            ? (payload.input as Record<string, unknown>[])
-            : [];
-        const prefixHashes: string[] = [];
-        let runningJson = "[";
-        for (let i = 0; i < messages.length; i++) {
-          if (i > 0) runningJson += ",";
-          runningJson += JSON.stringify(traceReady(messages[i]));
-          prefixHashes.push(sha256Hex(runningJson + "]").slice(0, 16));
-        }
-        const entry = {
-          ts: new Date().toISOString(),
-          session_id: options.sessionId ?? "",
-          api,
-          operation,
-          base_url: options.baseUrl ?? "",
-          model: payload.model,
-          prompt_cache_key: payload.prompt_cache_key ?? null,
-          reasoning_effort:
-            payload.reasoning_effort ??
-            (payload.reasoning && typeof payload.reasoning === "object"
-              ? (payload.reasoning as Record<string, unknown>).effort
-              : null),
-          message_count: messages.length,
-          prefix_hashes: prefixHashes,
-          tool_names: Array.isArray(payload.tools)
-            ? (payload.tools as Record<string, unknown>[]).map(t => {
-                const fn = t.function as Record<string, unknown> | undefined;
-                return String(t.name ?? fn?.name ?? "");
-              })
-            : [],
-          status: options.status ?? "ok",
-          usage: traceReady(options.usage ?? null),
-          error: options.error ?? null,
-          payload: traceReady(payload),
-        };
-        fs.appendFileSync(filePath, JSON.stringify(entry) + "\n", "utf8");
-      } catch {
-        // Tracing is diagnostic only
-      }
-    },
-  };
-}
-
-function traceReady(value: unknown): unknown {
-  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
-    return `<bytes:${value.byteLength}>`;
-  }
-  if (Array.isArray(value)) {
-    return value.map(item => traceReady(item));
-  }
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = traceReady(v);
-    }
-    return out;
-  }
-  return value;
 }
 
 export async function* parseSseEvents(

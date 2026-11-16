@@ -91,9 +91,9 @@ test("CLI team organization view loads and refreshes multi-member conversations 
               provider: "deepseek",
             });
             await store.initialize();
-            await store.persist_user_input(${JSON.stringify(promptText)});
-            await store.persist_message("assistant", ${JSON.stringify(replyText)});
-            process.stdout.write(store.session_id + "\\n");
+            await store.persistUserInput(${JSON.stringify(promptText)});
+            await store.persistMessage("assistant", ${JSON.stringify(replyText)});
+            process.stdout.write(store.sessionId + "\\n");
           `,
         ],
         {

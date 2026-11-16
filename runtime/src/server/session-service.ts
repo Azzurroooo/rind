@@ -49,7 +49,7 @@ export class SessionService {
 
   releasePersistedDraft(): void {
     for (const [sid, store] of this.drafts.entries()) {
-      if (store.is_persisted) {
+      if (store.persisted) {
         this.drafts.delete(sid);
         this.created.delete(sid);
       }
@@ -62,10 +62,10 @@ export class SessionService {
     if (store === null) {
       return false;
     }
-    const sid = store.session_id ?? clean;
+    const sid = store.sessionId ?? clean;
     this.drafts.delete(sid);
     this.created.delete(sid);
-    store.mark_deleted();
+    store.markDeleted();
     return true;
   }
 
@@ -83,7 +83,7 @@ export class SessionService {
 
   async exists(sessionId: string): Promise<boolean> {
     try {
-      JsonlSessionStore.load_session_metadata(validateSessionId(sessionId), this.sessionDir);
+      JsonlSessionStore.loadSessionMetadata(validateSessionId(sessionId), this.sessionDir);
       return true;
     } catch (err) {
       if (err instanceof Error && err.name === "LookupError") {
@@ -162,9 +162,9 @@ export class SessionService {
     const clean = validateSessionId(sessionId);
     const draft = this.draftStore(clean);
     if (draft !== null) {
-      return await draft.get_metadata();
+      return await draft.getMetadata();
     }
-    return JsonlSessionStore.load_session_metadata(clean, this.sessionDir);
+    return JsonlSessionStore.loadSessionMetadata(clean, this.sessionDir);
   }
 
   async list(options?: {
@@ -173,7 +173,7 @@ export class SessionService {
     excludeWorkspaceRoots?: readonly string[] | null;
     excludeSessionIds?: readonly string[] | null;
   }): Promise<Record<string, unknown>[]> {
-    return JsonlSessionStore.list_session_metadata({
+    return JsonlSessionStore.listSessionMetadata({
       sessionDir: this.sessionDir,
       limit: options?.limit ?? 20,
       workspaceRoot: options?.workspaceRoot ?? null,
@@ -188,7 +188,7 @@ export class SessionService {
     excludeWorkspaceRoots?: readonly string[] | null;
     excludeSessionIds?: readonly string[] | null;
   }): Promise<[Record<string, unknown>[], { workspace_root: string; count: number }[]]> {
-    return JsonlSessionStore.list_session_metadata_by_workspace({
+    return JsonlSessionStore.listSessionMetadataByWorkspace({
       sessionDir: this.sessionDir,
       limit: options?.limit ?? 500,
       perWorkspaceLimit: options?.perWorkspaceLimit ?? 3,
@@ -203,17 +203,17 @@ export class SessionService {
     const draft = this.draftStore(clean);
     this.created.delete(clean);
     if (draft !== null) {
-      this.drafts.delete(draft.session_id ?? clean);
-      draft.mark_deleted();
+      this.drafts.delete(draft.sessionId ?? clean);
+      draft.markDeleted();
     }
-    const root = JsonlSessionStore.resolve_session_root(this.sessionDir);
+    const root = JsonlSessionStore.resolveSessionRoot(this.sessionDir);
     const base = resolveSessionBase(root, clean);
     if (fs.existsSync(base)) {
       fs.rmSync(base, { recursive: true, force: true });
     }
     new SessionIndexRepository(
       SESSION_FILES,
-      JsonlSessionStore.index_path_for(this.sessionDir),
+      JsonlSessionStore.indexPathFor(this.sessionDir),
     ).removeSession(clean);
     return {
       session_id: clean,
@@ -226,7 +226,7 @@ export class SessionService {
     if (this.draftStore(clean) !== null) {
       throw new Error("Nothing to fork: the session has no user messages.");
     }
-    const meta = JsonlSessionStore.load_session_metadata(clean, this.sessionDir);
+    const meta = JsonlSessionStore.loadSessionMetadata(clean, this.sessionDir);
     if (meta.session_type === "delegated_task") {
       throw new Error("Delegated task sessions cannot be forked.");
     }
@@ -277,18 +277,18 @@ export class SessionService {
       selectionSource,
     });
     if (options?.deferPersistence) {
-      await store.create_session({ sessionId: store.session_id });
-      const sid = store.session_id!;
+      await store.createSession({ sessionId: store.sessionId });
+      const sid = store.sessionId!;
       this.drafts.set(sid, store);
       this.created.set(sid, this.now());
     } else {
       await store.initialize();
     }
     return {
-      session_id: store.session_id,
+      session_id: store.sessionId,
       model: store.model,
       provider: store.provider,
-      reasoning_effort: store.reasoning_effort,
+      reasoning_effort: store.reasoningEffort,
       workspace_root: root,
       turn_state: null,
       team_main: null,
@@ -363,7 +363,7 @@ export class SessionService {
     const store = await this.openStoreFromInfo(sessionId, info, {
       persistSystemPrompt: false,
     });
-    let messages = await store.get_messages_slice({
+    let messages = await store.getMessagesSlice({
       includeIds: true,
       compacted: false,
     });
@@ -375,7 +375,7 @@ export class SessionService {
     return {
       messages,
       message_total: total,
-      turn_state: await store.get_turn_state(),
+      turn_state: await store.getTurnState(),
       session_id: sessionId,
       model: store.model,
     };
@@ -387,9 +387,9 @@ export class SessionService {
       persistSystemPrompt: false,
     });
     return {
-      messages: await store.get_messages_slice({ includeIds: true, compacted: false }),
-      tool_records: await store.get_tool_records(),
-      turn_state: await store.get_turn_state(),
+      messages: await store.getMessagesSlice({ includeIds: true, compacted: false }),
+      tool_records: await store.getToolRecords(),
+      turn_state: await store.getTurnState(),
       session_id: sessionId,
     };
   }
@@ -421,7 +421,7 @@ export class SessionService {
     );
     const draft = this.draftStore(clean);
     if (draft !== null) {
-      if (root !== draft.workspace_root) {
+      if (root !== draft.workspaceRoot) {
         throw new Error(
           "Session workspace_root is immutable and does not match the requested agent context.",
         );
@@ -449,16 +449,16 @@ export class SessionService {
 
   async setGoal(sessionId: string, objective: string): Promise<Record<string, string>> {
     const store = await this.openStore(sessionId);
-    return (await store.set_goal(objective)) as unknown as Record<string, string>;
+    return (await store.setGoal(objective)) as unknown as Record<string, string>;
   }
 
   async setGoalStatus(sessionId: string, status: string): Promise<Record<string, string>> {
     const store = await this.openStore(sessionId);
-    return (await store.set_goal_status(status)) as unknown as Record<string, string>;
+    return (await store.setGoalStatus(status)) as unknown as Record<string, string>;
   }
 
   async clearGoal(sessionId: string): Promise<void> {
     const store = await this.openStore(sessionId);
-    await store.clear_goal();
+    await store.clearGoal();
   }
 }

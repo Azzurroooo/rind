@@ -16,9 +16,7 @@ function makeEventId(): string {
 }
 
 interface SessionEventContext {
-  session_id?: string | null;
   sessionId?: string | null;
-  now_iso?: () => string;
   nowIso?: () => string;
 }
 
@@ -28,14 +26,14 @@ export function eventMeta(session?: SessionEventContext | null, turnId = ""): {
   turn_id: string;
 } {
   let ts = "";
-  const fn = session?.nowIso ?? session?.now_iso;
+  const fn = session?.nowIso;
   if (typeof fn === "function") {
     try {
       ts = fn.call(session);
     } catch {}
   }
   if (!ts) ts = new Date().toISOString();
-  const sessionId = String(session?.sessionId || session?.session_id || "");
+  const sessionId = String(session?.sessionId || "");
   return {
     ts,
     session_id: sessionId,

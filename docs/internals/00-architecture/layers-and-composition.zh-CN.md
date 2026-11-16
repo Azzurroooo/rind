@@ -15,7 +15,7 @@ flowchart TB
     I -. "实现 ports" .-> A
 ~~~
 
-[AgentContainer](../../../runtime/src/core/turn-runner.ts) 显式接收会话 store、模型客户端、ShellTools、WebSessions 和共享资源，再组装 ContextManager、ToolCallProcessor、TurnRunner、AgentRuntime。`runtime/core` 不反向导入 `runtime/server` 或具体 infrastructure；Surface 也不持有运行时业务对象。
+[AgentContainer](../../../runtime/src/core/turn-runner.ts) 显式接收会话 store、模型客户端、ShellTools、WebSessions 和共享资源，再组装 ContextManager、ToolCallProcessor、TurnRunner、AgentRuntime。当前实现中，[turn-runner.ts](../../../runtime/src/core/turn-runner.ts) 同时承载回合执行内核（`TurnRunner`、`AgentRuntime`）与生产装配根（`buildAgentContainer`、`SharedRuntimeResources`）：`runtime/core` 绝不反向导入 `runtime/server` 或 `gateway`，而装配函数直接在该模块内绑定具体的 `infrastructure` 实现，避免制造多余的单实现包装接口。Surface 也不持有运行时业务对象。
 
 这让生命周期可被看清：Worker 级资源由 RuntimeWorker 创建，单次活跃执行在 ExecutionCoordinator 中装配，application 依赖抽象端口，infrastructure 在边界外实现它们。新增 Provider 或工具时，通常改变适配与装配，而不是改写回合循环。
 

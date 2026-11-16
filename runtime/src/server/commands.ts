@@ -631,7 +631,7 @@ export const SESSIONS_COMMAND = createSlashCommandInfo({
     }
     let sessions: Record<string, unknown>[];
     try {
-      sessions = await context.session.list_recent_sessions(limit);
+      sessions = await context.session.listSessions(limit);
     } catch (exc) {
       return `Command failed: ${(exc as Error).message || String(exc)}`;
     }
@@ -994,7 +994,7 @@ export const RENAME_COMMAND = createSlashCommandInfo({
     }
     let result: { name: string | null; title: string };
     try {
-      result = await session.set_name(text === RENAME_RESET ? null : text);
+      result = await session.rename(text === RENAME_RESET ? null : text);
     } catch (exc) {
       return `${(exc as Error).message || String(exc)} Usage: ${RENAME_USAGE}`;
     }

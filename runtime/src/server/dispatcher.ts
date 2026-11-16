@@ -686,7 +686,7 @@ export class RuntimeDispatcher {
       providerModels.find(m => m.id === currentModel) ?? providerModels[0]!;
     if (sessionId) {
       const store = await this.sessionStore(sessionId);
-      await store.update_selection(providerId, String(chosen.id));
+      await store.updateSelection(providerId, String(chosen.id));
       await this.settingsChanged(sessionId, store);
     }
     return { provider_id: providerId, model_id: String(chosen.id) };
@@ -1528,12 +1528,12 @@ export class RuntimeDispatcher {
       runtime: active ? active.runtime : null,
       session: store,
       debug: this.debug,
-      workspace_root: store.workspace_root,
+      workspace_root: store.workspaceRoot,
       compact_context: () => this.worker.execution.compactContext(sessionId),
       explain_selection: (selection, source) =>
         explainSelection(
           this.worker,
-          String(store.workspace_root || this.worker.workspaceRoot),
+          String(store.workspaceRoot || this.worker.workspaceRoot),
           selection,
           source,
         ),
@@ -1563,11 +1563,11 @@ export class RuntimeDispatcher {
 
   private skillRepository(
     sessionId: string,
-    store: { workspace_root: string | null },
+    store: { workspaceRoot: string | null },
   ): SkillRepository {
     const extTool = this.worker.execution.externalTool(sessionId);
     return new SkillRepository(
-      String(store.workspace_root || this.worker.workspaceRoot),
+      String(store.workspaceRoot || this.worker.workspaceRoot),
       { skillFiles: extTool ? extTool.skill_files : [] },
     );
   }
@@ -1607,7 +1607,7 @@ export class RuntimeDispatcher {
     }
     const store = await this.sessionStore(sessionId);
     providerId = providerId || String(store.provider || "openai");
-    await store.update_selection(providerId, model);
+    await store.updateSelection(providerId, model);
     const applies = await this.settingsChanged(sessionId, store);
     await this.respond(request, {
       provider_id: providerId,
@@ -1637,7 +1637,7 @@ export class RuntimeDispatcher {
       return;
     }
     const store = await this.sessionStore(sessionId);
-    await store.update_reasoning_effort(effort);
+    await store.updateReasoningEffort(effort);
     const applies = await this.settingsChanged(sessionId, store);
     await this.respond(request, {
       reasoning_effort: effort,
@@ -1720,18 +1720,18 @@ export class RuntimeDispatcher {
     if (sessionId === null) return;
     const store = await this.sessionStore(sessionId);
     const folder = this.worker.repository.folderSelection(
-      String(store.workspace_root || ""),
+      String(store.workspaceRoot || ""),
     );
     const wanted = folder.selection;
     let changed = false;
     if (store.provider !== wanted.provider_id || store.model !== wanted.model_id) {
-      await store.update_selection(wanted.provider_id, wanted.model_id, {
+      await store.updateSelection(wanted.provider_id, wanted.model_id, {
         source: folder.model_source,
       });
       changed = true;
     }
-    if (wanted.reasoning_effort && store.reasoning_effort !== wanted.reasoning_effort) {
-      await store.update_reasoning_effort(wanted.reasoning_effort, {
+    if (wanted.reasoning_effort && store.reasoningEffort !== wanted.reasoning_effort) {
+      await store.updateReasoningEffort(wanted.reasoning_effort, {
         source: folder.effort_source,
       });
       changed = true;
@@ -1740,7 +1740,7 @@ export class RuntimeDispatcher {
     await this.respond(request, {
       provider_id: store.provider,
       model_id: store.model,
-      reasoning_effort: store.reasoning_effort,
+      reasoning_effort: store.reasoningEffort,
       changed,
       applies,
     });
@@ -1751,8 +1751,8 @@ export class RuntimeDispatcher {
     store: {
       provider: string;
       model: string | null;
-      reasoning_effort: string;
-      selection_source: Record<string, string>;
+      reasoningEffort: string;
+      selectionSource: Record<string, string>;
     },
   ): Promise<string> {
     const applies = this.worker.execution.turnRunning(sessionId) ? "next_turn" : "now";
@@ -1763,9 +1763,9 @@ export class RuntimeDispatcher {
       turn_id: "",
       provider,
       model: String(store.model || ""),
-      reasoning_effort: String(store.reasoning_effort || ""),
+      reasoning_effort: String(store.reasoningEffort || ""),
       applies,
-      selection_source: { ...store.selection_source },
+      selection_source: { ...store.selectionSource },
       connection_ready: this.readyConnections().has(provider),
     });
     return applies;

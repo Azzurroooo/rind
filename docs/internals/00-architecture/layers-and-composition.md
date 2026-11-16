@@ -15,7 +15,7 @@ flowchart TB
     I -. "implements ports" .-> A
 ~~~
 
-[AgentContainer](../../../runtime/src/core/turn-runner.ts) explicitly receives the session store, the model client, ShellTools, WebSessions, and shared resources, then assembles ContextManager, ToolCallProcessor, TurnRunner, and AgentRuntime. `runtime/core` does not import `runtime/server` or concrete infrastructure in reverse, and a Surface does not hold runtime business objects either.
+[AgentContainer](../../../runtime/src/core/turn-runner.ts) explicitly receives the session store, the model client, ShellTools, WebSessions, and shared resources, then assembles ContextManager, ToolCallProcessor, TurnRunner, and AgentRuntime. In the current codebase, [turn-runner.ts](../../../runtime/src/core/turn-runner.ts) houses both the turn execution kernel (`TurnRunner`, `AgentRuntime`) and the production composition root (`buildAgentContainer`, `SharedRuntimeResources`): `core` never imports `runtime/server` or `gateway`, while container assembly in that module wires concrete `infrastructure` implementations directly without extra single-implementation wrapper interfaces. A Surface does not hold runtime business objects either.
 
 This makes the lifecycles legible: Worker-level resources are created by RuntimeWorker, a single active execution is assembled in ExecutionCoordinator, application depends on abstract ports, and infrastructure implements them outside the boundary. When adding a Provider or a tool, you usually change the adapter and the assembly rather than rewriting the turn loop.
 

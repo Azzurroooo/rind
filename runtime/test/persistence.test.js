@@ -59,13 +59,13 @@ test("JsonlSessionStore defers disk creation until first user message, persists 
   await store.initialize();
 
   // Draft store does not write to disk before user input
-  assert.equal(store.is_persisted, false);
+  assert.equal(store.persisted, false);
 
-  await store.set_name("Refactor test");
-  assert.equal(store.is_persisted, false);
+  await store.rename("Refactor test");
+  assert.equal(store.persisted, false);
 
   await store.persistUserInput("Hello Rind");
-  assert.equal(store.is_persisted, true);
+  assert.equal(store.persisted, true);
   assert.ok(store.sessionId);
   const st = await stat(path.join(sessionsDir, store.sessionId, "meta.json"));
   assert.ok(st.isFile());
@@ -226,12 +226,12 @@ test("reads of session_index.json, meta.json, and jsonl remain lock-free while a
     provider: "deepseek",
   });
   await store.initialize();
-  await store.persist_user_input("Analyze coal sector supply");
-  await store.persist_message("assistant", "Starting sector analysis.");
+  await store.persistUserInput("Analyze coal sector supply");
+  await store.persistMessage("assistant", "Starting sector analysis.");
 
-  const indexPath = JsonlSessionStore.index_path_for(sessionsDir);
-  const metaPath = path.join(sessionsDir, store.session_id, "meta.json");
-  const messagesPath = path.join(sessionsDir, store.session_id, "messages.jsonl");
+  const indexPath = JsonlSessionStore.indexPathFor(sessionsDir);
+  const metaPath = path.join(sessionsDir, store.sessionId, "meta.json");
+  const messagesPath = path.join(sessionsDir, store.sessionId, "messages.jsonl");
   const runtimeEntry = new URL("../dist/index.js", import.meta.url).href;
 
   // Hold exclusive write locks on index.json, meta.json, and messages.jsonl in a separate process.
@@ -269,14 +269,14 @@ test("reads of session_index.json, meta.json, and jsonl remain lock-free while a
 
   // Pure reads must complete instantaneously without acquiring .lock or blocking.
   const startedAt = Date.now();
-  const listed = JsonlSessionStore.list_session_metadata({ sessionDir: sessionsDir, workspaceRoot: workspace });
-  const loadedMeta = JsonlSessionStore.load_session_metadata(store.session_id, sessionsDir);
+  const listed = JsonlSessionStore.listSessionMetadata({ sessionDir: sessionsDir, workspaceRoot: workspace });
+  const loadedMeta = JsonlSessionStore.loadSessionMetadata(store.sessionId, sessionsDir);
   const loadedMessages = SESSION_FILES.readJsonl(messagesPath);
   const elapsedMs = Date.now() - startedAt;
 
   assert.equal(listed.length, 1);
-  assert.equal(listed[0].id, store.session_id);
-  assert.equal(loadedMeta.session_id, store.session_id);
+  assert.equal(listed[0].id, store.sessionId);
+  assert.equal(loadedMeta.session_id, store.sessionId);
   assert.ok(loadedMessages.some(m => m.content === "Analyze coal sector supply"));
   assert.ok(elapsedMs < 1000, `Expected lock-free reads to complete immediately, took ${elapsedMs}ms`);
 
@@ -360,10 +360,10 @@ test("concurrent multi-process session writes and continuous index reads complet
                 provider: "deepseek",
               });
               await store.initialize();
-              await store.persist_user_input("Task " + s + " from worker ${workerIdx}");
+              await store.persistUserInput("Task " + s + " from worker ${workerIdx}");
               for (let step = 0; step < 4; step++) {
-                const now = store.now_iso();
-                await store.persist_tool_call(
+                const now = store.nowIso();
+                await store.persistToolCall(
                   "call_" + step,
                   "bash",
                   { command: "echo " + step },
@@ -373,9 +373,9 @@ test("concurrent multi-process session writes and continuous index reads complet
                   JSON.stringify({ ok: true }),
                   JSON.stringify({ ok: true }),
                 );
-                await store.persist_message("assistant", "Completed step " + step);
+                await store.persistMessage("assistant", "Completed step " + step);
               }
-              ids.push(store.session_id);
+              ids.push(store.sessionId);
             }
             process.stdout.write(JSON.stringify(ids) + "\\n");
           `,
@@ -394,12 +394,12 @@ test("concurrent multi-process session writes and continuous index reads complet
     });
   });
 
-  // Hammer list_session_metadata concurrently on the main process while all 6 child processes write.
+  // Hammer listSessionMetadata concurrently on the main process while all 6 child processes write.
   let settled = false;
   const allDone = Promise.all(workers).finally(() => { settled = true; });
   let readCount = 0;
   while (!settled) {
-    const list = JsonlSessionStore.list_session_metadata({ sessionDir: sessionsDir, limit: 100 });
+    const list = JsonlSessionStore.listSessionMetadata({ sessionDir: sessionsDir, limit: 100 });
     assert.ok(Array.isArray(list));
     readCount += 1;
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -408,7 +408,7 @@ test("concurrent multi-process session writes and continuous index reads complet
   const expectedIds = createdGroups.flat().sort();
 
   assert.ok(readCount > 0);
-  const finalSessions = JsonlSessionStore.list_session_metadata({ sessionDir: sessionsDir, limit: 100 });
+  const finalSessions = JsonlSessionStore.listSessionMetadata({ sessionDir: sessionsDir, limit: 100 });
   assert.deepEqual(finalSessions.map(s => s.id).sort(), expectedIds);
 });
 
@@ -442,7 +442,7 @@ test("context diagnostics coalesce into the next durable metadata commit", async
   assert.equal(writes, writesAfterTurn + 1);
 
   await store.updateContextBreakdown({ estimated_total: 456 });
-  store.mark_deleted();
+  store.markDeleted();
   await store.flushContextBreakdown();
   assert.equal(writes, writesAfterTurn + 1);
 

@@ -432,14 +432,14 @@ test("old image budget triggers single compaction and legacy uploads render noti
   try {
     await container.runtime.initialize();
     const store = container.session_store;
-    await store.persist_user_input("start");
+    await store.persistUserInput("start");
     const imgPath = path.join(tmp, "sample.png");
     await writeFile(imgPath, encodePngBytes(8, 8));
     const [ref] = store.captureImage(imgPath);
 
     for (let i = 0; i < 9; i += 1) {
-      await store.persist_message("user", `Image ${i}`, null, null, null, null, [ref]);
-      await store.persist_message("assistant", "seen");
+      await store.persistMessage("user", `Image ${i}`, null, null, null, null, [ref]);
+      await store.persistMessage("assistant", "seen");
     }
 
     const events = [];
