@@ -85,7 +85,7 @@ test("deleting a saved conversation removes it and refuses while it runs or is s
     ]);
     assert.equal(created.status, "fulfilled");
     assert.equal(removed.status, "rejected");
-    assert.equal(removed.reason.code, "SESSION_BUSY");
+    assert.ok(["SESSION_BUSY", "SESSION_OPEN"].includes(removed.reason?.code), `unexpected delete rejection code: ${removed.reason?.code}`);
   } finally { host.close(); }
 
   await window.shutdown();

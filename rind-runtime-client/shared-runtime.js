@@ -162,6 +162,11 @@ function processAlive(pid) {
   catch (error) { return error?.code !== "ESRCH"; }
 }
 
+function canSignalProcess(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch { return false; }
+}
+
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function within(work, ms) {
@@ -216,19 +221,30 @@ async function endStuckHost(paths, connect) {
   let hostMatched = false;
   if (pid !== process.pid && processAlive(pid)) {
     const command = await readCommandLine(pid);
-    hostMatched = normalize(command).includes(normalize(entry)) && command.includes("--rind-host-nonce=" + record.nonce);
-    // Identity inspection takes time. A host that recovered meanwhile stays up.
-    if (hostMatched && connect) {
-      let connection;
-      try {
-        connection = await connect();
-        if (await within(connection.request("runtime/info").catch(() => null), 500)) return false;
-      } catch { /* It is still unreachable. */ }
-      finally { connection?.close(); }
+    if (!command.trim() && canSignalProcess(pid)) {
+      await waitForExit(pid, 2000);
+    } else {
+      hostMatched = normalize(command).includes(normalize(entry)) && command.includes("--rind-host-nonce=" + record.nonce);
+      // Identity inspection takes time. A host that recovered meanwhile stays up.
+      if (hostMatched && connect) {
+        let connection;
+        try {
+          connection = await connect();
+          if (await within(connection.request("runtime/info").catch(() => null), 500)) return false;
+        } catch { /* It is still unreachable. */ }
+        finally { connection?.close(); }
+      }
     }
   }
-  const workerMatched = Number.isInteger(workerPid) && workerPid > 0 && workerPid !== process.pid && processAlive(workerPid)
-    && (await readCommandLine(workerPid)).includes("app-server");
+  let workerMatched = false;
+  if (Number.isInteger(workerPid) && workerPid > 0 && workerPid !== process.pid && processAlive(workerPid)) {
+    const workerCommand = await readCommandLine(workerPid);
+    if (!workerCommand.trim() && canSignalProcess(workerPid)) {
+      await waitForExit(workerPid, 2000);
+    } else {
+      workerMatched = workerCommand.includes("app-server");
+    }
+  }
   if (!hostMatched && !workerMatched) {
     if (!processAlive(pid) && (!Number.isInteger(workerPid) || workerPid <= 0 || !processAlive(workerPid)) && !(await probeEndpoint(paths.endpoint))) {
       if (await readFile(paths.record, "utf8").catch(() => null) === raw) await unlink(paths.record).catch(() => {});
