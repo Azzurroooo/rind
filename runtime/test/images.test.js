@@ -370,7 +370,7 @@ test("captureImage reuses snapshots, verifies SHA-256 integrity, and wires read_
   const sessionBase2 = path.join(tmp, "session2");
   await mkdir(sessionBase2, { recursive: true });
 
-  const rawRead = readFile(img2, 1, 1000, null, {
+  const rawRead = await readFile(img2, 1, 1000, null, {
     captureImage: (p, tok) => captureImage(sessionBase2, p, tok),
     imageInput: true,
   });
@@ -379,9 +379,9 @@ test("captureImage reuses snapshots, verifies SHA-256 integrity, and wires read_
   assert.ok(!("attachments" in JSON.parse(normalized.model_content)));
   assert.match(normalized.terminal_content, /Read image/);
 
-  const unsupported = JSON.parse(readFile(img2, 1, 1000, null, { imageInput: false }));
+  const unsupported = JSON.parse(await readFile(img2, 1, 1000, null, { imageInput: false }));
   assert.equal(unsupported.error_type, "ImageInputUnsupported");
-  const badPage = JSON.parse(readFile(img2, 2, 1000, null, { imageInput: true }));
+  const badPage = JSON.parse(await readFile(img2, 2, 1000, null, { imageInput: true }));
   assert.equal(badPage.error_type, "InvalidImagePagination");
 });
 

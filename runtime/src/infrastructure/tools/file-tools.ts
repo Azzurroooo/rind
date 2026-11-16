@@ -591,7 +591,7 @@ function parseStrictInt(value: unknown): number | null {
   return null;
 }
 
-export function readFile(
+export async function readFile(
   rawPath: string,
   offset: unknown = 1,
   limit: unknown = 1000,
@@ -600,7 +600,7 @@ export function readFile(
     captureImage?: ((path: string, token?: CancellationToken | null) => [ImageAttachment, string | null]) | null;
     imageInput?: boolean | null;
   },
-): string {
+): Promise<string> {
   const cancelled = checkCancelled("read_file", cancellationToken);
   if (cancelled) return cancelled;
 
@@ -672,60 +672,79 @@ export function readFile(
       return toolError("read_file", `Binary file cannot be read as text: ${rawPath}`, "BinaryFile");
     }
 
-    const rawBytes = fs.readFileSync(filePath);
-    let fullText: string;
-    try {
-      fullText = new TextDecoder("utf-8", { fatal: true }).decode(rawBytes);
-    } catch {
-      return toolError("read_file", `File is not valid UTF-8 text: ${rawPath}`, "InvalidEncoding");
-    }
-
     const effectiveLimit = Math.min(parsedLimit, READ_MAX_LIMIT);
     const endLine = parsedOffset + effectiveLimit - 1;
     const selected: Array<[number, string]> = [];
     let hasMore = false;
-
-    const rawLines = fullText.length === 0 ? [] : fullText.split(/\r\n|\n|\r/);
-    if (fullText.endsWith("\n") || fullText.endsWith("\r")) {
-      rawLines.pop();
-    }
-    const lastLine = rawLines.length;
+    let lastLine = 0;
+    let line = "";
+    let lineChars = 0;
+    let skipLf = false;
+    let oversizedLine = 0;
     let outputBytes = Buffer.byteLength(`Showing lines ${parsedOffset} to 0:`, "utf8");
-
-    for (let idx = 0; idx < rawLines.length; idx++) {
-      const lineNo = idx + 1;
-      if (lineNo < parsedOffset) {
-        if (lineNo % 1000 === 0) {
-          const c = checkCancelled("read_file", cancellationToken);
-          if (c) return c;
-        }
-        continue;
+    const append = (text: string) => {
+      lineChars += text.length;
+      if (lastLine + 1 >= parsedOffset && lastLine < endLine && !hasMore && lineChars <= READ_MAX_BYTES) {
+        line += text;
       }
-      if (lineNo > endLine) {
-        hasMore = true;
-        break;
-      }
-      const rawLine = rawLines[idx];
-      const formatted = `${String(lineNo).padStart(4, " ")} | ${rawLine}\n`;
-      const lineBytes = Buffer.byteLength(formatted, "utf8");
-      if (outputBytes + lineBytes > READ_MAX_BYTES) {
-        if (selected.length > 0) {
+    };
+    const finishLine = () => {
+      lastLine += 1;
+      if (lastLine >= parsedOffset && !hasMore) {
+        const bytes = Buffer.byteLength(`${String(lastLine).padStart(4, " ")} | ${line}\n`, "utf8");
+        if (lastLine > endLine) {
           hasMore = true;
-          break;
+        } else if (lineChars > READ_MAX_BYTES || outputBytes + bytes > READ_MAX_BYTES) {
+          if (selected.length === 0) oversizedLine = lastLine;
+          hasMore = true;
+        } else {
+          selected.push([lastLine, line]);
+          outputBytes += bytes;
         }
-        return toolError(
-          "read_file",
-          `Line ${lineNo} exceeds the read budget and was not displayed. Use bash/Python to read this line in character slices, then resume at offset ${lineNo + 1}.`,
-          "LineTooLong",
-          { path: filePath, offset: lineNo },
-        );
       }
-      selected.push([lineNo, rawLine]);
-      outputBytes += lineBytes;
-      if (lineNo % 1000 === 0) {
+      line = "";
+      lineChars = 0;
+    };
+    const scan = (text: string) => {
+      if (!text) return;
+      let start = skipLf && text.startsWith("\n") ? 1 : 0;
+      skipLf = text.endsWith("\r");
+      const endings = /\r\n|\r|\n/g;
+      endings.lastIndex = start;
+      for (let match; (match = endings.exec(text)) !== null;) {
+        append(text.slice(start, match.index));
+        finishLine();
+        start = endings.lastIndex;
+      }
+      append(text.slice(start));
+    };
+    const handle = await fs.promises.open(filePath, "r");
+    try {
+      const size = (await handle.stat()).size;
+      const buffer = Buffer.allocUnsafe(64 * 1024);
+      const decoder = new TextDecoder("utf-8", { fatal: true });
+      let position = 0;
+      while (position < size) {
         const c = checkCancelled("read_file", cancellationToken);
         if (c) return c;
+        const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, size - position), position);
+        if (!bytesRead) break;
+        position += bytesRead;
+        scan(decoder.decode(buffer.subarray(0, bytesRead), { stream: true }));
       }
+      scan(decoder.decode());
+      if (lineChars > 0) finishLine();
+    } catch (exc) {
+      if ((exc as NodeJS.ErrnoException).code === "ERR_ENCODING_INVALID_ENCODED_DATA") {
+        return toolError("read_file", `File is not valid UTF-8 text: ${rawPath}`, "InvalidEncoding");
+      }
+      throw exc;
+    } finally {
+      await handle.close();
+    }
+    if (oversizedLine) {
+      return toolError("read_file", `Line ${oversizedLine} exceeds the read budget and was not displayed. Use bash/Python to read this line in character slices, then resume at offset ${oversizedLine + 1}.`,
+        "LineTooLong", { path: filePath, offset: oversizedLine });
     }
 
     if (parsedOffset > lastLine && !(parsedOffset === 1 && lastLine === 0)) {
@@ -1263,7 +1282,7 @@ export function buildFileToolSpecs(options?: {
   return [
     new ToolSpec({
       name: "read_file",
-      isAsync: false,
+      isAsync: true,
       parallel: true,
       normalizeArguments: normalizePathArguments,
       description:
@@ -1282,19 +1301,21 @@ export function buildFileToolSpecs(options?: {
         },
         required: ["path"],
       },
-      handler: args => {
+      handler: async args => {
         const [resolved, err] = resolveScopedPath("read_file", args.path, true);
         if (err) return err;
-        return readFile(
-          resolved!,
-          args.offset ?? 1,
-          args.limit ?? 1000,
-          args._cancellation_token as CancellationToken | undefined,
-          {
+        const token = args._cancellation_token as CancellationToken | undefined;
+        if (toolSemaphore && !(await tryAcquireSlot(toolSemaphore, token))) {
+          return toolCancelled("read_file", token?.reason);
+        }
+        try {
+          return await readFile(resolved!, args.offset ?? 1, args.limit ?? 1000, token, {
             captureImage: options?.captureImage,
             imageInput: imageInput(),
-          },
-        );
+          });
+        } finally {
+          toolSemaphore?.release();
+        }
       },
     }),
     new ToolSpec({
