@@ -27,39 +27,73 @@ export function retain(state: State, now = Date.now()) {
   const notices = Object.keys(state.notices);
   for (const key of notices.slice(0, Math.max(0, notices.length - NOTICE_LIMIT))) delete state.notices[key];
 
-  const activeRuns = Object.values(state.runs).filter(activeRun);
+  const activeTaskIds = new Set<string>();
+  const activeDelegationIds = new Set<string>();
+  for (const run of Object.values(state.runs)) {
+    if (!activeRun(run)) continue;
+    if (run.taskId) activeTaskIds.add(run.taskId);
+    if (run.delegationId) activeDelegationIds.add(run.delegationId);
+  }
+  const deletedTaskIds = new Set<string>();
+  const deletedDelegationIds = new Set<string>();
+
   for (const [id, team] of Object.entries(state.teams)) {
     if ((team as { archive?: unknown }).archive) delete state.teams[id];
   }
   for (const [id, task] of Object.entries(state.tasks)) {
     if (state.teams[task.teamId]) continue;
     delete state.tasks[id];
-    for (const [noteId, note] of Object.entries(state.notes)) if (note.taskId === id) delete state.notes[noteId];
-    for (const [artId, art] of Object.entries(state.artifacts)) if (art.taskId === id) delete state.artifacts[artId];
-    for (const [runId, run] of Object.entries(state.runs)) if (run.taskId === id && !activeRun(run)) delete state.runs[runId];
+    deletedTaskIds.add(id);
   }
 
+  const childDelegationCounts = new Map<string, number>();
+  for (const d of Object.values(state.delegations)) {
+    if (d.parentDelegationId) {
+      childDelegationCounts.set(d.parentDelegationId, (childDelegationCounts.get(d.parentDelegationId) ?? 0) + 1);
+    }
+  }
   const delegations = Object.keys(state.delegations);
   for (let drop = Math.max(0, delegations.length - DELEGATION_LIMIT), i = 0; drop > 0 && i < delegations.length; i++) {
     const d = state.delegations[delegations[i]];
     if (!d || awaitingDelegation(d) || (!d.returned && d.status !== "cancelled")) continue;
-    if (Object.values(state.delegations).some(child => child.parentDelegationId === d.id)) continue;
-    if (activeRuns.some(r => r.delegationId === d.id)) continue;
+    if ((childDelegationCounts.get(d.id) ?? 0) > 0) continue;
+    if (activeDelegationIds.has(d.id)) continue;
     delete state.delegations[d.id];
-    for (const [runId, run] of Object.entries(state.runs)) if (run.delegationId === d.id && !activeRun(run)) delete state.runs[runId];
+    deletedDelegationIds.add(d.id);
+    if (d.parentDelegationId) {
+      const remaining = (childDelegationCounts.get(d.parentDelegationId) ?? 1) - 1;
+      if (remaining <= 0) childDelegationCounts.delete(d.parentDelegationId);
+      else childDelegationCounts.set(d.parentDelegationId, remaining);
+    }
     drop--;
   }
 
+  const taskDelegationCounts = new Map<string, number>();
+  for (const d of Object.values(state.delegations)) {
+    if (d.taskId) taskDelegationCounts.set(d.taskId, (taskDelegationCounts.get(d.taskId) ?? 0) + 1);
+  }
   const finishedTasks = Object.values(state.tasks).filter(t => t.status === "done" || t.status === "cancelled");
   for (let drop = Math.max(0, finishedTasks.length - COMPLETED_TASK_LIMIT), i = 0; drop > 0 && i < finishedTasks.length; i++) {
     const task = finishedTasks[i];
-    if (activeRuns.some(r => r.taskId === task.id)) continue;
-    if (Object.values(state.delegations).some(d => d.taskId === task.id)) continue;
+    if (activeTaskIds.has(task.id)) continue;
+    if ((taskDelegationCounts.get(task.id) ?? 0) > 0) continue;
     delete state.tasks[task.id];
-    for (const [noteId, note] of Object.entries(state.notes)) if (note.taskId === task.id) delete state.notes[noteId];
-    for (const [artId, art] of Object.entries(state.artifacts)) if (art.taskId === task.id) delete state.artifacts[artId];
-    for (const [runId, run] of Object.entries(state.runs)) if (run.taskId === task.id && !activeRun(run)) delete state.runs[runId];
+    deletedTaskIds.add(task.id);
     drop--;
+  }
+
+  if (deletedTaskIds.size > 0 || deletedDelegationIds.size > 0) {
+    for (const [noteId, note] of Object.entries(state.notes)) {
+      if (deletedTaskIds.has(note.taskId)) delete state.notes[noteId];
+    }
+    for (const [artId, art] of Object.entries(state.artifacts)) {
+      if (deletedTaskIds.has(art.taskId)) delete state.artifacts[artId];
+    }
+    for (const [runId, run] of Object.entries(state.runs)) {
+      if (!activeRun(run) && ((run.taskId && deletedTaskIds.has(run.taskId)) || (run.delegationId && deletedDelegationIds.has(run.delegationId)))) {
+        delete state.runs[runId];
+      }
+    }
   }
 
   const groups = new Map<string, Run[]>();

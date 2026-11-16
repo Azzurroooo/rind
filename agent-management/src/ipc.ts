@@ -53,6 +53,40 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
   const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   ready.catch(() => {});
   const sockets = new Set<net.Socket>();
+  type Subscriber = { principal: Principal; active: () => boolean; deliver: (snapshot: unknown) => void };
+  const subscribers = new Set<Subscriber>();
+  const pendingSubscribers = new Set<Subscriber>();
+  let flushScheduled = false;
+  let stopSubscriberBroadcast: (() => void) | undefined;
+  function ensureSubscriberBroadcast() {
+    if (stopSubscriberBroadcast) return;
+    stopSubscriberBroadcast = service.onChange(() => {
+      if (subscribers.size === 0) return;
+      for (const subscriber of subscribers) pendingSubscribers.add(subscriber);
+      if (flushScheduled) return;
+      flushScheduled = true;
+      setImmediate(() => {
+        flushScheduled = false;
+        if (closing || pendingSubscribers.size === 0) {
+          pendingSubscribers.clear();
+          return;
+        }
+        const batch = [...pendingSubscribers];
+        pendingSubscribers.clear();
+        const snapshots = new Map<string, unknown>();
+        for (const subscriber of batch) {
+          if (!subscriber.active()) continue;
+          const key = subscriber.principal.kind === "user" ? "user" : `manager:${subscriber.principal.sessionId}`;
+          let snapshot = snapshots.get(key);
+          if (!snapshots.has(key)) {
+            snapshot = service.snapshot(subscriber.principal);
+            snapshots.set(key, snapshot);
+          }
+          subscriber.deliver(snapshot);
+        }
+      });
+    });
+  }
   let service: ReturnType<typeof createService>;
   let userToken = "";
   let runtime: Awaited<ReturnType<typeof connectSharedRuntime>> | undefined;
@@ -304,13 +338,19 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
           unsubscribe?.();
           // A burst of host events becomes one snapshot per connection. Responses
           // are written first, so a request is never answered with stale state.
-          let pending = false;
-          const stop = service.onChange(() => {
-            if (pending) return;
-            pending = true;
-            setImmediate(() => { pending = false; if (!socket.destroyed) send({ event: "snapshot", snapshot: service.snapshot(principal) }); });
-          });
-          unsubscribe = () => { pending = true; stop(); };
+          let current = true;
+          const subscriber: Subscriber = {
+            principal,
+            active: () => current && !socket.destroyed,
+            deliver: snapshot => send({ event: "snapshot", snapshot }),
+          };
+          subscribers.add(subscriber);
+          ensureSubscriberBroadcast();
+          unsubscribe = () => {
+            current = false;
+            subscribers.delete(subscriber);
+            pendingSubscribers.delete(subscriber);
+          };
           result = service.snapshot(principal);
         } else if (message.method === "sessionTools") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the host can issue session tools.");
@@ -514,6 +554,9 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
   function close(reason = "shutdown") {
     return closed ||= (async () => {
       closing = true;
+      stopSubscriberBroadcast?.();
+      subscribers.clear();
+      pendingSubscribers.clear();
       clearStopTimer();
       if (idleTimer) { clearInterval(idleTimer); idleTimer = undefined; }
       if (probe) clearInterval(probe);
