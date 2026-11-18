@@ -1881,6 +1881,7 @@ export function buildAgentContainer(options: {
   const webSessions = options.webSessions ?? new WebSessions();
   const model = settings.model;
 
+  const enableUserQuestion = options.enableUserQuestion ?? true;
   const sessionStore =
     options.sessionStore ??
     new JsonlSessionStore({
@@ -1890,7 +1891,10 @@ export function buildAgentContainer(options: {
       model,
       systemPrompt:
         options.systemPrompt ||
-        buildSystemPrompt({ environment: getSystemInfo(promptWorkspace) }),
+        buildSystemPrompt({
+          environment: getSystemInfo(promptWorkspace),
+          enableUserQuestion,
+        }),
       workspaceRoot: options.workspaceRoot,
       projectId: options.projectId,
       ownerAgentId: options.ownerAgentId,
@@ -1931,6 +1935,12 @@ export function buildAgentContainer(options: {
   const toolSpecs = options.externalTool
     ? [...catalog, ...options.externalTool.specs(sessionStore.sessionId || "")]
     : catalog;
+  if (!options.systemPrompt) {
+    sessionStore.configurePromptTools({
+      tools: toolSpecs.map(spec => spec.name),
+      enableUserQuestion,
+    });
+  }
   const toolRegistry = new DefaultToolRegistry(toolSpecs);
   const runtimeSystemMessages: Array<Record<string, unknown>> = [];
   if (options.externalTool?.instructions) {

@@ -862,6 +862,7 @@ export function projectMessages(
     compacted?: boolean;
     includeInternal?: boolean;
     toolMap?: ReadonlyMap<string, Record<string, unknown>>;
+    promptOptions?: { tools?: readonly string[]; enableUserQuestion?: boolean };
   } = {},
 ): Record<string, unknown>[] {
   const includeIds = options.includeIds ?? false;
@@ -944,7 +945,7 @@ export function projectMessages(
         content: message.content ?? "",
       };
       if (role === "system") {
-        projected.content = refreshSystemPrompt(String(projected.content ?? ""));
+        projected.content = refreshSystemPrompt(String(projected.content ?? ""), options.promptOptions);
       }
       if ("attachments" in message) {
         projected.attachments = message.attachments;
@@ -978,7 +979,7 @@ export function projectMessages(
   }
 
   if (builtMessages.length === 0) {
-    return [{ role: "system", content: systemPrompt }];
+    return [{ role: "system", content: refreshSystemPrompt(systemPrompt, options.promptOptions) }];
   }
   if (compactApplied) {
     const result = validateCompactHandoffBoundary(builtMessages);
@@ -1064,7 +1065,8 @@ export class JsonlSessionStore {
   private _provider: string;
   private _reasoningEffort: string;
   private _selectionSource: Record<string, string>;
-  private readonly _systemPrompt: string;
+  private _systemPrompt: string;
+  private _promptOptions: { tools?: readonly string[]; enableUserQuestion?: boolean } = {};
   private readonly _workspaceRoot: string | null;
   private readonly _projectId: string | null;
   private readonly _ownerAgentId: string | null;
@@ -1741,9 +1743,21 @@ export class JsonlSessionStore {
     }
   }
 
+  configurePromptTools(options: { tools?: readonly string[]; enableUserQuestion?: boolean }): void {
+    this._promptOptions = {
+      ...(options.tools ? { tools: [...options.tools] } : {}),
+      ...(options.enableUserQuestion !== undefined ? { enableUserQuestion: options.enableUserQuestion } : {}),
+    };
+    if (this._systemPrompt) {
+      this._systemPrompt = refreshSystemPrompt(this._systemPrompt, this._promptOptions);
+    }
+    this._projectedCaches.clear();
+  }
+
   private _projectionCacheKeySync(): string {
     return [
       this._systemPrompt,
+      JSON.stringify(this._promptOptions),
       this._projectionFileSignature(this._sessionPaths.messages),
       this._projectionFileSignature(this._sessionPaths.tool_calls),
       this._projectionFileSignature(this._sessionPaths.compactions),
@@ -1772,6 +1786,7 @@ export class JsonlSessionStore {
       compacted,
       includeInternal,
       toolMap,
+      promptOptions: this._promptOptions,
     });
     this._projectedCaches.set(key, [sig, built]);
     return built;
