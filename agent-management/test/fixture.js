@@ -52,7 +52,7 @@ export async function fixture(t, { maxConcurrentRuns, cliState } = {}) {
   // Stands in for the Runtime taking a delivery into a conversation.
   const delivered = [];
   const deliver = async (runtimeSessionId, text) => { delivered.push({ runtimeSessionId, text }); };
-  const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}), folderDefaults, deliver, maxConcurrentRuns });
+  const service = createService({ store, paths, adapter, toolConfig: () => ({}), folderDefaults, deliver, maxConcurrentRuns });
   t.after(async () => { await service.stop(); await store.close(); await rm(home, { recursive: true, force: true }); });
   const call = (method, params = {}, actor = user) => service.request(actor, method, { requestId: randomUUID(), ...params });
   const team = await call("createTeam", { name: "Product" });

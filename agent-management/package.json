@@ -6,10 +6,6 @@
   "engines": {
     "node": ">=20"
   },
-  "exports": {
-    ".": "./dist/client.js",
-    "./service": "./dist/service.js"
-  },
   "scripts": {
     "build": "tsc",
     "test": "npm run build && node scripts/run-tests.mjs"
@@ -17,8 +13,5 @@
   "devDependencies": {
     "@types/node": "^18.19.0",
     "typescript": "^5.8.3"
-  },
-  "dependencies": {
-    "yaml": "^2.9.1"
   }
 }

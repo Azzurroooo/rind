@@ -85,7 +85,6 @@ if (existsSync(path.join(runtimeRoot, "node_modules"))) {
 for (const relative of ["frontend-cli/package.json", "agent-management/package.json", "runtime/package.json"]) {
   await cp(path.join(root, relative), path.join(destination, relative));
 }
-await cp(path.dirname(require.resolve("yaml/package.json")), path.join(destination, "agent-management/node_modules/yaml"), { recursive: true });
 const version = (await readFile(path.join(root, "runtime/src/version.ts"), "utf8")).match(/RIND_VERSION\s*=\s*["']([^"']+)/)?.[1];
 if (!version) throw new Error("Cannot read the Rind version.");
 await writeFile(path.join(destination, "package.json"), JSON.stringify({ name: "@rind-ai/cli", version, type: "module", bin: { rind: "frontend-cli/bin/rind.js" }, engines: { node: ">=20" } }, null, 2) + "\n");

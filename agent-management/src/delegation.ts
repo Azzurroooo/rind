@@ -20,11 +20,11 @@ export function ownDelegations(state: State, session: Session) {
 // replays it, so it stays bounded however many reports it carries. A report
 // that does not fit is previewed, with the call that reads it in full; once
 // too little room is left for a useful preview, it takes one line.
-export const DELIVERY_BUDGET_BYTES = 48 * 1024;
-export const REPORT_PREVIEW_BYTES = 8 * 1024;
+const DELIVERY_BUDGET_BYTES = 48 * 1024;
+const REPORT_PREVIEW_BYTES = 8 * 1024;
 const MIN_PREVIEW_BYTES = 1024;
 
-export function resultsText(state: State, delegations: Delegation[], { full = false } = {}) {
+function resultsText(state: State, delegations: Delegation[], { full = false } = {}) {
   let budget = DELIVERY_BUDGET_BYTES;
   return ["Delegated work settled:", ...delegations.map(d => {
     const head = "- " + nameOf(state, d.assigneeAgentId) + " · task " + d.id + " · ";

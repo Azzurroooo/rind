@@ -1,11 +1,10 @@
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdir, rm, copyFile, readFile } from "node:fs/promises";
 import path from "node:path";
-import { activeRun, awaitingDelegation, entryTask, ManagementError, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Delegation, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
+import { activeRun, awaitingDelegation, ManagementError, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Delegation, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
-import { previewLegacyTeam } from "./legacy.js";
 import { sessionStatus, memberStatus, queuedReason, priorityRank, teamBriefing, managerOverview, projectionIndex, type LiveSession } from "./projection.js";
 import { retain } from "./retention.js";
 import { supervisor, manages, setSupervisor } from "./organization.js";
@@ -20,10 +19,10 @@ const WAIT_PENDING = Symbol("waitPending");
 interface WaitPending { [WAIT_PENDING]: { sessionId: string; ids: string[]; timeoutMs: number; includeReturned: boolean } }
 // Teams are picked by name in the sidebar and in `rind agents`; two live teams never share one.
 const teamNameTaken = (state: State, name: string) => Object.values(state.teams).some(t => t.name.trim().toLowerCase() === name.trim().toLowerCase());
-const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listModels", "getMemberModel", "listFolderDefaults"]);
+const reads = new Set(["snapshot", "getTeam", "getTask", "previewCopy", "readArtifact", "listModels", "getMemberModel", "listFolderDefaults"]);
 const MEMBER_MODEL_PARTS = { model: "model", reasoningEffort: "reasoning_effort" } as const;
 export const DEFAULT_MAX_CONCURRENT_RUNS = 128;
-export const CONCURRENT_RUN_OPTIONS = [4, 8, 16, 32, 64, 128, 256, 512] as const;
+const CONCURRENT_RUN_OPTIONS = [4, 8, 16, 32, 64, 128, 256, 512] as const;
 function resolveMaxConcurrentRuns(configured?: number, rindHome?: string) {
   const raw = configured ?? process.env.RIND_MAX_CONCURRENT_RUNS;
   if (raw !== undefined && raw !== "") {
@@ -38,8 +37,8 @@ function resolveMaxConcurrentRuns(configured?: number, rindHome?: string) {
   }
   return DEFAULT_MAX_CONCURRENT_RUNS;
 }
-export function createService({ store, paths, adapters, toolConfig, folderDefaults, deliver, maxConcurrentRuns }: {
-  store: Store; paths: Paths; adapters: Record<string, Adapter>;
+export function createService({ store, paths, adapter, toolConfig, folderDefaults, deliver, maxConcurrentRuns }: {
+  store: Store; paths: Paths; adapter: Adapter;
   toolConfig: (principal: Principal) => object;
   folderDefaults: FolderDefaults;
   // Runs a message as the next turn of a Runtime conversation.
@@ -200,11 +199,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   async function register(state: State, p: Params): Promise<Agent> {
     const canonicalWorkspace = await canonicalDirectory(text(p.workspace, "Workspace"));
     requireValue(!inside(await canonicalDirectory(paths.state), canonicalWorkspace), "FORBIDDEN", "The management state directory cannot be an agent workspace.");
-    const adapter = p.adapter || "rind";
-    requireValue(Object.hasOwn(adapters, adapter), "UNSUPPORTED_ADAPTER", "No installed execution adapter: " + adapter);
-    const existing = Object.values(state.agents).find(a => a.canonicalWorkspace === canonicalWorkspace && a.adapter === adapter);
+    const adapterName = p.adapter || "rind";
+    requireValue(adapterName === "rind", "UNSUPPORTED_ADAPTER", "No installed execution adapter: " + adapterName);
+    const existing = Object.values(state.agents).find(a => a.canonicalWorkspace === canonicalWorkspace && a.adapter === adapterName);
     if (existing) return existing;
-    const agent = { id: randomUUID(), name: p.name ? text(p.name, "Name", 200) : path.basename(canonicalWorkspace), canonicalWorkspace, adapter,
+    const agent = { id: randomUUID(), name: p.name ? text(p.name, "Name", 200) : path.basename(canonicalWorkspace), canonicalWorkspace, adapter: adapterName,
       ...(p.hint ? { hint: text(p.hint, "Agent instructions") } : {}),
       ...(p.skillRefs ? { skillRefs: strings(p.skillRefs, "Skills") } : {}) };
     state.agents[agent.id] = agent;
@@ -488,7 +487,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       throw new ManagementError("WORKSPACE_BUSY", "Run " + owner.id + " (" + owner.status + ") owns this workspace. Wait for it, or run `rind agents " + release + "`.");
     }
     const now = new Date().toISOString();
-    const run: Run = { id: randomUUID(), sessionId, ...(taskId ? { taskId } : {}), ...(delegationId ? { delegationId } : {}), status: "starting", startedAt: now, lastObservedAt: now, hostSequence: 0 };
+    const run: Run = { id: randomUUID(), sessionId, ...(taskId ? { taskId } : {}), ...(delegationId ? { delegationId } : {}), status: "starting", startedAt: now, lastObservedAt: now };
     state.runs[run.id] = run;
     return run;
   }
@@ -496,7 +495,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   function filtered(state: State, actor: Principal) {
     const teams = Object.values(state.teams);
     const teamIds = new Set(teams.map(t => t.id));
-    const tasks = Object.values(state.tasks).filter(t => teamIds.has(t.teamId) && entryTask(t));
+    const tasks = Object.values(state.tasks).filter(t => teamIds.has(t.teamId));
     const taskIds = new Set(tasks.map(t => t.id));
     const sessions = Object.values(state.sessions);
     const index = projectionIndex(state, connected, runtimeSessions);
@@ -523,8 +522,6 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     if (actor.kind !== "user") sessionOf(state, actor);
     switch (method) {
       case "snapshot": return actor.kind === "manager" ? managerOverview(filtered(state, actor), state.agents) : filtered(state, actor);
-      case "listTeams": return filtered(state, actor).teams;
-      case "listAgents": return filtered(state, actor).agents;
       case "getTeam": {
         teamAccess(state, actor, p.teamId); const view = filtered(state, actor);
         const tasks = view.tasks.filter(t => t.teamId === p.teamId);
@@ -627,27 +624,6 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         return agent;
       }
       case "previewCopy": userOnly(actor); return copyPreview(text(p.source, "Source"));
-      case "previewImport": userOnly(actor); return previewLegacyTeam(text(p.root, "Legacy team directory"));
-      case "importTeam": {
-        userOnly(actor);
-        const preview = await previewLegacyTeam(text(p.root, "Legacy team directory"));
-        requireValue(p.confirmation === preview.fingerprint && !preview.errors.length, "IMPORT_CONFIRMATION_REQUIRED", "Review and resolve the import preview first.", preview);
-        // Importing the same folder again returns its live team.
-        const id = "import-" + createHash("sha256").update(preview.root).digest("hex").slice(0, 24);
-        if (state.teams[id]) return state.teams[id];
-
-
-        // The name comes from the old files, not from the user: keep it free of clashes.
-        let name = preview.name;
-        for (let n = 2; teamNameTaken(state, name); n++) name = preview.name + " (" + n + ")";
-        state.teams[id] = { id, name, createRoot: path.join(paths.workspaces, id) };
-        for (const source of preview.agents) {
-          const agent = await register(state, source);
-          await addMember(state, actor, { teamId: id, agentId: agent.id, responsibility: source.responsibility, share: p.share === true });
-          if (source.legacyId === preview.leader) state.teams[id].leaderAgentId = agent.id;
-        }
-        return state.teams[id];
-      }
       case "assignTask": return newTask(state, actor, p.teamId, p.assigneeAgentId, text(p.brief, "Brief"), p.start !== false);
       case "delegate": return delegate(state, actor, p, prefetched);
       case "report": return report(state, actor, p);
@@ -817,7 +793,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         if (run) {
           run.lastObservedAt = new Date().toISOString();
           if (!run.taskId && !run.delegationId && !p.pending) {
-            run.status = p.outcome === "turn_completed" || p.outcome === "completed" ? "succeeded" : p.outcome === "turn_cancelled" || p.outcome === "cancelled" ? "cancelled" : "failed";
+            run.status = p.outcome === "turn_completed" ? "succeeded" : p.outcome === "turn_cancelled" ? "cancelled" : "failed";
             const children = sessionDelegations(state, run.sessionId);
             if (!children.some(awaitingDelegation)) {
               returnDelegations(state, children, text => { (state.deliveries[run.sessionId] ||= { texts: [] }).texts.push(text); });
@@ -826,16 +802,6 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           run.needsInput = false;
         }
         return { observed: true };
-      }
-      case "reportRunEvent": {
-        userOnly(actor); const run = state.runs[p.runId]; requireValue(run && run.sessionId === p.sessionId, "NOT_FOUND", "Run not found.");
-        requireValue(Number.isSafeInteger(p.hostSequence) && p.hostSequence > 0, "INVALID_INPUT", "A host sequence is required.");
-        if (p.hostSequence <= run.hostSequence) return run;
-        if (!activeRun(run)) return run;
-        requireValue(["working", "needs_input", "completed", "failed", "cancelled", "unknown"].includes(p.type), "INVALID_INPUT", "Invalid run event.");
-        run.hostSequence = p.hostSequence; run.lastObservedAt = new Date().toISOString();
-        run.status = p.type === "completed" ? "succeeded" : ["working", "needs_input"].includes(p.type) ? "running" : p.type;
-        run.needsInput = p.type === "needs_input"; return run;
       }
       case "reconcileSession": {
         userOnly(actor); const session = ownSession(state, actor, p.sessionId);
@@ -1161,11 +1127,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       const session = state.sessions[startRun.sessionId];
       const agent = state.agents[session.agentId];
       const instructions = memberInstructions(state, session, work);
-      const handle = await adapters[agent.adapter].start({ agent, session, task: work, input, ...(delivery ? { delivery: true } : {}), instructions, externalTools: toolConfig({ kind: "agent", sessionId: session.id }) }, event => {
+      const handle = await adapter.start({ agent, session, task: work, input, ...(delivery ? { delivery: true } : {}), instructions, externalTools: toolConfig({ kind: "agent", sessionId: session.id }) }, () => {
         void transaction(next => {
           const run = next.runs[runId];
-          if (!activeRun(run) || event.sequence <= run.hostSequence) return;
-          run.status = "running"; run.hostSequence = event.sequence; run.lastObservedAt = new Date().toISOString();
+          if (!activeRun(run)) return;
+          run.status = "running"; run.lastObservedAt = new Date().toISOString();
         }).catch(reportServiceError);
       });
       // Observed at once: a run can fail before this execution reaches its await,
@@ -1352,7 +1318,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     },
   };
 }
-export function validateReport(p: Params): Report {
+function validateReport(p: Params): Report {
   return { outcome: text(p.outcome, "Outcome", 200), summary: text(p.summary, "Summary", 4000), evidence: strings(p.evidence, "Evidence"), artifacts: strings(p.artifacts, "Artifacts"), ...(p.nextAction ? { nextAction: text(p.nextAction, "Next action") } : {}) };
 }
 function reportServiceError(error: unknown) { console.error(`[${new Date().toISOString()}] Agents management state update failed:`, error); }

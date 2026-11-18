@@ -25,49 +25,30 @@ function rind(home, cwd, ...args) {
   });
 }
 
-test("rind agents lists and imports from where it runs, and leaves teams and tasks to the Agents page", { timeout: 60000 }, async t => {
+test("rind agents lists state and leaves teams and tasks to the Agents page", { timeout: 60000 }, async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), "rind-agents-commands-"));
   const home = path.join(root, "home");
-  const physicalWork = path.join(root, "work");
-  const work = path.join(root, "work-alias");
   t.after(async () => {
     await rind(home, root, "agents", "stop", "--all");
     await removeRindHome(home);
     await removeRindHome(root);
   });
-  const legacy = path.join(physicalWork, "legacy");
-  await mkdir(path.join(legacy, ".aiteam"), { recursive: true });
-  await mkdir(path.join(legacy, "agents", "main", ".aiteam"), { recursive: true });
-  await writeFile(path.join(legacy, ".aiteam", "project.yaml"), JSON.stringify({ kind: "Project", metadata: { name: "Legacy" }, spec: { main_agent: "main", agents_root: "../agents" } }));
-  await writeFile(path.join(legacy, "agents", "main", ".aiteam", "agent.yaml"), JSON.stringify({ kind: "Agent", metadata: { name: "Main" }, spec: {} }));
-  // Exercise real filesystem aliases, including the short paths used by Windows runners.
-  await symlink(physicalWork, work, process.platform === "win32" ? "junction" : "dir");
 
   // The very first command starts the service; it must not fail on credentials the service is still writing.
   const empty = await rind(home, root, "agents", "list");
   assert.equal(empty.code, 0, empty.stderr);
   assert.match(empty.stdout, /No teams yet\. Create one on the Agents page/);
 
-  // The service runs in another folder than this command; a relative path still means this command's folder.
-  const preview = await rind(home, work, "agents", "import", "legacy");
-  assert.equal(preview.code, 0, preview.stderr);
-  assert.equal(JSON.parse(preview.stdout).name, "Legacy");
-  assert.equal(JSON.parse((await rind(home, root, "agents", "list", "--json")).stdout).teams.length, 0, "a preview imports nothing");
-  const imported = await rind(home, work, "agents", "import", "legacy", "--confirm");
-  assert.equal(imported.code, 0, imported.stderr);
-
-  for (const removed of [["task", "Legacy", "Main", "Review the change"], ["team", "create", "notes"], ["open", "Legacy/Main"]]) {
+  for (const removed of [["task", "Legacy", "Main", "Review the change"], ["team", "create", "notes"], ["open", "Legacy/Main"], ["import", "legacy"]]) {
     const refused = await rind(home, root, "agents", ...removed);
     assert.equal(refused.code, 2, removed.join(" "));
-    assert.match(refused.stderr, /Usage: rind agents \[list \| stop \| resolve \| import\]/);
+    assert.match(refused.stderr, /Usage: rind agents \[list \| stop \| resolve\]/);
     assert.match(refused.stderr, /Teams and tasks are managed on the Agents page or by the Manager\./);
   }
 
   const listed = JSON.parse((await rind(home, root, "agents", "list", "--json")).stdout);
-  assert.deepEqual(listed.teams.map(team => team.name), ["Legacy"]);
+  assert.deepEqual(listed.teams, []);
   assert.deepEqual(listed.tasks, []);
-  const member = await realpath(path.join(work, "legacy", "agents", "main"));
-  assert.deepEqual(listed.agents.map(agent => agent.canonicalWorkspace), [process.platform === "win32" ? member.toLowerCase() : member]);
 });
 
 test("rind agents stop also stops a shared Runtime that only plain conversations started", { timeout: 60000 }, async t => {

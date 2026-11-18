@@ -32,7 +32,7 @@ export interface Approval { id: string; kind: "deleteTeam" | "cancelRun"; teamId
 export interface Session { id: string; agentId: string; teamId?: string; runtimeSessionId: string; origin: "managed" | "direct"; delegationId?: string; shared?: boolean; released?: boolean }
 export interface Run {
   id: string; sessionId: string; taskId?: string; delegationId?: string; status: "starting" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
-  startedAt: string; lastObservedAt: string; hostSequence: number; needsInput?: boolean;
+  startedAt: string; lastObservedAt: string; needsInput?: boolean;
 }
 export interface Note { id: string; taskId: string; author: string; text: string; createdAt: string }
 // file: where the copy lives, relative to the artifacts directory.
@@ -62,8 +62,7 @@ export function text(value: unknown, label: string, limit = 16000): string {
 export const memberKey = (teamId: string, agentId: string) => teamId + "/" + agentId;
 export const activeRun = (run: Run) => ["starting", "running", "unknown"].includes(run.status);
 export const awaitingDelegation = (d: Delegation) => ["queued", "running", "waiting"].includes(d.status);
-export const entryTask = (task: Task & { parentTaskId?: string }) => !task.parentTaskId && (!task.createdBy || ["user", "manager"].includes(task.createdBy));
 export interface AdapterInput { agent: Agent; session: Session; task: Task | Delegation; input: string; delivery?: boolean; instructions: string; externalTools: object }
-export interface AdapterEvent { type: "working"; sequence: number }
+export interface AdapterEvent { type: "working" }
 export interface AdapterHandle { runtimeSessionId: string; completion: Promise<{ content: string }>; cancel(): Promise<void>; steer?(message: string): Promise<boolean> }
 export interface Adapter { start(input: AdapterInput, emit: (event: AdapterEvent) => void): Promise<AdapterHandle> }

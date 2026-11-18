@@ -202,7 +202,6 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
       if (closing) { value.close(); throw new Error("Agents management is closing."); }
       if (runtime) { value.close(); return runtime; }
       runtime = value;
-      // A host from before the live table does not know runtime/sessions.
       const liveSessions = (await value.request("runtime/sessions").catch(() => ({ sessions: [] }))).sessions || [];
       if (closing || runtime !== value) { value.close(); throw new Error("Runtime disconnected."); }
       liveRuntimeSessionIds = new Set(liveSessions.map((s: any) => s.id));
@@ -362,8 +361,7 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
         } else if (message.method === "serviceInfo") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can inspect the service.");
           // Report the Runtime host only when it is already connected; asking must not start one.
-          // An older host does not know runtime/info; report it as legacy rather than absent.
-          const host = runtime ? await runtime.request("runtime/info").catch(() => ({ legacy: true })) : null;
+          const host = runtime ? await runtime.request("runtime/info").catch(() => null) : null;
           result = { buildId: await build, pid: process.pid, startedAt, ...workload(), runtime: host && { ...host, stale: Boolean(runtime?.stale) } };
         } else if (message.method === "serviceShutdown") {
           // Leaving Rind never calls this; it is the explicit "stop background services" action.
@@ -527,7 +525,7 @@ export async function startServer(options: { home?: string; repoRoot: string; ru
       const externalTools = session ? await sessionToolsFor(session) : undefined;
       await (await executionHost()).request("rind/session/deliver", { session_id: runtimeSessionId, text, ...(externalTools ? { external_tools: externalTools } : {}) });
     };
-    service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig, folderDefaults, deliver });
+    service = createService({ store, paths, adapter: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } }, toolConfig, folderDefaults, deliver });
     await service.recover();
     await writeLog("service started", { pid: process.pid, home: paths.root, endpoint: paths.endpoint });
     if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) {

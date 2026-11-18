@@ -195,21 +195,15 @@ test("approvals disappear once they no longer apply, and the Manager asks before
   assert.deepEqual((await f.call("snapshot")).approvals.map(a => a.kind), ["deleteTeam"]);
 });
 
-test("a deleted imported team can be imported again, and deleted teams do not answer team reads", async t => {
+test("deleted teams clean up tasks and do not answer team reads", async t => {
   const f = await fixture(t);
-  const legacy = path.join(f.home, "legacy"), agentDir = path.join(legacy, "agents", "main", ".aiteam");
-  await mkdir(agentDir, { recursive: true }); await mkdir(path.join(legacy, ".aiteam"));
-  await writeFile(path.join(legacy, ".aiteam", "project.yaml"), JSON.stringify({ kind: "Project", metadata: { name: "Legacy" }, spec: { main_agent: "main", agents_root: "../agents" } }));
-  await writeFile(path.join(agentDir, "agent.yaml"), JSON.stringify({ kind: "Agent", metadata: { name: "Main" }, spec: {} }));
-  const preview = await f.call("previewImport", { root: legacy });
-  const first = await f.call("importTeam", { root: legacy, confirmation: preview.fingerprint });
-  await f.call("assignTask", { teamId: first.id, assigneeAgentId: first.leaderAgentId, brief: "Keep", start: false });
-  await f.call("deleteTeam", { teamId: first.id, confirmName: "Legacy" });
+  const first = await f.call("createTeam", { name: "Temporary" });
+  await f.call("addMember", { teamId: first.id, agentId: f.leader.id, share: true });
+  await f.call("setLeader", { teamId: first.id, agentId: f.leader.id });
+  await f.call("assignTask", { teamId: first.id, assigneeAgentId: f.leader.id, brief: "Keep", start: false });
+  await f.call("deleteTeam", { teamId: first.id, confirmName: "Temporary" });
   await assert.rejects(f.call("getTeam", { teamId: first.id }), { code: "NOT_FOUND" });
-  const second = await f.call("importTeam", { root: legacy, confirmation: preview.fingerprint });
-  assert.equal(second.id, first.id);
   assert.equal(Object.keys(f.store.state.tasks).length, 0);
-  assert.equal((await f.call("importTeam", { root: legacy, confirmation: preview.fingerprint })).id, second.id, "importing again stays idempotent");
 });
 
 test("a window that leaves before its first message leaves no conversation behind", async t => {
@@ -235,7 +229,7 @@ test("a run that fails before the service awaits it is recorded, not an unhandle
   const store = await openStore(paths.state, 5);
   // The adapter's run has already failed when start returns.
   const adapter = { async start() { return { runtimeSessionId: "r", completion: Promise.reject(new Error("lost connection")), async cancel() {} }; } };
-  const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}), folderDefaults: async () => ({}) });
+  const service = createService({ store, paths, adapter, toolConfig: () => ({}), folderDefaults: async () => ({}) });
   t.after(async () => { await service.stop(); await store.close(); await rm(home, { recursive: true, force: true }); });
   const call = (method, params = {}) => service.request({ kind: "user" }, method, { requestId: randomUUID(), ...params });
   const team = await call("createTeam", { name: "Product" });

@@ -12,7 +12,7 @@ function state() {
   return s;
 }
 const live = (extra = {}) => new Map([["r", { id: "r", workspace: "/w/lead", turn: "idle", startedAt: "", updatedAt: "2026-10-07T12:00:00Z", watchers: 0, ...extra }]]);
-const run = (status = "running") => ({ id: "run", sessionId: "s", status, startedAt: "2026-10-07T11:00:00Z", lastObservedAt: "2026-10-07T11:00:00Z", hostSequence: 0 });
+const run = (status = "running") => ({ id: "run", sessionId: "s", status, startedAt: "2026-10-07T11:00:00Z", lastObservedAt: "2026-10-07T11:00:00Z" });
 
 test("a session whose turn ended while its jobs still run is Running job, not Working or Idle", () => {
   const s = state();
@@ -32,7 +32,7 @@ test("a leader whose task waits for its members is Delegated, while a child dele
   s.sessions.child = { id: "child", agentId: "dev", teamId: "team", runtimeSessionId: "r-child", origin: "managed", delegationId: "d1" };
   s.tasks.t = { id: "t", teamId: "team", assigneeAgentId: "lead", createdBy: "user", brief: "Ship", status: "blocked", blockedOn: { responder: "children", action: "Continues when its members deliver." } };
   s.delegations.d1 = { id: "d1", teamId: "team", fromAgentId: "lead", assigneeAgentId: "dev", originSessionId: "s", taskId: "t", brief: "Subwork", status: "done", returned: false };
-  s.runs.childRun = { id: "childRun", sessionId: "child", taskId: "t", delegationId: "d1", status: "succeeded", startedAt: "2026-10-07T11:00:00Z", lastObservedAt: "2026-10-07T11:01:00Z", hostSequence: 1 };
+  s.runs.childRun = { id: "childRun", sessionId: "child", taskId: "t", delegationId: "d1", status: "succeeded", startedAt: "2026-10-07T11:00:00Z", lastObservedAt: "2026-10-07T11:01:00Z" };
   const index = projectionIndex(s, new Set(), new Map());
   assert.equal(memberStatus(index, "lead", "team"), "Delegated");
   assert.equal(sessionStatus(index, "child").taskId, undefined, "delegation session does not inherit parent taskId");
@@ -43,7 +43,7 @@ test("a leader whose task waits for its members is Delegated, while a child dele
   s.memberships["team/leaf"] = { teamId: "team", agentId: "leaf", reportsToAgentId: "dev" };
   s.delegations.d1.status = "waiting";
   s.delegations.d2 = { id: "d2", teamId: "team", fromAgentId: "dev", assigneeAgentId: "leaf", parentDelegationId: "d1", taskId: "t", brief: "Leaf work", status: "running", returned: false };
-  s.runs.directFollowUp = { id: "directFollowUp", sessionId: "child", status: "succeeded", startedAt: "2026-10-07T11:02:00Z", lastObservedAt: "2026-10-07T11:03:00Z", hostSequence: 2 };
+  s.runs.directFollowUp = { id: "directFollowUp", sessionId: "child", status: "succeeded", startedAt: "2026-10-07T11:02:00Z", lastObservedAt: "2026-10-07T11:03:00Z" };
   const cascaded = projectionIndex(s, new Set(), new Map());
   assert.equal(memberStatus(cascaded, "dev", "team"), "Delegated");
   const childStatus = sessionStatus(cascaded, "child");

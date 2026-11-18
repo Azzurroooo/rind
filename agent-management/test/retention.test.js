@@ -5,7 +5,7 @@ import { projectionIndex, sessionStatus, memberStatus } from "../dist/projection
 import { emptyState } from "../dist/model.js";
 
 const at = minute => new Date(Date.UTC(2026, 9, 6, 0, minute)).toISOString();
-const run = (id, sessionId, minute, extra = {}) => ({ id, sessionId, status: "succeeded", startedAt: at(minute), lastObservedAt: at(minute), hostSequence: 0, ...extra });
+const run = (id, sessionId, minute, extra = {}) => ({ id, sessionId, status: "succeeded", startedAt: at(minute), lastObservedAt: at(minute), ...extra });
 
 test("old receipts beyond the limit are pruned in request order, but recent ones survive any burst", () => {
   const now = Date.now();

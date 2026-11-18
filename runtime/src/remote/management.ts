@@ -459,9 +459,7 @@ export function createManagementBridge({
       serviceInfo = connected.service
         ? { ...connected.service, ...(connected.stale ? { stale: connected.stale } : {}) }
         : null;
-      const initial = await connected.request("subscribe", {
-        afterSeq: currentSnapshot.seq || 0,
-      });
+      const initial = await connected.request("subscribe");
       acceptSnapshot(initial);
       for (const attachment of attachmentsByManagementId.values()) {
         try {

@@ -9,7 +9,7 @@ export const RECEIPT_LIMIT = 512;
 export const RECEIPT_MIN_AGE_MS = 10 * 60 * 1000;
 export const TASK_RUN_LIMIT = 10;
 // The user reads and dismisses notices; ones never dismissed stop at the newest few.
-export const NOTICE_LIMIT = 50;
+const NOTICE_LIMIT = 50;
 export const DELEGATION_LIMIT = 200;
 export const COMPLETED_TASK_LIMIT = 100;
 export const UNBOUND_SESSION_LIMIT = 20;
@@ -37,9 +37,6 @@ export function retain(state: State, now = Date.now()) {
   const deletedTaskIds = new Set<string>();
   const deletedDelegationIds = new Set<string>();
 
-  for (const [id, team] of Object.entries(state.teams)) {
-    if ((team as { archive?: unknown }).archive) delete state.teams[id];
-  }
   for (const [id, task] of Object.entries(state.tasks)) {
     if (state.teams[task.teamId]) continue;
     delete state.tasks[id];

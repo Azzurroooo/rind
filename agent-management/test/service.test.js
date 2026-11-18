@@ -59,19 +59,6 @@ test("changing team scope cannot reuse private conversation history", async t =>
   await f.call("bindSession", { sessionId: a.id, runtimeSessionId: "private-history" });
   await assert.rejects(f.call("bindSession", { sessionId: b.id, runtimeSessionId: "private-history" }), { code: "SESSION_SCOPE_CONFLICT" });
 });
-test("import previews and registers legacy files without changing them", async t => {
-  const f = await fixture(t);
-  const root = path.join(f.home, "legacy"), agentDir = path.join(root, "agents", "main", ".aiteam");
-  await mkdir(agentDir, { recursive: true }); await mkdir(path.join(root, ".aiteam"));
-  const project = JSON.stringify({ kind: "Project", metadata: { name: "Legacy" }, spec: { main_agent: "main", agents_root: "../agents" } });
-  await writeFile(path.join(root, ".aiteam", "project.yaml"), project);
-  await writeFile(path.join(agentDir, "agent.yaml"), JSON.stringify({ kind: "Agent", metadata: { name: "Main" }, spec: {} }));
-  const preview = await f.call("previewImport", { root });
-  const imported = await f.call("importTeam", { root, confirmation: preview.fingerprint });
-  assert.equal(imported.name, "Legacy");
-  assert.ok(imported.leaderAgentId);
-  assert.equal((await f.call("importTeam", { root, confirmation: preview.fingerprint })).id, imported.id);
-});
 
 test("three levels of delegation wait for grandchildren and deliver back through the original task chain without creating subtasks", async t => {
   const f = await fixture(t), a = await f.member("a"), a1 = await f.member("a1");
@@ -587,13 +574,13 @@ test("direct Manager and Team Member sessions support multi-turn conversation ac
   // Start a turn on webAttached, and end it even if hostTurnEnd receives oldShared.id:
   const turn1 = await f.call("hostTurnStart", { sessionId: webAttached.id, runtimeSessionId: "rt-member-1" });
   assert.equal(f.store.state.runs[turn1.id].status, "running");
-  await f.call("hostTurnEnd", { sessionId: oldShared.id, outcome: "completed" });
+  await f.call("hostTurnEnd", { sessionId: oldShared.id, outcome: "turn_completed" });
   assert.equal(f.store.state.runs[turn1.id].status, "succeeded", "hostTurnEnd matches active direct run by runtimeSessionId fallback");
 
   // Second turn on the same member workspace succeeds immediately without WORKSPACE_BUSY:
   const turn2 = await f.call("hostTurnStart", { sessionId: webAttached.id, runtimeSessionId: "rt-member-1" });
   assert.equal(f.store.state.runs[turn2.id].status, "running");
-  await f.call("hostTurnEnd", { sessionId: webAttached.id, outcome: "completed" });
+  await f.call("hostTurnEnd", { sessionId: webAttached.id, outcome: "turn_completed" });
   assert.equal(f.store.state.runs[turn2.id].status, "succeeded");
 
   // 2. Manager session with a stranded direct run whose runtime session is idle in runtimeSessions:
@@ -606,7 +593,7 @@ test("direct Manager and Team Member sessions support multi-turn conversation ac
   const mgrRun2 = await f.call("hostTurnStart", { sessionId: mgr1.id, runtimeSessionId: "rt-mgr-1" });
   assert.equal(f.store.state.runs[mgrRun1.id].status, "succeeded", "previous direct run on same runtimeSessionId is settled automatically");
   assert.equal(f.store.state.runs[mgrRun2.id].status, "running");
-  await f.call("hostTurnEnd", { sessionId: mgr1.id, outcome: "completed" });
+  await f.call("hostTurnEnd", { sessionId: mgr1.id, outcome: "turn_completed" });
   assert.equal(f.store.state.runs[mgrRun2.id].status, "succeeded");
 });
 
@@ -693,10 +680,9 @@ test("delegation depth is capped at MAX_DELEGATION_DEPTH and leaf members do not
 test("retain bounds settled delegations and completed tasks with cascading notes/artifacts/runs without evicting bound direct sessions", async t => {
   const state = emptyState();
   state.teams.t1 = { id: "t1", name: "T1", createRoot: "/tmp", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
-  state.teams.legacy = { id: "legacy", name: "Legacy", createRoot: "/tmp", archive: { at: "2026-01-01T00:00:00Z", members: {} }, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
-  state.tasks["legacy-task"] = { id: "legacy-task", teamId: "legacy", assigneeAgentId: "a1", brief: "old", priority: "normal", status: "done", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
-  state.notes["legacy-note"] = { id: "legacy-note", taskId: "legacy-task", author: "user", text: "n", createdAt: "2026-01-01T00:00:00Z" };
-  state.artifacts["legacy-art"] = { id: "legacy-art", taskId: "legacy-task", name: "a", path: "/tmp/a", sha256: "0", size: 1, createdAt: "2026-01-01T00:00:00Z" };
+  state.tasks["orphan-task"] = { id: "orphan-task", teamId: "deleted-team", assigneeAgentId: "a1", brief: "old", priority: "normal", status: "done", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  state.notes["orphan-note"] = { id: "orphan-note", taskId: "orphan-task", author: "user", text: "n", createdAt: "2026-01-01T00:00:00Z" };
+  state.artifacts["orphan-art"] = { id: "orphan-art", taskId: "orphan-task", name: "a", path: "/tmp/a", sha256: "0", size: 1, createdAt: "2026-01-01T00:00:00Z" };
   for (let i = 0; i < DELEGATION_LIMIT + 15; i++) {
     const id = `del-${i}`;
     state.delegations[id] = {
@@ -722,8 +708,7 @@ test("retain bounds settled delegations and completed tasks with cascading notes
     state.sessions[id] = { id, agentId: "a1", teamId: "t1", runtimeSessionId: "", origin: "direct", shared: true };
   }
   retain(state);
-  assert.equal(state.teams.legacy, undefined, "legacy archived team is pruned");
-  assert.equal(state.tasks["legacy-task"], undefined, "orphaned task from deleted team is pruned");
+  assert.equal(state.tasks["orphan-task"], undefined, "orphaned task from deleted team is pruned");
   assert.equal(Object.keys(state.delegations).length, DELEGATION_LIMIT);
   assert.equal(Object.keys(state.tasks).length, COMPLETED_TASK_LIMIT);
   assert.equal(Object.keys(state.notes).length, COMPLETED_TASK_LIMIT);
@@ -744,14 +729,12 @@ test("recover settles interrupted runs without runtimeSessionId as failed so sub
   const reopened = createService({
     store: f.store,
     paths: f.paths,
-    adapters: {
-      rind: {
-        async start(input) {
-          let finish;
-          const completion = new Promise(resolve => { finish = resolve; });
-          f.starts.push({ input, finish });
-          return { runtimeSessionId: randomUUID(), completion, async cancel() { finish({ content: "" }); } };
-        },
+    adapter: {
+      async start(input) {
+        let finish;
+        const completion = new Promise(resolve => { finish = resolve; });
+        f.starts.push({ input, finish });
+        return { runtimeSessionId: randomUUID(), completion, async cancel() { finish({ content: "" }); } };
       },
     },
     toolConfig: () => ({}),

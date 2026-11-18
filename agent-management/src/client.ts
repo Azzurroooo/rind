@@ -7,15 +7,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { managementPaths, privateDirectory, resolveRindHome, type Paths } from "./paths.js";
 import { managementBuildId } from "./build.js";
-import { findServiceProcesses } from "./service-process.js";
 import { probeEndpoint } from "../../runtime/dist/client/endpoint.js";
 import { createLineBuffer } from "../../runtime/dist/client/ndjson.js";
 import { acquireProcessLock } from "../../runtime/dist/client/process-lock.js";
 
 const SPAWN_POLL_DELAYS_MS = [15, 20, 30, 50, 80];
 
-const sameFolder = (a: string, b: string) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
-const active = (snapshot: any) => snapshot.runs.filter((run: any) => run.status === "starting" || run.status === "running").length;
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function processAlive(pid: number) {
@@ -59,18 +56,14 @@ function parseRecordedPid(raw: string | null): number {
 async function endStuckService(paths: Paths, connect?: () => Promise<ManagementClient>) {
   if (!existsSync(paths.state)) return false;
   const raw = await readFile(paths.record, "utf8").catch(() => null);
-  const recordedPid = parseRecordedPid(raw);
-  const recordedAlive = Boolean(recordedPid && processAlive(recordedPid));
-  const startLockPath = path.join(paths.state, "service-start.lock");
-  if (!recordedAlive && !existsSync(startLockPath) && !(await probeEndpoint(paths.endpoint))) {
-    if (raw && recordedPid && await readFile(paths.record, "utf8").catch(() => null) === raw) {
+  const pid = parseRecordedPid(raw);
+  if (!pid) return false;
+  if (!processAlive(pid)) {
+    if (raw && await readFile(paths.record, "utf8").catch(() => null) === raw) {
       await unlink(paths.record).catch(() => {});
     }
     return false;
   }
-  const pids = new Set<number>(await findServiceProcesses(fileURLToPath(new URL("./server.js", import.meta.url)), config => sameFolder(managementPaths(config.home).state, paths.state)));
-  if (recordedAlive) pids.add(recordedPid);
-  if (!pids.size) return false;
   if (connect) {
     let client: ManagementClient | undefined;
     try {
@@ -79,30 +72,12 @@ async function endStuckService(paths: Paths, connect?: () => Promise<ManagementC
     } catch {}
     finally { client?.close(); }
   }
-  if (raw && await readFile(paths.record, "utf8").catch(() => null) !== raw) return false;
+  if (await readFile(paths.record, "utf8").catch(() => null) !== raw) return false;
   let ended = false;
-  for (const pid of pids) {
-    if (!processAlive(pid)) continue;
-    try { process.kill(pid, "SIGKILL"); ended = true; } catch {}
-    await waitForExit(pid, 5000);
-  }
-  if (raw && await readFile(paths.record, "utf8").catch(() => null) === raw) await unlink(paths.record).catch(() => {});
+  try { process.kill(pid, "SIGKILL"); ended = true; } catch {}
+  await waitForExit(pid, 5000);
+  if (await readFile(paths.record, "utf8").catch(() => null) === raw) await unlink(paths.record).catch(() => {});
   return ended;
-}
-
-// A service started before serviceInfo existed. Its own snapshot says whether
-// anything runs; only then is its process ended so a current one can start.
-export async function endLegacyService(client: ManagementClient, home?: string, { force = false } = {}) {
-  const working = active(await client.request("snapshot"));
-  if (working && !force) return { ended: false, working };
-  const paths = managementPaths(home);
-  const pids = await findServiceProcesses(fileURLToPath(new URL("./server.js", import.meta.url)), config => sameFolder(managementPaths(config.home).state, paths.state));
-  client.close();
-  for (const pid of pids) {
-    try { process.kill(pid); } catch {}
-    await waitForExit(pid, 5000);
-  }
-  return { ended: pids.length > 0, working };
 }
 
 export async function stopManagementService({ home }: { home?: string } = {}) {
@@ -212,9 +187,8 @@ export async function connectManagement(options: {
   };
   async function checked(client: ManagementClient) {
     try {
-      let legacy = false;
       const [info, expected] = await Promise.all([
-        within(client.request("serviceInfo").catch(error => { legacy = error.code === "UNKNOWN_METHOD"; return null; }), 3000),
+        within(client.request("serviceInfo").catch(() => null), 3000),
         managementBuildId(),
       ]);
       if (info?.buildId === expected) return attachHelpers(client, info, false);
@@ -224,12 +198,6 @@ export async function connectManagement(options: {
         await client.request("serviceShutdown", { restart: true }).catch(() => {});
         client.close();
         return (await stopped()) && null;
-      }
-      if (legacy) {
-        const result = await endLegacyService(client, home);
-        if (result.ended) { replaced = true; return (await stopped()) && null; }
-        if (!result.working) throw new Error("An agents management service from an older Rind is running and could not be stopped. End its process and try again.");
-        return Object.assign(attachHelpers(client, null, false), { stale: { reason: "legacy", working: result.working } });
       }
       if (!info) {
         client.close();
@@ -275,7 +243,7 @@ export async function connectManagement(options: {
       // Only a service that accepts these credentials counts as started.
       try {
         const client = await connect();
-        const service = await client.request("serviceInfo").catch(error => { if (error.code === "UNKNOWN_METHOD") return null; client.close(); throw error; });
+        const service = await client.request("serviceInfo").catch(error => { client.close(); throw error; });
         return attachHelpers(client, service, !replaced);
       } catch (error) { last = error; }
     }

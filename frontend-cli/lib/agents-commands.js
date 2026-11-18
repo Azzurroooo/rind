@@ -9,13 +9,12 @@ import { releaseInput, takeInput } from "./tui/console-input.js";
 import { privateDirectory, resolveRindHome } from "../../runtime/dist/client/local-files.js";
 
 export const agentsHelp = [
-  "Usage: rind agents [list | stop | resolve | import] [--json]",
+  "Usage: rind agents [list | stop | resolve] [--json]",
   "  (none)                            open the Agents page; without a terminal, same as list",
   "  list                              teams, members and tasks; --json gives the full state",
   "  stop [--all]                      stop background services when idle; --all also stops running agents",
   "  stop <run>                        stop one run",
   "  resolve <run> --confirm-stopped   release a run whose process has stopped",
-  "  import <legacy-team-root> [--confirm] [--share]",
   "Teams and tasks are managed on the Agents page or by the Manager.",
 ].join("\n");
 
@@ -110,7 +109,7 @@ export async function runAgentsCommand(args, launch) {
   }
   const [command = "list", target, ...rest] = args;
   if (command === "stop" && (!target || target === "--all")) { await stopBackground(target === "--all", launch, json); return; }
-  if (!["list", "stop", "resolve", "import"].includes(command) || (command !== "list" && !target)) throw new Error(agentsHelp);
+  if (!["list", "stop", "resolve"].includes(command) || (command !== "list" && !target)) throw new Error(agentsHelp);
   const client = await managementClient(launch);
   try {
     let result;
@@ -118,13 +117,7 @@ export async function runAgentsCommand(args, launch) {
       result = await client.request("snapshot");
       if (!json) { console.log(overviewText(result)); return; }
     } else if (command === "stop") result = await client.request("cancelRun", { runId: target });
-    else if (command === "resolve") result = await client.request("resolveRun", { runId: target, confirmStopped: rest.includes("--confirm-stopped") });
-    else {
-      // The service runs in its own folder, so the folder is resolved here, where the user typed it.
-      const root = path.resolve(target);
-      const preview = await client.request("previewImport", { root });
-      result = rest.includes("--confirm") ? await client.request("importTeam", { root, confirmation: preview.fingerprint, share: rest.includes("--share") }) : preview;
-    }
+    else result = await client.request("resolveRun", { runId: target, confirmStopped: rest.includes("--confirm-stopped") });
     console.log(JSON.stringify(result, null, 2));
   } finally { client.close(); }
 }
@@ -138,12 +131,12 @@ async function stopBackground(all, launch, json) {
     let result;
     try { result = await client.request("serviceShutdown", { stopAgents: all }); }
     catch (error) {
-      if (error.code === "UNKNOWN_METHOD") result = await stopLegacy(client, all, launch);
-      else if (all && error.code !== "SERVICE_BUSY") {
+      if (all && error.code !== "SERVICE_BUSY") {
         client.close();
         await stopRuntimeAlone(all, launch, json);
         return;
-      } else throw error;
+      }
+      throw error;
     }
     console.log(json ? JSON.stringify({ stopped: true, ...result }) : all && result.working ? "Stopped " + result.working + (result.working === 1 ? " running agent" : " running agents") + " and the background services." : "Stopped the background services.");
   } catch (error) {
@@ -185,18 +178,6 @@ async function stopRuntimeAlone(all, launch, json) {
     if (all) await stopSharedRuntime({ rindHome: launch?.home });
     console.log(json ? JSON.stringify({ stopped: true, working }) : all && working ? "Stopped " + working + (working === 1 ? " running conversation" : " running conversations") + " and the background services." : "Stopped the background services.");
   } finally { host.close(); }
-}
-
-// A service from before serviceShutdown: end its process once its own
-// snapshot shows nothing running (or --all), then stop the Runtime it used.
-async function stopLegacy(client, all, launch) {
-  const { endLegacyService } = await import("../../agent-management/dist/client.js");
-  const result = await endLegacyService(client, launch.home, { force: all });
-  if (!result.ended && result.working) throw Object.assign(new Error(result.working + (result.working === 1 ? " agent is" : " agents are") + " still working."), { code: "SERVICE_BUSY", details: { working: result.working } });
-  if (!result.ended) throw new Error("A background service from an older Rind is running but its process could not be found.");
-  const { stopSharedRuntime } = await import("../../runtime/dist/client/shared-runtime.js");
-  await stopSharedRuntime({ rindHome: launch.home });
-  return { stopping: true, working: result.working };
 }
 
 // Like a chat window, an interactive page ends the process itself: on Windows,

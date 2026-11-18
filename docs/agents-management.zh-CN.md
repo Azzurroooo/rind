@@ -27,7 +27,6 @@ rind agents list --json                         # 输出完整状态，供脚本
 rind agents stop <run>                          # 停止单次运行
 rind agents resolve <run> --confirm-stopped     # 确认旧进程已停止后释放对应运行锁
 rind agents stop [--all]                        # 停止后台服务
-rind agents import <legacy-root> [--confirm]    # 导入旧版 .aiteam 团队
 ```
 
 `rind agents` 拒绝在 Rind 会话内部执行，以防会话内的 shell 冒充用户身份。团队成员通过 `delegate` 和 `report` 协作，Manager 通过 `agent_management` 管理组织与任务。
@@ -36,7 +35,7 @@ rind agents import <legacy-root> [--confirm]    # 导入旧版 .aiteam 团队
 
 第一个成员不会被暗中赋予额外文件权限：它只是初始负责人（Leader）。每个团队都有一名主成员以及一棵汇报关系树。成员只能向自己的直接下属委派任务，并查看其子树中的任务；任何成员都可以在团队创建根目录下新建并注册自己的直接下属；用户和 Manager 可以调整整棵组织树。系统拒绝循环汇报关系，移除上级前必须先重新指定其直接下属。任务只有在提交有效报告且确认执行结束后才会进入 `done`。阻塞项（blocker）必须指明由 `user` 或当前成员处理，并说明所需动作。报告会逐层向上唤醒最初发起委派的任务；等待孙级任务不会提前完成中间层任务。调整成员汇报线不会改写已有任务的归属或父子关系。扁平团队依然有效：未指定上级时默认向团队负责人汇报。
 
-目录基名作为初始成员名称，职位（position）是独立的展示标签。新工作区与 worktree 创建在团队的 `createRoot` 下：在 Desktop 中默认为当前打开项目的目录，否则为 `RIND_HOME/agents-management/workspaces/<team>`；Manager 也可以用已存在的其他目录（`createRoot`）创建团队。可通过 `registerAgent` 提供成员提示词与 Skill 引用（普通项目/用户 Skill 名称或 `SKILL.md` 绝对路径）；导入的旧版地方法规 Skill 会保留原始引用目录。
+目录基名作为初始成员名称，职位（position）是独立的展示标签。新工作区与 worktree 创建在团队的 `createRoot` 下：在 Desktop 中默认为当前打开项目的目录，否则为 `RIND_HOME/agents-management/workspaces/<team>`；Manager 也可以用已存在的其他目录（`createRoot`）创建团队。可通过 `registerAgent` 提供成员提示词与 Skill 引用（普通项目/用户 Skill 名称或 `SKILL.md` 绝对路径）。
 
 ## CLI 界面
 
@@ -214,7 +213,7 @@ Rind 并非单一进程：Agent、任务与共享 Runtime 在后台常驻运行�
 
 只有用户与 Manager 可以修改成员模型。在 Agents 页面选中成员按 `Space` 打开 **Model and effort**（仅列出已登录连接）；Manager 调用 `setMemberModel` 与 `clearMemberModel`，每次修改都会出现在你的 Inbox *Changed by the Manager* 分栏中直至忽略。团队负责人与普通成员无权修改任何模型（包括自身模型），单个任务也不携带独立模型覆盖。变更自该成员的下一次任务起生效（新任务以此启动，重试或恢复的任务在运行前切换至此模型），正在运行的工作保持原模型不变。
 
-`rind agents list --json` 输出完整状态；占用目录的运行可用 `rind agents stop <run>` 停止，或在进程已退出且状态为 `unknown` 后用 `rind agents resolve <run> --confirm-stopped` 释放；`rind agents import <legacy-root>` 预览旧版 `.aiteam` 配置，确认无误后加 `--confirm` 导入，导入过程绝不修改旧文件。
+`rind agents list --json` 输出完整状态；占用目录的运行可用 `rind agents stop <run>` 停止，或在进程已退出且状态为 `unknown` 后用 `rind agents resolve <run> --confirm-stopped` 释放。
 
 当同一工作区属于多个团队时，交互终端会询问要挂载的作用域，非 TTY 环境需显式传入 `--team <id>` 或 `--standalone`。直接对话作为运行项被观测，但其私密消息内容不会广播。管理服务断线重连后会先与 Runtime 回放对账再恢复调度；未确认运行在人工确认停止前持续保留目录锁。
 

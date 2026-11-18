@@ -27,7 +27,6 @@ rind agents list --json                         # the full state, for scripts an
 rind agents stop <run>                          # stop one run
 rind agents resolve <run> --confirm-stopped     # release a run whose process has stopped
 rind agents stop [--all]                        # stop the background services
-rind agents import <legacy-root> [--confirm]    # bring in an old .aiteam team
 ```
 
 `rind agents` refuses to run inside a Rind session: a session's shell would otherwise act as the user. Members work through `delegate` and `report`, the Manager through `agent_management`.
@@ -36,7 +35,7 @@ Every member is an existing canonical folder. Teams are registry relationships, 
 
 The first member is not silently granted extra file access: it is simply the initial leader. Each configured team has one main agent and a tree of reporting relationships. Members delegate to their direct reports and see tasks in their subtree. Every member can create and register a new direct report below the team creation root. User and Manager can arrange the entire tree. Cycles are rejected, and direct reports must be reassigned before removing their supervisor. A task is `done` only after a valid report and confirmed execution completion. A blocker must name `user` or a current member and state the action needed. Reports wake the original delegating task, recursively through all levels; waiting for grandchildren does not complete the intermediate task. Moving a member does not rewrite existing task ownership or parent tasks. Existing flat teams remain valid: an omitted supervisor means the main agent.
 
-The folder basename is its initial agent name; position is a separate display label. New workspaces and worktrees are created in the team's creation root: the open project's folder in Desktop, otherwise `RIND_HOME/agents-management/workspaces/<team>`; the Manager can create a team with another existing folder (`createRoot`). Agent hints and Skill references can be supplied through `registerAgent`; a reference is a normal project/user Skill name or an absolute `SKILL.md` path. Imported local legacy Skills retain their original reference directories.
+The folder basename is its initial agent name; position is a separate display label. New workspaces and worktrees are created in the team's creation root: the open project's folder in Desktop, otherwise `RIND_HOME/agents-management/workspaces/<team>`; the Manager can create a team with another existing folder (`createRoot`). Agent hints and Skill references can be supplied through `registerAgent`; a reference is a normal project/user Skill name or an absolute `SKILL.md` path.
 
 ## CLI surface
 
@@ -218,7 +217,7 @@ A member runs on its folder's defaults for new conversations: a model (connectio
 
 Only you and the Manager choose them. On the Agents page, Space on a member opens **Model and effort**; only connections you are logged in to are offered. The Manager uses `setMemberModel` and `clearMemberModel`; each change it makes appears in your Inbox under *Changed by the Manager* until you dismiss it. Leaders and members cannot change any model, including their own, and a task cannot carry a model of its own. A change applies from the member's next task: a new task's conversation starts with it, and a retried or resumed task's conversation is brought to it before it runs. Running work keeps its model.
 
-`rind agents list --json` gives the full state. A run that holds a folder is stopped with `rind agents stop <run>`, or released with `rind agents resolve <run> --confirm-stopped` once its status is unknown and its process has stopped. `rind agents import <legacy-root>` previews old `.aiteam` files; add `--confirm` after reviewing the preview. Import never edits legacy files.
+`rind agents list --json` gives the full state. A run that holds a folder is stopped with `rind agents stop <run>`, or released with `rind agents resolve <run> --confirm-stopped` once its status is unknown and its process has stopped.
 
 When a workspace belongs to multiple teams, a TTY asks which scope to attach. Non-TTY requires `--team <id>` or `--standalone`. Direct conversations are observed as runs, but their private messages are not broadcast. If the management service disconnects, it reconciles with the Runtime replay before restoring activity; an unconfirmed run remains reserved until a human confirms it stopped.
 

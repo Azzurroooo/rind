@@ -3,13 +3,12 @@ import { ManagementError, type Adapter } from "../model.js";
 export function createRindAdapter(options: { home?: string; repoRoot: string; runtimePath?: string }): Adapter {
   return {
     async start(input, emit) {
-      let sequence = 0;
       const client = createSharedRuntimeClient({
         ...options, rindHome: options.home, cwd: input.agent.canonicalWorkspace,
         cliArgs: ["--cwd", input.agent.canonicalWorkspace, "--no-user-question", ...(input.session.runtimeSessionId ? ["--session", input.session.runtimeSessionId] : [])],
         externalTools: input.externalTools,
         onMessage: (message: any) => {
-          if (message.event?.type === "turn_started") emit({ type: "working", sequence: ++sequence });
+          if (message.event?.type === "turn_started") emit({ type: "working" });
         },
       });
       client.start();

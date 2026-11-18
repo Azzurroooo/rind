@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { cp, mkdir, rm } from "node:fs/promises"
-import { createRequire } from "node:module"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -85,8 +84,5 @@ await mkdir(stagedManagement, { recursive: true })
 for (const entry of ["dist", "package.json"]) {
   await cp(path.join(repoRoot, "agent-management", entry), path.join(stagedManagement, entry), { recursive: true })
 }
-const managementRequire = createRequire(path.join(repoRoot, "agent-management", "package.json"))
-const yamlPkgDir = path.dirname(managementRequire.resolve("yaml/package.json"))
-await cp(yamlPkgDir, path.join(stagedManagement, "node_modules", "yaml"), { recursive: true })
 
 console.log("Staged Desktop resources: runtime and agent-management.")

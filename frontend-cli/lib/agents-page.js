@@ -231,7 +231,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       view.service = replacement.service ? { ...replacement.service, stale: replacement.stale } : null;
       if (replacement.stale) notify("A newer Rind is installed. Background services keep the old version until their agents finish.", "info");
       view.history = {}; view.managerHistory = null; view.independent = null; view.folderHistory = {};
-      acceptSnapshot(await client.request("subscribe", { afterSeq: view.snapshot.seq || 0 }));
+      acceptSnapshot(await client.request("subscribe"));
     })().catch(error => { view.connection = start ? "offline · r retries" : "stopped · r starts again"; if (start) notify(error.message, "error"); })
       .finally(() => { connecting = null; redraw(); });
     return connecting;
@@ -240,7 +240,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (connecting) await connecting;
     if (view.connection !== "connected") throw new Error("Agents management is offline. Press r to reconnect, then try again.");
     const result = await client.request(method, params);
-    if (!closed && !["getTask", "readArtifact", "previewCopy", "previewImport", "listModels", "getMemberModel", "listFolderDefaults", "listSessions", "serviceInfo"].includes(method)) acceptSnapshot(await client.request("snapshot"));
+    if (!closed && !["getTask", "readArtifact", "previewCopy", "listModels", "getMemberModel", "listFolderDefaults", "listSessions", "serviceInfo"].includes(method)) acceptSnapshot(await client.request("snapshot"));
     return result;
   }
 

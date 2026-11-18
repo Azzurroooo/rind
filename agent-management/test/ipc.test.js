@@ -51,13 +51,13 @@ test("local service has one writer, scoped credentials, subscription and disconn
   const a = await connectClient({ endpoint: server.paths.endpoint, token, onSnapshot: snapshot => snapshots.push(snapshot) });
   const b = await connectClient({ endpoint: server.paths.endpoint, token });
   clients.push(a, b);
-  await a.request("subscribe", { afterSeq: 0 });
+  await a.request("subscribe");
   await Promise.all([a.request("createTeam", { name: "A" }), b.request("createTeam", { name: "B" })]);
   assert.equal((await a.request("snapshot")).teams.length, 2);
   assert.ok(snapshots.length);
   const workspace = path.join(home, "workspace"); await mkdir(workspace);
   const agent = await a.request("registerAgent", { workspace });
-  const team = (await a.request("listTeams"))[0];
+  const team = (await a.request("snapshot")).teams[0];
   await a.request("addMember", { teamId: team.id, agentId: agent.id });
   await a.request("setLeader", { teamId: team.id, agentId: agent.id });
   const session = await a.request("attachSession", { agentId: agent.id, teamId: team.id });
@@ -71,7 +71,7 @@ test("local service has one writer, scoped credentials, subscription and disconn
   assert.match(config.instructions, /authoritative source for team state/);
   assert.doesNotMatch(config.instructions, /agents-management/);
   await assert.rejects(runtime.request("delegate", { to: agent.id, brief: "Myself" }), { code: "NOT_DIRECT_REPORT" });
-  await assert.rejects(runtime.request("listTeams"), { code: "FORBIDDEN" });
+  await assert.rejects(runtime.request("snapshot"), { code: "FORBIDDEN" });
   await assert.rejects(runtime.request("hostTurnEnd", { outcome: "turn_completed" }), { code: "FORBIDDEN" });
   const host = await connectClient({ endpoint: server.paths.endpoint, token: config.lifecycle.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "runtime-1" });
   clients.push(host);
