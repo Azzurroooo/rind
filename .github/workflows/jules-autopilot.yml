@@ -42,7 +42,7 @@ jobs:
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       CONCLUSION: ${{ github.event.workflow_run.conclusion }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Extract failure logs and create surgical Jules issue
         shell: bash
         run: |
@@ -131,10 +131,10 @@ jobs:
       GH_TOKEN: ${{ secrets.JULES_PAT || github.token }}
       REPO: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 50
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
