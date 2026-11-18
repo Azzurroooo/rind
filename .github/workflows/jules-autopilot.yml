@@ -3,6 +3,7 @@ name: Jules Autopilot (CI Doctor & Scheduled Audit)
 on:
   workflow_run:
     workflows:
+      - "Verify repository gatekeeper"
       - "Verify agents management, runtime, and CLI"
       - "Verify web and desktop"
       - "Verify mobile app"
@@ -136,6 +137,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: runtime/package-lock.json
       - name: Build TypeScript runtime for gatekeeper tests
         run: |
           npm --prefix runtime ci
@@ -144,115 +147,16 @@ jobs:
         shell: bash
         run: |
           node --input-type=module - <<'EOF'
-          import fs from "node:fs";
-          import path from "node:path";
           import { spawnSync } from "node:child_process";
-          import { builtinModules } from "node:module";
 
           const repo = process.env.REPO;
-          const findings = [];
-          const filesToFix = [];
-
-          // 1. Ensure zero tracked Python files or requirements*.txt files remain
-          const lsFiles = spawnSync("git", ["ls-files"], { encoding: "utf8" });
-          if (lsFiles.status !== 0) {
-            throw new Error(`git ls-files failed: ${lsFiles.stderr}`);
-          }
-          const trackedPyOrReq = lsFiles.stdout
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter((file) => file && fs.existsSync(file) && (/\.py$/i.test(file) || /(?:^|\/)requirements[^/]*\.txt$/i.test(file)));
-          if (trackedPyOrReq.length > 0) {
-            findings.push(
-              "### 1. Tracked legacy Python or requirements files detected\n" +
-                trackedPyOrReq.map((file) => `- \`${file}\``).join("\n") +
-                "\n\n**Action required**:\n- Remove or migrate any tracked `.py` or `requirements*.txt` files."
-            );
-            filesToFix.push(...trackedPyOrReq);
-          }
-
-          // 2. Ensure third-party imports match declared package.json dependencies
-          const nodeBuiltins = new Set(
-            builtinModules.flatMap((m) => (m.startsWith("node:") ? [m, m.slice(5)] : [m, `node:${m}`]))
-          );
-          function walkSourceFiles(dir) {
-            if (!fs.existsSync(dir)) return [];
-            const out = [];
-            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-              const full = path.join(dir, entry.name);
-              if (entry.isDirectory() && entry.name !== "node_modules") {
-                out.push(...walkSourceFiles(full));
-              } else if (
-                entry.isFile() &&
-                /\.(?:[cm]?jsx?|tsx?)$/.test(entry.name) &&
-                !entry.name.endsWith(".d.ts") &&
-                !/\.test\.(?:[cm]?jsx?|tsx?)$/.test(entry.name)
-              ) {
-                out.push(full);
-              }
-            }
-            return out.sort();
-          }
-          function parseModuleSpecifiers(source) {
-            const specs = new Set();
-            const sideEffectImportRe = /^\s*import\s+["']([^"']+)["']/gm;
-            const fromImportExportRe = /^\s*(?:import|export)\s+(?:type\s+)?(?:\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|\{[^}]*\}|[A-Za-z_$][\w$]*(?:\s*,\s*(?:\*\s+as\s+[A-Za-z_$][\w$]*|\{[^}]*\}))?)\s+from\s+["']([^"']+)["']/gm;
-            const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
-            for (const match of source.matchAll(sideEffectImportRe)) specs.add(match[1]);
-            for (const match of source.matchAll(fromImportExportRe)) specs.add(match[1]);
-            for (const match of source.matchAll(dynamicImportRe)) specs.add(match[1]);
-            return [...specs];
-          }
-          const packageTargets = [
-            ["runtime/src", "runtime/package.json", []],
-            ["agent-management/src", "agent-management/package.json", []],
-            ["frontend-cli/lib", "frontend-cli/package.json", []],
-            ["rind-runtime-client", "rind-runtime-client/package.json", []],
-            ["desktop/src", "desktop/package.json", ["electron"]],
-            ["frontend-web/src", "frontend-web/package.json", []],
-          ];
-          const undeclaredLines = [];
-          for (const [srcDir, pkgPath, extraAllowed = []] of packageTargets) {
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-            const declared = new Set([...Object.keys(pkg.dependencies || {}), ...extraAllowed]);
-            for (const file of walkSourceFiles(srcDir)) {
-              const relFile = file.replace(/\\/g, "/");
-              for (const spec of parseModuleSpecifiers(fs.readFileSync(file, "utf8"))) {
-                if (spec.startsWith(".") || spec.startsWith("/") || nodeBuiltins.has(spec)) continue;
-                const pkgName = spec.startsWith("@")
-                  ? spec.split("/").slice(0, 2).join("/")
-                  : spec.split("/")[0];
-                if (!declared.has(pkgName)) {
-                  undeclaredLines.push(`- \`${pkgName}\` imported in \`${relFile}\` is not declared in \`${pkgPath}\`.`);
-                  filesToFix.push(pkgPath);
-                }
-              }
-            }
-          }
-          if (undeclaredLines.length > 0) {
-            findings.push(
-              "### 2. Undeclared direct third-party imports\n" +
-                undeclaredLines.join("\n") +
-                "\n\n**Action required**:\n- Declare missing runtime dependencies in the owning `package.json`."
-            );
-          }
-
-          // 3. Run TypeScript runtime architecture, RIND.md, and docs/internals guard tests
           const archRun = spawnSync("node", ["--test", "runtime/test/architecture.test.js"], { encoding: "utf8" });
-          if (archRun.status !== 0) {
-            const output = `${archRun.stdout || ""}\n${archRun.stderr || ""}`.trim().slice(-2000);
-            findings.push(
-              "### 3. Architecture or documentation guard test failure\n" +
-                `\`\`\`text\n${output}\n\`\`\`\n` +
-                "**Action required**: Fix the reported broken links, missing bilingual `.zh-CN.md` pairs, undeclared runtime imports, or layer architecture violations."
-            );
-          }
-
-          if (findings.length === 0) {
+          if (archRun.status === 0) {
             console.log("All gatekeeper checks passed with 0 issues. Exiting cleanly without waking Jules.");
             process.exit(0);
           }
 
+          const output = `${archRun.stdout || ""}\n${archRun.stderr || ""}`.trim().slice(-4000);
           const existingProc = spawnSync(
             "gh",
             ["issue", "list", "--repo", repo, "--label", "jules", "--state", "open", "--json", "title"],
@@ -267,26 +171,23 @@ jobs:
             process.exit(0);
           }
 
-          const uniqueFiles = [...new Set(filesToFix)];
-          const scopeNote = uniqueFiles.length > 0
-            ? `Only modify: ${uniqueFiles.map((f) => `\`${f}\``).join(", ")}.`
-            : "Only modify the files directly implicated by the findings below.";
           const body = [
             "## Objective",
-            "The scheduled Gatekeeper Audit detected actionable dependency/architecture drift on `main`. Fix the items below with minimal, surgical changes.",
+            "The scheduled Gatekeeper Audit detected actionable dependency, type, documentation, or architecture drift on `main`. Fix the failing checks below with minimal, surgical changes.",
             "---",
             "## Environment Setup",
             "```bash\nnpm --prefix runtime ci && npm --prefix runtime run build\n```",
             "---",
             "## Scope & Findings",
-            `> **Constraint**: ${scopeNote} Follow \`AGENTS.md\`.`,
-            ...findings,
+            "> **Constraint**: Only modify the files directly implicated by the test failure below. Follow `AGENTS.md`.",
+            "### Gatekeeper test failure (`runtime/test/architecture.test.js`)",
+            `\`\`\`text\n${output}\n\`\`\``,
             "---",
             "## Verification (Must Pass Before Opening PR)",
             "```bash\nnpm --prefix runtime run build && node --test runtime/test/architecture.test.js\n```",
           ].join("\n\n");
 
-          const title = "fix(deps): [Autopilot Audit] declare direct dependencies and fix architecture drift";
+          const title = "fix(ci): [Autopilot Audit] resolve repository gatekeeper drift";
           const created = spawnSync(
             "gh",
             ["issue", "create", "--repo", repo, "--label", "jules", "--title", title, "--body", body],

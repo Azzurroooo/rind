@@ -69,4 +69,6 @@ export declare class RemoteServer {
 }
 
 export type DesktopGateway = RemoteServer;
+export type GatewayOptions = RemoteOptions;
+export type GatewayState = RemoteState;
 export declare const DesktopGateway: typeof RemoteServer;

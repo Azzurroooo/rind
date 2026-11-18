@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { builtinModules } from "node:module";
+import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,19 +16,25 @@ import {
   resolveUserDocPath,
 } from "../dist/index.js";
 
+const require = createRequire(import.meta.url);
+const ts = require("typescript");
+
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const RUNTIME_ROOT = path.resolve(TEST_DIR, "..");
 const PROJECT_ROOT = path.resolve(RUNTIME_ROOT, "..");
 const SRC_ROOT = path.join(RUNTIME_ROOT, "src");
+const IGNORED_WALK_DIRS = new Set(["node_modules", "dist", "out", "android", "ios", ".git"]);
 
 function walkFiles(dir, predicate) {
+  if (!fs.existsSync(dir)) return [];
   const out = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      out.push(...walkFiles(full, predicate));
-    } else if (entry.isFile() && predicate(full)) {
-      out.push(full);
+      if (IGNORED_WALK_DIRS.has(entry.name)) continue;
+      out.push(...walkFiles(path.join(dir, entry.name), predicate));
+    } else if (entry.isFile()) {
+      const full = path.join(dir, entry.name);
+      if (predicate(full)) out.push(full);
     }
   }
   return out.sort();
@@ -185,25 +192,79 @@ test("runtime entrypoints use shared composition root and module graph has no cy
   }
 });
 
-test("all third-party imports in runtime/src are declared in runtime/package.json dependencies", () => {
-  const pkg = JSON.parse(fs.readFileSync(path.join(RUNTIME_ROOT, "package.json"), "utf8"));
-  const declared = new Set(Object.keys(pkg.dependencies || {}));
+test("zero tracked legacy Python or requirements files remain", t => {
+  if (!fs.existsSync(path.join(PROJECT_ROOT, ".git"))) {
+    t.skip("Not running inside a git worktree");
+    return;
+  }
+  const lsFiles = spawnSync("git", ["ls-files"], { cwd: PROJECT_ROOT, encoding: "utf8" });
+  if (lsFiles.status !== 0) {
+    t.skip(`git ls-files unavailable: ${lsFiles.stderr || lsFiles.error?.message || lsFiles.status}`);
+    return;
+  }
+  const trackedPyOrReq = lsFiles.stdout
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(
+      file =>
+        file &&
+        fs.existsSync(path.join(PROJECT_ROOT, file)) &&
+        (/\.py$/i.test(file) || /(?:^|\/)requirements[^/]*\.txt$/i.test(file)),
+    );
+  assert.deepEqual(
+    trackedPyOrReq,
+    [],
+    `Tracked legacy Python or requirements files detected:\n${trackedPyOrReq.join("\n")}`,
+  );
+});
+
+test("all third-party imports across repository packages are declared in owning package.json dependencies", () => {
   const nodeBuiltins = new Set(
     builtinModules.flatMap(m => (m.startsWith("node:") ? [m, m.slice(5)] : [m, `node:${m}`])),
   );
+  const packageTargets = [
+    ["runtime/src", "runtime/package.json", [], []],
+    ["agent-management/src", "agent-management/package.json", [], []],
+    ["frontend-cli/bin", "frontend-cli/package.json", [], []],
+    ["frontend-cli/lib", "frontend-cli/package.json", [], []],
+    ["rind-runtime-client", "rind-runtime-client/package.json", [], []],
+    ["desktop/src", "desktop/package.json", ["electron"], []],
+    ["frontend-web/src", "frontend-web/package.json", [], []],
+    ["mobile/src", "mobile/package.json", [], ["@surface/"]],
+  ];
 
   const undeclared = [];
-  for (const file of walkFiles(SRC_ROOT, f => f.endsWith(".ts"))) {
-    const rel = relPosix(PROJECT_ROOT, file);
-    for (const spec of parseModuleSpecifiers(fs.readFileSync(file, "utf8"))) {
-      if (spec.startsWith(".") || spec.startsWith("/") || nodeBuiltins.has(spec)) {
-        continue;
-      }
-      const pkgName = spec.startsWith("@")
-        ? spec.split("/").slice(0, 2).join("/")
-        : spec.split("/")[0];
-      if (!declared.has(pkgName)) {
-        undeclared.push(`${rel}: ${pkgName}`);
+  for (const [srcRel, pkgRel, extraAllowed, aliasPrefixes] of packageTargets) {
+    const srcDir = path.join(PROJECT_ROOT, srcRel);
+    const pkgPath = path.join(PROJECT_ROOT, pkgRel);
+    if (!fs.existsSync(srcDir) || !fs.existsSync(pkgPath)) continue;
+
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    const declared = new Set([...Object.keys(pkg.dependencies || {}), ...extraAllowed]);
+    const files = walkFiles(
+      srcDir,
+      f =>
+        /\.(?:[cm]?jsx?|tsx?)$/.test(f) &&
+        !f.endsWith(".d.ts") &&
+        !/\.test\.(?:[cm]?jsx?|tsx?)$/.test(f),
+    );
+    for (const file of files) {
+      const rel = relPosix(PROJECT_ROOT, file);
+      for (const spec of parseModuleSpecifiers(fs.readFileSync(file, "utf8"))) {
+        if (
+          spec.startsWith(".") ||
+          spec.startsWith("/") ||
+          nodeBuiltins.has(spec) ||
+          aliasPrefixes.some(prefix => spec.startsWith(prefix))
+        ) {
+          continue;
+        }
+        const pkgName = spec.startsWith("@")
+          ? spec.split("/").slice(0, 2).join("/")
+          : spec.split("/")[0];
+        if (!declared.has(pkgName)) {
+          undeclared.push(`${rel}: ${pkgName} (missing in ${pkgRel})`);
+        }
       }
     }
   }
@@ -211,8 +272,63 @@ test("all third-party imports in runtime/src are declared in runtime/package.jso
   assert.deepEqual(
     undeclared,
     [],
-    `Undeclared runtime third-party imports:\n${undeclared.join("\n")}`,
+    `Undeclared direct third-party imports:\n${undeclared.join("\n")}`,
   );
+});
+
+test("rind-runtime-client declarations typecheck and pure-JS packages parse without syntax errors", () => {
+  const clientRoot = path.join(PROJECT_ROOT, "rind-runtime-client");
+  const dtsFiles = walkFiles(clientRoot, f => f.endsWith(".d.ts"));
+  assert.ok(dtsFiles.length > 0, "Expected .d.ts files in rind-runtime-client");
+
+  const program = ts.createProgram(dtsFiles, {
+    noEmit: true,
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    types: [path.join(RUNTIME_ROOT, "node_modules", "@types", "node")],
+  });
+  const dtsSet = new Set(dtsFiles.map(f => path.normalize(f)));
+  const dtsErrors = [];
+  for (const diag of ts.getPreEmitDiagnostics(program)) {
+    if (diag.file && !dtsSet.has(path.normalize(diag.file.fileName))) continue;
+    const msg = ts.flattenDiagnosticMessageText(diag.messageText, "\n");
+    if (diag.file && diag.start !== undefined) {
+      const pos = diag.file.getLineAndCharacterOfPosition(diag.start);
+      dtsErrors.push(`${relPosix(PROJECT_ROOT, diag.file.fileName)}:${pos.line + 1}:${pos.character + 1} - ${msg}`);
+    } else {
+      dtsErrors.push(msg);
+    }
+  }
+  assert.deepEqual(dtsErrors, [], `rind-runtime-client .d.ts errors:\n${dtsErrors.join("\n")}`);
+
+  const jsDirs = [
+    path.join(PROJECT_ROOT, "frontend-cli", "bin"),
+    path.join(PROJECT_ROOT, "frontend-cli", "lib"),
+    path.join(PROJECT_ROOT, "frontend-cli", "scripts"),
+    clientRoot,
+  ];
+  const syntaxErrors = [];
+  for (const dir of jsDirs) {
+    for (const file of walkFiles(dir, f => /\.(?:m?js)$/.test(f))) {
+      const result = ts.transpileModule(fs.readFileSync(file, "utf8"), {
+        fileName: file,
+        reportDiagnostics: true,
+        compilerOptions: {
+          target: ts.ScriptTarget.ESNext,
+          module: ts.ModuleKind.ESNext,
+        },
+      });
+      for (const diag of result.diagnostics || []) {
+        const msg = ts.flattenDiagnosticMessageText(diag.messageText, "\n");
+        const pos = diag.file && diag.start !== undefined
+          ? diag.file.getLineAndCharacterOfPosition(diag.start)
+          : { line: 0, character: 0 };
+        syntaxErrors.push(`${relPosix(PROJECT_ROOT, file)}:${pos.line + 1}:${pos.character + 1} - ${msg}`);
+      }
+    }
+  }
+  assert.deepEqual(syntaxErrors, [], `JS syntax errors:\n${syntaxErrors.join("\n")}`);
 });
 
 test("RIND.md context injects user before project, skips missing levels, truncates UTF-8 cleanly, and uses cwd", async t => {
@@ -297,12 +413,12 @@ test("RIND.md context injects user before project, skips missing levels, truncat
   }
 });
 
-test("docs/internals maintains bilingual .zh-CN.md pairs and valid relative Markdown links", () => {
-  const internalsRoot = path.join(PROJECT_ROOT, "docs", "internals");
-  assert.equal(fs.existsSync(internalsRoot) && fs.statSync(internalsRoot).isDirectory(), true);
+test("docs maintains bilingual .zh-CN.md pairs and valid relative Markdown links", () => {
+  const docsRoot = path.join(PROJECT_ROOT, "docs");
+  assert.equal(fs.existsSync(docsRoot) && fs.statSync(docsRoot).isDirectory(), true);
 
-  const allMdFiles = walkFiles(internalsRoot, f => f.endsWith(".md"));
-  assert.ok(allMdFiles.length > 0, "Expected markdown files under docs/internals");
+  const allMdFiles = walkFiles(docsRoot, f => f.endsWith(".md"));
+  assert.ok(allMdFiles.length > 0, "Expected markdown files under docs/");
 
   const missingZh = [];
   const missingEn = [];
@@ -331,6 +447,7 @@ test("docs/internals maintains bilingual .zh-CN.md pairs and valid relative Mark
     path.join(PROJECT_ROOT, "README.md"),
     path.join(PROJECT_ROOT, "README.zh-CN.md"),
     path.join(PROJECT_ROOT, "CONTRIBUTING.md"),
+    path.join(PROJECT_ROOT, "AGENTS.md"),
   ].filter(f => fs.existsSync(f));
 
   const linkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;

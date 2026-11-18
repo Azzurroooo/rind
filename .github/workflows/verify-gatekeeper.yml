@@ -1,0 +1,30 @@
+name: Verify repository gatekeeper
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gatekeeper-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gatekeeper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: runtime/package-lock.json
+      - run: npm --prefix runtime ci
+      - run: npm --prefix runtime run build
+      - name: Run architecture, dependency, type, and documentation guards
+        run: node --test runtime/test/architecture.test.js

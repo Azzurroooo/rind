@@ -43,5 +43,5 @@ jobs:
       - name: Stage distributable CLI components
         shell: bash
         run: |
-          node agent-management/stage.mjs "$RUNNER_TEMP/rind-cli-stage"
+          node agent-management/stage.mjs --skip-build "$RUNNER_TEMP/rind-cli-stage"
           node "$RUNNER_TEMP/rind-cli-stage/frontend-cli/bin/rind.js" --version

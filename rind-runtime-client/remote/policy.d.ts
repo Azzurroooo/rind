@@ -1,4 +1,4 @@
-import type { RuntimeMethod } from "../../desktop/src/preload/types";
+import type { RuntimeMethod } from "../../desktop/src/preload/types.js";
 
 export declare const DESKTOP_RUNTIME_METHODS: Set<RuntimeMethod>;
 export declare const REMOTE_RUNTIME_METHODS: Set<RuntimeMethod>;

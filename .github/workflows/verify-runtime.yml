@@ -36,6 +36,7 @@ jobs:
           - os: macos-latest
             node: "22"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Ensure ripgrep (rg) is available on Linux

@@ -42,17 +42,31 @@ function collectProductionPackages(pkgRoot) {
 }
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const destination = process.argv[2];
-if (!destination || !path.isAbsolute(destination)) throw new Error("Usage: node agent-management/stage.mjs <new-absolute-directory>");
+const rawArgs = process.argv.slice(2);
+const skipBuild = rawArgs.includes("--skip-build");
+const positionalArgs = rawArgs.filter((arg) => !arg.startsWith("-"));
+const unknownFlags = rawArgs.filter((arg) => arg.startsWith("-") && arg !== "--skip-build");
+const destination = positionalArgs[0];
+if (!destination || positionalArgs.length !== 1 || unknownFlags.length > 0 || !path.isAbsolute(destination)) {
+  throw new Error("Usage: node agent-management/stage.mjs [--skip-build] <new-absolute-directory>");
+}
 const require = createRequire(import.meta.url);
-const build = spawnSync(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", path.join(root, "agent-management/tsconfig.json")], { stdio: "inherit" });
-if (build.status !== 0) process.exit(build.status || 1);
-const buildRuntime = spawnSync(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", path.join(root, "runtime/tsconfig.json")], { stdio: "inherit" });
-if (buildRuntime.status !== 0) process.exit(buildRuntime.status || 1);
-const copyAssetsScript = path.join(root, "runtime/scripts/copy-assets.mjs");
-if (existsSync(copyAssetsScript)) {
-  const copyAssets = spawnSync(process.execPath, [copyAssetsScript], { stdio: "inherit" });
-  if (copyAssets.status !== 0) process.exit(copyAssets.status || 1);
+if (!skipBuild) {
+  const build = spawnSync(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", path.join(root, "agent-management/tsconfig.json")], { stdio: "inherit" });
+  if (build.status !== 0) process.exit(build.status || 1);
+  const buildRuntime = spawnSync(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", path.join(root, "runtime/tsconfig.json")], { stdio: "inherit" });
+  if (buildRuntime.status !== 0) process.exit(buildRuntime.status || 1);
+  const copyAssetsScript = path.join(root, "runtime/scripts/copy-assets.mjs");
+  if (existsSync(copyAssetsScript)) {
+    const copyAssets = spawnSync(process.execPath, [copyAssetsScript], { stdio: "inherit" });
+    if (copyAssets.status !== 0) process.exit(copyAssets.status || 1);
+  }
+} else {
+  for (const requiredDist of ["agent-management/dist/service.js", "runtime/dist/cli.js"]) {
+    if (!existsSync(path.join(root, requiredDist))) {
+      throw new Error(`--skip-build requires prebuilt output at ${requiredDist}`);
+    }
+  }
 }
 await mkdir(destination); // Never overwrite an existing distribution.
 for (const relative of ["frontend-cli/bin", "frontend-cli/lib", "rind-runtime-client", "agent-management/dist", "runtime/dist", "runtime/skills"]) {
