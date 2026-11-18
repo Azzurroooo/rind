@@ -36,6 +36,10 @@
 // tracks the one card that can still be answered, while every card is ALSO a
 // stream entry (role "question") so the answered/cancelled card remains
 // readable in the transcript instead of vanishing.
+import {
+  normalizeQuestionAnswers,
+  normalizeUserQuestions,
+} from "../../../runtime/dist/protocol/runtime-protocol.js";
 import { parseToolResult, summarizeChanges, summarizeTurnFileList } from "../lib/toolDisplay.js";
 
 // Stream length ceiling (audit #5): dropping the oldest keeps month-long
@@ -124,8 +128,11 @@ export function reduceConversation(state, action) {
     case "answered": {
       const key = String(action.key || "");
       if (!key) return state;
-      // Answered cards freeze in the stream (§2.3) — only the pointer clears.
-      const next = markQuestionEntry(state, key, { status: "answered", selectedAnswer: String(action.answer || "") });
+      const answers = normalizeQuestionAnswers(action.answers);
+      const patch = answers.length > 0
+        ? { status: "answered", selectedAnswers: answers }
+        : { status: "cancelled", skipped: true };
+      const next = markQuestionEntry(state, key, patch);
       const pointerMatches = next.question && questionKey(next.question) === key;
       return { ...next, question: pointerMatches ? null : next.question, resolvedQuestionKey: key };
     }
@@ -309,11 +316,14 @@ function applyTurnEvent(state, event, context) {
       let next = upsertTool(state, definedOnly(patch));
       if (state.question?.toolCallId === patch.id) {
         const result = parseToolResult(patch.result);
-        const answer = result?.ok === true ? result?.data?.answer : undefined;
+        const rawAnswers = result?.ok === true && Array.isArray(result?.data?.answers)
+          ? result.data.answers.map((item) => (Array.isArray(item?.answers) ? item.answers : []))
+          : [];
+        const answers = normalizeQuestionAnswers(rawAnswers, state.question.questions?.length || 0);
         next = markQuestionEntry(
           next,
           questionKey(state.question),
-          typeof answer === "string" && answer ? { status: "answered", selectedAnswer: answer } : { status: "cancelled" },
+          answers.length > 0 ? { status: "answered", selectedAnswers: answers } : { status: "cancelled" },
         );
         next = { ...next, question: null };
       }
@@ -340,7 +350,11 @@ function applyTurnEvent(state, event, context) {
       const toolCallId = String(event.tool_call_id || "").trim();
       if (!toolCallId) return state;
       const key = `${context.sessionId}:${toolCallId}`;
-      const next = markQuestionEntry(state, key, { status: "answered", selectedAnswer: String(event.answer || "") });
+      const answers = normalizeQuestionAnswers(event.answers);
+      const patch = answers.length > 0
+        ? { status: "answered", selectedAnswers: answers }
+        : { status: "cancelled", skipped: true };
+      const next = markQuestionEntry(state, key, patch);
       const pointerMatches = next.question && (next.question.toolCallId === toolCallId || questionKey(next.question) === key);
       return { ...next, question: pointerMatches ? null : next.question, resolvedQuestionKey: key };
     }
@@ -462,16 +476,15 @@ function withQuestionEntry(state, question) {
     role: "question",
     sessionId: question.sessionId,
     toolCallId: question.toolCallId,
-    question: question.question,
-    options: question.options,
+    questions: question.questions,
     requestedAt: question.requestedAt,
     ttlMs: question.ttlMs,
   };
   if (index < 0) {
-    return { ...state, entries: [...state.entries, { id: `question:${key}`, status: question.status || "pending", selectedAnswer: "", ...fields }] };
+    return { ...state, entries: [...state.entries, { id: `question:${key}`, status: question.status || "pending", selectedAnswers: [], ...fields }] };
   }
   const entries = [...state.entries];
-  entries[index] = { ...entries[index], ...fields }; // keeps local status/selectedAnswer
+  entries[index] = { ...entries[index], ...fields }; // keeps local status/selectedAnswers
   return { ...state, entries };
 }
 
@@ -648,13 +661,14 @@ export function normalizeQuestion(value, fallbackSessionId = "") {
   if (!value || typeof value !== "object") return null;
   const toolCallId = String(value.toolCallId || value.tool_call_id || "").trim();
   if (!toolCallId) return null;
+  const questions = normalizeUserQuestions(value);
+  if (questions.length === 0) return null;
   const requestedAt = Date.parse(value.requestedAt || value.ts || "") || 0;
   const explicitTtl = Number(value.ttl_ms || value.ttlMs);
   return {
     sessionId: String(value.sessionId || value.session_id || fallbackSessionId || "").trim(),
     toolCallId,
-    question: String(value.question || ""),
-    options: Array.isArray(value.options) ? value.options : [],
+    questions,
     requestedAt: Number.isFinite(requestedAt) ? requestedAt : 0,
     ttlMs: Number.isFinite(explicitTtl) && explicitTtl > 0 ? explicitTtl : QUESTION_TTL_MS,
   };

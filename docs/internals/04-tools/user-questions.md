@@ -19,9 +19,9 @@ sequenceDiagram
     P-->>M: the persisted tool result
 ~~~
 
-The question must be a non-empty string; optional options are composed of a label and a description, the first item's label ends with " (Recommended)", and no other item may use that suffix. The user can still type freely; the options are only an interaction aid. Answers are tied to session_id and tool_call_id, so a question from an old session must not be answered against a new tool call.
+Each call passes `questions` (1 to 4 items), where each item carries a non-empty `question`, optional short `header`, optional `multiple` flag, and optional `options` (`label` + `description`; when recommending an option, the model places it first with `" (Recommended)"`, which Surfaces extract as a badge without hard-failing neutral preference questions). The user can always type freely; Surfaces return `answers: string[][]` tied to `session_id` and `tool_call_id`, so a question from an old session must not be answered against a new tool call.
 
-A waiter belongs to active execution, and cancellation releases it; a question released that way is recorded as cancelled, not as an empty answer. Skipping a question in the CLI (Esc) submits an empty answer without interrupting the turn, returning UserQuestionEmptyAnswer so the model can continue without a user answer. When there is no responder, it returns UserQuestionUnsupported rather than pretending that confirmation was already obtained. rind run starts the Worker with --no-user-question, and Team execution delegation also disables user questions, keeping unattended calls behind a clear interaction boundary.
+A waiter belongs to active execution, and cancellation releases it; a question released that way is recorded as cancelled, not as an empty answer. Skipping a question (Esc in the CLI or Skip in Desktop/Web/Mobile) submits empty `answers: []` without interrupting the turn, returning UserQuestionEmptyAnswer so the model can continue without a user answer. When there is no responder, it returns UserQuestionUnsupported rather than pretending that confirmation was already obtained. rind run starts the Worker with --no-user-question, and Team execution delegation also disables user questions, keeping unattended calls behind a clear interaction boundary.
 
 ## Waiting Needs a Stable Association, and Also a Way Out
 

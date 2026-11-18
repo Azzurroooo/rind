@@ -19,7 +19,13 @@ import {
   toolResultEvent,
   userQuestionRequestedEvent,
   type RuntimeEventBase,
+  type UserQuestionItem,
 } from "../domain/events.js";
+import {
+  MAX_USER_QUESTIONS,
+  normalizeQuestionAnswers,
+  type UserQuestionOption,
+} from "../protocol/runtime-protocol.js";
 import {
   classifyToolError,
   classifyToolPayload,
@@ -103,22 +109,20 @@ export type UserQuestionResponder = (
   event: RuntimeEventBase & {
     type: "user_question_requested";
     tool_call_id: string;
-    question: string;
-    options: Array<{ label: string; description?: string }> | null;
+    questions: UserQuestionItem[];
   },
-) => string | Promise<string>;
+) => string[][] | Promise<string[][]>;
 
 function cleanUserQuestionOptions(
   value: unknown,
-): Array<{ label: string; description: string }> | null {
+): UserQuestionOption[] | null {
   if (value === null || value === undefined) return null;
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error("ask_user_question options must be a non-empty array of option objects.");
   }
-  const cleaned: Array<{ label: string; description: string }> = [];
+  const cleaned: UserQuestionOption[] = [];
   const labels = new Set<string>();
-  for (let index = 0; index < value.length; index += 1) {
-    const item = value[index];
+  for (const item of value) {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw new Error("Each ask_user_question option must be an object.");
     }
@@ -142,14 +146,54 @@ function cleanUserQuestionOptions(
       throw new Error(`ask_user_question option labels must be unique: ${JSON.stringify(label)}.`);
     }
     labels.add(label);
-    const hasRec = label.endsWith(" (Recommended)");
-    if (index === 0 && !hasRec) {
-      throw new Error('The first ask_user_question option label must end with " (Recommended)".');
-    }
-    if (index > 0 && hasRec) {
-      throw new Error('Only the first ask_user_question option may end with " (Recommended)".');
-    }
     cleaned.push({ label, description: rawDesc.trim() });
+  }
+  return cleaned;
+}
+
+function cleanUserQuestions(parsedArgs: Record<string, unknown>): UserQuestionItem[] {
+  const unknownTop = Object.keys(parsedArgs).filter(k => k !== "questions");
+  if (unknownTop.length > 0) {
+    throw new Error(
+      `ask_user_question contains unsupported fields: ${JSON.stringify(unknownTop.sort())}. Pass { questions: [...] }.`,
+    );
+  }
+  const rawQuestions = parsedArgs.questions;
+  if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) {
+    throw new Error("ask_user_question requires a non-empty questions array.");
+  }
+  if (rawQuestions.length > MAX_USER_QUESTIONS) {
+    throw new Error(`ask_user_question accepts at most ${MAX_USER_QUESTIONS} questions.`);
+  }
+  const cleaned: UserQuestionItem[] = [];
+  for (const rawItem of rawQuestions) {
+    if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+      throw new Error("Each ask_user_question item must be an object.");
+    }
+    const obj = rawItem as Record<string, unknown>;
+    const unknown = Object.keys(obj).filter(
+      k => k !== "header" && k !== "question" && k !== "options" && k !== "multiple",
+    );
+    if (unknown.length > 0) {
+      throw new Error(
+        `ask_user_question item contains unsupported fields: ${JSON.stringify(unknown.sort())}.`,
+      );
+    }
+    const question = typeof obj.question === "string" ? obj.question.trim() : "";
+    if (!question) {
+      throw new Error("Each ask_user_question item requires a non-empty question string.");
+    }
+    const header =
+      typeof obj.header === "string" && obj.header.trim()
+        ? obj.header.trim().slice(0, 32)
+        : undefined;
+    const options = cleanUserQuestionOptions(obj.options);
+    cleaned.push({
+      ...(header ? { header } : {}),
+      question,
+      options,
+      ...(obj.multiple === true ? { multiple: true } : {}),
+    });
   }
   return cleaned;
 }
@@ -162,23 +206,13 @@ export function buildUserQuestionEvent(options: {
 }): RuntimeEventBase & {
   type: "user_question_requested";
   tool_call_id: string;
-  question: string;
-  options: Array<{ label: string; description?: string }> | null;
+  questions: UserQuestionItem[];
 } {
-  const rawQuestion = options.parsedArgs.question;
-  const question = typeof rawQuestion === "string" ? rawQuestion.trim() : "";
-  if (!question) {
-    throw new Error("ask_user_question requires a non-empty question string.");
-  }
-  if ("recommended" in options.parsedArgs) {
-    throw new Error("ask_user_question no longer accepts a top-level recommended field.");
-  }
-  const cleanOptions = cleanUserQuestionOptions(options.parsedArgs.options);
+  const questions = cleanUserQuestions(options.parsedArgs);
   return userQuestionRequestedEvent({
     ...eventMeta(options.session, options.turnId),
     tool_call_id: options.call.call_id,
-    question,
-    options: cleanOptions,
+    questions,
   });
 }
 
@@ -187,8 +221,7 @@ export async function runUserQuestion(
   event: RuntimeEventBase & {
     type: "user_question_requested";
     tool_call_id: string;
-    question: string;
-    options: Array<{ label: string; description?: string }> | null;
+    questions: UserQuestionItem[];
   },
   cancellationToken?: CancellationToken | null,
 ): Promise<[ToolEventStatus, string, string]> {
@@ -203,7 +236,7 @@ export async function runUserQuestion(
       "UserQuestionUnsupported",
     ];
   }
-  let answerValue: string;
+  let answerValue: string[][];
   try {
     answerValue = await responder(event);
   } catch (exc) {
@@ -220,19 +253,29 @@ export async function runUserQuestion(
       "Cancelled",
     ];
   }
-  const answer = String(answerValue || "").trim();
-  if (!answer) {
+  const answers = normalizeQuestionAnswers(answerValue, event.questions.length);
+  if (answers.length === 0) {
     return [
       "failed",
       toolError(
         "ask_user_question",
-        "User provided an empty answer.",
+        "User skipped the question without answering.",
         "UserQuestionEmptyAnswer",
       ),
       "UserQuestionEmptyAnswer",
     ];
   }
-  return ["completed", toolOk("ask_user_question", { answer }), ""];
+  return [
+    "completed",
+    toolOk("ask_user_question", {
+      answers: event.questions.map((q, idx) => ({
+        ...(q.header ? { header: q.header } : {}),
+        question: q.question,
+        answers: answers[idx] ?? [],
+      })),
+    }),
+    "",
+  ];
 }
 
 function splitLines(value: unknown): string[] {

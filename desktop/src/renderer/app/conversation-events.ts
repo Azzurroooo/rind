@@ -1,7 +1,13 @@
 import { Quote, renderIcon } from "../icons.ts"
-import { canConfirmQuestion, questionAnswer, selectQuestionOption, updateQuestionInput } from "../question-state.ts"
+import {
+  collectQuestionAnswers,
+  selectQuestionOption,
+  setQuestionStep,
+  updateQuestionInput,
+} from "../question-state.ts"
+import { syncQuestionCard } from "../question-card.ts"
 import { retryLastPrompt, selectSlashCommand, setPrompt } from "./composer.ts"
-import { interrupt, jumpLatest, messageStream, prompt, requiredElement, retry } from "./dom.ts"
+import { interrupt, jumpLatest, messageStream, prompt, retry } from "./dom.ts"
 import { answerQuestion, cancelActiveTurn, questionSelectionFor, restartRuntime, runAction } from "./runtime.ts"
 import { openToolFile } from "./files-panel.ts"
 import { chatProject, switchSession } from "./sessions.ts"
@@ -241,31 +247,78 @@ export function bindConversationEvents(): void {
       runAction(() => switchSession(commandSessionId), commandSessionId)
       return
     }
-  })
+    const question = state.conversation.question
+    if (!question) return
+    const selection = questionSelectionFor(question)
+    if (selection.submitting) return
 
-  messageStream.addEventListener("change", (event) => {
-    const questionOption = (event.target as HTMLElement).closest<HTMLInputElement>("[data-question-option-index]")
-    if (questionOption && state.conversation.question) {
-      const index = Number(questionOption.dataset.questionOptionIndex)
-      if (Number.isInteger(index)) {
-        const question = state.conversation.question
-        const selection = questionSelectionFor(question)
-        if (selection.submitting) return
-        state.questionSelection = selectQuestionOption(selection, index, question.options.length)
+    const stepTab = target.closest<HTMLButtonElement>("[data-step-tab]")
+    if (stepTab) {
+      const nextStep = Number(stepTab.dataset.stepTab)
+      if (Number.isInteger(nextStep)) {
+        state.questionSelection = setQuestionStep(selection, nextStep)
         render()
-        if (index === question.options.length) requiredElement<HTMLTextAreaElement>("question-answer").focus()
+      }
+      return
+    }
+    const navBtn = target.closest<HTMLButtonElement>("[data-question-nav]")
+    if (navBtn) {
+      const delta = navBtn.dataset.questionNav === "prev" ? -1 : 1
+      state.questionSelection = setQuestionStep(selection, selection.activeStep + delta)
+      render()
+      return
+    }
+    const skipBtn = target.closest<HTMLButtonElement>("[data-question-skip]")
+    if (skipBtn) {
+      runAction(() => answerQuestion([]), state.viewedSessionId)
+      return
+    }
+    const optionBtn = target.closest<HTMLButtonElement>("[data-question-option-index]")
+    if (optionBtn) {
+      const stepIdx = Number(optionBtn.dataset.questionStep ?? selection.activeStep)
+      const optIdx = Number(optionBtn.dataset.questionOptionIndex)
+      if (Number.isInteger(stepIdx) && Number.isInteger(optIdx)) {
+        const nextSelection = selectQuestionOption(selection, stepIdx, optIdx, question.questions)
+        state.questionSelection = nextSelection
+        render()
+        const optsLen = question.questions[stepIdx]?.options?.length ?? 0
+        if (optIdx === optsLen && nextSelection.steps[stepIdx]?.customSelected) {
+          messageStream
+            .querySelector<HTMLTextAreaElement>(`textarea[data-question-custom-input="${stepIdx}"]`)
+            ?.focus()
+        }
       }
     }
   })
 
   messageStream.addEventListener("input", (event) => {
     const target = event.target as HTMLElement
-    if (target.id !== "question-answer" || !(target instanceof HTMLTextAreaElement) || !state.conversation.question) return
-    const selection = updateQuestionInput(questionSelectionFor(state.conversation.question), target.value)
+    if (!(target instanceof HTMLTextAreaElement) || target.dataset.questionCustomInput === undefined) return
+    const question = state.conversation.question
+    if (!question) return
+    const stepIdx = Number(target.dataset.questionCustomInput)
+    if (!Number.isInteger(stepIdx)) return
+    const selection = updateQuestionInput(questionSelectionFor(question), stepIdx, target.value)
     state.questionSelection = selection
-    const form = requiredElement<HTMLFormElement>("question-form")
-    const confirm = form.querySelector<HTMLButtonElement>("[type=submit]")
-    if (confirm) confirm.disabled = !canConfirmQuestion(selection, state.conversation.question.options.length)
+    const card = messageStream.querySelector<HTMLElement>(".card-question")
+    if (card) syncQuestionCard(card, selection, question.questions)
+  })
+
+  messageStream.addEventListener("keydown", (event) => {
+    const target = event.target as HTMLElement
+    if (!(target instanceof HTMLTextAreaElement) || target.dataset.questionCustomInput === undefined) return
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return
+    const question = state.conversation.question
+    if (!question) return
+    event.preventDefault()
+    const selection = questionSelectionFor(question)
+    const answers = collectQuestionAnswers(selection, question.questions)
+    if (answers) {
+      runAction(() => answerQuestion(answers), state.viewedSessionId)
+    } else if (selection.activeStep < question.questions.length - 1) {
+      state.questionSelection = setQuestionStep(selection, selection.activeStep + 1)
+      render()
+    }
   })
 
   messageStream.addEventListener("submit", (event) => {
@@ -273,7 +326,7 @@ export function bindConversationEvents(): void {
     if ((event.target as HTMLElement).id !== "question-form") return
     const question = state.conversation.question
     if (!question) return
-    const answer = questionAnswer(questionSelectionFor(question), question.options)
-    if (answer) runAction(() => answerQuestion(answer), state.viewedSessionId)
+    const answers = collectQuestionAnswers(questionSelectionFor(question), question.questions)
+    if (answers) runAction(() => answerQuestion(answers), state.viewedSessionId)
   })
 }

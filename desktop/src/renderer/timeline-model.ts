@@ -1,5 +1,11 @@
 import { parseStructuredToolPayload } from "../../../runtime/dist/protocol/tool-semantics.js"
-import type { RuntimeEvent } from "../preload/types"
+import {
+  normalizeQuestionAnswers,
+  normalizeUserQuestions,
+  type RuntimeEvent,
+  type UserQuestionItem,
+  type UserQuestionOption,
+} from "../preload/types.ts"
 import { appendInput, partialArguments } from "./tool-input.ts"
 import {
   backgroundWaitFrom,
@@ -52,6 +58,7 @@ export type PlanEntry = {
   errorType: string
   durationMs: number
 }
+export type QuestionReceiptItem = { header?: string; question: string; answers: string[] }
 export type Entry = (
   | { kind: "user"; id: string; content: string; inputId?: string; delivery?: boolean }
   | { kind: "assistant"; id: string; content: string; turnId: string; pendingCompletion?: boolean }
@@ -61,9 +68,11 @@ export type Entry = (
   | { kind: "system"; id: string; content: string; tone: SystemTone }
   | { kind: "notice"; id: string; content: string; label: string }
   | { kind: "command"; id: string; command: string; content: string; display?: Record<string, unknown> }
+  | { kind: "question_receipt"; id: string; toolCallId: string; items: QuestionReceiptItem[]; skipped?: boolean }
 ) & { time?: string | number }
-export type QuestionOption = { label: string; description: string }
-export type Question = { toolCallId: string; turnId: string; question: string; options: QuestionOption[] }
+export type QuestionOption = UserQuestionOption
+export type QuestionItem = UserQuestionItem
+export type Question = { toolCallId: string; turnId: string; questions: QuestionItem[] }
 export type ConversationState = {
   entries: Entry[]
   activeTurnId: string
@@ -188,25 +197,27 @@ function reduceTurnEvent(state: ConversationState, envelope: RuntimeEvent): Conv
       const filePath = asString(event.file_path)
       return filePath ? appendEntry(closeAssistant(state), { kind: "file", id: "", filePath }) : closeAssistant(state)
     }
-    case "user_question_requested": return {
-      ...closeAssistant(state), question: {
-        toolCallId: asString(event.tool_call_id), turnId, question: asString(event.question) || "Question required",
-        options: Array.isArray(event.options) ? event.options.flatMap((item) => {
-          if (!item || typeof item !== "object") return []
-          const option = item as Record<string, unknown>
-          const label = asString(option.label)
-          const description = asString(option.description)
-          return label && description
-            ? [{ label, description }]
-            : []
-        }) : [],
-      },
+    case "user_question_requested": {
+      const questions = normalizeUserQuestions(event)
+      if (!questions.length) return state
+      return {
+        ...closeAssistant(state),
+        question: {
+          toolCallId: asString(event.tool_call_id),
+          turnId,
+          questions,
+        },
+      }
     }
     case "user_question_answered": {
       const answeredId = asString(event.tool_call_id)
-      return state.question && (!answeredId || state.question.toolCallId === answeredId)
-        ? { ...state, question: undefined }
-        : state
+      if (!state.question || (answeredId && state.question.toolCallId !== answeredId)) {
+        return state
+      }
+      const q = state.question
+      const answers = normalizeQuestionAnswers(event.answers, q.questions.length)
+      const next = appendQuestionReceipt(state, q.toolCallId, q.questions, answers)
+      return { ...next, question: undefined }
     }
     case "token_stats_updated": {
       const stats = asRecord(event.stats)
@@ -248,7 +259,7 @@ export function conversationFromReplay(messages: unknown[]): ConversationState {
 export function mergeReplayConversation(replay: ConversationState, live: ConversationState): ConversationState {
   const entries = replay.entries.map((entry) => ({ ...entry })) as Entry[]
   const hasLiveTurn = Boolean(live.activeTurnId)
-  const persistedIds = new Set(entries.map((entry) => entry.id).filter((id) => id.startsWith("message:") || id.startsWith("tool:")))
+  const persistedIds = new Set(entries.map((entry) => entry.id).filter((id) => id.startsWith("message:") || id.startsWith("tool:") || id.startsWith("question-receipt:")))
   const persistedTools = new Set(entries.flatMap((entry) => entry.kind === "tool" && entry.toolCallId ? [entry.toolCallId] : []))
   const liveUsers = live.entries.filter((entry) => entry.kind === "user")
   const replayUsers = entries.filter((entry) => entry.kind === "user").length
@@ -501,14 +512,71 @@ function completeReplayTool(state: ConversationState, record: Record<string, unk
     },
   }
   const existing = state.entries.find((entry): entry is ToolEntry => entry.kind === "tool" && entry.toolCallId === toolCallId)
-  if (existing) return replaceEntry(state, existing.id, {
-    ...existing,
-    output: result.raw,
-    result,
-    status: resultStatus("", result.errorType, result.ok),
-    errorType: result.errorType,
-  } as ToolEntry)
+  if (existing) {
+    let updated = replaceEntry(state, existing.id, {
+      ...existing,
+      output: result.raw,
+      result,
+      status: resultStatus("", result.errorType, result.ok),
+      errorType: result.errorType,
+    } as ToolEntry)
+    if (existing.toolName === "ask_user_question" && result.ok === true) {
+      const data = asRecord(result.data)
+      if (Array.isArray(data.answers)) {
+        const items: QuestionReceiptItem[] = data.answers.flatMap((raw) => {
+          const item = asRecord(raw)
+          const question = asString(item.question)
+          if (!question) return []
+          const header = asString(item.header) || undefined
+          const answers = Array.isArray(item.answers)
+            ? item.answers.map((v) => asString(v)).filter(Boolean)
+            : []
+          return [{ ...(header ? { header } : {}), question, answers }]
+        })
+        if (items.length > 0) {
+          updated = upsertQuestionReceipt(updated, toolCallId, items, false)
+        }
+      }
+    }
+    return updated
+  }
   return appendEntry(state, { kind: "tool", id: `tool:${toolCallId}`, toolCallId, toolName: asString(record.tool_name) || "Tool", argsPreview: "", arguments: {}, status: resultStatus("", result.errorType, result.ok), output: result.raw, result, errorType: result.errorType, durationMs: 0 })
+}
+
+export function appendQuestionReceipt(
+  state: ConversationState,
+  toolCallId: string,
+  questions: readonly QuestionItem[],
+  answers: readonly string[][],
+): ConversationState {
+  if (!toolCallId || !questions.length) return state
+  const skipped = answers.length === 0 || !answers.some((group) => group.length > 0)
+  const items: QuestionReceiptItem[] = questions.map((q, idx) => ({
+    ...(q.header ? { header: q.header } : {}),
+    question: q.question,
+    answers: skipped ? [] : [...(answers[idx] ?? [])],
+  }))
+  return upsertQuestionReceipt(state, toolCallId, items, skipped)
+}
+
+function upsertQuestionReceipt(
+  state: ConversationState,
+  toolCallId: string,
+  items: QuestionReceiptItem[],
+  skipped: boolean,
+): ConversationState {
+  const id = `question-receipt:${toolCallId}`
+  const entry: Entry = {
+    kind: "question_receipt",
+    id,
+    toolCallId,
+    items,
+    ...(skipped ? { skipped: true } : {}),
+  }
+  if (state.entries.some((e) => e.id === id)) {
+    return replaceEntry(state, id, entry)
+  }
+  return appendEntry(state, entry)
 }
 
 function appendSystem(state: ConversationState, line: SystemLine): ConversationState {

@@ -1229,8 +1229,25 @@ test("status helpers render question and errors", () => {
   );
   assert.match(questionText({ question: "q".repeat(120) }), /^  Q: q{73}\.\.\.$/);
   assert.equal(
-    questionAnswerText({ question: "Pick one" }, "Fast (Recommended)"),
-    ["  Q: Pick one", "  A: Fast (Recommended)"].join("\n"),
+    questionAnswerText({ questions: [{ question: "Pick one" }] }, [["Fast (Recommended)"]]),
+    ["  Q: Pick one", "  A: Fast"].join("\n"),
+  );
+  assert.equal(
+    questionAnswerText(
+      {
+        questions: [
+          { header: "DB", question: "Which DB?" },
+          { header: "Targets", question: "Which targets?" },
+        ],
+      },
+      [["SQLite (Recommended)"], ["CLI", "Web"]],
+    ),
+    [
+      "  Q1: DB · Which DB?",
+      "   ✓  SQLite",
+      "  Q2: Targets · Which targets?",
+      "   ✓  CLI, Web",
+    ].join("\n"),
   );
   assert.match(questionAnswerText({ question: "Explain" }, ""), /  A: \(no answer\)$/);
   assert.equal(errorLine("failed"), "⊘ Turn failed\n  ↳ failed");
@@ -1337,6 +1354,36 @@ test("questionMenuFrame wraps complete labels and descriptions with distinct for
   assert.match(compact, /Averylongdescriptionthatmustremaincompleteandwrapacrossterminallines/);
   assert.match(plain, /↳ A very long/);
   assert.doesNotMatch(plain, /\.\.\./);
+});
+
+test("questionMenuFrame renders multi-question step pills and multi-select checkboxes", () => {
+  const frame = questionMenuFrame(
+    [
+      { label: "CLI", description: "Terminal" },
+      { label: "Web", description: "Browser" },
+    ],
+    0,
+    "",
+    false,
+    undefined,
+    76,
+    null,
+    {
+      steps: [
+        { index: 0, label: "DB", done: true, active: false },
+        { index: 1, label: "Targets", done: false, active: true },
+      ],
+      multiple: true,
+      isOptionPicked: (idx) => idx === 0,
+    },
+  );
+  const plain = frame.text.replace(/\x1b\[[0-9;]*m/g, "");
+  assert.match(plain, /Questions \(2\/2\) · multi-select/);
+  assert.match(plain, /✓ 1\. DB/);
+  assert.match(plain, /› 2\. Targets ‹/);
+  assert.match(plain, /› \[✓\] CLI/);
+  assert.match(plain, /· \[ \] Web/);
+  assert.match(plain, /space toggle · ←→ step/);
 });
 
 test("choiceMenuText keeps the selected option visible", () => {

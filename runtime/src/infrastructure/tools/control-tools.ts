@@ -104,8 +104,7 @@ export function createGoalToolSpec(
 }
 
 export function askUserQuestion(
-  _question: string,
-  _options: Array<Record<string, string>> | null = null,
+  _questions: ReadonlyArray<Record<string, unknown>>,
 ): string {
   return toolError(
     "ask_user_question",
@@ -119,36 +118,57 @@ export const USER_QUESTION_TOOL_SPECS: readonly ToolSpec[] = [
     name: "ask_user_question",
     isAsync: false,
     description:
-      "Ask the user a question that must be confirmed by them. Use only when a preference, scope decision, blocking choice, or information genuinely absent from the environment needs a human answer; do not ask about things tools can discover, and prefer a conservative engineering assumption over asking.",
+      "Ask the user 1 to 4 focused questions when genuine ambiguity, preference/scope choices, or destructive decisions cannot be resolved by inspecting the workspace. Explore relevant context first; do not ask about discoverable facts or routine permissions.",
     parameters: {
       type: "object",
       properties: {
-        question: {
-          type: "string",
-          description: "The single, clearly stated question to ask the user",
-        },
-        options: {
-          type: ["array", "null"],
-          default: null,
-          description:
-            'Optional structured answer list; the first item\'s label must end with " (Recommended)" and no other item may use that suffix. The user can also type free text, so never add an "Other" item.',
+        questions: {
+          type: "array",
+          minItems: 1,
+          maxItems: 4,
+          description: "1 to 4 questions to present together.",
           items: {
             type: "object",
             properties: {
-              label: { type: "string", description: "Short answer label" },
-              description: { type: "string", description: "Brief explanation of the answer" },
+              header: {
+                type: "string",
+                description: "Short step label (1-3 words, <=20 chars, e.g. 'Scope').",
+              },
+              question: {
+                type: "string",
+                description: "Clear, self-contained question shown to the user.",
+              },
+              options: {
+                type: ["array", "null"],
+                default: null,
+                description:
+                  'Optional preset choices (2-5 items). If you recommend a specific option, put it first and suffix its label with " (Recommended)". Never include an "Other" catch-all item; the UI adds free-text input automatically.',
+                items: {
+                  type: "object",
+                  properties: {
+                    label: { type: "string", description: "Concise choice label (1-5 words)." },
+                    description: { type: "string", description: "One-line explanation or tradeoff." },
+                  },
+                  required: ["label", "description"],
+                  additionalProperties: false,
+                },
+              },
+              multiple: {
+                type: "boolean",
+                description: "Set true to allow selecting multiple choices.",
+              },
             },
-            required: ["label", "description"],
+            required: ["question"],
             additionalProperties: false,
           },
         },
       },
-      required: ["question"],
+      required: ["questions"],
+      additionalProperties: false,
     },
     handler: args =>
       askUserQuestion(
-        args.question as string,
-        (args.options as Array<Record<string, string>> | null | undefined) ?? null,
+        Array.isArray(args.questions) ? (args.questions as ReadonlyArray<Record<string, unknown>>) : [],
       ),
   }),
 ];

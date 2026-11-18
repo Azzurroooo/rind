@@ -46,7 +46,7 @@ interface ActiveExecution {
   selection: ModelSelection | null;
   turnSlot: AsyncMutex;
   currentCancel: CancellationTokenSource | null;
-  pendingAnswers: Map<string, Deferred<string>>;
+  pendingAnswers: Map<string, Deferred<string[][]>>;
   queuedTurnStarts: number;
 }
 
@@ -703,8 +703,7 @@ export class ExecutionCoordinator {
     } else if (eventType === "user_question_requested") {
       current.question = {
         tool_call_id: String(event.tool_call_id || ""),
-        question: String(event.question || ""),
-        options: Array.isArray(event.options) ? event.options : [],
+        questions: Array.isArray(event.questions) ? event.questions : [],
       };
     } else if (eventType === "queued_input_delivered") {
       const inputId = String(event.input_id || "");
@@ -989,7 +988,7 @@ export class ExecutionCoordinator {
     }
     for (const future of execution.pendingAnswers.values()) {
       if (!future.done) {
-        future.resolve("");
+        future.resolve([]);
       }
     }
     execution.pendingAnswers.clear();
@@ -1067,7 +1066,11 @@ export class ExecutionCoordinator {
     return result;
   }
 
-  async answerUserQuestion(sessionId: string, toolCallId: string, answer: string): Promise<void> {
+  async answerUserQuestion(
+    sessionId: string,
+    toolCallId: string,
+    answers: string[][],
+  ): Promise<void> {
     const clean = validateSessionId(sessionId);
     const execution = this.active.get(clean);
     if (!execution) {
@@ -1081,7 +1084,7 @@ export class ExecutionCoordinator {
       err.name = "LookupError";
       throw err;
     }
-    future.resolve(answer);
+    future.resolve(answers);
     const snapshot = this.live.get(clean);
     const question = snapshot?.question as Record<string, unknown> | undefined;
     if (snapshot && question && question.tool_call_id === toolCallId) {
@@ -1091,7 +1094,7 @@ export class ExecutionCoordinator {
       type: "user_question_answered",
       session_id: clean,
       tool_call_id: toolCallId,
-      answer,
+      answers,
     });
   }
 
@@ -1100,19 +1103,19 @@ export class ExecutionCoordinator {
     if (!value) return;
     const execution = this.active.get(validateSessionId(sessionId));
     if (execution && !execution.pendingAnswers.has(value)) {
-      execution.pendingAnswers.set(value, createDeferred<string>());
+      execution.pendingAnswers.set(value, createDeferred<string[][]>());
     }
   }
 
   private async answerUserQuestionInternal(
     sessionId: string,
     event: UserQuestionRequestedEvent,
-  ): Promise<string> {
+  ): Promise<string[][]> {
     const execution = this.active.get(sessionId);
-    if (!execution) return "";
+    if (!execution) return [];
     let future = execution.pendingAnswers.get(event.tool_call_id);
     if (!future) {
-      future = createDeferred<string>();
+      future = createDeferred<string[][]>();
       execution.pendingAnswers.set(event.tool_call_id, future);
     }
     try {

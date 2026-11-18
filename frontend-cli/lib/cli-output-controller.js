@@ -368,24 +368,25 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       log(() => questionText(event));
       return;
     }
-    const questionEntry = { event, answer: null };
+    const questionEntry = { event, answers: null, elsewhere: false };
     const block = new DynamicBlock(() => {
-      const text = questionEntry.answer === null
+      const text = questionEntry.answers === null
         ? questionText(questionEntry.event)
-        : questionAnswerText(questionEntry.event, questionEntry.answer);
+        : questionAnswerText(questionEntry.event, questionEntry.answers, questionEntry.elsewhere);
       return text.split("\n");
     });
     questionBlock = { state: questionEntry, block };
     appendBlock(block);
   }
 
-  function finishQuestion(event, answer) {
+  function finishQuestion(event, answers, elsewhere = false) {
     if (!terminalUi || !questionBlock) {
-      log(() => questionAnswerText(event, answer));
+      log(() => questionAnswerText(event, answers, elsewhere));
       return;
     }
     questionBlock.state.event = event;
-    questionBlock.state.answer = answer;
+    questionBlock.state.answers = answers;
+    questionBlock.state.elsewhere = elsewhere;
     questionBlock.block.invalidate();
     transcript.changed();
     questionBlock = null;

@@ -998,17 +998,24 @@ function composeFrame(width = process.stdout.columns || 80) {
     };
   }
   if (session.mode === "question") {
-    const editing = session.questionState.isEditing();
+    const qs = session.questionState;
+    const editing = qs.isEditing();
     session.editor.setViewportWidth(width);
     const editorCursor = editing ? session.editor.cursorPosition() : null;
+    const customShown = editing ? session.editor.input() : qs.customText();
     const menu = questionMenuFrame(
-      session.questionState.options(),
-      session.questionState.selectedIndex(),
-      editing ? session.editor.input() : "",
+      qs.options(),
+      qs.selectedIndex(),
+      customShown,
       editing,
       CUSTOM_ANSWER_LABEL,
       width,
       editorCursor,
+      {
+        steps: qs.stepSummary(),
+        multiple: qs.multiple(),
+        isOptionPicked: (idx) => qs.isOptionPicked(idx),
+      },
     );
     return {
       showCaret,

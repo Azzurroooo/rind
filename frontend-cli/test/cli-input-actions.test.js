@@ -87,8 +87,12 @@ test("question arrows leave custom editing and discard its draft", async () => {
 
   const pending = actions.answerQuestion({
     tool_call_id: "question-1",
-    question: "What should I do?",
-    options: [{ label: "Continue" }],
+    questions: [
+      {
+        question: "What should I do?",
+        options: [{ label: "Continue", description: "Keep going" }],
+      },
+    ],
   });
   await Promise.resolve();
 
@@ -125,20 +129,23 @@ test("a question answered in another window closes here without answering twice"
   const requests = [], finished = [];
   const actions = createCliInputActions({
     state, request: async (method, params) => { requests.push([method, params]); return {}; },
-    output: { terminalUi: {}, writeUserInput() {}, closeAssistant() {}, beginQuestion() {}, finishQuestion: (event, answer) => finished.push(answer), redraw() {}, writeError() {} },
+    output: { terminalUi: {}, writeUserInput() {}, closeAssistant() {}, beginQuestion() {}, finishQuestion: (_event, answers, elsewhere) => finished.push({ answers, elsewhere }), redraw() {}, writeError() {} },
     getTurnController: () => null, getTaskMonitor: () => null, getLineInput: () => null,
     pausePrompt() {}, resumePrompt() {}, handleSigint() {},
   });
-  const question = { tool_call_id: "q-1", question: "Ship it?", options: [{ label: "Yes" }, { label: "No" }] };
+  const question = {
+    tool_call_id: "q-1",
+    questions: [{ question: "Ship it?", options: [{ label: "Yes", description: "y" }, { label: "No", description: "n" }] }],
+  };
   const pending = actions.answerQuestion(question);
   await Promise.resolve();
-  actions.questionAnswered({ tool_call_id: "other", answer: "ignored" });
+  actions.questionAnswered({ tool_call_id: "other", answers: [["ignored"]] });
   assert.equal(state.input.session.mode, "question", "an answer to another question changes nothing");
-  actions.questionAnswered({ tool_call_id: "q-1", answer: "Yes" });
+  actions.questionAnswered({ tool_call_id: "q-1", answers: [["Yes"]] });
   await pending;
   assert.equal(state.input.session, null, "the question menu is closed");
   assert.deepEqual(requests, [], "the answer is not sent a second time");
-  assert.deepEqual(finished, ["Yes (answered in another window)"]);
+  assert.deepEqual(finished, [{ answers: [["Yes"]], elsewhere: true }]);
 
   // Answering here: this window's own broadcast arrives while the answer is being sent.
   const local = actions.answerQuestion({ ...question, tool_call_id: "q-2" });
@@ -146,16 +153,16 @@ test("a question answered in another window closes here without answering twice"
   actions.handleTerminalInput("\r");
   // The Runtime broadcasts only after it received this window's answer.
   await new Promise(resolve => setImmediate(resolve));
-  actions.questionAnswered({ tool_call_id: "q-2", answer: "Yes" });
+  actions.questionAnswered({ tool_call_id: "q-2", answers: [["Yes"]] });
   await local;
-  assert.deepEqual(requests.map(([, params]) => params), [{ tool_call_id: "q-2", answer: "Yes" }]);
-  assert.deepEqual(finished.at(-1), "Yes");
+  assert.deepEqual(requests.map(([, params]) => params), [{ tool_call_id: "q-2", answers: [["Yes"]] }]);
+  assert.deepEqual(finished.at(-1), { answers: [["Yes"]], elsewhere: false });
 
   const skippedElsewhere = actions.answerQuestion({ ...question, tool_call_id: "q-3" });
   await Promise.resolve();
-  actions.questionAnswered({ tool_call_id: "q-3", answer: "" });
+  actions.questionAnswered({ tool_call_id: "q-3", answers: [] });
   await skippedElsewhere;
-  assert.equal(finished.at(-1), "(no answer) (answered in another window)");
+  assert.deepEqual(finished.at(-1), { answers: [], elsewhere: true });
 });
 
 test("Esc on a question leaves custom editing first and skips the question without interrupting the turn", async () => {
@@ -166,12 +173,15 @@ test("Esc on a question leaves custom editing first and skips the question witho
   let interrupted = false;
   const actions = createCliInputActions({
     state, request: async (method, params) => { requests.push([method, params]); return {}; },
-    output: { terminalUi: {}, writeUserInput() {}, closeAssistant() {}, beginQuestion() {}, finishQuestion: (_event, answer) => finished.push(answer), redraw() {}, writeError() {} },
+    output: { terminalUi: {}, writeUserInput() {}, closeAssistant() {}, beginQuestion() {}, finishQuestion: (_event, answers) => finished.push(answers), redraw() {}, writeError() {} },
     getTurnController: () => ({ interrupt() { interrupted = true; } }),
     getTaskMonitor: () => null, getLineInput: () => null,
     pausePrompt() {}, resumePrompt() {}, handleSigint() {},
   });
-  const pending = actions.answerQuestion({ tool_call_id: "q-1", question: "Ship it?", options: [{ label: "Yes (Recommended)" }] });
+  const pending = actions.answerQuestion({
+    tool_call_id: "q-1",
+    questions: [{ question: "Ship it?", options: [{ label: "Yes (Recommended)", description: "go" }] }],
+  });
   await Promise.resolve();
 
   actions.handleTerminalInput("\x1b[B");
@@ -189,8 +199,70 @@ test("Esc on a question leaves custom editing first and skips the question witho
   await pending;
   assert.equal(interrupted, false);
   assert.equal(state.input.session, null);
-  assert.deepEqual(requests, [["rind/user-question/respond", { tool_call_id: "q-1", answer: "" }]]);
-  assert.deepEqual(finished, [""]);
+  assert.deepEqual(requests, [["rind/user-question/respond", { tool_call_id: "q-1", answers: [] }]]);
+  assert.deepEqual(finished, [[]]);
+});
+
+test("multi-question CLI flow supports step switching, Space multi-select toggles, and batch submission", async () => {
+  const state = createCliState();
+  state.runtime.status = "ready";
+  state.session.commands = [];
+  const requests = [];
+  const actions = createCliInputActions({
+    state,
+    request: async (method, params) => { requests.push([method, params]); return {}; },
+    output: { terminalUi: {}, writeUserInput() {}, closeAssistant() {}, beginQuestion() {}, finishQuestion() {}, redraw() {}, writeError() {} },
+    getTurnController: () => null,
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    pausePrompt() {},
+    resumePrompt() {},
+    handleSigint() {},
+  });
+  const pending = actions.answerQuestion({
+    tool_call_id: "q-multi",
+    questions: [
+      {
+        header: "DB",
+        question: "Which database?",
+        options: [
+          { label: "SQLite (Recommended)", description: "Local" },
+          { label: "Postgres", description: "Remote" },
+        ],
+      },
+      {
+        header: "Targets",
+        question: "Which targets?",
+        multiple: true,
+        options: [
+          { label: "CLI", description: "Terminal" },
+          { label: "Web", description: "Browser" },
+        ],
+      },
+    ],
+  });
+  await Promise.resolve();
+
+  assert.equal(state.input.session.question, "Which database?");
+  // Move down to Postgres and press Enter -> advances to step 2
+  actions.handleTerminalInput("\x1b[B");
+  actions.handleTerminalInput("\r");
+  assert.equal(state.input.session.questionState.activeStep(), 1);
+  assert.equal(state.input.session.question, "Which targets?");
+
+  // Toggle CLI (Space), move down, toggle Web (Space), press Enter -> submits both!
+  actions.handleTerminalInput(" ");
+  actions.handleTerminalInput("\x1b[B");
+  actions.handleTerminalInput(" ");
+  actions.handleTerminalInput("\r");
+  await pending;
+
+  assert.deepEqual(requests, [
+    [
+      "rind/user-question/respond",
+      { tool_call_id: "q-multi", answers: [["Postgres"], ["CLI", "Web"]] },
+    ],
+  ]);
 });
 
 test("prompt input restores persisted history, saves natural prompts only, and omits user echo for slash commands", async () => {

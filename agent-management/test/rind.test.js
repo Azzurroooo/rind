@@ -136,9 +136,11 @@ test("direct CLI captures activity, rejects ambiguous teams, and the manager has
   const managerPrompt = requests.at(-1).messages.filter(message => message.role === "system").map(message => message.content).join("\n");
   assert.match(managerPrompt, /only through agent_management/);
   const question = requests.at(-1).tools.find(tool => tool.function.name === "ask_user_question").function;
-  assert.match(question.description, /conservative engineering assumption/);
-  assert.match(question.parameters.properties.options.description, /Recommended/);
-  assert.match(question.parameters.properties.options.description, /never add an "Other" item/);
+  assert.match(question.description, /genuine ambiguity/);
+  const questionItemProps = question.parameters.properties.questions.items.properties;
+  assert.match(questionItemProps.options.description, /Recommended/);
+  assert.match(questionItemProps.options.description, /Never include an "Other"/);
+  assert.equal(questionItemProps.multiple.type, "boolean");
   view = await client.request("snapshot");
   assert.equal(view.runs.at(-1).status, "succeeded");
 });

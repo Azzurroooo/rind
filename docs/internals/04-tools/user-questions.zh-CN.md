@@ -19,9 +19,9 @@ sequenceDiagram
     P-->>M: 持久化后的 tool 结果
 ~~~
 
-问题必须是非空字符串；可选选项由 label 和 description 组成，第一项 label 以“ (Recommended)”结尾，其他项不能使用该后缀。用户仍可自由输入，选项只是交互辅助。答案关联 session_id 与 tool_call_id，不能把旧会话的问题误答到新工具调用上。
+每次调用传入 `questions`（1 到 4 题），每题包含非空 `question`、可选短标题 `header`、可选多选标记 `multiple` 以及可选 `options`（由 `label` 和 `description` 组成；有推荐项时放在首项并以“ (Recommended)”结尾，各端 UI 自动提炼为推荐徽标，无客观优劣的偏好题不强制要求推荐标记）。用户始终可自由输入；各端通过协议回传与题目对齐的 `answers: string[][]`，并绑定 `session_id` 与 `tool_call_id`，不能把旧会话的问题误答到新工具调用上。
 
-等待者属于活跃执行，取消会释放它；这样释放的问题记为已取消，而不是空答案。CLI 里按 Esc 跳过问题会提交空答案而不中断本轮，返回 UserQuestionEmptyAnswer，让模型在未获答复的情况下继续执行。缺少 responder 时返回 UserQuestionUnsupported，不能假装已经得到确认。rind run 启动 Worker 时传 --no-user-question，Team 执行委派也关闭用户问答，让无人值守调用保持明确的交互边界。
+等待者属于活跃执行，取消会释放它；这样释放的问题记为已取消，而不是空答案。跳过问题（CLI 按 Esc 或 Desktop/Web/Mobile 点击 Skip）会提交空 `answers: []` 而不中断本轮，返回 UserQuestionEmptyAnswer，让模型在未获答复的情况下继续执行。缺少 responder 时返回 UserQuestionUnsupported，不能假装已经得到确认。rind run 启动 Worker 时传 --no-user-question，Team 执行委派也关闭用户问答，让无人值守调用保持明确的交互边界。
 
 ## 等待需要稳定关联，也需要退出路径
 

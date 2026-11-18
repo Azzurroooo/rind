@@ -22,11 +22,19 @@ it("restores compact operation from live replay and clears it on completion", ()
 it("reflects an answer submitted on another surface before the turn ends", () => {
   const state = run([
     { type: "turn_started" },
-    { type: "user_question_requested", tool_call_id: "q1", question: "Which scope?", options: [] },
-    { type: "tool_result", tool_call_id: "q1", tool_name: "ask_user_question", result: JSON.stringify({ ok: true, data: { answer: "Focused" } }) },
+    { type: "user_question_requested", tool_call_id: "q1", questions: [{ question: "Which scope?", options: [] }] },
+    {
+      type: "tool_result",
+      tool_call_id: "q1",
+      tool_name: "ask_user_question",
+      result: JSON.stringify({
+        ok: true,
+        data: { answers: [{ question: "Which scope?", answers: ["Focused"] }] },
+      }),
+    },
   ]);
   expect(state.question).toBeNull();
-  expect(state.entries.find(item => item.role === "question")).toMatchObject({ status: "answered", selectedAnswer: "Focused" });
+  expect(state.entries.find(item => item.role === "question")).toMatchObject({ status: "answered", selectedAnswers: [["Focused"]] });
 });
 
 describe("conversation reducer — v2 tool input streaming", () => {

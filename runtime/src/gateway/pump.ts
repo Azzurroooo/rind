@@ -1,4 +1,5 @@
 import path from "node:path";
+import { normalizeUserQuestions } from "../protocol/runtime-protocol.js";
 import { firstLineTitle } from "./chunk.js";
 import {
   CommandHub,
@@ -59,6 +60,7 @@ interface PendingQuestion {
   channel_id: string;
   target: SendTarget;
   tool_call_id: string;
+  questionCount: number;
   options: readonly string[];
   deadline: number;
 }
@@ -345,13 +347,23 @@ export class TurnPump implements InboundSink {
 
   private async answerQuestion(question: PendingQuestion, answer: string): Promise<void> {
     this.questions.delete(question.key);
+    const trimmed = answer.trim();
+    const answers = !trimmed
+      ? []
+      : question.questionCount > 1
+        ? trimmed
+            .split(/\r?\n/)
+            .map(line => line.replace(/^\s*\d+[.)、]\s*/, "").trim())
+            .filter(Boolean)
+            .map(line => [line])
+        : [[trimmed]];
     try {
       await this.worker.request(
         RuntimeMethod.RIND_USER_QUESTION_RESPOND,
         {
           session_id: question.session_id,
           tool_call_id: question.tool_call_id,
-          answer,
+          answers,
         },
         this.requestTimeout,
       );
@@ -502,14 +514,21 @@ export class TurnPump implements InboundSink {
     if (!position) {
       return;
     }
-    const rawOptions = Array.isArray(event.options) ? event.options : [];
-    const options = rawOptions.map(opt => {
-      if (opt && typeof opt === "object" && !Array.isArray(opt)) {
-        return String((opt as Record<string, unknown>).label ?? "");
-      }
-      return String(opt ?? "");
-    });
-    const questionText = String(event.question || "Choose:");
+    const items = normalizeUserQuestions(event);
+    const first = items[0];
+    const options =
+      items.length === 1 && first?.options ? first.options.map(opt => opt.label) : [];
+    const questionText =
+      items.length <= 1
+        ? first?.question || "Choose:"
+        : items
+            .map((item, idx) => {
+              const opts = item.options?.length
+                ? ` (${item.options.map(o => o.label).join(" / ")})`
+                : "";
+              return `${idx + 1}. ${item.question}${opts}`;
+            })
+            .join("\n");
     await this.outbound.sendQuestion(position, questionText, options);
     this.questions.set(key, {
       key,
@@ -517,6 +536,7 @@ export class TurnPump implements InboundSink {
       channel_id: position[0],
       target: position[1],
       tool_call_id: String(event.tool_call_id ?? ""),
+      questionCount: Math.max(1, items.length),
       options,
       deadline: this.clock() + this.questionTtl,
     });

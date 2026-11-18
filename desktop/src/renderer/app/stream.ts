@@ -1,7 +1,7 @@
 import { renderCommandResult } from "../command-results.ts"
 import { ChevronDown, ChevronRight, FileDiff, FileText, renderIcon } from "../icons.ts"
 import { isStreamingAssistant, latestAssistantId } from "../message-view.ts"
-import { questionCardMarkup, syncQuestionCard } from "../question-card.ts"
+import { questionCardMarkup, questionReceiptMarkup, syncQuestionCard } from "../question-card.ts"
 import { type Entry, type ToolEntry } from "../timeline-model.ts"
 import { summarizeTurnFileChanges } from "../tool-display.ts"
 import { foldWorkSegments, isWorkSegment, segmentOpenMode, type SegmentOpenMode, type WorkSegment } from "../work-segments.ts"
@@ -210,7 +210,7 @@ export function renderStream(sampledStickToBottom?: boolean) {
     anchor = node.nextElementSibling
   }
   const questionCard = messageStream.querySelector<HTMLElement>(".card-question")
-  if (questionCard && conversation.question) syncQuestionCard(questionCard, questionSelectionFor(conversation.question), conversation.question.options.length)
+  if (questionCard && conversation.question) syncQuestionCard(questionCard, questionSelectionFor(conversation.question), conversation.question.questions)
   if (!entries.length && !conversation.question) {
     const ready = state.runtime.status === "ready"
     if (!messageStream.querySelector(".stream-empty")) {
@@ -282,6 +282,8 @@ function renderEntryContent(entry: Entry, context: MessageContext): string {
       return `<div class="system-line system-${entry.tone}" role="note" data-entry-id="${escapeAttribute(entry.id)}"><span>${escapeHtml(entry.content)}</span></div>`
     case "command":
       return renderCommandResult(entry)
+    case "question_receipt":
+      return questionReceiptMarkup(entry)
   }
 }
 

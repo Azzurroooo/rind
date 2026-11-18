@@ -123,7 +123,16 @@ export function handleRuntimeEvent(envelope: RuntimeEvent) {
     deliverPendingInput(sessionId, asRecordText(envelope.event.input_id))
   }
   if (envelope.type === "user_question_requested") {
-    void maybeNotify(sessionId, "Rind asks a question", asRecordText(envelope.event.question))
+    const rawQuestions = Array.isArray(envelope.event.questions) ? envelope.event.questions : []
+    const firstQuestion =
+      rawQuestions.length > 0 && rawQuestions[0] && typeof rawQuestions[0] === "object"
+        ? asRecordText((rawQuestions[0] as Record<string, unknown>).question)
+        : ""
+    void maybeNotify(
+      sessionId,
+      rawQuestions.length > 1 ? `Rind asks ${rawQuestions.length} questions` : "Rind asks a question",
+      firstQuestion,
+    )
   }
   const nextConversation = reduceEvent(conversationFor(sessionId), envelope)
   setConversationFor(sessionId, nextConversation)

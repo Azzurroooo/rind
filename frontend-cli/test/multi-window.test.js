@@ -27,7 +27,18 @@ function questionModel() {
       const secondTurn = body.messages.filter(message => message.role === "user").length > 1;
       const question = secondTurn ? "Deploy to staging?" : "Ship it now?";
       const callId = secondTurn ? "call_q2" : "call_q";
-      const args = JSON.stringify({ question, options: [{ label: "Yes (Recommended)", description: "go" }, { label: "No", description: "wait" }] });
+      const args = JSON.stringify({
+        questions: [
+          {
+            header: "Release",
+            question,
+            options: [
+              { label: "Yes (Recommended)", description: "go" },
+              { label: "No", description: "wait" },
+            ],
+          },
+        ],
+      });
       response.end(chunk({ role: "assistant", tool_calls: [{ index: 0, id: callId, type: "function", function: { name: "ask_user_question", arguments: args } }] }) + chunk({}, "tool_calls") + "data: [DONE]\n\n");
     });
   });

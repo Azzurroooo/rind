@@ -1,5 +1,8 @@
 import { randomBytes } from "node:crypto";
+import type { UserQuestionItem } from "../protocol/runtime-protocol.js";
 import type { FailureStatus, ToolEventStatus } from "./errors.js";
+
+export type { UserQuestionItem };
 
 const ID_POOL_BYTES = 16 * 64;
 let idPool = Buffer.alloc(0);
@@ -284,22 +287,19 @@ export function toolCallStartedEvent(params: {
 
 export function userQuestionRequestedEvent(params: {
   tool_call_id: string;
-  question: string;
-  options?: Array<{ label: string; description?: string }> | null;
+  questions: UserQuestionItem[];
   session_id?: string;
   turn_id?: string;
   ts?: string;
 }): TypedRuntimeEvent<"user_question_requested", {
   tool_call_id: string;
-  question: string;
-  options: Array<{ label: string; description?: string }> | null;
+  questions: UserQuestionItem[];
 }> {
   return createEvent(
     "user_question_requested",
     {
       tool_call_id: params.tool_call_id,
-      question: params.question,
-      options: params.options ?? null,
+      questions: params.questions,
     },
     params,
   );

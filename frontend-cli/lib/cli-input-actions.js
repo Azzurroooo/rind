@@ -4,7 +4,12 @@ import { createModelMenuState } from "./model-menu-state.js";
 import { createSettingsMenuState } from "./settings-menu-state.js";
 import { createQuestionMenuState } from "./question-menu-state.js";
 import { createSlashMenuState } from "./slash-menu-state.js";
-import { REASONING_EFFORTS, runtimeMethods } from "../../runtime/dist/protocol/runtime-protocol.js";
+import {
+  normalizeQuestionAnswers,
+  normalizeUserQuestions,
+  REASONING_EFFORTS,
+  runtimeMethods,
+} from "../../runtime/dist/protocol/runtime-protocol.js";
 import { parseTerminalKey } from "./terminal-key.js";
 import {
   answerPromptText,
@@ -144,26 +149,41 @@ export function createCliInputActions({
     } else {
       output.log(() => questionText(event));
     }
+    const items = normalizeUserQuestions(event);
     const question = { toolCallId: String(event.tool_call_id || ""), answeredElsewhere: null };
     openQuestion = question;
     try {
-      const options = Array.isArray(event.options) ? event.options : [];
-      const typed = output.terminalUi
-        ? await askQuestionMenu(event)
-        : selectAnswer((await ask(answerPromptText(), answerPlaceholderText())).trim(), options);
+      let typed = [];
+      if (output.terminalUi) {
+        typed = await askQuestionMenu(items);
+      } else {
+        const collected = [];
+        for (const item of items) {
+          const raw = (await ask(answerPromptText(), answerPlaceholderText())).trim();
+          const chosen = selectAnswer(raw, item.options || []);
+          collected.push(chosen ? [chosen] : []);
+        }
+        typed = normalizeQuestionAnswers(collected, items.length);
+      }
       // From here this window's own broadcast must not dismiss anything.
       openQuestion = null;
       const elsewhere = question.answeredElsewhere !== null;
       if (!elsewhere && (state.turn.interruptRequested || state.runtime.status === "closing")) {
         return;
       }
-      const answer = elsewhere ? question.answeredElsewhere : typed;
-      if (!elsewhere) await request(runtimeMethods.userQuestionRespond, { tool_call_id: event.tool_call_id, answer });
-      const shown = elsewhere ? (answer || "(no answer)") + " (answered in another window)" : answer;
+      const answers = elsewhere
+        ? normalizeQuestionAnswers(question.answeredElsewhere, items.length)
+        : normalizeQuestionAnswers(typed, items.length);
+      if (!elsewhere) {
+        await request(runtimeMethods.userQuestionRespond, {
+          tool_call_id: event.tool_call_id,
+          answers,
+        });
+      }
       if (output.finishQuestion) {
-        output.finishQuestion(event, shown);
+        output.finishQuestion(event, answers, elsewhere);
       } else {
-        output.log(() => questionAnswerText(event, shown));
+        output.log(() => questionAnswerText(event, answers, elsewhere));
       }
     } finally {
       if (openQuestion === question) openQuestion = null;
@@ -174,7 +194,7 @@ export function createCliInputActions({
   function questionAnswered(event) {
     const question = openQuestion;
     if (!question || question.toolCallId !== String(event.tool_call_id || "")) return;
-    question.answeredElsewhere = String(event.answer ?? "");
+    question.answeredElsewhere = Array.isArray(event.answers) ? event.answers : [];
     cancelActiveInput?.();
   }
 
@@ -615,23 +635,22 @@ export function createCliInputActions({
     }
   }
 
-  function askQuestionMenu(event) {
+  function askQuestionMenu(questions) {
     return new Promise((resolve) => {
-      const options = (Array.isArray(event.options) ? event.options : [])
-        .map((option) => ({ label: String(option?.label || "").trim(), description: String(option?.description || "").trim() }))
-        .filter((option) => option.label);
-      const questionState = createQuestionMenuState(options);
+      const questionState = createQuestionMenuState(questions);
       const editor = createLineEditor();
       editor.setViewportWidth(process.stdout.columns || 80);
+      const syncPrompt = () => questionState.currentQuestion()?.question || "Input required";
       state.input.session = {
         mode: "question",
-        question: String(event.question || "Input required"),
+        question: syncPrompt(),
         questionState,
         editor,
+        syncPrompt,
         resolve,
       };
       state.input.active = true;
-      cancelActiveInput = () => completeTtyInput(state.input.session, "", false);
+      cancelActiveInput = () => completeTtyInput(state.input.session, [], false);
       output.redraw(true);
     });
   }
@@ -648,41 +667,91 @@ export function createCliInputActions({
   }
 
   function handleQuestionInput(session, key) {
-    const modified = key.ctrl || key.alt || key.shift;
-    if (session.questionState.isEditing()) {
-      if (!modified && (key.name === "up" || key.name === "down")) {
-        session.questionState.leaveEditing();
+    const modified = key.ctrl || key.alt;
+    const qs = session.questionState;
+    const refreshPrompt = () => {
+      session.question = session.syncPrompt ? session.syncPrompt() : session.question;
+    };
+    if (qs.isEditing()) {
+      if (!modified && !key.shift && (key.name === "up" || key.name === "down")) {
+        qs.leaveEditing();
         session.editor.setInput("");
-        if (session.questionState.handleNavigation(key)) output.redraw();
+        qs.setCustomText("", false);
+        if (qs.handleNavigation(key)) output.redraw();
         return;
       }
-      if (!modified && key.name === "escape") {
-        session.questionState.leaveEditing();
+      if (!modified && !key.shift && key.name === "escape") {
+        qs.leaveEditing();
         session.editor.setInput("");
+        qs.setCustomText("", false);
         output.redraw();
         return;
       }
       const result = session.editor.handleInput(key);
       if (result === "submit") {
         const answer = session.editor.input().trim();
-        if (answer) completeTtyInput(session, answer, false);
-        else output.redraw();
+        if (!answer) {
+          output.redraw();
+          return;
+        }
+        const outcome = qs.confirmCurrent(answer);
+        if (outcome.done) {
+          completeTtyInput(session, outcome.answers, false);
+        } else {
+          session.editor.setInput(qs.customText());
+          refreshPrompt();
+          output.redraw();
+        }
         return;
       }
       if (result) output.redraw();
       return;
     }
-    if (!modified && (key.name === "enter" || key.name === "return" || key.name === "tab")) {
-      if (session.questionState.enterEditing()) {
+
+    if (!modified && key.name === "tab") {
+      if (!key.shift && qs.enterEditing()) {
+        session.editor.setInput(qs.customText());
         output.redraw();
         return;
       }
-      if (key.name === "tab") return;
-      completeTtyInput(session, session.questionState.selectedOption()?.label || "", false);
+      if (qs.stepBy(key.shift ? -1 : 1)) {
+        session.editor.setInput(qs.customText());
+        refreshPrompt();
+        output.redraw();
+      }
       return;
     }
-    if (!modified && key.name === "escape") return completeTtyInput(session, "", false);
-    if (!modified && session.questionState.handleNavigation(key)) {
+
+    if (!modified && !key.shift && key.text === " " && qs.multiple()) {
+      const action = qs.toggleCurrent();
+      if (action === "edit") {
+        session.editor.setInput(qs.customText());
+      }
+      output.redraw();
+      return;
+    }
+
+    if (!modified && !key.shift && (key.name === "enter" || key.name === "return")) {
+      const outcome = qs.confirmCurrent();
+      if (outcome.done) {
+        completeTtyInput(session, outcome.answers, false);
+        return;
+      }
+      if (outcome.editing || outcome.switched) {
+        session.editor.setInput(qs.customText());
+        refreshPrompt();
+      }
+      output.redraw();
+      return;
+    }
+
+    if (!modified && !key.shift && key.name === "escape") {
+      return completeTtyInput(session, [], false);
+    }
+
+    if (!modified && !key.shift && qs.handleNavigation(key)) {
+      session.editor.setInput(qs.customText());
+      refreshPrompt();
       output.redraw();
     }
   }

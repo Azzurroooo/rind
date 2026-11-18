@@ -36,24 +36,32 @@ test("question updates retain the input, caret and draft; failed submissions can
   const dom = new JSDOM()
   globalThis.document = dom.window.document
   try {
-    const question = { toolCallId: "q1", question: "Choose a plan", options: [{ label: "Small", description: "One change" }] }
-    let selection = selectQuestionOption(createQuestionSelection("q1", 1), 1, 1)
+    const questions = [
+      {
+        header: "Plan",
+        question: "Choose a plan",
+        options: [{ label: "Small (Recommended)", description: "One change" }],
+      },
+    ]
+    const question = { toolCallId: "q1", turnId: "t1", questions }
+    let selection = selectQuestionOption(createQuestionSelection("q1", questions), 0, 1, questions)
     document.body.innerHTML = questionCardMarkup(question, selection)
     const card = document.querySelector("section")
     const input = document.querySelector("textarea")
-    syncQuestionCard(card, selection, 1)
+    syncQuestionCard(card, selection, questions)
+    assert.match(card.innerHTML, /question-rec-badge/)
     input.focus()
     input.value = "my own plan"
     input.setSelectionRange(3, 6)
-    selection = updateQuestionInput(selection, input.value)
-    syncQuestionCard(card, selection, 1)
+    selection = updateQuestionInput(selection, 0, input.value)
+    syncQuestionCard(card, selection, questions)
     assert.equal(document.activeElement, input)
     assert.equal(input.selectionStart, 3)
     assert.equal(document.querySelector("textarea"), input)
-    syncQuestionCard(card, { ...selection, submitting: true }, 1)
-    assert.ok(document.querySelector("button").disabled)
-    syncQuestionCard(card, { ...selection, error: "Try again" }, 1)
-    assert.equal(document.querySelector("button").disabled, false)
+    syncQuestionCard(card, { ...selection, submitting: true }, questions)
+    assert.ok(card.querySelector("[type=submit]").disabled)
+    syncQuestionCard(card, { ...selection, error: "Try again" }, questions)
+    assert.equal(card.querySelector("[type=submit]").disabled, false)
     assert.equal(input.value, "my own plan")
     assert.match(card.textContent, /Try again/)
   } finally { dom.window.close(); delete globalThis.document }

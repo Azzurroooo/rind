@@ -4,7 +4,7 @@ import { sameProjectPath as samePath } from "../project-selection.ts"
 import { createQuestionSelection, type QuestionSelection } from "../question-state.ts"
 import { mergeSlashCatalog } from "../desktop-slash.ts"
 import { parseSlashCommands } from "../slash-commands.ts"
-import { clipLine, conversationFromLiveTurn, conversationFromReplay, type ConversationState, createConversation, mergeLiveConversation, mergeReplayConversation } from "../timeline-model.ts"
+import { appendQuestionReceipt, clipLine, conversationFromLiveTurn, conversationFromReplay, type ConversationState, createConversation, mergeLiveConversation, mergeReplayConversation } from "../timeline-model.ts"
 import { isTurnNotActive } from "../turn-state.ts"
 import { asRecord, asRecordText } from "./html.ts"
 import { syncCurrentPendingInputs } from "./pending-inputs.ts"
@@ -22,7 +22,7 @@ export function conversationFor(sessionId: string) {
 
 export function questionSelectionFor(question: NonNullable<ConversationState["question"]>): QuestionSelection {
   if (state.questionSelection?.questionId === question.toolCallId) return state.questionSelection
-  const selection = createQuestionSelection(question.toolCallId, question.options.length)
+  const selection = createQuestionSelection(question.toolCallId, question.questions)
   state.questionSelection = selection
   return selection
 }
@@ -305,7 +305,7 @@ export function finalAssistantPreview(sessionId: string): string {
   return ""
 }
 
-export async function answerQuestion(answer: string) {
+export async function answerQuestion(answers: string[][]) {
   const sessionId = state.viewedSessionId
   if (!sessionTurnActive(sessionId)) return
   const question = state.conversation.question
@@ -315,9 +315,20 @@ export async function answerQuestion(answer: string) {
   state.questionSelection = { ...selection, submitting: true, error: "" }
   render()
   try {
-    await requestForSession(runtimeMethods.userQuestionRespond, sessionId, { tool_call_id: question.toolCallId, answer })
+    await requestForSession(runtimeMethods.userQuestionRespond, sessionId, {
+      tool_call_id: question.toolCallId,
+      answers,
+    })
     const conversation = conversationFor(sessionId)
-    if (conversation.question?.toolCallId === question.toolCallId) setConversationFor(sessionId, { ...conversation, question: undefined })
+    if (conversation.question?.toolCallId === question.toolCallId) {
+      const withReceipt = appendQuestionReceipt(
+        conversation,
+        question.toolCallId,
+        question.questions,
+        answers,
+      )
+      setConversationFor(sessionId, { ...withReceipt, question: undefined })
+    }
     if (state.questionSelection?.questionId === question.toolCallId) state.questionSelection = undefined
   } catch (error) {
     if (state.questionSelection?.questionId === question.toolCallId) state.questionSelection = { ...selection, submitting: false, error: error instanceof Error ? error.message : String(error) }

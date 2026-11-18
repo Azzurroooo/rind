@@ -1,3 +1,4 @@
+import { normalizeQuestionAnswers } from "../../../runtime/dist/protocol/runtime-protocol.js";
 import { methods } from "../methods.js";
 import { fileToBase64, uploadTargetPath } from "../lib/files.js";
 import { findModelOption } from "../lib/models.js";
@@ -370,16 +371,16 @@ export function createTurnActions(ctx) {
     return client().request(methods.fileRead, { path, session_id: refs.info.current.session_id });
   }
 
-  async function answerQuestion(question, answer) {
+  async function answerQuestion(question, answers) {
     if (!question || question.status !== "pending") return false;
-    const text = String(answer || "").trim();
+    const normalized = normalizeQuestionAnswers(answers, question.questions?.length || 0);
     try {
       await client().request(methods.userQuestionRespond, {
         session_id: question.sessionId || refs.info.current.session_id,
         tool_call_id: question.toolCallId,
-        answer: text,
+        answers: normalized,
       }, 15_000);
-      dispatchConversation({ kind: "answered", key: questionKey(question), answer: text });
+      dispatchConversation({ kind: "answered", key: questionKey(question), answers: normalized });
       return true;
     } catch (error) {
       say("system", `Question response failed: ${errorText(error)}`, "error");

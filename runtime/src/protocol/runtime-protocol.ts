@@ -235,6 +235,83 @@ export function isRuntimeEventForTurn(
   return !eventTurnId || Boolean(turnId && eventTurnId === turnId);
 }
 
+export interface UserQuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface UserQuestionItem {
+  header?: string;
+  question: string;
+  options: UserQuestionOption[] | null;
+  multiple?: boolean;
+}
+
+export const MAX_USER_QUESTIONS = 4;
+
+const RECOMMENDED_SUFFIX_RE = /\s*(?:\(Recommended\)|（推荐）)$/i;
+
+export function parseOptionLabel(label: string): { text: string; recommended: boolean } {
+  const raw = String(label || "").trim();
+  const recommended = RECOMMENDED_SUFFIX_RE.test(raw);
+  const text = recommended ? raw.replace(RECOMMENDED_SUFFIX_RE, "").trim() || raw : raw;
+  return { text, recommended };
+}
+
+export function normalizeUserQuestions(source: unknown): UserQuestionItem[] {
+  if (!isRecord(source) || !Array.isArray(source.questions)) return [];
+  const items: UserQuestionItem[] = [];
+  for (const rawItem of source.questions) {
+    if (!isRecord(rawItem)) continue;
+    const question = String(rawItem.question || "").trim();
+    if (!question) continue;
+    const header = typeof rawItem.header === "string" && rawItem.header.trim()
+      ? rawItem.header.trim()
+      : undefined;
+    const options = Array.isArray(rawItem.options)
+      ? rawItem.options.flatMap((opt): UserQuestionOption[] => {
+          if (typeof opt === "string" && opt.trim()) {
+            return [{ label: opt.trim(), description: "" }];
+          }
+          if (!isRecord(opt)) return [];
+          const label = String(opt.label || opt.value || "").trim();
+          if (!label) return [];
+          return [{ label, description: String(opt.description || "").trim() }];
+        })
+      : null;
+    items.push({
+      ...(header ? { header } : {}),
+      question,
+      options: options && options.length > 0 ? options : null,
+      ...(rawItem.multiple === true ? { multiple: true } : {}),
+    });
+  }
+  return items;
+}
+
+export function normalizeQuestionAnswers(raw: unknown, questionCount = 0): string[][] {
+  if (!Array.isArray(raw)) return [];
+  const normalized = raw.map((entry) => {
+    const list = Array.isArray(entry) ? entry : typeof entry === "string" ? [entry] : [];
+    const seen = new Set<string>();
+    const clean: string[] = [];
+    for (const item of list) {
+      const text = String(item ?? "").trim();
+      if (text && !seen.has(text)) {
+        seen.add(text);
+        clean.push(text);
+      }
+    }
+    return clean;
+  });
+  if (!normalized.some((group) => group.length > 0)) return [];
+  if (questionCount > 0) {
+    while (normalized.length < questionCount) normalized.push([]);
+    return normalized.slice(0, questionCount);
+  }
+  return normalized;
+}
+
 function isRequestId(value: unknown): value is RequestId {
   return (
     (typeof value === "string" && Boolean(value.trim())) ||

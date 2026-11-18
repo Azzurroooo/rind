@@ -19,6 +19,9 @@ export type RuntimeEvent = {
 import {
   clientRuntimeMethods as runtimeMethods,
   localOnlyRuntimeMethods,
+  normalizeQuestionAnswers,
+  normalizeUserQuestions,
+  parseOptionLabel,
   runtimeProtocolVersion,
   sessionScopedMethods,
   turnScopedMethods,
@@ -29,10 +32,15 @@ import {
   type RuntimeRequestEnvelope,
   type RuntimeResponseEnvelope,
   type RuntimeServerMethod,
+  type UserQuestionItem,
+  type UserQuestionOption,
 } from "../../../runtime/dist/protocol/runtime-protocol.js"
 
 export {
   localOnlyRuntimeMethods,
+  normalizeQuestionAnswers,
+  normalizeUserQuestions,
+  parseOptionLabel,
   runtimeMethods,
   runtimeProtocolVersion,
   sessionScopedMethods,
@@ -44,6 +52,8 @@ export {
   type RuntimeRequestEnvelope,
   type RuntimeResponseEnvelope,
   type RuntimeServerMethod,
+  type UserQuestionItem,
+  type UserQuestionOption,
 }
 
 export type DesktopProviderAuthDetail = {

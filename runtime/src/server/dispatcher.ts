@@ -3,6 +3,7 @@ import { AsyncMutex, AsyncQueue, createDeferred, type Deferred } from "../domain
 import { InputQueueError } from "../domain/errors.js";
 import type { AuthInteraction } from "../infrastructure/chatgpt-oauth.js";
 import { validateSessionId } from "../infrastructure/paths.js";
+import { normalizeQuestionAnswers } from "../protocol/runtime-protocol.js";
 import { SkillRepository } from "../infrastructure/skills.js";
 import { RIND_VERSION } from "../version.js";
 import {
@@ -831,7 +832,7 @@ export class RuntimeDispatcher {
         await this.worker.execution.answerUserQuestion(
           sessionId,
           String(params.tool_call_id || ""),
-          String(params.answer || "").trim(),
+          normalizeQuestionAnswers(params.answers),
         );
       } catch (err) {
         if (err instanceof Error && err.name === "LookupError") {

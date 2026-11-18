@@ -780,8 +780,15 @@ test("TurnPump end-to-end: turns, follow-up, BUG FIX 1 hyphenated question respo
   fakeWorker.pushEvent(sid, {
     type: "user_question_requested",
     tool_call_id: "tc-ask-1",
-    question: "Which environment?",
-    options: ["staging", "production"],
+    questions: [
+      {
+        question: "Which environment?",
+        options: [
+          { label: "staging", description: "Staging env" },
+          { label: "production", description: "Prod env" },
+        ],
+      },
+    ],
   });
   await waitUntil(
     () => channel.sent.some(s => s.payload.text === "Which environment?"),
@@ -792,7 +799,7 @@ test("TurnPump end-to-end: turns, follow-up, BUG FIX 1 hyphenated question respo
   assert.deepEqual(questionMsg.payload.choices, ["staging", "production"]);
 
   await pump.inbound(makeInbound({ message_ref: "ans-1", text: "2" }));
-  assert.deepEqual(fakeWorker.answers, [[sid, "tc-ask-1", "production"]]);
+  assert.deepEqual(fakeWorker.answers, [[sid, "tc-ask-1", [["production"]]]]);
 
   // Complete turn and check assistant reply + persisted cursor
   fakeWorker.pushEvent(sid, {
@@ -816,8 +823,7 @@ test("TurnPump end-to-end: turns, follow-up, BUG FIX 1 hyphenated question respo
   fakeWorker.pushEvent(sid, {
     type: "user_question_requested",
     tool_call_id: "tc-exp",
-    question: "Confirm?",
-    options: ["yes", "no"],
+    questions: [{ question: "Confirm?", options: [{ label: "yes", description: "y" }, { label: "no", description: "n" }] }],
   });
   await waitUntil(
     () => channel.sent.some(s => s.payload.text === "Confirm?"),

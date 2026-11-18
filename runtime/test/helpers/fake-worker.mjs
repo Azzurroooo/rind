@@ -237,7 +237,7 @@ export class FakeWorker {
     }
     if (method === "rind/user-question/respond") {
       const sid = params.session_id !== undefined ? String(params.session_id) : null;
-      this.answers.push([sid, String(params.tool_call_id ?? ""), String(params.answer ?? "")]);
+      this.answers.push([sid, String(params.tool_call_id ?? ""), params.answers ?? []]);
       return { ok: true };
     }
     if (method === "rind/session/compact") {

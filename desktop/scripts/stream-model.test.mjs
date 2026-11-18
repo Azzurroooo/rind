@@ -138,7 +138,7 @@ test("live snapshot restores a missed question without replacing current stream"
     turn_id: "turn-live",
     status: "running",
     assistant_text: "Still working",
-    question: { tool_call_id: "question-1", question: "Choose", options: [{ label: "Yes", description: "Proceed" }] },
+    question: { tool_call_id: "question-1", questions: [{ question: "Choose", options: [{ label: "Yes", description: "Proceed" }] }] },
   })
   const merged = mergeLiveConversation(current, snapshot)
   assert.equal(merged.entries.find((entry) => entry.kind === "assistant")?.content, "Still working")
@@ -326,19 +326,34 @@ test("turn completion clears active turn and settles running tools", () => {
   assert.equal(tool.status, "completed")
 })
 
-test("turn failure appends an error entry and clears the question", () => {
+test("turn failure appends an error entry and clears the question; answering records a decision receipt", () => {
   let state = createConversation()
   state = reduceEvent(state, event("turn_started"))
   state = reduceEvent(state, event("user_question_requested", {
     tool_call_id: "q1",
-    question: "Proceed?",
-    options: [
-      { label: "yes (Recommended)", description: "Continue." },
-      { label: "no", description: "Stop." },
+    questions: [
+      {
+        header: "Deploy",
+        question: "Proceed?",
+        options: [
+          { label: "yes (Recommended)", description: "Continue." },
+          { label: "no", description: "Stop." },
+        ],
+      },
     ],
   }))
-  assert.equal(state.question.question, "Proceed?")
-  assert.deepEqual(state.question.options[0], { label: "yes (Recommended)", description: "Continue." })
+  assert.equal(state.question.questions[0].question, "Proceed?")
+  assert.deepEqual(state.question.questions[0].options[0], { label: "yes (Recommended)", description: "Continue." })
+
+  const answeredState = reduceEvent(state, event("user_question_answered", {
+    tool_call_id: "q1",
+    answers: [["yes (Recommended)"]],
+  }))
+  assert.equal(answeredState.question, undefined)
+  const receipt = answeredState.entries.find((entry) => entry.kind === "question_receipt")
+  assert.ok(receipt)
+  assert.deepEqual(receipt.items, [{ header: "Deploy", question: "Proceed?", answers: ["yes (Recommended)"] }])
+
   state = reduceEvent(state, event("turn_failed", { error: "boom", error_source: "provider" }))
   assert.equal(state.question, undefined)
   assert.equal(state.activeTurnId, "")

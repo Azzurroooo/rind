@@ -4,6 +4,11 @@ import { DEFAULT_THEME, colorEnabled, paint, paintRaw, flavorSwatch, themeNames,
 import { DEFAULT_SPINNER, isBriefMode, spinnerFrame, spinnerNames } from "./cli-state-store.js";
 import { homedir } from "node:os";
 import { encodeQrMatrix, renderTerminalQr } from "../../runtime/dist/remote/qr.js";
+import {
+  normalizeQuestionAnswers,
+  normalizeUserQuestions,
+  parseOptionLabel,
+} from "../../runtime/dist/protocol/runtime-protocol.js";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
 const MAX_COMPOSER_WIDTH = 78;
@@ -901,6 +906,7 @@ export function questionMenuFrame(
   customLabel = "Type your own answer",
   width = 76,
   editorCursor = null,
+  meta = null,
 ) {
   const entries = [
     ...(Array.isArray(options) ? options : []),
@@ -910,26 +916,58 @@ export function questionMenuFrame(
   if (!visible.items.length) {
     return { text: "", cursor: null };
   }
-  const lines = [dim(choiceMenuTitle(visible, "Answers"))];
+  const steps = Array.isArray(meta?.steps) ? meta.steps : [];
+  const multiple = Boolean(meta?.multiple);
+  const lines = [];
+  if (steps.length > 1) {
+    const stepPills = steps.map((s) => {
+      const tag = `${s.index + 1}. ${clipSingleLine(s.label, 18)}`;
+      if (s.active) return accent(bold(`› ${s.done ? "✓ " : ""}${tag} ‹`));
+      if (s.done) return `${green("✓")} ${dim(tag)}`;
+      return dim(tag);
+    });
+    const activeIdx = steps.findIndex((s) => s.active);
+    const counter = dim(`Questions (${(activeIdx >= 0 ? activeIdx : 0) + 1}/${steps.length})`);
+    const modeTag = multiple ? ` · ${accent("multi-select")}` : "";
+    lines.push(`  ${counter}${modeTag}  ${stepPills.join(dim("  ·  "))}`);
+  } else {
+    const title = multiple ? `${choiceMenuTitle(visible, "Answers")} · multi-select` : choiceMenuTitle(visible, "Answers");
+    lines.push(dim(title));
+  }
   let cursor = null;
   for (const [index, option] of visible.items.entries()) {
+    const realIndex = visible.start + index;
     const active = index === visible.activeIndex;
-    const marker = active ? accent("›") : dim("·");
     const isCustom = option.label === customLabel;
+    const picked = typeof meta?.isOptionPicked === "function" ? Boolean(meta.isOptionPicked(realIndex)) : false;
+    const marker = active ? accent("›") : picked && !multiple ? green("✓") : dim("·");
+    const checkPrefix = multiple ? `${picked ? green("[✓]") : dim("[ ]")} ` : "";
+    const firstPrefix = `  ${marker} ${checkPrefix}`;
+    const contPrefix = " ".repeat(textWidth(stripAnsi(firstPrefix)));
+    const wrapWidth = Math.max(1, width - textWidth(stripAnsi(firstPrefix)));
     const customText = String(customInput || "");
-    const labelLines = isCustom && editing
-      ? wrapQuestionLines(customText || `${customLabel}:`, Math.max(1, width - 4))
-      : wrapQuestionLines(option.label, Math.max(1, width - 4));
-    const labelStyle = isCustom && editing && !customText ? dim : active ? bold : dim;
+    const displayLabel = isCustom
+      ? (editing ? (customText || `${customLabel}:`) : (customText ? `${customLabel}: ${customText}` : option.label))
+      : option.label;
+    const labelLines = wrapQuestionLines(displayLabel, wrapWidth);
+    const labelStyle = isCustom && editing && !customText ? dim : active ? bold : picked ? (s) => s : dim;
     let firstPushedLine = -1;
     let lastPushedLine = -1;
     let firstPrefixWidth = 0;
     for (const [lineIndex, labelLine] of labelLines.entries()) {
-      const prefix = lineIndex === 0 ? `  ${marker} ` : "    ";
-      lines.push(`${prefix}${labelStyle(labelLine)}`);
+      const prefix = lineIndex === 0 ? firstPrefix : contPrefix;
+      let styledLine = labelStyle(labelLine);
+      if (!isCustom && lineIndex === labelLines.length - 1) {
+        const parsed = parseOptionLabel(labelLine);
+        if (parsed.recommended && parsed.text !== labelLine) {
+          const suffix = labelLine.slice(parsed.text.length);
+          styledLine = `${labelStyle(parsed.text)}${active ? accent(suffix) : dim(suffix)}`;
+        }
+      }
+      lines.push(`${prefix}${styledLine}`);
       if (firstPushedLine === -1) {
         firstPushedLine = lines.length - 1;
-        firstPrefixWidth = textWidth(prefix);
+        firstPrefixWidth = textWidth(stripAnsi(prefix));
       }
       lastPushedLine = lines.length - 1;
     }
@@ -940,12 +978,12 @@ export function questionMenuFrame(
           editorCursor,
           Math.max(0, firstPushedLine),
           firstPrefixWidth,
-          Math.max(1, width - 4),
+          wrapWidth,
         );
       } else {
         const cursorLine = customText ? Math.max(0, lastPushedLine) : Math.max(0, firstPushedLine);
         const cursorColumn = customText
-          ? textWidth(lines[cursorLine])
+          ? textWidth(stripAnsi(lines[cursorLine]))
           : firstPrefixWidth;
         cursor = {
           line: cursorLine,
@@ -958,11 +996,15 @@ export function questionMenuFrame(
       for (const [lineIndex, descriptionLine] of descriptionLines.entries()) {
         lines.push(dim(`${lineIndex === 0 ? "    ↳ " : "      "}${descriptionLine}`));
       }
-    } else if (option.label === customLabel && !editing) {
+    } else if (option.label === customLabel && !editing && !customText) {
       lines.push(dim("    ↳ press Tab to type"));
     }
   }
-  lines.push(dim("    ↑↓ select · enter confirm · esc skip"));
+  const hints = ["↑↓ select"];
+  if (multiple) hints.push("space toggle");
+  if (steps.length > 1) hints.push("←→ step");
+  hints.push("enter confirm", "esc skip");
+  lines.push(dim(`    ${hints.join(" · ")}`));
   return { text: `${lines.join("\n")}\n`, cursor };
 }
 
@@ -1454,13 +1496,45 @@ export function errorLine(error) {
 }
 
 export function questionText(event = {}) {
-  return `  Q: ${clipSingleLine(event.question || "Input required", 76)}`;
+  const items = normalizeUserQuestions(event);
+  if (items.length <= 1) {
+    const prompt = items[0]?.question || event.question || "Input required";
+    return `  Q: ${clipSingleLine(prompt, 76)}`;
+  }
+  return items
+    .map((item, idx) => {
+      const head = item.header ? `[${item.header}] ` : "";
+      return `  Q${idx + 1}: ${clipSingleLine(`${head}${item.question}`, 76)}`;
+    })
+    .join("\n");
 }
 
-export function questionAnswerText(event = {}, answer = "") {
-  const question = clipSingleLine(event.question || "Input required", 76);
-  const value = clipSingleLine(String(answer || "").trim() || "(no answer)", 76);
-  return [`  ${dim("Q:")} ${question}`, `  ${green("A:")} ${value}`].join("\n");
+export function questionAnswerText(event = {}, answers = [], elsewhere = false) {
+  const items = normalizeUserQuestions(event);
+  const normalized = Array.isArray(answers)
+    ? normalizeQuestionAnswers(answers, items.length)
+    : typeof answers === "string" && answers.trim()
+      ? [[answers.trim()]]
+      : [];
+  const note = elsewhere ? dim(" (answered in another window)") : "";
+  if (items.length <= 1) {
+    const question = clipSingleLine(items[0]?.question || event.question || "Input required", 76);
+    const chosen = (normalized[0] || []).map((v) => parseOptionLabel(v).text).join(", ");
+    const value = clipSingleLine(chosen || "(no answer)", 76);
+    return [`  ${dim("Q:")} ${question}`, `  ${chosen ? green("A:") : dim("A:")} ${value}${note}`].join("\n");
+  }
+  if (!normalized.length) {
+    const summary = items.map((q, i) => `${i + 1}. ${q.header || clipSingleLine(q.question, 30)}`).join(" · ");
+    return [`  ${dim("Q:")} ${clipSingleLine(summary, 76)}`, `  ${dim("A:")} (no answer)${note}`].join("\n");
+  }
+  return items
+    .map((item, idx) => {
+      const label = item.header ? `${item.header} · ${item.question}` : item.question;
+      const chosen = (normalized[idx] || []).map((v) => parseOptionLabel(v).text).join(", ") || "—";
+      const suffix = idx === items.length - 1 ? note : "";
+      return [`  ${dim(`Q${idx + 1}:`)} ${clipSingleLine(label, 74)}`, `  ${green(" ✓")}  ${clipSingleLine(chosen, 74)}${suffix}`].join("\n");
+    })
+    .join("\n");
 }
 
 function toolDetail(name, args) {

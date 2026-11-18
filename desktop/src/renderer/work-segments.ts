@@ -49,7 +49,13 @@ export function foldWorkSegments(entries: readonly Entry[], options: FoldOptions
 
 function isBoundary(entry: Entry): boolean {
   if (entry.kind === "assistant") return entry.content.trim().length > 0
-  return entry.kind === "user" || entry.kind === "error" || entry.kind === "notice" || entry.kind === "command"
+  return (
+    entry.kind === "user" ||
+    entry.kind === "error" ||
+    entry.kind === "notice" ||
+    entry.kind === "command" ||
+    entry.kind === "question_receipt"
+  )
 }
 
 function segmentItems(tools: ToolEntry[], trailing: Entry[], options: FoldOptions, last: boolean): StreamItem[] {

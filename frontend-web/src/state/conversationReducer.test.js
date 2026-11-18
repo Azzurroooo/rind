@@ -132,8 +132,13 @@ describe("conversation reducer — question card state (§2.3)", () => {
     type: "user_question_requested",
     ts: "2026-03-01T10:00:00Z",
     tool_call_id: "q1",
-    question: "Proceed?",
-    options: [{ value: "yes", label: "Yes" }],
+    questions: [
+      {
+        header: "Deploy",
+        question: "Proceed?",
+        options: [{ label: "Yes", description: "Go ahead" }],
+      },
+    ],
   });
 
   it("question becomes pending, is answered once, and stays hidden afterwards", () => {
@@ -141,7 +146,7 @@ describe("conversation reducer — question card state (§2.3)", () => {
     expect(state.question).toMatchObject({ toolCallId: "q1", status: "pending" });
 
     const key = questionKey(state.question);
-    state = reduceConversation(state, { kind: "answered", key });
+    state = reduceConversation(state, { kind: "answered", key, answers: [["Yes"]] });
     expect(state.question).toBeNull();
     expect(state.resolvedQuestionKey).toBe(key);
 
@@ -164,8 +169,15 @@ describe("conversation reducer — question cards as stream entries (§2.3 answe
     type: "user_question_requested",
     ts: "2026-03-01T10:00:00Z",
     tool_call_id: "q1",
-    question: "Proceed?",
-    options: [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }],
+    questions: [
+      {
+        question: "Proceed?",
+        options: [
+          { label: "Yes", description: "Deploy" },
+          { label: "No", description: "Hold" },
+        ],
+      },
+    ],
   });
 
   it("a requested question is also inserted into the stream as a role=question entry", () => {
@@ -175,10 +187,11 @@ describe("conversation reducer — question cards as stream entries (§2.3 answe
       id: "question:session-1:q1",
       sessionId: "session-1",
       toolCallId: "q1",
-      question: "Proceed?",
       status: "pending",
-      selectedAnswer: "",
+      selectedAnswers: [],
     });
+    expect(entry.questions).toHaveLength(1);
+    expect(entry.questions[0].question).toBe("Proceed?");
     expect(entry.requestedAt).toBe(Date.parse("2026-03-01T10:00:00Z"));
     expect(entry.ttlMs).toBe(QUESTION_TTL_MS);
   });
@@ -187,19 +200,19 @@ describe("conversation reducer — question cards as stream entries (§2.3 answe
     const state = reduceConversation(emptyConversationState(), event(1, "durable", {
       type: "user_question_requested",
       tool_call_id: "q1",
-      question: "Proceed?",
+      questions: [{ question: "Proceed?" }],
       ttl_ms: 5000,
     }));
     expect(state.question.ttlMs).toBe(5000);
   });
 
-  it("answered freezes the entry in the stream with the chosen answer", () => {
+  it("answered freezes the entry in the stream with the chosen answers", () => {
     let state = reduceConversation(emptyConversationState(), questionEnvelope);
     const key = questionKey(state.question);
-    state = reduceConversation(state, { kind: "answered", key, answer: "yes" });
+    state = reduceConversation(state, { kind: "answered", key, answers: [["Yes"]] });
     expect(state.question).toBeNull();
     const entry = state.entries.find((item) => item.role === "question");
-    expect(entry).toMatchObject({ status: "answered", selectedAnswer: "yes" });
+    expect(entry).toMatchObject({ status: "answered", selectedAnswers: [["Yes"]] });
 
     // replay of the same request must not resurrect a pending card
     const after = reduceConversation(state, questionEnvelope);
@@ -236,7 +249,7 @@ describe("conversation reducer — question cards as stream entries (§2.3 answe
         result: JSON.stringify({
           ok: false,
           tool: "ask_user_question",
-          error: "User provided an empty answer.",
+          error: "User skipped the question without answering.",
           error_type: "UserQuestionEmptyAnswer",
         }),
       }),
@@ -250,7 +263,11 @@ describe("conversation reducer — question cards as stream entries (§2.3 answe
     state = reduceConversation(state, {
       kind: "live_turn",
       sessionId: "session-1",
-      liveTurn: { turn_id: "t9", status: "running", question: { tool_call_id: "q2", question: "Use db?", options: [] } },
+      liveTurn: {
+        turn_id: "t9",
+        status: "running",
+        question: { tool_call_id: "q2", questions: [{ question: "Use db?", options: [] }] },
+      },
     });
     expect(state.question).toMatchObject({ toolCallId: "q2", status: "pending" });
     expect(state.entries.at(-1)).toMatchObject({ role: "question", toolCallId: "q2", status: "pending" });
