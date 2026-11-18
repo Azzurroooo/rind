@@ -54,7 +54,6 @@ export function emptyAgentsSnapshot() {
     folderDefaultsVersion: 0,
     notices: [],
     approvals: [],
-    archivedTeams: [],
     notes: [],
     artifacts: [],
   };
@@ -76,7 +75,6 @@ export function normalizeAgentsSnapshot(raw) {
     folderDefaultsVersion: Number(raw.folderDefaultsVersion) || 0,
     notices: Array.isArray(raw.notices) ? raw.notices : [],
     approvals: Array.isArray(raw.approvals) ? raw.approvals : [],
-    archivedTeams: Array.isArray(raw.archivedTeams) ? raw.archivedTeams : [],
     notes: Array.isArray(raw.notes) ? raw.notes : [],
     artifacts: Array.isArray(raw.artifacts) ? raw.artifacts : [],
   };

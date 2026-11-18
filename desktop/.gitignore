@@ -4,5 +4,3 @@ dist/
 resources/runtime
 resources/agent-management
 .verify-user-data*/
-!src/
-!src/**

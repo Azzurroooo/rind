@@ -8,11 +8,11 @@ import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 
 import type { DesktopUpdateState } from "../preload/types.ts"
-import { asObject, readJsonObject, writeJsonObject } from "./json-store.ts"
+import { asObject, readJsonObject, writeJsonObject } from "../../../runtime/dist/remote/workspaces.js"
 import { resolveRindHome } from "../../../runtime/dist/remote/host.js"
 
 export const DESKTOP_UPDATE_TTL_MS = 20 * 60 * 60 * 1000
-export const DESKTOP_UPDATE_POLL_MS = 6 * 60 * 60 * 1000
+const DESKTOP_UPDATE_POLL_MS = 6 * 60 * 60 * 1000
 const DEFAULT_MANIFEST_BASE_URL = "https://github.com/Azzurroooo/rind/releases"
 
 export type DesktopChannelKind =

@@ -27,13 +27,11 @@ export function useAgentsController(ctx) {
   const [busy, setBusy] = useState(false);
   const [teamHistories, setTeamHistories] = useState({});
   const [managerHistory, setManagerHistory] = useState([]);
-  const [archiveList, setArchiveList] = useState([]);
   // Active center-stage surface:
   // { kind: "chat" }
   // | { kind: "inbox" }
   // | { kind: "manager" }
   // | { kind: "background" }
-  // | { kind: "archive" }
   // | { kind: "team", teamId: string, tab: "organization" | "tasks", selectedTaskId?: string }
   const [surface, setSurface] = useState({ kind: "chat" });
   const [activeAgentOverride, setActiveAgentOverride] = useState(null);
@@ -65,8 +63,8 @@ export function useAgentsController(ctx) {
     const applySnapshot = (raw) => {
       const normalized = normalizeAgentsSnapshot(raw);
       setSnapshot((prev) => {
-        if (prev.seq > 0 && normalized.seq > 0 && prev.seq !== normalized.seq) {
-          return normalized;
+        if (prev.seq > 0 && normalized.seq > 0) {
+          return prev.seq === normalized.seq ? prev : normalized;
         }
         return JSON.stringify(prev) === JSON.stringify(normalized) ? prev : normalized;
       });
@@ -292,18 +290,6 @@ export function useAgentsController(ctx) {
     void requestAgent("serviceInfo", {}).catch(() => {});
   }, [ctx.layout, requestAgent]);
 
-  const openArchive = useCallback(() => {
-    ctx.layout.closeDrawersSilently?.();
-    setSurface({ kind: "archive" });
-    void requestAgent("listArchive", {})
-      .then((res) => {
-        if (mountedRef.current && Array.isArray(res?.teams)) {
-          setArchiveList(res.teams);
-        }
-      })
-      .catch(() => {});
-  }, [ctx.layout, requestAgent]);
-
   const openTeam = useCallback(
     (teamId, tab = "organization", selectedTaskId = "") => {
       if (!teamId) return;
@@ -427,7 +413,6 @@ export function useAgentsController(ctx) {
         } else if (resolvedWs && client) {
           const created = await client.request(methods.sessionNew, {
             workspace_root: resolvedWs,
-            ...(externalTools ? { external_tools: externalTools } : {}),
           });
           if (created?.session_id) {
             if (opened.managementSessionId) {
@@ -617,7 +602,6 @@ export function useAgentsController(ctx) {
     activeSessionContext,
     teamSummaries,
     managerSummary,
-    archiveList: archiveList.length > 0 ? archiveList : snapshot.archivedTeams || [],
     currentTeamId,
     currentTeamSummary,
     currentTeamTasks,
@@ -631,7 +615,6 @@ export function useAgentsController(ctx) {
     openInbox,
     openManagerView,
     openBackground,
-    openArchive,
     openTeam,
     selectTask,
     openAgentConversation,

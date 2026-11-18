@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  Archive,
   Crown,
   ListChecks,
   MessageSquare,
@@ -13,17 +12,14 @@ import {
 } from "lucide-react";
 
 export function ManagerView({
-  mode = "manager", // "manager" | "archive"
   managerSummary,
   teamSummaries = [],
-  archiveList = [],
   busy = false,
   onOpenManagerChat,
   onRenameSession,
   onDeleteSession,
   onOpenTeam,
   onCreateTeam,
-  onSwitchMode,
 }) {
   const [newTeamOpen, setNewTeamOpen] = useState(false);
   const [newTeamName, setNewTeamName] = useState("");
@@ -43,84 +39,6 @@ export function ManagerView({
     setNewTeamName("");
     setNewTeamRoot("");
     setNewTeamOpen(false);
-  }
-
-  if (mode === "archive") {
-    return (
-      <div className="agents-surface">
-        <div className="agents-surface-header">
-          <div className="agents-surface-title-block">
-            <div className="agents-surface-title-row">
-              <h2 className="agents-surface-title">Archive</h2>
-              <span className="agents-header-meta">{archiveList.length} archived</span>
-            </div>
-          </div>
-          <div className="agents-surface-actions">
-            <button
-              type="button"
-              className="agent-btn secondary sm"
-              onClick={() => onSwitchMode?.("manager")}
-            >
-              <Sparkles size={13} aria-hidden="true" />
-              <span>Manager</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="agents-surface-main panel-scroll">
-          {archiveList.length === 0 ? (
-            <div className="agents-empty-hero">
-              <Archive size={28} aria-hidden="true" />
-              <h3>No archived teams</h3>
-              <p>Deleted teams that completed tasks preserve their delivery reports here.</p>
-            </div>
-          ) : (
-            <div className="bg-grid">
-              {archiveList.map((archived) => {
-                const tasks = Array.isArray(archived.tasks) ? archived.tasks : [];
-                return (
-                  <section key={archived.id} className="bg-card">
-                    <div className="bg-card-head">
-                      <Archive size={15} aria-hidden="true" />
-                      <h3>{archived.name || archived.id}</h3>
-                      {archived.archivedAt && (
-                        <span className="agents-header-meta">
-                          {String(archived.archivedAt).slice(0, 10)}
-                        </span>
-                      )}
-                    </div>
-                    {tasks.length === 0 ? (
-                      <p className="bg-empty-note">{archived.taskCount || 0} completed task(s)</p>
-                    ) : (
-                      <div className="task-list-table">
-                        {tasks.map((task) => (
-                          <div key={task.id} className="task-list-row">
-                            <div className="task-list-main">
-                              <div className="task-list-title-line">
-                                <span className="agent-status-pill tone-completed">
-                                  {task.status || "done"}
-                                </span>
-                                <strong className="task-list-brief">{task.brief}</strong>
-                              </div>
-                              {task.report?.summary && (
-                                <div className="task-list-callout report">
-                                  {task.report.outcome ? `${task.report.outcome}: ` : ""}
-                                  {task.report.summary}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    );
   }
 
   return (

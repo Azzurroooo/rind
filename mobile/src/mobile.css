@@ -41,7 +41,6 @@ body { isolation: isolate; }
 .mobile-session .composer-wrap { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 .mobile-session .sidebar, .mobile-session .inspector { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
 .icon-button { min-width: 44px; min-height: 44px; }
-.chat-header .icon-button { min-width: 44px; min-height: 44px; }
 .dialog-scrim { padding-top: max(12px, env(safe-area-inset-top)); padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 input, textarea, select { font-size: 16px; }
 @media (max-width: 359px) { .mobile-home { padding-left: 16px; padding-right: 16px; } .mobile-connect h1 { font-size: 27px; } .mobile-host-origin { max-width: 40%; } }

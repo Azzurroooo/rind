@@ -2,15 +2,17 @@ import { stat, unlink } from "node:fs/promises"
 import { dirname } from "node:path"
 
 import type { DesktopProject, DesktopProjectOverview, DesktopRecentSession, DesktopSessionSummary, DesktopTheme, DesktopPrefsPatch } from "../preload/types"
-import { asObject, readJsonObject, writeJsonObject } from "./json-store.ts"
 import {
+  asObject,
   canonicalDirectory,
   projectSummaryForPath,
+  readJsonObject,
   readSessionIndex,
   readSharedWorkspaces,
   samePath,
   storedPath,
   uniquePaths,
+  writeJsonObject,
   writeSharedWorkspaces,
 } from "../../../runtime/dist/remote/workspaces.js"
 

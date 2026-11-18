@@ -4,7 +4,7 @@ import { isStreamingAssistant, latestAssistantId } from "../message-view.ts"
 import { questionCardMarkup, syncQuestionCard } from "../question-card.ts"
 import { type Entry, type ToolEntry } from "../timeline-model.ts"
 import { summarizeTurnFileChanges } from "../tool-display.ts"
-import { foldWorkSegments, isWorkSegment, segmentOpenMode, type SegmentOpenMode, type StreamItem, type WorkSegment } from "../work-segments.ts"
+import { foldWorkSegments, isWorkSegment, segmentOpenMode, type SegmentOpenMode, type WorkSegment } from "../work-segments.ts"
 import { SegmentPresentation, reconcileToolElement } from "../segment-presentation.ts"
 import { canRetryLastPrompt } from "./composer.ts"
 import { jumpLatest, messageStream } from "./dom.ts"
@@ -251,10 +251,6 @@ export function replaceElementChildren(current: HTMLElement, next: HTMLElement) 
   if (!input) return
   input.focus()
   if (selectionStart !== null && selectionEnd !== null) input.setSelectionRange(selectionStart, selectionEnd)
-}
-
-export function renderStreamItem(item: StreamItem, context: MessageContext = idleContext): string {
-  return isWorkSegment(item) ? renderWorkSegment(item) : renderEntry(item, context)
 }
 
 export function renderEntry(entry: Entry, context: MessageContext = idleContext): string {

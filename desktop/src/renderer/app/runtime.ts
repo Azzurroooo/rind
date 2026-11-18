@@ -183,21 +183,20 @@ export async function ensureSession(workspaceRoot: string, requestedSessionId?: 
       workspaceRoot,
     }
   } else {
-    created = asRecord(await request(runtimeMethods.sessionNew, { workspace_root: workspaceRoot }))
+    created = asRecord(
+      await request(runtimeMethods.sessionCreate, {
+        workspace_root: workspaceRoot,
+        ...(selection.model.trim() ? { model_id: selection.model.trim() } : {}),
+        ...(selection.provider ? { provider_id: selection.provider } : {}),
+        ...(selection.effort ? { reasoning_effort: selection.effort } : {}),
+      }),
+    )
   }
   const sessionId = asRecordText(created.session_id)
   if (!sessionId) throw new Error("Runtime did not create a session.")
   const selectedModel = selection.model.trim() || asRecordText(created.model)
   const selectedProvider = selection.provider || asRecordText(created.provider)
   const selectedEffort = selection.effort || asRecordText(created.reasoning_effort)
-  // Configure before binding/sending: provider identity is part of the choice,
-  // including when two providers expose the same model id.
-  if (selectedModel && (selectedModel !== created.model || selectedProvider !== created.provider)) {
-    await requestForSession(runtimeMethods.modelSet, sessionId, { model_id: selectedModel, ...(selectedProvider ? { provider_id: selectedProvider } : {}) })
-  }
-  if (selectedEffort && selectedEffort !== created.reasoning_effort) {
-    await requestForSession(runtimeMethods.modelEffort, sessionId, { reasoning_effort: selectedEffort })
-  }
   state.sessionModels[sessionId] = selectedModel
   if (selectedEffort) state.sessionEfforts[sessionId] = selectedEffort
   const bindToView = !state.viewedSessionId && samePath(state.chatProjectPath, workspaceRoot)

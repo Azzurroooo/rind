@@ -58,10 +58,6 @@ export function turnDone(durationMs = 4200, completed = 0, failed = 0) {
   return { kind: "turn-done", durationMs, completed, failed };
 }
 
-export function exitRind() {
-  return { kind: "exit" };
-}
-
 export function note(lines) {
   return { kind: "note", lines: textLines(lines) };
 }

@@ -6,7 +6,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopTheme, DesktopUpdateState, GatewayOptions, GatewayState, RuntimeEvent, RuntimeMethod, RuntimeSnapshot } from "../preload/types"
-import { asObject, readJsonObject } from "./json-store"
+import { asObject, readJsonObject } from "../../../runtime/dist/remote/workspaces.js"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile, workspaceFileRequest } from "../../../runtime/dist/remote/files.js"
 import {

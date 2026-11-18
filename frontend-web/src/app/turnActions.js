@@ -74,23 +74,23 @@ export function createTurnActions(ctx) {
     let sessionId = submittedSession;
     if (!sessionId) {
       const workspace = ctx.selectedWorkspace || refs.info.current.workspace_root;
-      const selection = { model: refs.currentModel.current || refs.info.current.model, provider: refs.currentProvider.current, effort: refs.info.current.reasoning_effort };
+      const modelId = refs.currentModel.current || refs.info.current.model || "";
+      const providerId = refs.currentProvider.current || "";
+      const effort = refs.info.current.reasoning_effort || "";
       try {
-        const result = await client().request(methods.sessionNew, { workspace_root: workspace });
+        const result = await client().request(methods.sessionCreate, {
+          workspace_root: workspace,
+          ...(modelId ? { model_id: modelId } : {}),
+          ...(providerId ? { provider_id: providerId } : {}),
+          ...(effort ? { reasoning_effort: effort } : {}),
+        });
         if (run !== refs.connectionRun.current) return;
         sessionId = String(result?.session_id || "");
         if (!sessionId) throw new Error("The runtime did not create a session.");
-        if (selection.model && (selection.model !== result.model || (selection.provider && selection.provider !== result.provider))) {
-          await client().request(methods.modelSet, { session_id: sessionId, model: selection.model, ...(selection.provider ? { provider_id: selection.provider } : {}) });
-        }
-        if (selection.effort && selection.effort !== result.reasoning_effort) {
-          await client().request(methods.modelEffort, { session_id: sessionId, reasoning_effort: selection.effort });
-        }
-        if (run !== refs.connectionRun.current) return;
         if (loadId === refs.sessionLoad.current) {
           ctx.setSelectedWorkspace(workspace);
           await call().loadSession(sessionId, true);
-          await call().refreshSessions(workspace);
+          void call().refreshSessions(workspace);
         }
       } catch (error) {
         if (run !== refs.connectionRun.current) return;

@@ -1,7 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import {
   Activity,
-  Archive,
   BarChart3,
   Bell,
   ChevronDown,
@@ -146,10 +145,6 @@ export const Sidebar = memo(function Sidebar({
     sessionCount: 0,
     sessions: [],
   };
-
-  const archiveCount = Array.isArray(agents?.snapshot?.archivedTeams)
-    ? agents.snapshot.archivedTeams.length
-    : 0;
 
   const totalAttention = agents?.inboxCount || 0;
   const totalWorking = agents?.bgCount || 0;
@@ -296,18 +291,6 @@ export const Sidebar = memo(function Sidebar({
                   <span className="sidebar-nav-badge working">{agents.bgCount}</span>
                 )}
               </button>
-
-              {archiveCount > 0 && (
-                <button
-                  type="button"
-                  className={`sidebar-nav-item ${agents.surface?.kind === "archive" ? "active" : ""}`}
-                  onClick={agents.onOpenArchive}
-                >
-                  <Archive size={15} aria-hidden="true" />
-                  <span>Archive</span>
-                  <span className="sidebar-nav-hint">{archiveCount}</span>
-                </button>
-              )}
             </div>
 
             <div className="sidebar-manager-section">

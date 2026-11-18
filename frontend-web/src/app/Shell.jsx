@@ -156,7 +156,6 @@ export function Shell() {
       onOpenManagerView: agents.openManagerView,
       onOpenManager: handleOpenManager,
       onOpenBackground: agents.openBackground,
-      onOpenArchive: agents.openArchive,
       onOpenTeam: agents.openTeam,
       onOpenMemberChat: handleOpenMemberChat,
       onDeleteAgentSession: agents.deleteAgentConversation,
@@ -175,7 +174,6 @@ export function Shell() {
       agents.openManagerView,
       handleOpenManager,
       agents.openBackground,
-      agents.openArchive,
       agents.openTeam,
       handleOpenMemberChat,
       agents.deleteAgentConversation,
@@ -270,13 +268,11 @@ export function Shell() {
       ? "Inbox"
       : agents.surface.kind === "manager"
         ? "Manager · Coordinator"
-        : agents.surface.kind === "archive"
-          ? "Archived Teams"
-          : agents.surface.kind === "background"
-            ? "Background & Runtime"
-            : agents.surface.kind === "team"
-              ? agents.currentTeamSummary?.team?.name || "Team"
-              : sessionTitle(ctx.sessions, sessionId, info.name || info.title, {
+        : agents.surface.kind === "background"
+          ? "Background & Runtime"
+          : agents.surface.kind === "team"
+            ? agents.currentTeamSummary?.team?.name || "Team"
+            : sessionTitle(ctx.sessions, sessionId, info.name || info.title, {
                   agentContext: agents.activeSessionContext,
                   agentSessions:
                     agents.activeSessionContext?.kind === "manager"
@@ -496,12 +492,10 @@ export function Shell() {
                 agents.openChatSurface();
               }}
             />
-          ) : agents.surface.kind === "manager" || agents.surface.kind === "archive" ? (
+          ) : agents.surface.kind === "manager" ? (
             <ManagerView
-              mode={agents.surface.kind === "archive" ? "archive" : "manager"}
               managerSummary={agents.managerSummary}
               teamSummaries={agents.teamSummaries}
-              archiveList={agents.archiveList}
               busy={agents.busy}
               onOpenManagerChat={(opts = {}) =>
                 void agents.openAgentConversation({ manager: true, ...opts })
@@ -512,9 +506,6 @@ export function Shell() {
               onDeleteSession={(sid) => agents.deleteAgentConversation(sid, { manager: true })}
               onOpenTeam={agents.openTeam}
               onCreateTeam={handleCreateTeam}
-              onSwitchMode={(nextMode) =>
-                nextMode === "archive" ? agents.openArchive() : agents.openManagerView()
-              }
             />
           ) : agents.surface.kind === "inbox" ? (
             <InboxView
