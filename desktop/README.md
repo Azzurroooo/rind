@@ -1,7 +1,7 @@
 # Rind Desktop
 
 Electron owns the local Worker lifecycle, native project selection, preferences, and optional
-remote access. The remote Gateway lives in `rind-runtime-client/remote/`; it shares the running
+remote access. The remote Gateway lives in `runtime/src/remote/`; it shares the running
 Worker and serves the production Web interface.
 
 ## Develop and build
@@ -40,9 +40,9 @@ npm --prefix desktop run package
 
 The `prepackage` step builds the Web and Desktop bundles and runs `scripts/stage-resources.mjs`,
 which compiles `runtime` and `agent-management` and stages `runtime` (`dist`, `skills`,
-`node_modules`), `rind-runtime-client`, and `agent-management` into `desktop/resources/`.
+`node_modules`) and `agent-management` into `desktop/resources/`.
 Electron Builder copies those staged resources and `frontend-web/dist` into the installed
-application's `resources/` directory (`runtime`, `rind-runtime-client`, `agent-management`,
+application's `resources/` directory (`runtime`, `agent-management`,
 and `web`). Packaging uses the version in `runtime/src/version.ts`; it does not publish a release.
 
 ## Use from a phone or browser

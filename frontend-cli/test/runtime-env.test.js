@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 
-import { buildRuntimeEnv } from "../lib/runtime-env.js";
+import { buildRuntimeEnv } from "../../runtime/dist/client/runtime-env.js";
 
 test("buildRuntimeEnv preserves base environment and sets RIND_HOME when requested", () => {
   const repoRoot = path.join("repo", "root");

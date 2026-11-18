@@ -1,33 +1,12 @@
 import { createHash } from "node:crypto";
 import type { FailureStatus, ToolEventStatus } from "./errors.js";
-export type { FailureStatus, ToolEventStatus };
-
-export type ProviderApi =
-  | "openai-chat"
-  | "openai-responses"
-  | "anthropic-messages"
-  | "google-generative-ai";
-
-export type AuthMethod = "oauth" | "api_key";
-
-export interface ModelDefinition {
-  readonly provider_id: string;
-  readonly id: string;
-  readonly api: ProviderApi;
-  readonly reasoning_efforts: readonly string[];
-  readonly context_window: number | null;
-  readonly image_input: boolean | null;
-}
-
-export interface ProviderDefinition {
-  readonly id: string;
-  readonly name: string;
-  readonly api: ProviderApi;
-  readonly default_base_url: string;
-  readonly auth_methods: readonly AuthMethod[];
-  readonly environment_key: string | null;
-  readonly fallback_models: readonly ModelDefinition[];
-}
+import type {
+  AuthMethod,
+  ModelDefinition,
+  ProviderApi,
+  ProviderDefinition,
+} from "../protocol/provider-catalog.js";
+export type { FailureStatus, ToolEventStatus, AuthMethod, ModelDefinition, ProviderApi, ProviderDefinition };
 
 export interface Credential {
   readonly type: AuthMethod;

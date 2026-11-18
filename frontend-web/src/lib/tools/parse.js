@@ -1,7 +1,7 @@
 // Parsing helpers shared by the per-tool formatters. Tool entries carry
 // `args` (a JSON string that may still be streaming, or an object) and
 // `result` (a `{ok, data, meta, error}` JSON payload, or plain text).
-import { parseStructuredToolPayload, partialJsonStrings } from "../../../../rind-runtime-client/tool-semantics.js";
+import { parseStructuredToolPayload, partialJsonStrings } from "../../../../runtime/dist/protocol/tool-semantics.js";
 
 export { partialJsonStrings };
 

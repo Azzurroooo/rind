@@ -4,7 +4,7 @@ import test from "node:test";
 import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
-import { createRuntimeClient, resolveRuntimeLaunch } from "../lib/runtime-client.js";
+import { createRuntimeClient, resolveRuntimeLaunch } from "../../runtime/dist/client/runtime-client.js";
 
 async function shutdownFixture(t, handler) {
   const root = await mkdtemp(path.join(tmpdir(), "rind-shutdown-"));

@@ -3,7 +3,7 @@ import {
   parseStructuredToolPayload,
   toolTruncationMeta,
   unwrapNestedToolData,
-} from "../../rind-runtime-client/tool-semantics.js";
+} from "../../runtime/dist/protocol/tool-semantics.js";
 import { clipCells } from "./text-width.js";
 import { breathingAccent, paintRaw } from "./theme.js";
 

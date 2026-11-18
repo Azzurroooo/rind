@@ -61,11 +61,9 @@ runNpmBuild(path.join(repoRoot, "runtime"))
 runNpmBuild(path.join(repoRoot, "agent-management"))
 
 const stagedRuntime = path.join(resourcesDir, "runtime")
-const stagedClient = path.join(resourcesDir, "rind-runtime-client")
 const stagedManagement = path.join(resourcesDir, "agent-management")
 
 await rm(stagedRuntime, { recursive: true, force: true })
-await rm(stagedClient, { recursive: true, force: true })
 await rm(stagedManagement, { recursive: true, force: true })
 
 await mkdir(stagedRuntime, { recursive: true })
@@ -83,11 +81,6 @@ if (existsSync(path.join(runtimeRoot, "node_modules"))) {
   }
 }
 
-await cp(path.join(repoRoot, "rind-runtime-client"), stagedClient, {
-  recursive: true,
-  filter: (src) => path.basename(src) !== "node_modules",
-})
-
 await mkdir(stagedManagement, { recursive: true })
 for (const entry of ["dist", "package.json"]) {
   await cp(path.join(repoRoot, "agent-management", entry), path.join(stagedManagement, entry), { recursive: true })
@@ -96,4 +89,4 @@ const managementRequire = createRequire(path.join(repoRoot, "agent-management", 
 const yamlPkgDir = path.dirname(managementRequire.resolve("yaml/package.json"))
 await cp(yamlPkgDir, path.join(stagedManagement, "node_modules", "yaml"), { recursive: true })
 
-console.log("Staged Desktop resources: runtime, rind-runtime-client, and agent-management.")
+console.log("Staged Desktop resources: runtime and agent-management.")

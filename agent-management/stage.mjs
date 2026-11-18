@@ -52,8 +52,6 @@ if (!destination || positionalArgs.length !== 1 || unknownFlags.length > 0 || !p
 }
 const require = createRequire(import.meta.url);
 if (!skipBuild) {
-  const build = spawnSync(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", path.join(root, "agent-management/tsconfig.json")], { stdio: "inherit" });
-  if (build.status !== 0) process.exit(build.status || 1);
   const buildRuntime = spawnSync(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", path.join(root, "runtime/tsconfig.json")], { stdio: "inherit" });
   if (buildRuntime.status !== 0) process.exit(buildRuntime.status || 1);
   const copyAssetsScript = path.join(root, "runtime/scripts/copy-assets.mjs");
@@ -61,6 +59,8 @@ if (!skipBuild) {
     const copyAssets = spawnSync(process.execPath, [copyAssetsScript], { stdio: "inherit" });
     if (copyAssets.status !== 0) process.exit(copyAssets.status || 1);
   }
+  const build = spawnSync(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", path.join(root, "agent-management/tsconfig.json")], { stdio: "inherit" });
+  if (build.status !== 0) process.exit(build.status || 1);
 } else {
   for (const requiredDist of ["agent-management/dist/service.js", "runtime/dist/cli.js"]) {
     if (!existsSync(path.join(root, requiredDist))) {
@@ -69,7 +69,7 @@ if (!skipBuild) {
   }
 }
 await mkdir(destination); // Never overwrite an existing distribution.
-for (const relative of ["frontend-cli/bin", "frontend-cli/lib", "rind-runtime-client", "agent-management/dist", "runtime/dist", "runtime/skills"]) {
+for (const relative of ["frontend-cli/bin", "frontend-cli/lib", "agent-management/dist", "runtime/dist", "runtime/skills"]) {
   await cp(path.join(root, relative), path.join(destination, relative), { recursive: true, errorOnExist: true, force: false });
 }
 const runtimeRoot = path.join(root, "runtime");
@@ -91,4 +91,4 @@ if (!version) throw new Error("Cannot read the Rind version.");
 await writeFile(path.join(destination, "package.json"), JSON.stringify({ name: "@rind-ai/cli", version, type: "module", bin: { rind: "frontend-cli/bin/rind.js" }, engines: { node: ">=20" } }, null, 2) + "\n");
 const cliPackage = JSON.parse(await readFile(path.join(destination, "frontend-cli/package.json"), "utf8"));
 await writeFile(path.join(destination, "frontend-cli/package.json"), JSON.stringify({ ...cliPackage, version }, null, 2) + "\n");
-console.log("Staged CLI, runtime, management service, shared runtime client and dependencies at " + destination);
+console.log("Staged CLI, runtime, management service and dependencies at " + destination);

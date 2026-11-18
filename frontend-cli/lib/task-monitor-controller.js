@@ -1,5 +1,5 @@
 import { taskMonitorFrame } from "./rendering.js";
-import { runtimeMethods } from "./runtime-protocol.js";
+import { runtimeMethods } from "../../runtime/dist/protocol/runtime-protocol.js";
 
 const ACTIVE = new Set(["starting", "running", "cancelling"]);
 const TERMINAL = new Set(["completed", "failed", "cancelled", "timed_out", "lost"]);

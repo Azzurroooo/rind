@@ -12,7 +12,7 @@ import {
   storedPath,
   uniquePaths,
   writeSharedWorkspaces,
-} from "../../../rind-runtime-client/remote/workspaces.js"
+} from "../../../runtime/dist/remote/workspaces.js"
 
 export { samePath }
 

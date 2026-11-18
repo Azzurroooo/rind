@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { localAddresses, outboundAddress } from "../../rind-runtime-client/remote/network.js"
+import { localAddresses, outboundAddress } from "../../runtime/dist/remote/network.js"
 
 const ipv4 = (address, internal = false) => ({ address, family: "IPv4", internal })
 test("Wi-Fi wins over Hyper-V and VPN adapters even if a VPN owns the default route", () => {

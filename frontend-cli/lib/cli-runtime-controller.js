@@ -735,7 +735,7 @@ export function createCliRuntimeController({
       notify(effortSetResultText({ reasoning_effort: effort }, effort, scope));
     } else {
       try {
-        const update = await request(methods.modelEffortSet, { reasoning_effort: effort });
+        const update = await request(methods.modelEffort, { reasoning_effort: effort });
         state.session.info = { ...state.session.info, reasoning_effort: effort };
         notify(effortSetResultText(update, effort, scope));
       } catch (error) {

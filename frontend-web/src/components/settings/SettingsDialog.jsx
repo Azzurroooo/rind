@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bell, Check, ChevronDown, KeyRound, LogOut, SlidersHorizontal } from "lucide-react";
-import { BUILTIN_PROVIDER_CATALOG } from "../../../../rind-runtime-client/provider-catalog.js";
+import { BUILTIN_PROVIDER_CATALOG } from "../../../../runtime/dist/protocol/provider-catalog.js";
 import { Dialog } from "../overlays/Dialog.jsx";
 import { methods } from "../../methods.js";
 

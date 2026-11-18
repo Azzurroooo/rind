@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createLiveSessions } from "../../rind-runtime-client/live-sessions.js";
+import { createLiveSessions } from "../../runtime/dist/client/live-sessions.js";
 
 function setup() {
   let clock = Date.parse("2026-10-06T12:00:00Z");

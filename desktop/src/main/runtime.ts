@@ -4,21 +4,23 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import log from "electron-log/main"
 import { RuntimeInputs } from "./runtime-inputs.ts"
 import { runtimeRequestTimeout } from "./runtime-request-policy.ts"
-import { buildRuntimeEnv } from "../../../rind-runtime-client/runtime-env.js"
-import { resolveRindHome } from "../../../rind-runtime-client/local-files.js"
-import { createLineBuffer } from "../../../rind-runtime-client/ndjson.js"
+import { buildRuntimeEnv } from "../../../runtime/dist/client/runtime-env.js"
+import { resolveRindHome } from "../../../runtime/dist/client/local-files.js"
+import { createLineBuffer } from "../../../runtime/dist/client/ndjson.js"
+import {
+  isRuntimeEvent as isRuntimeEventEnvelope,
+  isRuntimeResponse as isRuntimeResponseEnvelope,
+  requireRuntimeInitialization,
+} from "../../../runtime/dist/protocol/runtime-protocol.js"
 
 import { buildAuthReply, parseAuthPrompt, parseAuthUpdate, validateAuthReply } from "./auth-messages.ts"
 import {
-  runtimeProtocolVersion,
   type DesktopAuthPrompt,
   type DesktopAuthUpdate,
   type GatewayState,
   type RuntimeEvent,
-  type RuntimeEventEnvelope,
   type RuntimeMethod,
   type RuntimeRequestEnvelope,
-  type RuntimeResponseEnvelope,
   type RuntimeServerMethod,
   type RuntimeSnapshot,
 } from "../preload/types.ts"
@@ -195,7 +197,7 @@ let sharedRuntimeModulePromise: Promise<any> | undefined
 
 function loadSharedRuntimeModule(repoRoot: string) {
   if (!sharedRuntimeModulePromise) {
-    const sharedUrl = pathToFileURL(join(repoRoot, "rind-runtime-client", "shared-runtime.js")).href
+    const sharedUrl = pathToFileURL(join(repoRoot, "runtime", "dist", "client", "shared-runtime.js")).href
     sharedRuntimeModulePromise = import(/* @vite-ignore */ sharedUrl).catch((error) => {
       sharedRuntimeModulePromise = undefined
       throw error
@@ -524,45 +526,6 @@ function waitForChildExit(child: ChildProcessWithoutNullStreams) {
     const timer = setTimeout(finish, 5_000)
     child.once("close", finish)
   })
-}
-
-function isRuntimeResponseEnvelope(message: unknown): message is RuntimeResponseEnvelope {
-  const value = asRecord(message)
-  return value?.kind === "response"
-    && isRequestId(value.request_id)
-    && (Object.hasOwn(value, "result") || isRuntimeError(value.error))
-}
-
-function isRuntimeEventEnvelope(message: unknown): message is RuntimeEventEnvelope {
-  const value = asRecord(message)
-  return value?.kind === "event"
-    && value.method === "session/update"
-    && Number.isInteger(value.sequence)
-    && (value.durability === "durable" || value.durability === "incremental")
-    && typeof value.session_id === "string"
-    && typeof value.turn_id === "string"
-    && asRecord(value.event) !== undefined
-}
-
-function requireRuntimeInitialization(result: unknown): Record<string, unknown> {
-  const value = asRecord(result)
-  if (!value || value.protocol_version !== runtimeProtocolVersion) {
-    const received = value ? String(value.protocol_version || "missing") : "invalid"
-    throw new Error(`Unsupported Runtime protocol version: ${received}.`)
-  }
-  if (!Array.isArray(value.capabilities) || !Array.isArray(value.methods)) {
-    throw new Error("Runtime initialization response is missing capabilities or methods.")
-  }
-  return value
-}
-
-function isRequestId(value: unknown): value is string | number {
-  return (typeof value === "string" && value.trim().length > 0) || (typeof value === "number" && Number.isFinite(value))
-}
-
-function isRuntimeError(value: unknown): value is { type: string; message: string } {
-  const error = asRecord(value)
-  return error !== undefined && typeof error.type === "string" && typeof error.message === "string"
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

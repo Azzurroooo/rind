@@ -3,7 +3,7 @@ import { formatDuration } from "./tool-display.js";
 import { DEFAULT_THEME, colorEnabled, paint, paintRaw, flavorSwatch, themeNames, breathingAccent } from "./theme.js";
 import { DEFAULT_SPINNER, isBriefMode, spinnerFrame, spinnerNames } from "./cli-state-store.js";
 import { homedir } from "node:os";
-import { encodeQrMatrix, renderTerminalQr } from "../../rind-runtime-client/remote/qr.js";
+import { encodeQrMatrix, renderTerminalQr } from "../../runtime/dist/remote/qr.js";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
 const MAX_COMPOSER_WIDTH = 78;

@@ -31,6 +31,6 @@ Runtime Web server 支持 Bearer、token/ticket 等认证路径，Origin 检查�
 
 供应商凭证存于本机 auth.json，界面拿到的是公开设置和认证状态；原始 LLM trace 会保留普通提示与模型文本，仅对图片数据做特殊省略。诊断材料不能一概视为已经脱敏。
 
-源码：[Runtime Web 认证](../../../runtime/src/server/transports.ts)、[Desktop Gateway](../../../rind-runtime-client/remote/server.js)、[凭证](../../../runtime/src/infrastructure/settings.ts)、[任务通知](../../../runtime/src/application/context-manager.ts)。验证：[Web 运行时](../../../runtime/test/server-protocol.test.js)、[网关安全](../../../runtime/src/gateway/security.ts)。细节：[文件工具](../04-tools/file-tools.zh-CN.md)、[Team](../05-autonomy/teams.zh-CN.md)、[观测](observability.zh-CN.md)。
+源码：[Runtime Web 认证](../../../runtime/src/server/transports.ts)、[Desktop Gateway](../../../runtime/src/remote/server.ts)、[凭证](../../../runtime/src/infrastructure/settings.ts)、[任务通知](../../../runtime/src/application/context-manager.ts)。验证：[Web 运行时](../../../runtime/test/server-protocol.test.js)、[网关安全](../../../runtime/src/gateway/security.ts)。细节：[文件工具](../04-tools/file-tools.zh-CN.md)、[Team](../05-autonomy/teams.zh-CN.md)、[观测](observability.zh-CN.md)。
 
 [返回系列地图](../README.zh-CN.md)

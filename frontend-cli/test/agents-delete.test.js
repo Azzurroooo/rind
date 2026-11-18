@@ -11,7 +11,7 @@ import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { startServer } from "../../agent-management/dist/ipc.js";
 import { connectClient } from "../../agent-management/dist/client.js";
-import { createSharedRuntimeClient, connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { createSharedRuntimeClient, connectSharedRuntime } from "../../runtime/dist/client/shared-runtime.js";
 import { prepareManagement } from "../lib/agents-session.js";
 import { createActions } from "../lib/agents-actions.js";
 import { emptyAgentsSnapshot } from "../lib/agents-model.js";

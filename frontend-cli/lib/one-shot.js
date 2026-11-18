@@ -2,10 +2,10 @@ import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { buildRuntimeEnv } from "../../rind-runtime-client/runtime-env.js";
-import { resolveRuntimeExecutable } from "../../rind-runtime-client/runtime-client.js";
-import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
-import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
+import { buildRuntimeEnv } from "../../runtime/dist/client/runtime-env.js";
+import { resolveRuntimeExecutable } from "../../runtime/dist/client/runtime-client.js";
+import { createSharedRuntimeClient } from "../../runtime/dist/client/shared-runtime.js";
+import { requireRuntimeInitialization, runtimeMethods } from "../../runtime/dist/protocol/runtime-protocol.js";
 import { createOneShotProgress } from "./one-shot-progress.js";
 import { sendHelp } from "./send.js";
 import { configHelp } from "./config-command.js";

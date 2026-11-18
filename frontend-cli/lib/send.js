@@ -1,6 +1,6 @@
 import { sendIpc } from "./ipc.js";
 import { paint } from "./theme.js";
-import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { connectSharedRuntime } from "../../runtime/dist/client/shared-runtime.js";
 
 export const sendHelp = [
   "Usage: rind send --session <id> \"<prompt>\"",

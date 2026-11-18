@@ -15,7 +15,7 @@ import { parseTerminalKey } from "./terminal-key.js";
 import { Component } from "./tui/component.js";
 import { createTui } from "./tui/tui.js";
 import { readCliVersion } from "./version.js";
-import { connectSharedRuntime, stopSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { connectSharedRuntime, stopSharedRuntime } from "../../runtime/dist/client/shared-runtime.js";
 
 export const UPDATE_CHECK_TTL_MS = 20 * 60 * 60 * 1000;
 const DEFAULT_MANIFEST_BASE_URL = "https://github.com/Azzurroooo/rind/releases";

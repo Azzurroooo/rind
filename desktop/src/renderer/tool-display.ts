@@ -2,7 +2,7 @@
 // formatter is unit tested. Caps follow frontend-cli/lib/tool-display.js.
 // Nothing here ever echoes raw arguments, JSON or file contents by default.
 
-import { toolTruncationMeta, unwrapNestedToolData } from "../../../rind-runtime-client/tool-semantics.js"
+import { toolTruncationMeta, unwrapNestedToolData } from "../../../runtime/dist/protocol/tool-semantics.js"
 import { extractDiffText, parseDiffLines, type DiffLine } from "./diff-text.ts"
 import { clipLine, fileMutationPreview, formatDuration, type ToolEntry } from "./timeline-model.ts"
 

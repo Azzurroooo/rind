@@ -6,7 +6,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { startServer } from "../../agent-management/dist/ipc.js";
 import { connectClient } from "../../agent-management/dist/client.js";
-import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
+import { createSharedRuntimeClient } from "../../runtime/dist/client/shared-runtime.js";
 import { runAgentsPage } from "../lib/agents-page.js";
 import { harness } from "./helpers/agents-harness.js";
 import { removeRindHome } from "./helpers/rind-home.js";

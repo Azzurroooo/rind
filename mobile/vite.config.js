@@ -11,10 +11,14 @@ export default defineConfig({
   publicDir: "../frontend-web/public",
   resolve: {
     dedupe: ["react", "react-dom"],
-    alias: {
-      "@surface": fileURLToPath(new URL("../frontend-web/src", import.meta.url)),
-      "lucide-react": fileURLToPath(new URL("./node_modules/lucide-react", import.meta.url)),
-    },
+    alias: [
+      {
+        find: /^.*[/\\]runtime[/\\]dist[/\\]protocol[/\\]([^/\\]+)\.js$/,
+        replacement: `${fileURLToPath(new URL("../runtime/src/protocol", import.meta.url)).replace(/\\/g, "/")}/$1.ts`,
+      },
+      { find: "@surface", replacement: fileURLToPath(new URL("../frontend-web/src", import.meta.url)) },
+      { find: "lucide-react", replacement: fileURLToPath(new URL("./node_modules/lucide-react", import.meta.url)) },
+    ],
   },
   server: { port: 5174, fs: { allow: [".."] }, watch: { ignored: ["**/android/**", "**/ios/**", "**/.qa/**"] } },
   test: { environment: "jsdom", globals: true, include: ["src/**/*.test.{js,jsx}"] },

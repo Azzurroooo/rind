@@ -1,8 +1,8 @@
 import { mkdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import net from "node:net";
-import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
-import { createLineBuffer } from "../../rind-runtime-client/ndjson.js";
+import { resolveRindHome } from "../../runtime/dist/client/local-files.js";
+import { createLineBuffer } from "../../runtime/dist/client/ndjson.js";
 
 const CONNECT_TIMEOUT_MS = 2000;
 

@@ -15,17 +15,19 @@ import { createCliInputActions } from "../lib/cli-input-actions.js";
 import { createCliState } from "../lib/cli-state.js";
 import { createVirtualOutput } from "./helpers/virtual-terminal.js";
 import { removeRindHome } from "./helpers/rind-home.js";
-import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { connectSharedRuntime } from "../../runtime/dist/client/shared-runtime.js";
+import {
+  encodeQrMatrix,
+  renderSvgQrDataUrl,
+  renderTerminalQr,
+} from "../../runtime/dist/remote/qr.js";
 import {
   decodeQrMatrix,
   decodeTerminalQr,
-  encodeQrMatrix,
   parseTerminalQrMatrix,
-  renderSvgQrDataUrl,
-  renderTerminalQr,
-} from "../../rind-runtime-client/remote/qr.js";
-import { RemoteWebSocket } from "../../rind-runtime-client/remote/server.js";
-import { canonicalDirectory, registerSharedWorkspace, samePath } from "../../rind-runtime-client/remote/workspaces.js";
+} from "./helpers/qr-decoder.js";
+import { RemoteWebSocket } from "../../test/helpers/remote-websocket.mjs";
+import { canonicalDirectory, registerSharedWorkspace, samePath } from "../../runtime/dist/remote/workspaces.js";
 import { connectManagement } from "../../agent-management/dist/client.js";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));

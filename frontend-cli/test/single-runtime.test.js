@@ -9,14 +9,14 @@ import path from "node:path";
 import os from "node:os";
 import http from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { connectSharedRuntime, sharedRuntimePaths } from "../../rind-runtime-client/shared-runtime.js";
-import { startSharedServer } from "../../rind-runtime-client/shared-server.js";
-import { probeEndpoint } from "../../rind-runtime-client/endpoint.js";
+import { connectSharedRuntime, sharedRuntimePaths } from "../../runtime/dist/client/shared-runtime.js";
+import { startSharedServer } from "../../runtime/dist/client/shared-server.js";
+import { probeEndpoint } from "../../runtime/dist/client/endpoint.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const rindBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));
-const runtimeModule = new URL("../../rind-runtime-client/shared-runtime.js", import.meta.url).href;
+const runtimeModule = new URL("../../runtime/dist/client/shared-runtime.js", import.meta.url).href;
 const runtimeOptions = home => ({ rindHome: home, repoRoot });
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -255,7 +255,7 @@ test("a verified shared host that stopped answering can be replaced", { timeout:
   const preload = path.join(home, "stuck.mjs");
   await writeFile(preload, "import net from 'node:net'; const write = net.Socket.prototype.write; net.Socket.prototype.write = function (...args) { return this === process.stdout || this === process.stderr ? write.apply(this, args) : true; };\n");
   const nonce = "4a33659c-f104-4f13-8c19-910c4e57c167";
-  const entry = fileURLToPath(new URL("../../rind-runtime-client/shared-server.js", import.meta.url));
+  const entry = fileURLToPath(new URL("../../runtime/dist/client/shared-server.js", import.meta.url));
   const stuck = spawn(process.execPath, ["--import", pathToFileURL(preload).href, entry, JSON.stringify(runtimeOptions(home)), "--rind-host-nonce=" + nonce], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
   let stderr = "";
   stuck.stderr.on("data", chunk => { stderr += chunk; });

@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { startServer } from "../dist/ipc.js";
 import { connectClient } from "../dist/client.js";
-import { connectSharedRuntime, createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
+import { connectSharedRuntime, createSharedRuntimeClient } from "../../runtime/dist/client/shared-runtime.js";
 async function stopRuntime(home) {
   const client = await connectSharedRuntime({ home, start: false }).catch(() => null);
   if (!client) return;

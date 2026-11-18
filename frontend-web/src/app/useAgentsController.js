@@ -104,7 +104,6 @@ export function useAgentsController(ctx) {
             ? client.request(methods.agentsGet, {})
             : client.request(methods.agentsRequest, {
                 operation: "getState",
-                method: "getState",
                 params: {},
               });
         if (method === "getState") {
@@ -114,7 +113,6 @@ export function useAgentsController(ctx) {
         }
         const res = await client.request(methods.agentsRequest, {
           operation: method,
-          method,
           params,
         });
         const fresh = await fetchState().catch(() => null);

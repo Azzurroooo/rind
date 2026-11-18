@@ -9,7 +9,7 @@ import { pipeline } from "node:stream/promises"
 
 import type { DesktopUpdateState } from "../preload/types.ts"
 import { asObject, readJsonObject, writeJsonObject } from "./json-store.ts"
-import { resolveRindHome } from "./runtime-settings.ts"
+import { resolveRindHome } from "../../../runtime/dist/remote/host.js"
 
 export const DESKTOP_UPDATE_TTL_MS = 20 * 60 * 60 * 1000
 export const DESKTOP_UPDATE_POLL_MS = 6 * 60 * 60 * 1000

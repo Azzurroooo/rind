@@ -108,36 +108,49 @@ test("TypeScript runtime layer dependencies point inward and prompts stay pure",
     }
 
     for (const spec of specs) {
+      if (topLayer === "protocol" || rel === "remote/qr.ts") {
+        if (!spec.startsWith(".")) {
+          violations.push(`${rel} -> ${spec} (must remain browser-pure with zero Node/npm imports)`);
+          continue;
+        }
+      }
       const target = resolveInternalTsTarget(file, spec);
       if (!target) continue;
       const targetRel = relPosix(SRC_ROOT, target);
       const targetLayer = targetRel.includes("/") ? targetRel.split("/")[0] : targetRel;
 
-      if (topLayer === "domain" && targetLayer !== "domain") {
+      if (topLayer === "protocol" && targetLayer !== "protocol") {
+        violations.push(`${rel} -> ${targetRel}`);
+      } else if (topLayer === "domain" && !["domain", "protocol"].includes(targetLayer)) {
+        violations.push(`${rel} -> ${targetRel}`);
+      } else if (
+        (topLayer === "client" || topLayer === "remote") &&
+        !["protocol", "client", "remote"].includes(targetLayer)
+      ) {
         violations.push(`${rel} -> ${targetRel}`);
       } else if (
         topLayer === "infrastructure" &&
-        ["application", "core", "server", "gateway", "cli.ts", "index.ts"].includes(targetLayer)
+        ["application", "core", "server", "gateway", "client", "remote", "cli.ts", "index.ts"].includes(targetLayer)
       ) {
         violations.push(`${rel} -> ${targetRel}`);
       } else if (
         topLayer === "application" &&
-        ["core", "server", "gateway", "cli.ts", "index.ts"].includes(targetLayer)
+        ["core", "server", "gateway", "client", "remote", "cli.ts", "index.ts"].includes(targetLayer)
       ) {
         violations.push(`${rel} -> ${targetRel}`);
       } else if (
         topLayer === "core" &&
-        ["server", "gateway", "cli.ts", "index.ts"].includes(targetLayer)
+        ["server", "gateway", "client", "remote", "cli.ts", "index.ts"].includes(targetLayer)
       ) {
         violations.push(`${rel} -> ${targetRel}`);
       } else if (
         topLayer === "server" &&
-        ["gateway", "cli.ts", "index.ts"].includes(targetLayer)
+        ["gateway", "client", "remote", "cli.ts", "index.ts"].includes(targetLayer)
       ) {
         violations.push(`${rel} -> ${targetRel}`);
       } else if (
         topLayer === "gateway" &&
-        ["cli.ts", "index.ts"].includes(targetLayer)
+        ["client", "remote", "cli.ts", "index.ts"].includes(targetLayer)
       ) {
         violations.push(`${rel} -> ${targetRel}`);
       }
@@ -227,7 +240,6 @@ test("all third-party imports across repository packages are declared in owning 
     ["agent-management/src", "agent-management/package.json", [], []],
     ["frontend-cli/bin", "frontend-cli/package.json", [], []],
     ["frontend-cli/lib", "frontend-cli/package.json", [], []],
-    ["rind-runtime-client", "rind-runtime-client/package.json", [], []],
     ["desktop/src", "desktop/package.json", ["electron"], []],
     ["frontend-web/src", "frontend-web/package.json", [], []],
     ["mobile/src", "mobile/package.json", [], ["@surface/"]],
@@ -276,37 +288,11 @@ test("all third-party imports across repository packages are declared in owning 
   );
 });
 
-test("rind-runtime-client declarations typecheck and pure-JS packages parse without syntax errors", () => {
-  const clientRoot = path.join(PROJECT_ROOT, "rind-runtime-client");
-  const dtsFiles = walkFiles(clientRoot, f => f.endsWith(".d.ts"));
-  assert.ok(dtsFiles.length > 0, "Expected .d.ts files in rind-runtime-client");
-
-  const program = ts.createProgram(dtsFiles, {
-    noEmit: true,
-    target: ts.ScriptTarget.ES2022,
-    module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    types: [path.join(RUNTIME_ROOT, "node_modules", "@types", "node")],
-  });
-  const dtsSet = new Set(dtsFiles.map(f => path.normalize(f)));
-  const dtsErrors = [];
-  for (const diag of ts.getPreEmitDiagnostics(program)) {
-    if (diag.file && !dtsSet.has(path.normalize(diag.file.fileName))) continue;
-    const msg = ts.flattenDiagnosticMessageText(diag.messageText, "\n");
-    if (diag.file && diag.start !== undefined) {
-      const pos = diag.file.getLineAndCharacterOfPosition(diag.start);
-      dtsErrors.push(`${relPosix(PROJECT_ROOT, diag.file.fileName)}:${pos.line + 1}:${pos.character + 1} - ${msg}`);
-    } else {
-      dtsErrors.push(msg);
-    }
-  }
-  assert.deepEqual(dtsErrors, [], `rind-runtime-client .d.ts errors:\n${dtsErrors.join("\n")}`);
-
+test("pure-JS CLI package parses without syntax errors", () => {
   const jsDirs = [
     path.join(PROJECT_ROOT, "frontend-cli", "bin"),
     path.join(PROJECT_ROOT, "frontend-cli", "lib"),
     path.join(PROJECT_ROOT, "frontend-cli", "scripts"),
-    clientRoot,
   ];
   const syntaxErrors = [];
   for (const dir of jsDirs) {

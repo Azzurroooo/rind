@@ -55,6 +55,6 @@ node frontend-cli/bin/rind.js
 
 从其他工作区启动时使用 CLI 脚本的绝对路径；示例中的 rind 可替换成 `node /absolute/path/to/rind/frontend-cli/bin/rind.js`。登录和端点设置见[配置与凭证](../06-models/authentication-and-settings.zh-CN.md)。只想看操作方式，可运行 `node frontend-cli/bin/rind.js tour agents.create`，需要交互终端。
 
-源码：[CLI 实现](../../../frontend-cli/lib/frontend-cli-implementation.js)、[输入动作](../../../frontend-cli/lib/cli-input-actions.js)、[TUI](../../../frontend-cli/lib/tui/tui.js)、[运行时客户端](../../../frontend-cli/lib/runtime-client.js)、[Tour](../../../frontend-cli/lib/tour/run-tour.js)。验证：[TUI 引擎](../../../frontend-cli/test/tui-engine.test.js)、[虚拟终端集成](../../../frontend-cli/test/tui-integration.test.js)、[输入缓冲](../../../frontend-cli/test/tui-input-buffer.test.js)、[Tour](../../../frontend-cli/test/tour-tui.test.js)。
+源码：[CLI 实现](../../../frontend-cli/lib/frontend-cli-implementation.js)、[输入动作](../../../frontend-cli/lib/cli-input-actions.js)、[TUI](../../../frontend-cli/lib/tui/tui.js)、[运行时客户端](../../../runtime/src/client/runtime-client.ts)、[Tour](../../../frontend-cli/lib/tour/run-tour.js)。验证：[TUI 引擎](../../../frontend-cli/test/tui-engine.test.js)、[虚拟终端集成](../../../frontend-cli/test/tui-integration.test.js)、[输入缓冲](../../../frontend-cli/test/tui-input-buffer.test.js)、[Tour](../../../frontend-cli/test/tour-tui.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

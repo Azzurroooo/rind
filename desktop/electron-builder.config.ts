@@ -15,7 +15,6 @@ const config: Configuration = {
   files: ["out/**/*"],
   extraResources: [
     { from: "resources/runtime", to: "runtime" },
-    { from: "resources/rind-runtime-client", to: "rind-runtime-client" },
     { from: "resources/agent-management", to: "agent-management" },
     { from: "resources/icon.ico", to: "icon.ico" },
     { from: "resources/icon.png", to: "icon.png" },

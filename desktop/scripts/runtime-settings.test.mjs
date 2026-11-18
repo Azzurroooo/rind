@@ -8,7 +8,7 @@ import {
   loadRuntimeSettings,
   maskSecretKey,
   saveRuntimeSettings,
-} from "../src/main/runtime-settings.ts"
+} from "../../runtime/dist/remote/host.js"
 
 async function withTempRindHome(run) {
   const dir = await mkdtemp(join(tmpdir(), "rind-runtime-settings-test-"))

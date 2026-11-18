@@ -31,6 +31,6 @@ request_id 是调用关联标识，session_id 选定持久会话，turn_id 标�
 
 普通 prompt 的 response 在回合结束后返回；支持请求作用域的 one-shot 还会等待本次任务续接。另一方面，队列方法的 accepted 只确认接收，实际投递由 queued_input_delivered 通知。客户端应根据调用契约判断完成，而不能把任何 response 都显示成“工作已完成”。
 
-代码入口：[Runtime 协议](../../../runtime/src/server/protocol.ts)、[Dispatcher](../../../runtime/src/server/dispatcher.ts)、[CLI 镜像](../../../frontend-cli/lib/runtime-protocol.js)。验证：[协议回归](../../../runtime/test/server-protocol.test.js)、[golden fixture](../../../runtime/test/fixtures/runtime_protocol.golden.jsonl)。
+代码入口：[Runtime 协议](../../../runtime/src/server/protocol.ts)、[Dispatcher](../../../runtime/src/server/dispatcher.ts)、[共享协议](../../../runtime/src/protocol/runtime-protocol.ts)。验证：[协议回归](../../../runtime/test/server-protocol.test.js)、[golden fixture](../../../runtime/test/fixtures/runtime_protocol.golden.jsonl)。
 
 [返回系列地图](../README.zh-CN.md)

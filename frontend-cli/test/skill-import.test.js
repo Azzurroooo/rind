@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { createCliRuntimeController } from "../lib/cli-runtime-controller.js";
 import { createCliState } from "../lib/cli-state.js";
 import { settingsMenuText } from "../lib/rendering.js";
-import { runtimeMethods as methods } from "../lib/runtime-protocol.js";
+import { runtimeMethods as methods } from "../../runtime/dist/protocol/runtime-protocol.js";
 import { createSettingsMenuState } from "../lib/settings-menu-state.js";
 import { resetMaxConcurrentRuns, resetSpinner, setMaxConcurrentRuns, setSpinner } from "../lib/cli-state-store.js";
 import { resetTheme, setTheme } from "../lib/theme.js";

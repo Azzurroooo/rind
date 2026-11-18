@@ -1,10 +1,10 @@
 import { resolve } from "node:path";
-import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
+import { resolveRindHome } from "../../runtime/dist/client/local-files.js";
 import {
   createRemoteHost,
   resolveWebRoot,
-} from "../../rind-runtime-client/remote/host.js";
-import { registerSharedWorkspace } from "../../rind-runtime-client/remote/workspaces.js";
+} from "../../runtime/dist/remote/host.js";
+import { registerSharedWorkspace } from "../../runtime/dist/remote/workspaces.js";
 
 const STOPPED_STATE = {
   running: false,

@@ -6,8 +6,8 @@ import http from "node:http";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { startSharedServer } from "../../rind-runtime-client/shared-server.js";
-import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
+import { startSharedServer } from "../../runtime/dist/client/shared-server.js";
+import { createSharedRuntimeClient } from "../../runtime/dist/client/shared-runtime.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 
 const rindBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url)).replaceAll("\\", "/");

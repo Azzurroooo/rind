@@ -1,4 +1,4 @@
-import { createSharedRuntimeClient } from "../../../rind-runtime-client/shared-runtime.js";
+import { createSharedRuntimeClient } from "../../../runtime/dist/client/shared-runtime.js";
 import { ManagementError, type Adapter } from "../model.js";
 export function createRindAdapter(options: { home?: string; repoRoot: string; runtimePath?: string }): Adapter {
   return {

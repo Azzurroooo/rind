@@ -6,7 +6,7 @@ import {
   partialJsonStrings,
   toolTruncationMeta,
   unwrapNestedToolData,
-} from "../../rind-runtime-client/tool-semantics.js";
+} from "../../runtime/dist/protocol/tool-semantics.js";
 import { delegatedTask, parseToolResult as cliParseToolResult } from "../lib/tool-display.js";
 import { parseToolResult as webParseToolResult, partialJsonStrings as webPartialJsonStrings } from "../../frontend-web/src/lib/tools/parse.js";
 import { taskFinishState as webTaskFinishState } from "../../frontend-web/src/lib/tools/runTools.js";

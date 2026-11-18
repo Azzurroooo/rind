@@ -383,7 +383,7 @@ test("delegating member and session surface Delegated status, Waits on details, 
   assert.match(apiMemberDetail, /Job\s+pytest -q · continues by itself/);
 
   // live-sessions synchronizes background_wait attached to turn_completed and clears it on turn_cancelled.
-  const { createLiveSessions } = await import("../../rind-runtime-client/live-sessions.js");
+  const { createLiveSessions } = await import("../../runtime/dist/client/live-sessions.js");
   const liveTable = createLiveSessions({ now: () => NOW, schedule: fn => fn() });
   liveTable.event({ session_id: "r-job", event: { type: "turn_started" } });
   assert.equal(liveTable.list()[0].turn, "running");

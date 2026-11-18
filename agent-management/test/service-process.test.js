@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { matchServiceProcesses } from "../dist/service-process.js";
-import { buildId } from "../../rind-runtime-client/build-id.js";
+import { buildId } from "../../runtime/dist/client/build-id.js";
 
 const B = String.fromCharCode(92), Q = String.fromCharCode(34);
 const win = (...parts) => parts.join(B);
@@ -16,12 +16,12 @@ test("older services are matched by script and data folder from their command li
     "101\tnode " + script + " " + json({ repoRoot: win("C:", "rind") }),
     "102\tnode " + script + " " + json({ home: win("C:", "Temp", "test-home") }),
     "103\tnode " + win("C:", "other", "server.js") + " {}",
-    "104\tnode " + win("C:", "rind", "rind-runtime-client", "shared-server.js") + " " + json({ rindHome: win("C:", "Temp", "test-home") }),
+    "104\tnode " + win("C:", "rind", "runtime", "dist", "client", "shared-server.js") + " " + json({ rindHome: win("C:", "Temp", "test-home") }),
     "garbage line",
   ].join("\r\n");
   assert.deepEqual(matchServiceProcesses(list, script, config => !config.home), [101], "the default data folder has no home field");
   assert.deepEqual(matchServiceProcesses(list, script, config => config.home === win("C:", "Temp", "test-home")), [102]);
-  const runtime = win("D:", "elsewhere", "rind", "rind-runtime-client", "shared-server.js");
+  const runtime = win("D:", "elsewhere", "rind", "runtime", "dist", "client", "shared-server.js");
   assert.deepEqual(matchServiceProcesses(list, runtime, config => Boolean(config.rindHome)), [104], "the install folder may differ; the script's own path tail must match");
   assert.deepEqual(matchServiceProcesses("1 ps -axo\n2 node /opt/rind/agent-management/dist/server.js {\"home\":\"/h\"}", "/x/agent-management/dist/server.js", c => c.home === "/h"), [2]);
 });

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { startServer } from "../../agent-management/dist/ipc.js";
 import { connectClient } from "../../agent-management/dist/client.js";
 import { removeRindHome } from "./helpers/rind-home.js";
-import { canonicalDirectory } from "../../rind-runtime-client/remote/workspaces.js";
+import { canonicalDirectory } from "../../runtime/dist/remote/workspaces.js";
 
 const entry = (id, workspace, updatedAt) => ({ id, workspace_root: workspace, updated_at: updatedAt, has_user_message: true, title: id });
 

@@ -5,8 +5,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { once } from "node:events"
 import { request as httpRequest } from "node:http"
-import { DesktopGateway, RemoteWebSocket as WebSocket } from "../../rind-runtime-client/remote/server.js"
-import { workspaceFileRequest } from "../../rind-runtime-client/remote/files.js"
+import { RemoteServer } from "../../runtime/dist/remote/server.js"
+import { RemoteWebSocket as WebSocket } from "../../test/helpers/remote-websocket.mjs"
+import { workspaceFileRequest } from "../../runtime/dist/remote/files.js"
 
 test("desktop gateway authenticates, isolates sessions, revokes access and serves the web build", { timeout: 15000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "rind-gateway-test-"))
@@ -22,7 +23,7 @@ test("desktop gateway authenticates, isolates sessions, revokes access and serve
     request: async (method, params) => { requests.push([method, params]); return method === "session/switch" ? { session_id: params.session_id, workspace_root: project } : { echoed: params, method } },
     subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn) },
   }
-  const gateway = new DesktopGateway(bridge, web)
+  const gateway = new RemoteServer(bridge, web)
   t.after(async () => { await gateway.stop(); await rm(dir, { recursive: true, force: true }) })
   const state = await gateway.start({ scope: "loopback", port: 0 })
   const origin = state.addresses[0]
@@ -122,7 +123,7 @@ test("gateway files restrict writes, sizes, traversal, symlinks and overwrite", 
 
 test("failed gateway startup is retryable and never leaves credentials", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "rind-gateway-retry-"))
-  const gateway = new DesktopGateway({ initialize: async () => ({}), request: async () => ({}), subscribe: () => () => {} }, dir)
+  const gateway = new RemoteServer({ initialize: async () => ({}), request: async () => ({}), subscribe: () => () => {} }, dir)
   t.after(async () => { await gateway.stop(); await rm(dir, { recursive: true, force: true }) })
   await assert.rejects(gateway.start({ scope: "loopback", port: 0 }))
   assert.equal(gateway.state().accessCode, "")
@@ -146,7 +147,7 @@ test("gateway reclaims unresponsive devices while keeping healthy connections", 
   const root = await mkdtemp(join(tmpdir(), "rind-gateway-heartbeat-"))
   await writeFile(join(root, "index.html"), "Rind")
   t.mock.timers.enable({ apis: ["setInterval"] })
-  const gateway = new DesktopGateway({ initialize: async () => ({}), request: async () => ({}), subscribe: () => () => {} }, root)
+  const gateway = new RemoteServer({ initialize: async () => ({}), request: async () => ({}), subscribe: () => () => {} }, root)
   t.after(async () => { await gateway.stop(); t.mock.timers.reset(); await rm(root, { recursive: true, force: true }) })
   const state = await gateway.start({ scope: "loopback", port: 0 })
   const origin = state.addresses[0]
@@ -179,7 +180,7 @@ test("gateway reclaims unresponsive devices while keeping healthy connections", 
 test("stopping during gateway startup leaves no server or access code", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "rind-gateway-cancel-"))
   await writeFile(join(dir, "index.html"), "Rind")
-  const gateway = new DesktopGateway({ initialize: async () => ({}), request: async () => ({}), subscribe: () => () => {} }, dir)
+  const gateway = new RemoteServer({ initialize: async () => ({}), request: async () => ({}), subscribe: () => () => {} }, dir)
   t.after(async () => { await gateway.stop(); await rm(dir, { recursive: true, force: true }) })
   const starting = gateway.start({ scope: "loopback", port: 0 })
   const rejection = assert.rejects(starting, /cancelled/)
@@ -231,7 +232,7 @@ test("gateway proxies agents management requests, binds opened sessions, and bro
       return () => agentListeners.delete(fn)
     },
   }
-  const gateway = new DesktopGateway(bridge, web)
+  const gateway = new RemoteServer(bridge, web)
   t.after(async () => { await gateway.stop(); await rm(dir, { recursive: true, force: true }) })
   const state = await gateway.start({ scope: "loopback", port: 0 })
   const origin = state.addresses[0]

@@ -1,8 +1,4 @@
-import {
-  BUILTIN_PROVIDER_CATALOG,
-  type BuiltinProviderSpec,
-  type CatalogModelSpec,
-} from "../../../../rind-runtime-client/provider-catalog.js"
+import { BUILTIN_PROVIDER_CATALOG } from "../../../../runtime/dist/protocol/provider-catalog.js"
 import type { DesktopAuthPrompt, DesktopAuthProvider, DesktopCustomProvider } from "../../preload/types.ts"
 import { renderCustomSelectHtml } from "../custom-select.ts"
 import { authPromptDialog, authPromptField, authPromptForm, authPromptMessage, requiredElement, settingsProviders } from "./dom.ts"
@@ -10,8 +6,6 @@ import { escapeAttribute, escapeHtml } from "./html.ts"
 import { loadAvailableModels } from "./settings.ts"
 import { render } from "./shell.ts"
 import { state } from "./state.ts"
-
-export { BUILTIN_PROVIDER_CATALOG, type BuiltinProviderSpec, type CatalogModelSpec }
 
 const ALL_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 

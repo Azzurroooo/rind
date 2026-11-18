@@ -7,7 +7,8 @@ import readline from "node:readline"
 import test from "node:test"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
-import { DesktopGateway, RemoteWebSocket as WebSocket } from "../../rind-runtime-client/remote/server.js"
+import { RemoteServer } from "../../runtime/dist/remote/server.js"
+import { RemoteWebSocket as WebSocket } from "../../test/helpers/remote-websocket.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
@@ -87,7 +88,7 @@ test("real app-server supports desktop and remote browser session lifecycles", a
     await writeFile(join(webRoot, "index.html"), '<script src="/app.js"></script>')
     await writeFile(join(webRoot, "app.js"), "window.rind = true")
     let gatewaySequence = 0
-    gateway = new DesktopGateway({
+    gateway = new RemoteServer({
       initialize: async () => (await request(`g-${++gatewaySequence}`, "initialize")).result,
       request: async (method, params) => {
         const response = await request(`g-${++gatewaySequence}`, method, params)

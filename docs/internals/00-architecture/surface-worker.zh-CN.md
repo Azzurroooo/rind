@@ -19,7 +19,7 @@ flowchart TB
     end
 ~~~
 
-CLI 的 [runtime-client.js](../../../frontend-cli/lib/runtime-client.js) 启动或连接 Worker；输入缓冲、光标、TTY 渲染留在 CLI Surface。Desktop 的 Electron main 管 Worker 子进程，renderer 只能通过 preload 暴露的方法调用。Web 连接 WebSocket；Mobile 复用 Web Surface，以 Capacitor 提供配对和原生能力，手机上没有本地执行内核。
+共享的 [runtime-client.ts](../../../runtime/src/client/runtime-client.ts) 启动或连接 Worker；输入缓冲、光标、TTY 渲染留在 CLI Surface。Desktop 的 Electron main 管 Worker 子进程，renderer 只能通过 preload 暴露的方法调用。Web 连接 WebSocket；Mobile 复用 Web Surface，以 Capacitor 提供配对和原生能力，手机上没有本地执行内核。
 
 **边界的收益是职责清楚。** 换一种界面不用复制模型循环；修改工具语义也不必把业务判断散落到多个 Surface。协议响应表示请求结束，独立的事件表示执行中的变化；界面不能把两者当作两次回答。
 
@@ -33,6 +33,6 @@ CLI 的 [runtime-client.js](../../../frontend-cli/lib/runtime-client.js) 启动�
 
 这不是要求前端“没有状态”。前端必须有足够状态让输入与渲染稳定，但执行事实以 Worker 和持久记录为准。例如用户正在编辑的草稿不应因一条后台更新消失；反过来，客户端显示任务已完成，也不能替代 Worker 的任务终态。
 
-代码入口：[CLI 客户端](../../../frontend-cli/lib/runtime-client.js)、[Desktop Worker 管理](../../../desktop/src/main/runtime.ts)、[Web 客户端](../../../frontend-web/src/runtimeClient.js)。验证：[CLI 协议测试](../../../frontend-cli/test/runtime-client.test.js)、[Web 协议测试](../../../frontend-web/src/runtimeClient.test.js)。
+代码入口：[宿主客户端](../../../runtime/src/client/runtime-client.ts)、[Desktop Worker 管理](../../../desktop/src/main/runtime.ts)、[Web 客户端](../../../frontend-web/src/runtimeClient.js)。验证：[CLI 协议测试](../../../frontend-cli/test/runtime-client.test.js)、[Web 协议测试](../../../frontend-web/src/runtimeClient.test.js)。
 
 [返回系列地图](../README.zh-CN.md)

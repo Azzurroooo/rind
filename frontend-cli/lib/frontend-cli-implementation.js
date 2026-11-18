@@ -19,15 +19,15 @@ import { runAgentsPage } from "./agents-page.js";
 import { prepareManagement, observeRuntime } from "./agents-session.js";
 
 import { createCompactContextState } from "./compact-context-state.js";
-import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
-import { runHelpVersion } from "./runtime-client.js";
+import { createSharedRuntimeClient } from "../../runtime/dist/client/shared-runtime.js";
+import { runHelpVersion } from "../../runtime/dist/client/runtime-client.js";
 import {
   requireRuntimeInitialization,
   runtimeMethods,
   sessionScopedMethods,
   turnScopedMethods,
   isRuntimeEventForTurn,
-} from "./runtime-protocol.js";
+} from "../../runtime/dist/protocol/runtime-protocol.js";
 import { executeLocalSlashCommand } from "./local-slash-commands.js";
 import { applySavedTheme, isBriefMode, loadCliState, saveCliState } from "./cli-state-store.js";
 import { loadPromptHistory, savePromptHistory } from "./prompt-history-store.js";

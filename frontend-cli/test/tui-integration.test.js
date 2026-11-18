@@ -987,7 +987,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
   const { createCommandController } = await import("../lib/command-controller.js");
   const { executeLocalSlashCommand } = await import("../lib/local-slash-commands.js");
   const { choiceDialogFrame, settingsMenuText } = await import("../lib/rendering.js");
-  const { runtimeMethods: methods, sessionScopedMethods, turnScopedMethods } = await import("../lib/runtime-protocol.js");
+  const { runtimeMethods: methods, sessionScopedMethods, turnScopedMethods } = await import("../../runtime/dist/protocol/runtime-protocol.js");
 
   setBriefMode(false);
   resetTheme();
@@ -1262,7 +1262,7 @@ test("/settings two-level menu E2E in headless terminal configures brief output,
 
 test("/remote two-view menu E2E in headless virtual terminal: turn on, scan, new code, turn off, and Esc leaves zero residue", async () => {
   const { createRemoteMenuState } = await import("../lib/remote.js");
-  const { decodeTerminalQr } = await import("../../rind-runtime-client/remote/qr.js");
+  const { decodeTerminalQr } = await import("./helpers/qr-decoder.js");
   const { remoteMenuText } = await import("../lib/rendering.js");
   const { createCommandController } = await import("../lib/command-controller.js");
   const { createCliInputActions } = await import("../lib/cli-input-actions.js");

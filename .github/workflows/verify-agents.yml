@@ -2,10 +2,10 @@ name: Verify agents management, runtime, and CLI
 
 on:
   pull_request:
-    paths: ["agent-management/**", "rind-runtime-client/**", "frontend-cli/**", "runtime/**", ".github/workflows/verify-agents.yml"]
+    paths: ["agent-management/**", "frontend-cli/**", "runtime/**", ".github/workflows/verify-agents.yml"]
   push:
     branches: [main]
-    paths: ["agent-management/**", "rind-runtime-client/**", "frontend-cli/**", "runtime/**", ".github/workflows/verify-agents.yml"]
+    paths: ["agent-management/**", "frontend-cli/**", "runtime/**", ".github/workflows/verify-agents.yml"]
   workflow_dispatch:
 
 permissions:

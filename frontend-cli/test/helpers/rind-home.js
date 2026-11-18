@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { rm } from "node:fs/promises";
-import { connectSharedRuntime } from "../../../rind-runtime-client/shared-runtime.js";
+import { connectSharedRuntime } from "../../../runtime/dist/client/shared-runtime.js";
 
 // Interactive Rind windows share one Runtime per RIND_HOME. Tests that start
 // a window in a temporary home stop that Runtime before removing the folder,

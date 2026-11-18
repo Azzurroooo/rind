@@ -245,7 +245,7 @@ The service owns authorization, persistence, scheduling, workspace locks, report
 
 Reviewing and removing work goes through the same boundary. `reviewTask { taskId, decision: "accept" | "rework", feedback }` is user-only and applies once per delivery; rework is a new task (`reworkOf`) for the same owner. `deleteTeam { teamId, confirmName }` requires the exact name from the user, refuses while the team has a run, and removes the team along with its tasks and published artifacts; importing a deleted legacy team again recreates it. A conversation released while a window shows it keeps a teamless registration (`released`) so its turns and detach still work, and is dropped on detach. Only the folders an operation released are unregistered, and only when nothing live refers to them and they have no instructions or skills. The Manager's `deleteTeam` on a team with members, tasks or conversations and its `cancelRun` return `{ approval }` instead of acting; snapshots for the user carry `approvals`, which are removed as soon as their target is gone, and `resolveApproval { approvalId, approve }` (user-only) carries one out or declines it.
 
-Legacy in-Worker Team discovery, `agent_create` and in-Worker `delegate` paths are removed. The read-only importer is the sole legacy bridge. `rind-runtime-client/` is shared by the CLI and adapter so the transport is not duplicated.
+Legacy in-Worker Team discovery, `agent_create` and in-Worker `delegate` paths are removed. The read-only importer is the sole legacy bridge. `runtime/src/client/` is shared by the CLI and adapter so the transport is not duplicated.
 
 ## Distribution
 
@@ -255,7 +255,7 @@ The source repository's external Windows distribution can stage the new componen
 node agent-management/stage.mjs C:/tmp/rind-cli-stage
 ```
 
-The destination must not exist. The script builds TypeScript, copies the CLI, runtime (including `node_modules` and `skills`), service, shared runtime client and YAML dependency, and writes package metadata from `runtime/src/version.ts`. A custom Worker path can still be selected with `RIND_RUNTIME_PATH`.
+The destination must not exist. The script builds TypeScript, copies the CLI, runtime (including `node_modules` and `skills`), management service and YAML dependency, and writes package metadata from `runtime/src/version.ts`. A custom Worker path can still be selected with `RIND_RUNTIME_PATH`.
 
 ## Recovery
 
@@ -283,7 +283,7 @@ Exactly one host serves a `RIND_HOME`. Starting is serialized by a lock file who
 
 Stopping is total and never blocks the next host. A host releases its endpoint first (the next host can bind while the old Worker drains), then lets every window go, then ends the Worker with force as the last resort; `runtime/shutdown` always acknowledges, even when the Worker already died mid-shutdown, and nothing in that path can leave a half-closed host behind. A host also publishes `runtime/host.json` with its pid; a host that stops answering its own protocol is ended through that record by the next client before a fresh one starts. A Worker that dies on its own takes its host with it.
 
-The `rind-runtime-client` package owns transport and hosting; it has no Team dependency. `session/open` is a local-host operation that validates the requested workspace, creates or resumes a Session, and installs its external tool configuration. Ordinary WebSocket clients cannot inject this configuration. Session containers, model requests, workspaces, tool grants, questions and cancellation remain isolated. Shared immutable services are reused; idle execution containers are released.
+The `runtime/src/client/` layer owns transport and hosting; it has no Team dependency. `session/open` is a local-host operation that validates the requested workspace, creates or resumes a Session, and installs its external tool configuration. Ordinary WebSocket clients cannot inject this configuration. Session containers, model requests, workspaces, tool grants, questions and cancellation remain isolated. Shared immutable services are reused; idle execution containers are released.
 
 One Session has one active prompt request. Additional windows can observe it, steer/queue input through the existing Runtime controls, or answer a pending question once. Detaching a CLI does not stop the execution. Returning to it restores history and the live turn without creating a second run. A lost host produces Unconfirmed state; reopen the session to reconnect and inspect before retrying uncertain work. The Runtime itself remains a persistent background service; stopping management does not shut down unrelated direct sessions.
 

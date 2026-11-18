@@ -1,5 +1,5 @@
 // Formatters for process-like tools: bash, bash_output, task_control, delegate.
-import { classifyTaskStatus, unwrapNestedToolData } from "../../../../rind-runtime-client/tool-semantics.js";
+import { classifyTaskStatus, unwrapNestedToolData } from "../../../../runtime/dist/protocol/tool-semantics.js";
 import { CAPS, meta } from "./caps.js";
 import { firstLine, firstText, plural, singleLine, textLines } from "./parse.js";
 

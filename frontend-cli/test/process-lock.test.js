@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
-import { acquireProcessLock } from "../../rind-runtime-client/process-lock.js";
+import { acquireProcessLock } from "../../runtime/dist/client/process-lock.js";
 
 function run(script) {
   const child = spawn(process.execPath, ["--input-type=module", "-e", script], { windowsHide: true });
@@ -23,7 +23,7 @@ test("process locks serialize independent publishers and tolerate repeated relea
   const dead = run(""); await dead.done;
   await mkdir(directory);
   await writeFile(path.join(directory, `${dead.child.pid}-00000000-0000-0000-0000-000000000000`), "");
-  const module = new URL("../../rind-runtime-client/process-lock.js", import.meta.url).href;
+  const module = new URL("../../runtime/dist/client/process-lock.js", import.meta.url).href;
   const children = Array.from({ length: 8 }, () => run(`
     import { acquireProcessLock } from ${JSON.stringify(module)};
     import { appendFile } from 'node:fs/promises';

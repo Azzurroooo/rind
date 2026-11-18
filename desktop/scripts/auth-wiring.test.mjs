@@ -10,7 +10,7 @@ import ts from "typescript"
 import * as ipcError from "../src/shared/ipc-error.ts"
 import * as types from "../src/preload/types.ts"
 import { buildAuthReply, maxAuthReplyChars, parseAuthPrompt, parseAuthUpdate, validateAuthReply } from "../src/main/auth-messages.ts"
-import { isDesktopRuntimeMethod, isRemoteRuntimeMethod } from "../../rind-runtime-client/remote/policy.js"
+import { isClientRuntimeMethod, isRemoteRuntimeMethod } from "../../runtime/dist/remote/policy.js"
 
 const { runtimeMethods, sessionScopedMethods, localOnlyRuntimeMethods } = types
 
@@ -18,13 +18,13 @@ test("auth changes are available to the desktop but never to remote clients", ()
   assert.equal(isRemoteRuntimeMethod("rind/auth/list"), true, "remote clients may read provider status")
   assert.equal(localOnlyRuntimeMethods.has("rind/auth/list"), false)
   for (const method of ["rind/auth/login", "rind/auth/logout"]) {
-    assert.equal(isDesktopRuntimeMethod(method), true, `${method} must pass the desktop allowlist`)
+    assert.equal(isClientRuntimeMethod(method), true, `${method} must pass the desktop allowlist`)
     assert.equal(isRemoteRuntimeMethod(method), false, `${method} must be refused by the gateway`)
     assert.equal(localOnlyRuntimeMethods.has(method), true)
   }
   assert.equal(isRemoteRuntimeMethod("session/prompt"), true, "ordinary methods still reach remote clients")
   assert.equal(isRemoteRuntimeMethod("initialize"), false)
-  assert.equal(isDesktopRuntimeMethod(42), false)
+  assert.equal(isClientRuntimeMethod(42), false)
   assert.equal(sessionScopedMethods.has(runtimeMethods.authLogin), true, "login requires a session id")
 })
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createLineBuffer } from "../../rind-runtime-client/ndjson.js";
+import { createLineBuffer } from "../../runtime/dist/client/ndjson.js";
 
 test("NDJSON limits individual UTF-8 frames regardless of chunk boundaries", () => {
   const input = Buffer.from('中文\r\naa\nbb\n😀\n');

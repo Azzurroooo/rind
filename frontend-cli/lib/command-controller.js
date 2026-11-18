@@ -5,7 +5,7 @@ import {
   slashResultNotice,
 } from "./rendering.js";
 import { LOCAL_SLASH_COMMANDS } from "./local-slash-commands.js";
-import { runtimeMethods } from "./runtime-protocol.js";
+import { runtimeMethods } from "../../runtime/dist/protocol/runtime-protocol.js";
 
 const LOCAL_COMMANDS = Object.freeze([
   { name: "exit", description: "Exit Rind", aliases: ["quit"] },

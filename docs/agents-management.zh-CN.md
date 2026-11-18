@@ -241,7 +241,7 @@ Rind 并非单一进程：Agent、任务与共享 Runtime 在后台常驻运行�
 
 审阅交付与删除团队同样走统一边界：`reviewTask { taskId, decision: "accept" | "rework", feedback }` 仅限用户调用且每次交付只生效一次（返工会为同一负责人生成带 `reworkOf` 的新任务）；`deleteTeam { teamId, confirmName }` 要求用户输入精确团队名，存在运行项时拒绝执行，通过后清理团队、任务与已发布产物（旧版团队再次导入可重建）。释放成员时若其会话正被窗口打开，则转为无团队注册态（`released`）以保证当前轮次与脱离正常完成，脱离后自动清理；仅当目录无活跃引用且无自定义指令或 Skill 时才注销该目录注册。Manager 对非空团队调用 `deleteTeam` 或调用 `cancelRun` 时不会直接生效，而是返回 `{ approval }` 写入用户快照的 `approvals` 列表（目标消失时自动清除），由用户独占的 `resolveApproval { approvalId, approve }` 批准执行或拒绝。
 
-旧版内置于 Worker 的团队发现、`agent_create` 与内置 `delegate` 路径已彻底移除，只读导入器是唯一的旧版迁移入口。CLI 与适配器共享 `rind-runtime-client/`，避免重复实现传输层。
+旧版内置于 Worker 的团队发现、`agent_create` 与内置 `delegate` 路径已彻底移除，只读导入器是唯一的旧版迁移入口。CLI 与适配器共享 `runtime/src/client/`，避免重复实现传输层。
 
 ## 分发打包（Distribution）
 
@@ -251,7 +251,7 @@ Rind 并非单一进程：Agent、任务与共享 Runtime 在后台常驻运行�
 node agent-management/stage.mjs C:/tmp/rind-cli-stage
 ```
 
-目标目录必须尚不存在。该脚本会编译 TypeScript，复制 CLI、Runtime（含 `node_modules` 与 `skills`）、管理服务、共享客户端及 YAML 依赖，并从 `runtime/src/version.ts` 写入包版本元数据。仍可通过 `RIND_RUNTIME_PATH` 指定自定义 Worker 路径。
+目标目录必须尚不存在。该脚本会编译 TypeScript，复制 CLI、Runtime（含 `node_modules` 与 `skills`）、管理服务及 YAML 依赖，并从 `runtime/src/version.ts` 写入包版本元数据。仍可通过 `RIND_RUNTIME_PATH` 指定自定义 Worker 路径。
 
 ## 故障恢复（Recovery）
 
@@ -278,7 +278,7 @@ Agents 页面直接复用 Rind 现有的 TUI 渲染引擎、行编辑器、输�
 
 停止过程彻底且绝不阻塞下一代宿主：宿主先释放端点（让新宿主可在旧 Worker 收尾期间立即绑定），再断开所有窗口连接，最后按需强制终结 Worker；即使 Worker 在关闭途中提前退出，`runtime/shutdown` 也必定返回确认，绝不留下半关闭僵尸宿主。宿主同时在 `runtime/host.json` 记录自身 PID：若宿主不再响应协议，下一个客户端会先据此终结失响应进程再启动新实例；若 Worker 意外退出，其宿主也会随之退出。
 
-`rind-runtime-client` 包独立负责传输与宿主托管，不含任何 Team 依赖。`session/open` 作为本地宿主操作校验目标工作区、创建或恢复 Session 并挂载外部工具配置（普通远程 WebSocket 客户端无权注入外部工具）。各 Session 的容器、模型请求、工作区、工具授权、提问卡与取消信号彼此隔离；不可变基础服务跨会话共享，空闲执行容器自动释放。
+`runtime/src/client/` 模块独立负责传输与宿主托管，不含任何 Team 依赖。`session/open` 作为本地宿主操作校验目标工作区、创建或恢复 Session 并挂载外部工具配置（普通远程 WebSocket 客户端无权注入外部工具）。各 Session 的容器、模型请求、工作区、工具授权、提问卡与取消信号彼此隔离；不可变基础服务跨会话共享，空闲执行容器自动释放。
 
 同一 Session 同时至多运行一个活跃轮次；多个窗口可同步观察、通过现有控制协议追加 steer/follow-up 输入或抢答待处理提问（仅首次回答生效）。关闭或脱离 CLI 窗口不会停止执行，重新接入即可恢复完整历史与实时轮次而不会产生重复运行。宿主失联会标记为 Unconfirmed，重新打开会话即可重连核查现场后再决定是否重试。共享 Runtime 本身是常驻后台服务，停止管理服务不会误关无关的独立会话。
 

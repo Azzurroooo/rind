@@ -8,7 +8,7 @@
 import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { monitorEventLoopDelay } from "node:perf_hooks";
-import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
+import { resolveRindHome } from "../../runtime/dist/client/local-files.js";
 import { releaseInput, takeInput } from "./tui/console-input.js";
 
 const KEEP_LOGS = 20;

@@ -31,7 +31,7 @@ import {
   rejectsPromptCacheKey,
   separateToolImages,
 } from "../dist/infrastructure/llm/sse.js";
-import { BUILTIN_PROVIDER_CATALOG } from "../../rind-runtime-client/provider-catalog.js";
+import { BUILTIN_PROVIDER_CATALOG } from "../dist/protocol/provider-catalog.js";
 
 async function isLoopbackPortFree(port, host = "127.0.0.1") {
   return await new Promise(resolve => {

@@ -19,7 +19,7 @@ flowchart TB
     end
 ~~~
 
-The CLI's [runtime-client.js](../../../frontend-cli/lib/runtime-client.js) starts or connects to the Worker; input buffering, the cursor, and TTY rendering all stay in the CLI Surface. On the desktop, Electron main owns the Worker subprocess, and the renderer can only call through the methods exposed by preload. Web connects over WebSocket; Mobile reuses the Web Surface, with Capacitor providing pairing and native capabilities, so there is no local execution kernel on the phone.
+The shared [runtime-client.ts](../../../runtime/src/client/runtime-client.ts) starts or connects to the Worker; input buffering, the cursor, and TTY rendering all stay in the CLI Surface. On the desktop, Electron main owns the Worker subprocess, and the renderer can only call through the methods exposed by preload. Web connects over WebSocket; Mobile reuses the Web Surface, with Capacitor providing pairing and native capabilities, so there is no local execution kernel on the phone.
 
 **The benefit of the boundary is clear responsibilities.** Switching to a different interface does not require copying the model loop; changing tool semantics does not require scattering business decisions across multiple Surfaces. A protocol response marks the end of a request, while independent events represent changes during execution; an interface must not treat the two as two separate answers.
 
@@ -33,6 +33,6 @@ The CLI's [runtime-client.js](../../../frontend-cli/lib/runtime-client.js) start
 
 This does not require the frontend to be "stateless". The frontend must hold enough state to keep input and rendering stable, but execution facts are governed by the Worker and the persistent record. For example, a draft the user is editing should not disappear because of one background update; conversely, a client showing a task as completed cannot replace the Worker's task end state.
 
-Code entry points: [CLI client](../../../frontend-cli/lib/runtime-client.js), [Desktop Worker management](../../../desktop/src/main/runtime.ts), [Web client](../../../frontend-web/src/runtimeClient.js). Verification: [CLI protocol tests](../../../frontend-cli/test/runtime-client.test.js), [Web protocol tests](../../../frontend-web/src/runtimeClient.test.js).
+Code entry points: [Host runtime client](../../../runtime/src/client/runtime-client.ts), [Desktop Worker management](../../../desktop/src/main/runtime.ts), [Web client](../../../frontend-web/src/runtimeClient.js). Verification: [CLI protocol tests](../../../frontend-cli/test/runtime-client.test.js), [Web protocol tests](../../../frontend-web/src/runtimeClient.test.js).
 
 [Back to the series map](../README.md)

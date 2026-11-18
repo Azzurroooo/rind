@@ -13,7 +13,7 @@ import {
   runtimeEventType,
   runtimeRequestId,
   isRuntimeEventForTurn,
-} from "../lib/runtime-protocol.js";
+} from "../../runtime/dist/protocol/runtime-protocol.js";
 
 test("runtime requests use request_id", () => {
   assert.deepEqual(createRuntimeRequest(4, runtimeMethods.sessionPrompt, { input: "hello" }), {

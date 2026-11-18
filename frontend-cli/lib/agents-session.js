@@ -3,9 +3,9 @@ import { realpath, readFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { managementClient, selectRecord } from "./agents-client.js";
-import { connectSharedRuntime, sharedRuntimePaths } from "../../rind-runtime-client/shared-runtime.js";
-import { probeEndpoint } from "../../rind-runtime-client/endpoint.js";
-import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
+import { connectSharedRuntime, sharedRuntimePaths } from "../../runtime/dist/client/shared-runtime.js";
+import { probeEndpoint } from "../../runtime/dist/client/endpoint.js";
+import { resolveRindHome } from "../../runtime/dist/client/local-files.js";
 
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 

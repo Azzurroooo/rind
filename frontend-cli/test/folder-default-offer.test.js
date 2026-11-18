@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 import { createCliRuntimeController } from "../lib/cli-runtime-controller.js";
 import { createCliState } from "../lib/cli-state.js";
-import { runtimeMethods as methods } from "../lib/runtime-protocol.js";
+import { runtimeMethods as methods } from "../../runtime/dist/protocol/runtime-protocol.js";
 
 const MODELS = [
   { provider_id: "deepseek", id: "deepseek-flash", reasoning_efforts: ["low", "high", "max"] },
@@ -30,7 +30,7 @@ function harness({ modelScope = "session", effortScope = "session" } = {}) {
     },
   };
   const controller = createCliRuntimeController({
-    client, methods, sessionScopedMethods: new Set([methods.modelSet, methods.modelEffortSet]), turnScopedMethods: new Set(),
+    client, methods, sessionScopedMethods: new Set([methods.modelSet, methods.modelEffort]), turnScopedMethods: new Set(),
     requireInitialization: value => value, state, getCommands: () => ({ normalizeCommands: () => [], localCommands: () => [] }), getTaskMonitor: () => null, getCompactContextState: () => ({ clear() {} }),
     askModelMenu: async () => ({ providerId: "deepseek", modelId: "deepseek-v4-pro", scope: modelScope }),
     askEffortMenu: async () => (effortScope === "session" ? "high" : { effort: "high", scope: effortScope }),

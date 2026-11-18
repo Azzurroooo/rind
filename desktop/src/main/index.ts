@@ -8,14 +8,19 @@ import { fileURLToPath } from "node:url"
 import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopTheme, DesktopUpdateState, GatewayOptions, GatewayState, RuntimeEvent, RuntimeMethod, RuntimeSnapshot } from "../preload/types"
 import { asObject, readJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
-import { listProjectFiles, previewProjectFile, workspaceFileRequest } from "../../../rind-runtime-client/remote/files.js"
-import { createRemoteHost, type RemoteHost } from "../../../rind-runtime-client/remote/host.js"
+import { listProjectFiles, previewProjectFile, workspaceFileRequest } from "../../../runtime/dist/remote/files.js"
+import {
+  createRemoteHost,
+  loadRuntimeSettings as loadSharedRuntimeSettings,
+  resolveRindPaths,
+  saveRuntimeSettings as saveSharedRuntimeSettings,
+  type RemoteHost,
+} from "../../../runtime/dist/remote/host.js"
 import { DesktopProjectStore, samePath } from "./projects"
-import { loadRuntimeSettings as loadSharedRuntimeSettings, resolveRindPaths, saveRuntimeSettings as saveSharedRuntimeSettings } from "./runtime-settings"
 import { readRindVersion } from "./version"
 import { DesktopUpdater } from "./updater"
 import { wrapRuntimeIpcError } from "../shared/ipc-error"
-import { isDesktopRuntimeMethod } from "../../../rind-runtime-client/remote/policy.js"
+import { isClientRuntimeMethod } from "../../../runtime/dist/remote/policy.js"
 import {
   getRuntimeSnapshot,
   initializeRuntime,
@@ -325,7 +330,7 @@ function registerIpc() {
   ipcMain.handle("runtime-initialize", () => initializeRuntime())
   ipcMain.handle("runtime-shutdown", () => shutdownRuntime())
   ipcMain.handle("runtime-request", async (_event, method: unknown, params: unknown) => {
-    if (!isDesktopRuntimeMethod(method)) {
+    if (!isClientRuntimeMethod(method)) {
       throw new Error("Runtime method is not available to the desktop client.")
     }
     let safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}

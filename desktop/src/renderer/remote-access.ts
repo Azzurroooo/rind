@@ -1,5 +1,5 @@
 import type { GatewayState } from "../preload/types"
-import { renderSvgQrDataUrl } from "../../../rind-runtime-client/remote/qr.js"
+import { renderSvgQrDataUrl } from "../../../runtime/dist/remote/qr.js"
 import { bindCustomSelects, renderCustomSelectHtml, setCustomSelectOptions } from "./custom-select.ts"
 
 export function remoteAccessMarkup() {

@@ -4,7 +4,7 @@ import { createModelMenuState } from "./model-menu-state.js";
 import { createSettingsMenuState } from "./settings-menu-state.js";
 import { createQuestionMenuState } from "./question-menu-state.js";
 import { createSlashMenuState } from "./slash-menu-state.js";
-import { REASONING_EFFORTS, runtimeMethods } from "./runtime-protocol.js";
+import { REASONING_EFFORTS, runtimeMethods } from "../../runtime/dist/protocol/runtime-protocol.js";
 import { parseTerminalKey } from "./terminal-key.js";
 import {
   answerPromptText,
@@ -607,7 +607,7 @@ export function createCliInputActions({
       const next = levels[(index + 1 + levels.length) % levels.length];
       // Only this conversation, never a folder default. Before the first
       // message the window keeps it for the conversation it creates.
-      if (state.session.info.session_id) await request(runtimeMethods.modelEffortSet, { reasoning_effort: next });
+      if (state.session.info.session_id) await request(runtimeMethods.modelEffort, { reasoning_effort: next });
       state.session.info = { ...state.session.info, reasoning_effort: next };
       output.notify?.(`Reasoning effort: ${next}`);
     } catch (error) {

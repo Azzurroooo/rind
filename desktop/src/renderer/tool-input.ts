@@ -1,6 +1,6 @@
 // Parses the streamed argument text of a tool call (tool_input_delta) so a
 // row can show its target before the arguments finish arriving (spec 5.3).
-import { partialJsonStrings } from "../../../rind-runtime-client/tool-semantics.js"
+import { partialJsonStrings } from "../../../runtime/dist/protocol/tool-semantics.js"
 
 export const maxInputChars = 60_000
 

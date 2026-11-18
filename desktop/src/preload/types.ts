@@ -16,133 +16,34 @@ export type RuntimeEvent = {
   generation?: number
 }
 
-export const runtimeProtocolVersion = "2"
+import {
+  clientRuntimeMethods as runtimeMethods,
+  localOnlyRuntimeMethods,
+  runtimeProtocolVersion,
+  sessionScopedMethods,
+  turnScopedMethods,
+  type ClientRuntimeMethod as RuntimeMethod,
+  type RuntimeErrorObject as RuntimeError,
+  type RuntimeEventEnvelope,
+  type RuntimeLifecycleMethod,
+  type RuntimeRequestEnvelope,
+  type RuntimeResponseEnvelope,
+  type RuntimeServerMethod,
+} from "../../../runtime/dist/protocol/runtime-protocol.js"
 
-export const runtimeMethods = {
-  sessionList: "session/list",
-  sessionSwitch: "session/switch",
-  sessionFork: "session/fork",
-  sessionSubscribe: "session/subscribe",
-  contextInspect: "rind/context/inspect",
-  usageSummary: "rind/usage/summary",
-  sessionNew: "session/new",
-  sessionCreate: "session/create",
-  sessionOpen: "session/open",
-  sessionDeliver: "rind/session/deliver",
-  sessionReplay: "session/replay",
-  sessionPrompt: "session/prompt",
-  sessionDelete: "session/delete",
-  sessionSteer: "rind/session/steer",
-  sessionFollowUp: "rind/session/follow_up",
-  sessionPromoteFollowUp: "rind/session/promote_follow_up",
-  sessionUnsteer: "rind/session/unsteer",
-  sessionDequeueFollowUp: "rind/session/dequeue_follow_up",
-  sessionCancel: "session/cancel",
-  userQuestionRespond: "rind/user-question/respond",
-  modelList: "model/list",
-  modelSet: "model/set",
-  modelEffort: "model/effort",
-  folderDefaultsGet: "rind/folder_defaults/get",
-  folderDefaultsSet: "rind/folder_defaults/set",
-  folderDefaultsUnset: "rind/folder_defaults/unset",
-  folderDefaultsApply: "rind/folder_defaults/apply",
-  folderDefaultsResolve: "rind/folder_defaults/resolve",
-  fileRead: "file/read",
-  fileList: "file/list",
-  fileWrite: "file/write",
-  sessionCompact: "rind/session/compact",
-  commandExecute: "rind/command/execute",
-  backgroundList: "rind/background/list",
-  backgroundOutput: "rind/background/output",
-  taskList: "rind/task/list",
-  taskRead: "rind/task/read",
-  taskWait: "rind/task/wait",
-  taskCancel: "rind/task/cancel",
-  taskReleaseWait: "rind/task/release_wait",
-  goalGet: "rind/goal/get",
-  goalSet: "rind/goal/set",
-  goalStatus: "rind/goal/status",
-  goalClear: "rind/goal/clear",
-  authList: "rind/auth/list",
-  authLogin: "rind/auth/login",
-  authLogout: "rind/auth/logout",
-} as const
-
-export type RuntimeMethod = typeof runtimeMethods[keyof typeof runtimeMethods]
-export type RuntimeLifecycleMethod = "initialize" | "shutdown"
-export type RuntimeServerMethod = RuntimeMethod | RuntimeLifecycleMethod
-
-export const sessionScopedMethods = new Set<RuntimeMethod>([
-  runtimeMethods.sessionPrompt,
-  runtimeMethods.sessionReplay,
-  runtimeMethods.sessionCancel,
-  runtimeMethods.sessionDelete,
-  runtimeMethods.sessionDeliver,
-  runtimeMethods.modelSet,
-  runtimeMethods.modelEffort,
-  runtimeMethods.folderDefaultsApply,
-  runtimeMethods.sessionSteer,
-  runtimeMethods.sessionFollowUp,
-  runtimeMethods.sessionPromoteFollowUp,
-  runtimeMethods.sessionUnsteer,
-  runtimeMethods.sessionDequeueFollowUp,
-  runtimeMethods.sessionCompact,
-  runtimeMethods.commandExecute,
-  runtimeMethods.userQuestionRespond,
-  runtimeMethods.backgroundList,
-  runtimeMethods.backgroundOutput,
-  runtimeMethods.taskList,
-  runtimeMethods.taskRead,
-  runtimeMethods.taskWait,
-  runtimeMethods.taskCancel,
-  runtimeMethods.taskReleaseWait,
-  runtimeMethods.goalGet,
-  runtimeMethods.goalSet,
-  runtimeMethods.goalStatus,
-  runtimeMethods.goalClear,
-  runtimeMethods.authLogin,
-])
-
-/** Methods that need the desktop window (interactive auth prompts, local
- *  credential storage). The remote gateway must never forward them. */
-export const localOnlyRuntimeMethods = new Set<RuntimeMethod>([
-  runtimeMethods.authLogin,
-  runtimeMethods.authLogout,
-  runtimeMethods.sessionOpen,
-])
-
-export const turnScopedMethods = new Set<RuntimeMethod>([
-  runtimeMethods.sessionCancel,
-  runtimeMethods.sessionSteer,
-])
-
-export type RuntimeRequestEnvelope = {
-  kind: "request"
-  request_id: string | number
-  method: RuntimeServerMethod
-  params: Record<string, unknown>
-}
-
-export type RuntimeError = {
-  type: string
-  message: string
-}
-
-export type RuntimeResponseEnvelope = {
-  kind: "response"
-  request_id: string | number
-  result?: unknown
-  error?: RuntimeError
-}
-
-export type RuntimeEventEnvelope = {
-  kind: "event"
-  method: "session/update"
-  sequence: number
-  durability: "durable" | "incremental"
-  session_id: string
-  turn_id: string
-  event: Record<string, unknown>
+export {
+  localOnlyRuntimeMethods,
+  runtimeMethods,
+  runtimeProtocolVersion,
+  sessionScopedMethods,
+  turnScopedMethods,
+  type RuntimeError,
+  type RuntimeEventEnvelope,
+  type RuntimeLifecycleMethod,
+  type RuntimeMethod,
+  type RuntimeRequestEnvelope,
+  type RuntimeResponseEnvelope,
+  type RuntimeServerMethod,
 }
 
 export type DesktopProviderAuthDetail = {

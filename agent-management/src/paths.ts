@@ -2,7 +2,7 @@ import path from "node:path";
 import { realpath, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { requireValue } from "./model.js";
-import { privateDirectory, resolveRindHome } from "../../rind-runtime-client/local-files.js";
+import { privateDirectory, resolveRindHome } from "../../runtime/dist/client/local-files.js";
 
 export function managementPaths(rindHome = process.env.RIND_HOME) {
   const root = path.join(resolveRindHome(rindHome), "agents-management");

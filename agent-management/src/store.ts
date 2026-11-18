@@ -2,7 +2,7 @@ import { open, readFile, rename, truncate } from "node:fs/promises";
 import path from "node:path";
 import { ManagementError, emptyState, requireValue, type State } from "./model.js";
 import { privateDirectory } from "./paths.js";
-import { acquireProcessLock } from "../../rind-runtime-client/process-lock.js";
+import { acquireProcessLock } from "../../runtime/dist/client/process-lock.js";
 
 type Changes = Partial<Record<Exclude<keyof State, "seq">, Record<string, unknown>>>;
 interface Entry { seq: number; changes: Changes }

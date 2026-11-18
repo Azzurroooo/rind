@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { removeRindHome } from "./helpers/rind-home.js";
-import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { connectSharedRuntime } from "../../runtime/dist/client/shared-runtime.js";
 import { managerWorkspace, openAgentChat } from "../lib/agents-commands.js";
 
 const rindBin = fileURLToPath(new URL("../bin/rind.js", import.meta.url));

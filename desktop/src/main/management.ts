@@ -1,10 +1,10 @@
-import { resolveRindHome } from "../../../rind-runtime-client/local-files.js"
+import { resolveRindHome } from "../../../runtime/dist/client/local-files.js"
 import {
   createManagementBridge,
   emptyAgentsSnapshot,
   type AgentsSnapshot,
   type ManagementStatePayload,
-} from "../../../rind-runtime-client/remote/management.js"
+} from "../../../runtime/dist/remote/management.js"
 import type { RuntimeEvent, RuntimeMethod } from "../preload/types.ts"
 import {
   getRuntimeSnapshot,

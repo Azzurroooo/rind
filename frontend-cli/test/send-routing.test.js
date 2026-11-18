@@ -5,8 +5,8 @@ import path from "node:path";
 import os from "node:os";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
-import { startSharedServer } from "../../rind-runtime-client/shared-server.js";
-import { connectSharedRuntime, createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
+import { startSharedServer } from "../../runtime/dist/client/shared-server.js";
+import { connectSharedRuntime, createSharedRuntimeClient } from "../../runtime/dist/client/shared-runtime.js";
 import { runSend } from "../lib/send.js";
 
 test("rind send reaches the newest window showing a session, or a turn that keeps running", { timeout: 40000 }, async t => {

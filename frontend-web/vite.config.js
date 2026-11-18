@@ -28,8 +28,8 @@ function rindAgentsDevPlugin() {
 
       function loadBridge() {
         if (!bridgePromise) {
-          const hostUrl = pathToFileURL(join(repoRoot, "rind-runtime-client", "remote", "host.js")).href;
-          const mgmtUrl = pathToFileURL(join(repoRoot, "rind-runtime-client", "remote", "management.js")).href;
+          const hostUrl = pathToFileURL(join(repoRoot, "runtime", "dist", "remote", "host.js")).href;
+          const mgmtUrl = pathToFileURL(join(repoRoot, "runtime", "dist", "remote", "management.js")).href;
           bridgePromise = Promise.all([import(hostUrl), import(mgmtUrl)])
             .then(([host, mgmt]) => {
               const management = mgmt.createManagementBridge({
@@ -139,6 +139,14 @@ function rindAgentsDevPlugin() {
 
 export default defineConfig({
   plugins: [react(), rindAgentsDevPlugin()],
+  resolve: {
+    alias: [
+      {
+        find: /^.*[/\\]runtime[/\\]dist[/\\]protocol[/\\]([^/\\]+)\.js$/,
+        replacement: `${resolve(repoRoot, "runtime/src/protocol").replace(/\\/g, "/")}/$1.ts`,
+      },
+    ],
+  },
   server: {
     host: "0.0.0.0",
     port: 5173,

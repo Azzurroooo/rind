@@ -1,4 +1,4 @@
-import { runtimeMethods } from "./runtime-protocol.js";
+import { runtimeMethods } from "../../runtime/dist/protocol/runtime-protocol.js";
 
 export function createTurnController({
   request,

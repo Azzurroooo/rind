@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium, expect } from "@playwright/test";
 import { preview } from "vite";
-import { DesktopGateway, RemoteWebSocket as WebSocket } from "../../rind-runtime-client/remote/server.js";
+import { RemoteServer } from "../../runtime/dist/remote/server.js";
+import { RemoteWebSocket as WebSocket } from "../../test/helpers/remote-websocket.mjs";
 
 const root = await mkdtemp(join(tmpdir(), "rind-mobile-smoke-"));
 const listeners = new Set(), requests = [], sockets = new Set(), errors = [];
@@ -41,7 +42,7 @@ const bridge = {
     return {};
   },
 };
-const gateway = new DesktopGateway(bridge, resolve("dist"));
+const gateway = new RemoteServer(bridge, resolve("dist"));
 let server, browser;
 try {
   const state = await gateway.start({ scope: "loopback", port: 0 });

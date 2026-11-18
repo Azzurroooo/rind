@@ -13,10 +13,10 @@ import { managementBuildId } from "./build.js";
 import { activeRun } from "./model.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { connectSharedRuntime, stopSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
-import { listenOwned, EndpointOccupiedError } from "../../rind-runtime-client/endpoint.js";
-import { recordedNonce } from "../../rind-runtime-client/local-files.js";
-import { createLineBuffer } from "../../rind-runtime-client/ndjson.js";
+import { connectSharedRuntime, stopSharedRuntime } from "../../runtime/dist/client/shared-runtime.js";
+import { listenOwned, EndpointOccupiedError } from "../../runtime/dist/client/endpoint.js";
+import { recordedNonce } from "../../runtime/dist/client/local-files.js";
+import { createLineBuffer } from "../../runtime/dist/client/ndjson.js";
 import { canDelegate, managerInstructions, memberInstructions, toolsFor } from "./tools.js";
 
 const RUNTIME_START_MS = 30000;

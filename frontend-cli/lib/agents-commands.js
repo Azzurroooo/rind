@@ -6,7 +6,7 @@ import { createHandoff, HANDOFF_ENV } from "./agents-handoff.js";
 import { applySavedTheme } from "./cli-state-store.js";
 import { terminalKeyboard, TERMINAL_KEYBOARD_ENV } from "./tui/tui.js";
 import { releaseInput, takeInput } from "./tui/console-input.js";
-import { privateDirectory, resolveRindHome } from "../../rind-runtime-client/local-files.js";
+import { privateDirectory, resolveRindHome } from "../../runtime/dist/client/local-files.js";
 
 export const agentsHelp = [
   "Usage: rind agents [list | stop | resolve | import] [--json]",
@@ -157,7 +157,7 @@ async function stopBackground(all, launch, json) {
 // stopping must reach it too, under the same rule: running turns need --all.
 async function stopRuntimeAlone(all, launch, json) {
   const { stopManagementService } = await import("../../agent-management/dist/client.js");
-  const { connectSharedRuntime, stopSharedRuntime } = await import("../../rind-runtime-client/shared-runtime.js");
+  const { connectSharedRuntime, stopSharedRuntime } = await import("../../runtime/dist/client/shared-runtime.js");
   const stoppedService = all ? await stopManagementService({ home: launch?.home }).catch(() => false) : false;
   const host = await connectSharedRuntime({ rindHome: launch?.home, start: false }).catch(() => null);
   if (!host) {
@@ -194,7 +194,7 @@ async function stopLegacy(client, all, launch) {
   const result = await endLegacyService(client, launch.home, { force: all });
   if (!result.ended && result.working) throw Object.assign(new Error(result.working + (result.working === 1 ? " agent is" : " agents are") + " still working."), { code: "SERVICE_BUSY", details: { working: result.working } });
   if (!result.ended) throw new Error("A background service from an older Rind is running but its process could not be found.");
-  const { stopSharedRuntime } = await import("../../rind-runtime-client/shared-runtime.js");
+  const { stopSharedRuntime } = await import("../../runtime/dist/client/shared-runtime.js");
   await stopSharedRuntime({ rindHome: launch.home });
   return { stopping: true, working: result.working };
 }

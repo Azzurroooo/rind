@@ -1,4 +1,4 @@
-import { parseStructuredToolPayload } from "../../../rind-runtime-client/tool-semantics.js"
+import { parseStructuredToolPayload } from "../../../runtime/dist/protocol/tool-semantics.js"
 import type { RuntimeEvent } from "../preload/types"
 import { appendInput, partialArguments } from "./tool-input.ts"
 import {

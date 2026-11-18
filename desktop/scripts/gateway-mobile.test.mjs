@@ -4,12 +4,13 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
-import { DesktopGateway, RemoteWebSocket as WebSocket } from "../../rind-runtime-client/remote/server.js";
+import { RemoteServer } from "../../runtime/dist/remote/server.js";
+import { RemoteWebSocket as WebSocket } from "../../test/helpers/remote-websocket.mjs";
 
 test("packaged mobile origins require one-time tickets and share revocation", async (t) => {
   const web = await mkdtemp(join(tmpdir(), "rind-mobile-gateway-"));
   await writeFile(join(web, "index.html"), "Rind");
-  const gateway = new DesktopGateway({ initialize: async () => ({}), request: async () => ({}), subscribe: () => () => {} }, web);
+  const gateway = new RemoteServer({ initialize: async () => ({}), request: async () => ({}), subscribe: () => () => {} }, web);
   t.after(async () => { await gateway.stop(); await rm(web, { recursive: true, force: true }); });
   const state = await gateway.start({ scope: "loopback", port: 0 });
   const base = state.addresses[0];
@@ -50,7 +51,7 @@ test("remote mobile clients sync existing Agents & Teams via initialize, agents/
     },
   };
 
-  const gateway = new DesktopGateway(
+  const gateway = new RemoteServer(
     {
       initialize: async () => ({ session_id: "sess-1", workspace_root: "E:/teams/core" }),
       request: async () => ({}),
@@ -109,13 +110,6 @@ test("remote mobile clients sync existing Agents & Teams via initialize, agents/
   const getStateResult = await rpc("req-get", "agents/get");
   assert.equal(getStateResult.snapshot.teams.length, 1);
   assert.equal(getStateResult.snapshot.teams[0].id, "team-1");
-
-  // Both `{ method, params }` (web client) and `{ operation, params }` are accepted
-  const byMethodResult = await rpc("req-list-1", "agents/request", {
-    method: "listSessions",
-    params: { teamId: "team-1" },
-  });
-  assert.equal(byMethodResult.teamId, "team-1");
 
   const byOperationResult = await rpc("req-list-2", "agents/request", {
     operation: "listSessions",

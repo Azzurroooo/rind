@@ -8,7 +8,7 @@ import net from "node:net";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { listenOwned } from "../../rind-runtime-client/endpoint.js";
+import { listenOwned } from "../../runtime/dist/client/endpoint.js";
 
 test("a live owner refuses a second server", { timeout: 30000 }, async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "rind-endpoint-"));

@@ -8,9 +8,9 @@ import path from "node:path";
 import { managementPaths, privateDirectory, resolveRindHome, type Paths } from "./paths.js";
 import { managementBuildId } from "./build.js";
 import { findServiceProcesses } from "./service-process.js";
-import { probeEndpoint } from "../../rind-runtime-client/endpoint.js";
-import { createLineBuffer } from "../../rind-runtime-client/ndjson.js";
-import { acquireProcessLock } from "../../rind-runtime-client/process-lock.js";
+import { probeEndpoint } from "../../runtime/dist/client/endpoint.js";
+import { createLineBuffer } from "../../runtime/dist/client/ndjson.js";
+import { acquireProcessLock } from "../../runtime/dist/client/process-lock.js";
 
 const SPAWN_POLL_DELAYS_MS = [15, 20, 30, 50, 80];
 

@@ -3,8 +3,8 @@
 // is edited by hand.
 import path from "node:path";
 
-import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
-import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
+import { createSharedRuntimeClient } from "../../runtime/dist/client/shared-runtime.js";
+import { requireRuntimeInitialization, runtimeMethods } from "../../runtime/dist/protocol/runtime-protocol.js";
 
 export const configHelp = [
   "Usage: rind config set model <model> --folder [dir] [--connection <id>]",

@@ -13,90 +13,74 @@ import {
   normalizeReasoningEffort,
   saveSettings,
 } from "../infrastructure/settings.js";
+import {
+  type RequestId,
+  type RuntimeErrorObject as ErrorObject,
+  type RuntimeEventEnvelope as EventEnvelope,
+  type RuntimeResponseEnvelope as ResponseEnvelope,
+  runtimeMethods,
+  runtimeProtocolVersion,
+} from "../protocol/runtime-protocol.js";
 
-export const PROTOCOL_VERSION = "2";
-export type RequestId = string | number;
-
-export interface ErrorObject {
-  type: string;
-  message: string;
-}
-
-export interface ResponseEnvelope {
-  kind: "response";
-  request_id: RequestId | null;
-  result?: unknown;
-  error?: ErrorObject;
-}
-
-export interface EventEnvelope {
-  kind: "event";
-  method: "session/update";
-  sequence: number;
-  durability: "durable" | "incremental";
-  session_id: string;
-  turn_id: string;
-  event: Record<string, unknown>;
-}
+export const PROTOCOL_VERSION = runtimeProtocolVersion;
+export type { RequestId, ErrorObject, ResponseEnvelope, EventEnvelope };
 
 export const RuntimeMethod = {
-  INITIALIZE: "initialize",
-  SHUTDOWN: "shutdown",
-  SESSION_NEW: "session/new",
-  SESSION_OPEN: "session/open",
-  SESSION_LIST: "session/list",
-  SESSION_SWITCH: "session/switch",
-  SESSION_FORK: "session/fork",
-  SESSION_REPLAY: "session/replay",
-  SESSION_PROMPT: "session/prompt",
-  SESSION_CANCEL: "session/cancel",
-  SESSION_SUBSCRIBE: "session/subscribe",
+  INITIALIZE: runtimeMethods.initialize,
+  SHUTDOWN: runtimeMethods.shutdown,
+  SESSION_NEW: runtimeMethods.sessionNew,
+  SESSION_OPEN: runtimeMethods.sessionOpen,
+  SESSION_LIST: runtimeMethods.sessionList,
+  SESSION_SWITCH: runtimeMethods.sessionSwitch,
+  SESSION_FORK: runtimeMethods.sessionFork,
+  SESSION_REPLAY: runtimeMethods.sessionReplay,
+  SESSION_PROMPT: runtimeMethods.sessionPrompt,
+  SESSION_CANCEL: runtimeMethods.sessionCancel,
+  SESSION_SUBSCRIBE: runtimeMethods.sessionSubscribe,
   SESSION_UNSUBSCRIBE: "session/unsubscribe",
-  SESSION_DELETE: "session/delete",
+  SESSION_DELETE: runtimeMethods.sessionDelete,
   PING: "ping",
-  FILE_LIST: "file/list",
-  FILE_READ: "file/read",
-  FILE_WRITE: "file/write",
-  MODEL_LIST: "model/list",
-  MODEL_SET: "model/set",
-  MODEL_EFFORT: "model/effort",
-  RIND_AUTH_LIST: "rind/auth/list",
-  RIND_AUTH_LOGIN: "rind/auth/login",
-  RIND_AUTH_LOGOUT: "rind/auth/logout",
-  RIND_AUTH_PROMPT: "rind/auth/prompt",
-  RIND_AUTH_UPDATE: "rind/auth/update",
-  RIND_SESSION_STEER: "rind/session/steer",
-  RIND_SESSION_FOLLOW_UP: "rind/session/follow_up",
-  RIND_SESSION_DELIVER: "rind/session/deliver",
-  RIND_SESSION_PROMOTE_FOLLOW_UP: "rind/session/promote_follow_up",
-  RIND_SESSION_UNSTEER: "rind/session/unsteer",
-  RIND_SESSION_DEQUEUE_FOLLOW_UP: "rind/session/dequeue_follow_up",
-  RIND_SESSION_COMPACT: "rind/session/compact",
-  SESSION_CREATE: "session/create",
-  RIND_COMMAND_EXECUTE: "rind/command/execute",
-  RIND_USER_QUESTION_RESPOND: "rind/user-question/respond",
-  RIND_BACKGROUND_LIST: "rind/background/list",
-  RIND_BACKGROUND_OUTPUT: "rind/background/output",
-  RIND_TASK_LIST: "rind/task/list",
-  RIND_TASK_READ: "rind/task/read",
-  RIND_TASK_WAIT: "rind/task/wait",
-  RIND_TASK_CANCEL: "rind/task/cancel",
-  RIND_TASK_RELEASE_WAIT: "rind/task/release_wait",
-  RIND_GOAL_GET: "rind/goal/get",
-  RIND_GOAL_SET: "rind/goal/set",
-  RIND_GOAL_STATUS: "rind/goal/status",
-  RIND_GOAL_CLEAR: "rind/goal/clear",
-  RIND_CONTEXT_INSPECT: "rind/context/inspect",
-  RIND_USAGE_SUMMARY: "rind/usage/summary",
-  RIND_FOLDER_DEFAULTS_GET: "rind/folder_defaults/get",
-  RIND_FOLDER_DEFAULTS_SET: "rind/folder_defaults/set",
-  RIND_FOLDER_DEFAULTS_UNSET: "rind/folder_defaults/unset",
-  RIND_FOLDER_DEFAULTS_APPLY: "rind/folder_defaults/apply",
-  RIND_FOLDER_DEFAULTS_RESOLVE: "rind/folder_defaults/resolve",
+  FILE_LIST: runtimeMethods.fileList,
+  FILE_READ: runtimeMethods.fileRead,
+  FILE_WRITE: runtimeMethods.fileWrite,
+  MODEL_LIST: runtimeMethods.modelList,
+  MODEL_SET: runtimeMethods.modelSet,
+  MODEL_EFFORT: runtimeMethods.modelEffort,
+  RIND_AUTH_LIST: runtimeMethods.authList,
+  RIND_AUTH_LOGIN: runtimeMethods.authLogin,
+  RIND_AUTH_LOGOUT: runtimeMethods.authLogout,
+  RIND_AUTH_PROMPT: runtimeMethods.authPrompt,
+  RIND_AUTH_UPDATE: runtimeMethods.authUpdate,
+  RIND_SESSION_STEER: runtimeMethods.sessionSteer,
+  RIND_SESSION_FOLLOW_UP: runtimeMethods.sessionFollowUp,
+  RIND_SESSION_DELIVER: runtimeMethods.sessionDeliver,
+  RIND_SESSION_PROMOTE_FOLLOW_UP: runtimeMethods.sessionPromoteFollowUp,
+  RIND_SESSION_UNSTEER: runtimeMethods.sessionUnsteer,
+  RIND_SESSION_DEQUEUE_FOLLOW_UP: runtimeMethods.sessionDequeueFollowUp,
+  RIND_SESSION_COMPACT: runtimeMethods.sessionCompact,
+  SESSION_CREATE: runtimeMethods.sessionCreate,
+  RIND_COMMAND_EXECUTE: runtimeMethods.commandExecute,
+  RIND_USER_QUESTION_RESPOND: runtimeMethods.userQuestionRespond,
+  RIND_BACKGROUND_LIST: runtimeMethods.backgroundList,
+  RIND_BACKGROUND_OUTPUT: runtimeMethods.backgroundOutput,
+  RIND_TASK_LIST: runtimeMethods.taskList,
+  RIND_TASK_READ: runtimeMethods.taskRead,
+  RIND_TASK_WAIT: runtimeMethods.taskWait,
+  RIND_TASK_CANCEL: runtimeMethods.taskCancel,
+  RIND_TASK_RELEASE_WAIT: runtimeMethods.taskReleaseWait,
+  RIND_GOAL_GET: runtimeMethods.goalGet,
+  RIND_GOAL_SET: runtimeMethods.goalSet,
+  RIND_GOAL_STATUS: runtimeMethods.goalStatus,
+  RIND_GOAL_CLEAR: runtimeMethods.goalClear,
+  RIND_CONTEXT_INSPECT: runtimeMethods.contextInspect,
+  RIND_USAGE_SUMMARY: runtimeMethods.usageSummary,
+  RIND_FOLDER_DEFAULTS_GET: runtimeMethods.folderDefaultsGet,
+  RIND_FOLDER_DEFAULTS_SET: runtimeMethods.folderDefaultsSet,
+  RIND_FOLDER_DEFAULTS_UNSET: runtimeMethods.folderDefaultsUnset,
+  RIND_FOLDER_DEFAULTS_APPLY: runtimeMethods.folderDefaultsApply,
+  RIND_FOLDER_DEFAULTS_RESOLVE: runtimeMethods.folderDefaultsResolve,
   SESSION_UPDATE: "session/update",
 } as const;
-
-export type RuntimeMethodName = (typeof RuntimeMethod)[keyof typeof RuntimeMethod];
 
 export const SESSION_SCOPED_METHODS: ReadonlySet<string> = new Set([
   RuntimeMethod.SESSION_PROMPT,

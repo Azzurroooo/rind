@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { resolveRindHome } from "../../rind-runtime-client/local-files.js";
+import { resolveRindHome } from "../../runtime/dist/client/local-files.js";
 import { setTheme } from "./theme.js";
 
 let cachedPath = "";

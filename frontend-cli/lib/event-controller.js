@@ -1,4 +1,4 @@
-import { runtimeEventType } from "./runtime-protocol.js";
+import { runtimeEventType } from "../../runtime/dist/protocol/runtime-protocol.js";
 import {
   cancelledText,
   contextBuiltLine,
