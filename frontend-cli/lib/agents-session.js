@@ -56,7 +56,6 @@ export function managementArgs(args) {
 }
 
 function validateSharedArgs(args, rindHome) {
-  if (args.includes("--trace-llm")) throw new Error("Shared Runtime tracing is host-wide. Set RIND_TRACE_LLM=1 before starting the shared host instead of --trace-llm.");
   const sessionDir = argument(args, "--session-dir");
   if (sessionDir && resolveRindHome(sessionDir) !== path.join(rindHome, "sessions")) throw new Error("Shared conversations use RIND_HOME/sessions. Set RIND_HOME to select another shared history directory; omit --session-dir.");
 }

@@ -26,8 +26,8 @@ test("unblocked desktop methods pass the runtime allowlist", () => {
     "rind/goal/set",
     "rind/goal/status",
     "rind/goal/clear",
-    "rind/background/list",
-    "rind/background/output",
+    "rind/task/list",
+    "rind/task/read",
   ]
   for (const method of required) {
     assert.equal(isRuntimeMethod(method), true, `${method} must pass isRuntimeMethod`)
@@ -52,8 +52,8 @@ test("session-scoped new methods receive session_id automatically", () => {
     runtimeMethods.sessionDeliver,
     runtimeMethods.folderDefaultsApply,
     runtimeMethods.modelEffort,
-    runtimeMethods.backgroundList,
-    runtimeMethods.backgroundOutput,
+    runtimeMethods.taskList,
+    runtimeMethods.taskRead,
     runtimeMethods.goalGet,
     runtimeMethods.goalSet,
     runtimeMethods.goalStatus,

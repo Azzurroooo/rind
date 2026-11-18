@@ -11,12 +11,7 @@ import { JsonlSessionStore } from "../infrastructure/persistence/session-store.j
 import { ensureUserSettings, loadSettings } from "../infrastructure/settings.js";
 import { ExternalTool } from "../infrastructure/tools/control-tools.js";
 import { ServerWebSocket, upgradeWebSocket } from "../infrastructure/ws-server.js";
-import {
-  type BackgroundListFn,
-  type BackgroundOutputFn,
-  RuntimeDispatcher,
-  type TransportWriter,
-} from "./dispatcher.js";
+import { RuntimeDispatcher, type TransportWriter } from "./dispatcher.js";
 import { errorMessage, validateRequest } from "./protocol.js";
 import { RuntimeWorker, type WorkerLock, acquireWorkerLock } from "./worker.js";
 
@@ -52,7 +47,6 @@ export function configureStdioServerSignals(): void {
 }
 
 export class StdioRuntimeServer {
-  static readonly workerMode = true;
   static readonly networkMode = false;
 
   private readonly writer: JsonlWriter;
@@ -62,8 +56,6 @@ export class StdioRuntimeServer {
     worker: RuntimeWorker,
     options?: {
       debug?: boolean;
-      backgroundList?: BackgroundListFn | null;
-      backgroundOutput?: BackgroundOutputFn | null;
       goalEnabled?: boolean;
     },
   ) {
@@ -71,8 +63,6 @@ export class StdioRuntimeServer {
     this.dispatcher = new RuntimeDispatcher(worker, {
       debug: options?.debug ?? false,
       writer: this.writer,
-      backgroundList: options?.backgroundList ?? null,
-      backgroundOutput: options?.backgroundOutput ?? null,
       goalEnabled: options?.goalEnabled ?? true,
       allowSessionConfiguration: true,
     });
@@ -193,15 +183,12 @@ export class StdioRuntimeServer {
 export const AUTH_CLOSE_CODE = 4401;
 const MAX_WS_MESSAGE_BYTES = 8 * 1024 * 1024;
 
-export type WebSocketConnection = ServerWebSocket;
-export const WebSocketConnection = ServerWebSocket;
-
 export class WebSocketWriter implements TransportWriter {
-  private readonly ws: WebSocketConnection;
+  private readonly ws: ServerWebSocket;
   private readonly lock = new AsyncMutex();
   private closed = false;
 
-  constructor(ws: WebSocketConnection) {
+  constructor(ws: ServerWebSocket) {
     this.ws = ws;
   }
 
@@ -250,15 +237,12 @@ export function isLoopbackHost(host: string): boolean {
 }
 
 export class WebRuntimeServer {
-  static readonly workerMode = true;
   static readonly networkMode = true;
 
   private readonly worker: RuntimeWorker;
   private readonly debug: boolean;
   private readonly host: string;
   private readonly port: number;
-  private readonly backgroundList: BackgroundListFn | null;
-  private readonly backgroundOutput: BackgroundOutputFn | null;
   private readonly goalEnabled: boolean;
   private readonly serverToken: string;
   private readonly ticketTtlSeconds: number;
@@ -271,8 +255,6 @@ export class WebRuntimeServer {
       debug?: boolean;
       host?: string;
       port?: number;
-      backgroundList?: BackgroundListFn | null;
-      backgroundOutput?: BackgroundOutputFn | null;
       goalEnabled?: boolean;
       serverToken?: string | null;
       ticketTtlSeconds?: number;
@@ -283,8 +265,6 @@ export class WebRuntimeServer {
     this.debug = options?.debug ?? false;
     this.host = options?.host ?? "127.0.0.1";
     this.port = options?.port ?? 8765;
-    this.backgroundList = options?.backgroundList ?? null;
-    this.backgroundOutput = options?.backgroundOutput ?? null;
     this.goalEnabled = options?.goalEnabled ?? true;
     this.serverToken = String(options?.serverToken || "").trim();
     this.ticketTtlSeconds = options?.ticketTtlSeconds ?? 60.0;
@@ -391,8 +371,6 @@ export class WebRuntimeServer {
     const writer = new WebSocketWriter(ws);
     const dispatcher = new RuntimeDispatcher(this.worker, {
       debug: this.debug,
-      backgroundList: this.backgroundList,
-      backgroundOutput: this.backgroundOutput,
       goalEnabled: this.goalEnabled,
       writer,
     });
@@ -457,7 +435,7 @@ export class WebRuntimeServer {
     return reqObj;
   }
 
-  private async authorize(ws: WebSocketConnection): Promise<boolean> {
+  private async authorize(ws: ServerWebSocket): Promise<boolean> {
     if (!this.serverToken) {
       return true;
     }
@@ -555,7 +533,6 @@ export interface AppServerArgs {
   resumeLatest: boolean;
   sessionDir: string | null;
   noUserQuestion: boolean;
-  traceLlm: boolean;
 }
 
 export function parseAppServerArgs(argv: readonly string[]): AppServerArgs {
@@ -570,7 +547,6 @@ export function parseAppServerArgs(argv: readonly string[]): AppServerArgs {
     resumeLatest: false,
     sessionDir: null,
     noUserQuestion: false,
-    traceLlm: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -585,8 +561,6 @@ export function parseAppServerArgs(argv: readonly string[]): AppServerArgs {
       args.resumeLatest = true;
     } else if (arg === "--no-user-question") {
       args.noUserQuestion = true;
-    } else if (arg === "--trace-llm") {
-      args.traceLlm = true;
     } else if (arg === "--host" && i + 1 < argv.length) {
       args.host = argv[++i]!;
     } else if (arg.startsWith("--host=")) {
@@ -686,9 +660,6 @@ export async function asyncAppServerMain(
     );
     return 1;
   }
-  if (args.traceLlm) {
-    process.env.RIND_TRACE_LLM = "1";
-  }
 
   let workspaceRoot: string;
   try {
@@ -713,10 +684,6 @@ export async function asyncAppServerMain(
     writeStartupError("Settings warning", exc, args.debug);
   }
 
-  if (!ServerClass.workerMode) {
-    throw new Error(`${ServerClass.name} must be a worker-mode runtime server.`);
-  }
-
   let workerLock: WorkerLock | null = null;
   let worker: RuntimeWorker | null = null;
   let serverStarted = false;
@@ -732,16 +699,10 @@ export async function asyncAppServerMain(
       sessionId: args.session,
       resumeLatest: args.resumeLatest,
       sessionDir: args.sessionDir,
-      debug: args.debug,
       enableGoal: true,
       enableUserQuestion: !args.noUserQuestion,
       externalTool,
     });
-
-    const backgroundList: BackgroundListFn = sessionId =>
-      worker!.shellTools.listBackgrounds(sessionId);
-    const backgroundOutput: BackgroundOutputFn = (bgId, opts) =>
-      worker!.shellTools.snapshotBackground(bgId, opts.maxOutputChars, opts._sessionId);
 
     let server: StdioRuntimeServer | WebRuntimeServer;
     if (ServerClass === WebRuntimeServer) {
@@ -750,16 +711,12 @@ export async function asyncAppServerMain(
         debug: args.debug,
         host: args.host,
         port: args.port,
-        backgroundList,
-        backgroundOutput,
         goalEnabled: true,
         serverToken: token || null,
       });
     } else {
       server = new StdioRuntimeServer(worker, {
         debug: args.debug,
-        backgroundList,
-        backgroundOutput,
         goalEnabled: true,
       });
     }

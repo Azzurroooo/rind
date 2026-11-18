@@ -118,8 +118,6 @@ export class AnthropicMessagesClient implements ChatClient {
       throw providerError(exc, "stream_interrupted", cancellationToken);
     }
   }
-
-  async close(): Promise<void> {}
 }
 
 function convertMessages(

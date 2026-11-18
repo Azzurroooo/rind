@@ -20,7 +20,7 @@ import {
   type FetchLike,
   MAX_ATTACHMENT_BYTES,
   OVERSIZE_NOTICE,
-  type ServerWsConnection,
+  type ServerWebSocket,
   defaultFetch,
   ensureAttachmentDir,
   safeFilename,
@@ -181,7 +181,7 @@ export class QQChannel implements Channel {
 
   private sink: InboundSink | null = null;
   private server: http.Server | null = null;
-  private conn: ServerWsConnection | null = null;
+  private conn: ServerWebSocket | null = null;
   private nextEchoId = 1;
   private readonly pending = new Map<string, PendingEcho>();
   private readonly chatKinds = new Map<string, "dm" | "group">();
@@ -269,7 +269,7 @@ export class QQChannel implements Channel {
     this.failPending();
   }
 
-  private attachConnection(wsConn: ServerWsConnection): void {
+  private attachConnection(wsConn: ServerWebSocket): void {
     this.conn = wsConn;
     wsConn.listen(
       raw => {

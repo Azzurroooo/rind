@@ -72,11 +72,6 @@ export interface InboundSink {
   inbound(message: InboundMessage): Promise<void>;
 }
 
-export interface OutboundSink {
-  send(target: SendTarget, payload: OutboundPayload): Promise<void>;
-  typing(target: SendTarget): Promise<void>;
-}
-
 export interface Channel {
   readonly id: string;
   readonly capabilities: ChannelCapabilities;

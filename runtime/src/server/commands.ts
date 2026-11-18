@@ -1096,10 +1096,6 @@ export class SlashCommandRouter {
     this._validateCommands();
   }
 
-  commandNames(): string[] {
-    return Array.from(this._commandsByName.keys()).sort();
-  }
-
   commandInfos(): SlashCommandInfo[] {
     return [...this._commandInfos].sort((a, b) => a.name.localeCompare(b.name));
   }

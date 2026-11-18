@@ -20,7 +20,7 @@ The objective text is limited to 4,000 characters. The protocol provides get, se
 
 The coordinator handles pending task notifications first. While on_exit background tasks are still awaiting completion, it does not spin on repeated Goal checkpoints. When there are no pending notifications, no waiting tasks, and the Goal is still active, it writes an internal goal_checkpoint and executes it through an ordinary run_turn. Failures and interruptions suppress continuation, and a manual compact must not restart a goal that has already stopped.
 
-The current public Goal model has only active, paused, blocked, and complete, with no token_budget field and no settable budget_exhausted status. A defensive check by that name exists in the coordinator, but it must not be used to claim in documentation that the Goal budget feature has been implemented.
+The public Goal model has only active, paused, blocked, and complete, with no token_budget field or budget_exhausted status.
 
 ## How Goal, Plan, and background tasks work together
 

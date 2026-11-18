@@ -82,7 +82,6 @@ export function buildConfigData(
     readonly worker_token: string;
     readonly workspace: string;
     readonly pairing_enabled?: boolean;
-    readonly auto_install_sdk?: boolean;
   },
 ): Record<string, unknown> {
   const channels: Record<string, unknown> = {};
@@ -123,9 +122,6 @@ export function buildConfigData(
   }
   if (options.pairing_enabled ?? true) {
     data.pairing = { enabled: true };
-  }
-  if (options.auto_install_sdk) {
-    data.auto_install_sdk = true;
   }
   return data;
 }
@@ -381,7 +377,6 @@ export async function runInit(
         workerToken,
         workspace,
         confirmWrite: false,
-        autoInstallSdk: false,
         prompt,
         env,
         workerAliveImpl: options?.workerAliveImpl,
@@ -447,7 +442,6 @@ export async function runInit(
       workerToken,
       workspace,
       confirmWrite: true,
-      autoInstallSdk: false,
       prompt,
       env,
       workerAliveImpl: options?.workerAliveImpl,
@@ -473,7 +467,6 @@ async function finishInit(params: {
   readonly workerToken: string;
   readonly workspace: string;
   readonly confirmWrite: boolean;
-  readonly autoInstallSdk: boolean;
   readonly prompt: PromptSession;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly workerAliveImpl?: (
@@ -486,7 +479,6 @@ async function finishInit(params: {
     worker: params.worker,
     worker_token: params.workerToken,
     workspace: params.workspace,
-    auto_install_sdk: params.autoInstallSdk,
   });
   const text = renderYaml(data);
   prompt.println("\n—— Generated gateway.yaml ——");

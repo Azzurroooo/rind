@@ -1,35 +1,11 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Worker } from "node:worker_threads";
 import type { CancellationToken } from "../domain/cancellation.js";
-import { CancelledError, ProviderError, type FailureStatus } from "../domain/errors.js";
+import { CancelledError, ProviderError } from "../domain/errors.js";
 import type { ImageAttachment } from "../domain/models.js";
 import { applyExifOrientation } from "./exif-orientation.js";
 import { loadPhotonSync, resetPhotonCache, type PhotonImageType, type PhotonModule } from "./photon.js";
-
-export const IMAGE_WORKER_RESPONSE_TYPE = "rind:image-worker-response";
-
-export interface SerializedImageWorkerResult {
-  type: typeof IMAGE_WORKER_RESPONSE_TYPE;
-  ok: true;
-  data: Uint8Array;
-  mime: string;
-  width: number;
-  height: number;
-  hint: string;
-}
-
-export interface SerializedImageWorkerError {
-  type: typeof IMAGE_WORKER_RESPONSE_TYPE;
-  ok: false;
-  message: string;
-  code: string | null;
-  status: FailureStatus;
-  errorType: string;
-}
-
-export type ImageWorkerResponse = SerializedImageWorkerResult | SerializedImageWorkerError;
 
 export const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 export const MAX_IMAGE_PIXELS = 40_000_000;
@@ -497,96 +473,6 @@ export function processImage(filePath: string, token?: CancellationToken | null)
       decoded.free();
     }
   }
-}
-
-export async function processImageAsync(
-  filePath: string,
-  token?: CancellationToken | null,
-): Promise<ProcessedImage> {
-  checkCancelled(token);
-  const workerUrl = new URL(
-    import.meta.url.endsWith(".ts") ? "./image-resize-worker.ts" : "./image-resize-worker.js",
-    import.meta.url,
-  );
-
-  let worker: Worker;
-  try {
-    worker = new Worker(workerUrl);
-  } catch {
-    return processImage(filePath, token);
-  }
-
-  return await new Promise<ProcessedImage>((resolve, reject) => {
-    let settled = false;
-    const unsubscribe = token
-      ? token.onCancel(() => {
-          if (settled) return;
-          settled = true;
-          void worker.terminate().catch(() => undefined);
-          reject(new CancelledError(token.reason || "Image operation cancelled"));
-        })
-      : () => {};
-
-    const cleanup = () => {
-      unsubscribe();
-      void worker.terminate().catch(() => undefined);
-    };
-
-    worker.on("message", (msg: unknown) => {
-      if (
-        !msg ||
-        typeof msg !== "object" ||
-        (msg as { type?: unknown }).type !== IMAGE_WORKER_RESPONSE_TYPE
-      ) {
-        return;
-      }
-      if (settled) return;
-      settled = true;
-      cleanup();
-      const response = msg as ImageWorkerResponse;
-      if (!response.ok) {
-        if (response.code) {
-          reject(
-            new ProviderError(response.message, {
-              status: response.status,
-              code: response.code,
-              errorType: response.errorType,
-            }),
-          );
-        } else {
-          reject(new Error(response.message));
-        }
-        return;
-      }
-      resolve({
-        data: Buffer.from(response.data),
-        mime: response.mime,
-        width: response.width,
-        height: response.height,
-        hint: response.hint,
-      });
-    });
-
-    worker.once("error", err => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      try {
-        resolve(processImage(filePath, token));
-      } catch (fallbackErr) {
-        reject(fallbackErr ?? err);
-      }
-    });
-
-    worker.once("exit", code => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(new Error(`Image worker exited unexpectedly with code ${code}`));
-    });
-
-    worker.postMessage({ filePath });
-  });
 }
 
 const UPLOAD_FAST_RE = /uploads\//i;

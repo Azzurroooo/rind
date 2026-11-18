@@ -61,7 +61,7 @@ import {
   userErrorLine,
   workerAlive,
 } from "../dist/gateway/index.js";
-import { FakeWorker, MemoryTransport } from "../dist/gateway/fake-worker.js";
+import { FakeWorker, MemoryTransport } from "./helpers/fake-worker.mjs";
 import { LOADERS } from "../dist/gateway/channels/index.js";
 
 async function withTempDir(t, prefix = "rind-gw-core-") {
@@ -246,7 +246,6 @@ channels:
   const rendered = renderYaml({
     worker: "stdio",
     workspace: ws,
-    auto_install_sdk: true,
     channels: {
       telegram: {
         token: "$literal_dollar",
@@ -257,7 +256,6 @@ channels:
   assert.match(rendered, /'987654321'/);
   const roundTripped = buildConfig(parseYaml(rendered, { env: {} }));
   assert.equal(roundTripped.worker, "stdio");
-  assert.equal(roundTripped.auto_install_sdk, true);
   assert.equal(roundTripped.channels.telegram.token, "$literal_dollar");
   assert.deepEqual(roundTripped.channels.telegram.allow_from, ["987654321"]);
 });

@@ -4,8 +4,7 @@ import type { Socket } from "node:net";
 import path from "node:path";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
 import {
-  ServerWebSocket,
-  encodeWsFrame,
+  type ServerWebSocket,
   upgradeWebSocket,
 } from "../../infrastructure/ws-server.js";
 
@@ -91,14 +90,12 @@ export async function readHttpBody(
 
 const MAX_WS_FRAME_BYTES = 24 * 1024 * 1024;
 
-export const encodeServerWsFrame = encodeWsFrame;
-export type ServerWsConnection = ServerWebSocket;
-export const ServerWsConnection = ServerWebSocket;
+export type { ServerWebSocket };
 
 export function upgradeToServerWs(
   req: http.IncomingMessage,
   socket: Socket,
   head: Buffer,
-): ServerWsConnection | null {
+): ServerWebSocket | null {
   return upgradeWebSocket(req, socket, head, { maxMessageBytes: MAX_WS_FRAME_BYTES });
 }

@@ -39,6 +39,6 @@ node frontend-cli/bin/rind.js gateway --config /absolute/path/to/project/.rind/g
 
 这里的 `runtime/src/gateway/` 是消息渠道命令（`rind gateway`），与 Desktop 内部 HTTP/WebSocket Gateway 不同。前者把聊天消息转为会话输入，后者把同一个图形 Surface 暴露给远端设备。
 
-源码：[路由](../../../runtime/src/gateway/router.ts)、[pump](../../../runtime/src/gateway/pump.ts)、[安全门](../../../runtime/src/gateway/security.ts)、[传输](../../../runtime/src/gateway/transports.ts)。验证：[路由](../../../runtime/src/gateway/router.ts)、[安全](../../../runtime/src/gateway/security.ts)、[pump](../../../runtime/src/gateway/fake-worker.ts)、[stdio 关闭](../../../runtime/src/gateway/transports.ts)。
+源码：[路由](../../../runtime/src/gateway/router.ts)、[pump](../../../runtime/src/gateway/pump.ts)、[安全门](../../../runtime/src/gateway/security.ts)、[传输](../../../runtime/src/gateway/transports.ts)。验证：[路由](../../../runtime/src/gateway/router.ts)、[安全](../../../runtime/src/gateway/security.ts)、[pump](../../../runtime/test/gateway-core.test.js)、[stdio 关闭](../../../runtime/src/gateway/transports.ts)。
 
 [返回系列地图](../README.zh-CN.md)

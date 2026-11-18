@@ -675,10 +675,6 @@ class UnavailableChatClient implements ChatClient {
       code: this.error.code,
     });
   }
-
-  async close(): Promise<void> {
-    // no-op
-  }
 }
 
 function selectionModel(definition: ProviderDefinition, selection: ModelSelection): ModelDefinition {

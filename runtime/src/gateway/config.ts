@@ -12,7 +12,6 @@ export const KNOWN_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([
   "pairing",
   "cooldown_per_minute",
   "uploads_dir",
-  "auto_install_sdk",
 ]);
 
 export const KNOWN_PAIRING_KEYS: ReadonlySet<string> = new Set(["enabled", "ttl_minutes"]);
@@ -97,7 +96,6 @@ export interface GatewayConfig {
   readonly pairing: PairingConfig;
   readonly cooldown_per_minute: number;
   readonly uploads_dir: string;
-  readonly auto_install_sdk: boolean;
 }
 
 export function resolveConfigPath(explicit: string | null | undefined, workspace: string): string {
@@ -420,10 +418,6 @@ export function buildConfig(data: Readonly<Record<string, unknown>>): GatewayCon
   if (typeof uploadsDir !== "string" || !uploadsDir || isAbsoluteAnyPlatform(uploadsDir)) {
     throw new ConfigError("gateway config: uploads_dir must be a workspace-relative path");
   }
-  const autoInstallSdk = data.auto_install_sdk === undefined ? false : data.auto_install_sdk;
-  if (typeof autoInstallSdk !== "boolean") {
-    throw new ConfigError("gateway config: auto_install_sdk must be a boolean");
-  }
   const rawChannels = data.channels ?? {};
   if (!isPlainObject(rawChannels)) {
     throw new ConfigError("gateway config: channels must be a mapping");
@@ -436,7 +430,6 @@ export function buildConfig(data: Readonly<Record<string, unknown>>): GatewayCon
     pairing,
     cooldown_per_minute: cooldown,
     uploads_dir: uploadsDir,
-    auto_install_sdk: autoInstallSdk,
   };
 }
 

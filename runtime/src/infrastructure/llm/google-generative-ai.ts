@@ -110,8 +110,6 @@ export class GoogleGenerativeAIClient implements ChatClient {
       throw providerError(exc, "stream_interrupted", cancellationToken);
     }
   }
-
-  async close(): Promise<void> {}
 }
 
 function buildRestBody(contents: unknown[], config: Record<string, unknown>): Record<string, unknown> {

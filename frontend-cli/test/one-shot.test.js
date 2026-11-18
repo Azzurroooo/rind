@@ -17,7 +17,6 @@ test("one-shot parser requires run prompt and accepts explicit workspace/session
     session: "s1",
     prompt: "hello",
     debug: false,
-    traceLlm: false,
   });
   assert.throws(() => parseOneShotArgs(["run", "--prompt", ""]), /non-empty/);
   assert.throws(() => parseOneShotArgs(["run", "--dir", "relative", "--prompt", "hello"]), /absolute/);

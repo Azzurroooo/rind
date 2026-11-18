@@ -13,15 +13,13 @@ export function visibleTabs(info) {
   const available = new Set(info?.methods || []);
   const capabilities = new Set(info?.capabilities || []);
   const tasks = available.has(methods.taskList) || capabilities.has("rind/tasks");
-  const background = available.has(methods.backgroundList);
   return {
     tabs: [
       "context",
-      ...(tasks || background ? ["activity"] : []),
+      ...(tasks ? ["activity"] : []),
       "files",
     ],
     tasks,
-    background,
     usage: available.has(methods.usageSummary),
     auth: available.has(methods.authList),
   };
@@ -136,7 +134,6 @@ export const Inspector = memo(function Inspector({
             sessionId={sessionId}
             request={request}
             taskService={gates.tasks}
-            background={gates.background}
             waitingCount={backgroundWaitCount}
             goal={goal}
             goalDisabled={!sessionId || !connected}

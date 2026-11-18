@@ -4,7 +4,7 @@ import {
   CancellationTokenSource,
   CancelledError,
   normalizeGoal,
-  normalizePlanItems,
+  normalizePlan,
   parseToolArgs,
   validateCompactHandoffBoundary,
   validateModelMessageBoundary,
@@ -34,8 +34,8 @@ test("CancellationTokenSource propagates reason, notifies callbacks, and rejects
   await assert.rejects(waitPromise, err => err instanceof CancelledError && err.message === "user_interrupt");
 });
 
-test("normalizePlanItems validates statuses and strips whitespace", () => {
-  const plan = normalizePlanItems([
+test("normalizePlan validates statuses and strips whitespace", () => {
+  const plan = normalizePlan([
     { step: "  Read code  ", status: "completed" },
     { step: "Write tests", status: "in_progress" },
     { step: "Run suite", status: "pending" },
@@ -46,11 +46,11 @@ test("normalizePlanItems validates statuses and strips whitespace", () => {
     { step: "Run suite", status: "pending" },
   ]);
   assert.throws(
-    () => normalizePlanItems([{ step: "   ", status: "pending" }]),
+    () => normalizePlan([{ step: "   ", status: "pending" }]),
     /non-empty step/i,
   );
   assert.throws(
-    () => normalizePlanItems([{ step: "A", status: "blocked" }]),
+    () => normalizePlan([{ step: "A", status: "blocked" }]),
     /invalid status/i,
   );
 });

@@ -13,11 +13,10 @@ describe("visibleTabs", () => {
   });
 
   it("keeps global Usage separate from session and workspace tabs", () => {
-    const gates = visibleTabs({ methods: ["rind/background/list", "rind/usage/summary"] });
+    const gates = visibleTabs({ methods: ["rind/task/list", "rind/usage/summary"] });
     expect(gates.tabs).toEqual(["context", "activity", "files"]);
     expect(gates.usage).toBe(true);
-    expect(gates.tasks).toBe(false);
-    expect(gates.background).toBe(true);
+    expect(gates.tasks).toBe(true);
     expect(gates.auth).toBe(false);
   });
 });
@@ -128,19 +127,5 @@ describe("Inspector", () => {
     fireEvent.click(row.closest("button"));
     await waitFor(() => expect(document.querySelector(".task-output").textContent).toBe("all green"));
     expect(request).toHaveBeenCalledWith("rind/task/read", expect.objectContaining({ session_id: "s-1", task_id: "t-1" }));
-  });
-
-  it("falls back to the legacy background list when the task service is absent", async () => {
-    const request = vi.fn(async (method) => {
-      if (method === "rind/background/list") return { tasks: [{ bg_id: "bg-1", command: "npm test", status: "running", elapsed_ms: 5000 }, { bg_id: "bg-2", command: "npm build", status: "completed" }] };
-      if (method === "rind/background/output") return { task: { stdout: "all green" } };
-      return {};
-    });
-    render(<Inspector tab="activity" info={{ session_id: "s-1", methods: ["rind/background/list"] }} request={request} />);
-    const job = await screen.findByText("npm test");
-    expect(screen.queryByText("npm build")).toBeNull();
-    fireEvent.click(job.closest("button"));
-    await waitFor(() => expect(document.querySelector(".task-output").textContent).toBe("all green"));
-    expect(request).toHaveBeenCalledWith("rind/background/output", expect.objectContaining({ session_id: "s-1", bg_id: "bg-1" }));
   });
 });

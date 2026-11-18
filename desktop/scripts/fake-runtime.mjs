@@ -9,8 +9,8 @@ let reasoningEffort = "high"
 let goal = null
 const writtenFiles = new Map()
 const backgroundTasks = new Map([
-  ["bg-1", { bg_id: "bg-1", status: "running", exit_code: -1, cwd: "/workspace", stdout: "working\n", stderr: "" }],
-  ["bg-0", { bg_id: "bg-0", status: "completed", exit_code: 0, cwd: "/workspace", stdout: "done\n", stderr: "" }],
+  ["task-1", { task_id: "task-1", status: "running", handoff: true, exit_code: -1, cwd: "/workspace", stdout: "working\n", stderr: "" }],
+  ["task-0", { task_id: "task-0", status: "completed", handoff: true, exit_code: 0, cwd: "/workspace", stdout: "done\n", stderr: "" }],
 ])
 
 // Interactive auth: login writes a prompt *request* to stdout and waits for
@@ -199,22 +199,22 @@ input.on("line", (line) => {
     respond(request, { path, size: data.length })
     return
   }
-  if (request.method === "rind/background/list") {
+  if (request.method === "rind/task/list") {
     respond(request, { tasks: [...backgroundTasks.values()] })
     return
   }
-  if (request.method === "rind/background/output") {
-    const bgId = String(requireParams(request).bg_id || "").trim()
-    if (!bgId) {
-      respondError(request, "InvalidRequest", "rind/background/output requires bg_id.")
+  if (request.method === "rind/task/read") {
+    const taskId = String(requireParams(request).task_id || "").trim()
+    if (!taskId) {
+      respondError(request, "InvalidRequest", "rind/task/read requires task_id.")
       return
     }
-    const task = backgroundTasks.get(bgId)
+    const task = backgroundTasks.get(taskId)
     if (!task) {
-      respondError(request, "NotFound", `Unknown background task: ${bgId}`)
+      respondError(request, "NotFound", `Unknown task: ${taskId}`)
       return
     }
-    respond(request, { task })
+    respond(request, task)
     return
   }
   if (request.method === "rind/goal/get") {

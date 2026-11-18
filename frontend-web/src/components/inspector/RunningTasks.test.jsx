@@ -9,7 +9,7 @@ const flush = async () => { await act(async () => {}); };
 
 it("normalizes task and bg IDs before filtering terminal updates", () => {
   expect(listedTasks([task(), task(), task("b"), task("b", { status: "completed" })])).toEqual([task()]);
-  expect(listedTasks([{ bg_id: "b", status: "running" }], true)).toHaveLength(1);
+  expect(listedTasks([{ bg_id: "b", handoff: true, status: "running" }])).toHaveLength(1);
 });
 
 it("serializes slow polls and keeps existing rows and output during revalidation", async () => {

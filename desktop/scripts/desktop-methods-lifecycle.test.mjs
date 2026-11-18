@@ -30,16 +30,16 @@ try {
     "model/effort without a payload must fail like the kernel does",
   )
 
-  // rind/background/list + rind/background/output: monitor polling data.
-  const listed = await runtime.requestRuntime("rind/background/list", { session_id: "fake-session" })
-  assert.ok(Array.isArray(listed.tasks), "background list must return a tasks array")
-  assert.deepEqual(listed.tasks.map((task) => task.bg_id).sort(), ["bg-0", "bg-1"])
-  const output = await runtime.requestRuntime("rind/background/output", { session_id: "fake-session", bg_id: "bg-1" })
-  assert.equal(output.task.status, "running")
-  assert.equal(output.task.stdout, "working\n")
+  // rind/task/list + rind/task/read: monitor polling data.
+  const listed = await runtime.requestRuntime("rind/task/list", { session_id: "fake-session" })
+  assert.ok(Array.isArray(listed.tasks), "task list must return a tasks array")
+  assert.deepEqual(listed.tasks.map((task) => task.task_id).sort(), ["task-0", "task-1"])
+  const output = await runtime.requestRuntime("rind/task/read", { session_id: "fake-session", task_id: "task-1" })
+  assert.equal(output.status, "running")
+  assert.equal(output.stdout, "working\n")
   await assert.rejects(
-    () => runtime.requestRuntime("rind/background/output", { session_id: "fake-session" }),
-    /requires bg_id/,
+    () => runtime.requestRuntime("rind/task/read", { session_id: "fake-session" }),
+    /requires task_id/,
   )
 
   // file/write + file/read: the desktop attachment upload path.

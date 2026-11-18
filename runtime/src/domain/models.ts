@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { FailureStatus, ToolEventStatus } from "./errors.js";
 import type {
   AuthMethod,
@@ -15,7 +14,6 @@ export interface Credential {
   readonly refresh?: string;
   readonly expires_at?: number | null;
   readonly client_id?: string;
-  readonly account_id?: string;
 }
 
 export interface ProviderStatus {
@@ -90,8 +88,6 @@ export function normalizePlan(plan: unknown): PlanItem[] {
   return normalized;
 }
 
-export const normalizePlanItems = normalizePlan;
-
 type GoalStatus = "active" | "paused" | "blocked" | "complete";
 
 const GOAL_STATUSES: readonly GoalStatus[] = ["active", "paused", "blocked", "complete"];
@@ -142,8 +138,6 @@ export function normalizeGoal(value: unknown): GoalRecord | null {
 }
 
 export const COMPACT_BOUNDARY_KIND = "compact_boundary";
-export const COMPACT_CONTINUATION_KIND = "compact_continuation";
-export const COMPACT_HANDOFF_KIND = "compact_handoff";
 
 export const COMPACT_CONTINUATION_USER_CONTENT =
   "Continue from the compacted conversation state. " +
@@ -396,10 +390,6 @@ export interface ParsedToolCall {
   parsed_args?: [Record<string, unknown>, string | null];
 }
 
-export function looksLikeToolPayload(value: unknown): boolean {
-  return parseToolResultPayload(value) !== null;
-}
-
 export function parseToolArgs(rawArgs: string): [Record<string, unknown>, string | null] {
   if (!rawArgs) {
     return [{}, null];
@@ -506,10 +496,6 @@ export interface LoadedSkill {
   readonly body: string;
 }
 
-export function sha256Hex(input: string | Buffer): string {
-  return createHash("sha256").update(input).digest("hex");
-}
-
 export interface ModelUsage {
   readonly input_tokens: number;
   readonly output_tokens: number;
@@ -568,6 +554,5 @@ export interface ChatClient {
       promptCacheKey?: string | null;
     },
   ): AsyncIterable<ModelStreamEvent>;
-  close(): Promise<void>;
 }
 

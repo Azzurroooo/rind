@@ -257,8 +257,6 @@ export function mainRepository(workspaceRoot: string): string | null {
   }
 }
 
-export const gitCommonWorkspaceRoot = mainRepository;
-
 function workspaceKey(workspaceRoot: string): string {
   return normcasePath(canonicalizePath(workspaceRoot));
 }
@@ -286,7 +284,7 @@ export class WorkspaceDefaults {
     return result;
   }
 
-  set_model(workspaceRoot: string, provider: string, model: string): void {
+  setModel(workspaceRoot: string, provider: string, model: string): void {
     const cleanProvider = String(provider || "").trim();
     const cleanModel = String(model || "").trim();
     if (!cleanProvider || !cleanModel) {
@@ -295,20 +293,12 @@ export class WorkspaceDefaults {
     this.update(workspaceRoot, { provider: cleanProvider, model: cleanModel });
   }
 
-  setModel(workspaceRoot: string, provider: string, model: string): void {
-    this.set_model(workspaceRoot, provider, model);
-  }
-
-  set_reasoning_effort(workspaceRoot: string, effort: string): void {
+  setReasoningEffort(workspaceRoot: string, effort: string): void {
     const clean = normalizeReasoningEffort(effort);
     if (!clean) {
       throw new Error("Reasoning effort is required.");
     }
     this.update(workspaceRoot, { reasoning_effort: clean });
-  }
-
-  setReasoningEffort(workspaceRoot: string, effort: string): void {
-    this.set_reasoning_effort(workspaceRoot, effort);
   }
 
   unset(workspaceRoot: string, group: "model" | "reasoning_effort" | string): boolean {

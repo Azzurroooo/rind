@@ -210,7 +210,6 @@ export class RuntimeWorker {
     sessionId?: string | null;
     resumeLatest?: boolean;
     sessionDir?: string | null;
-    debug?: boolean;
     enableGoal?: boolean;
     enableUserQuestion?: boolean;
     externalTool?: ExternalTool | null;
@@ -243,7 +242,6 @@ export class RuntimeWorker {
       shellTools: this.shellTools,
       webSessions: this.webSessions,
       repository: this.repository,
-      debug: options.debug ?? false,
       enableGoal: options.enableGoal ?? true,
       enableUserQuestion: options.enableUserQuestion ?? true,
       sessionDir: options.sessionDir ?? null,
@@ -354,10 +352,6 @@ export class RuntimeWorker {
 
   async startExecution(sessionId: string): Promise<AgentContainer> {
     return await this.execution.start(sessionId);
-  }
-
-  async releaseExecution(sessionId: string): Promise<void> {
-    await this.execution.release(sessionId);
   }
 
   async createConversation(params: Record<string, unknown>): Promise<Record<string, unknown>> {

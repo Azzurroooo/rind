@@ -69,7 +69,7 @@ test("real app-server supports desktop and remote browser session lifecycles", a
     // A window has no conversation before its first message; nothing is created or saved.
     assert.equal(initialize.result.session_id, "")
     await assert.rejects(access(join(rindHome, "sessions")), { code: "ENOENT" })
-    assert.ok(initialize.result.methods.includes("rind/background/list"))
+    assert.ok(initialize.result.methods.includes("rind/task/list"))
 
     const listed = await request("sessions", "session/list", { limit: 10 })
     assert.equal(listed.error, undefined)

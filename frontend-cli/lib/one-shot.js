@@ -113,15 +113,11 @@ export function runGateway({
 
 export function parseOneShotArgs(args) {
   if (args[0] !== "run") return null;
-  const result = { dir: null, session: null, prompt: null, debug: false, traceLlm: false };
+  const result = { dir: null, session: null, prompt: null, debug: false };
   for (let index = 1; index < args.length; index += 1) {
     const flag = args[index];
     if (flag === "--debug") {
       result.debug = true;
-      continue;
-    }
-    if (flag === "--trace-llm") {
-      result.traceLlm = true;
       continue;
     }
     if (flag === "--standalone") { result.standalone = true; continue; }
@@ -208,7 +204,6 @@ export async function runOneShot({ args, repoRoot, runtimePath, cwd = process.cw
   if (options.dir) runtimeArgs.push("--cwd", options.dir);
   if (options.session) runtimeArgs.push("--session", options.session);
   if (options.debug) runtimeArgs.push("--debug");
-  if (options.traceLlm) runtimeArgs.push("--trace-llm");
 
   let assistant = "";
   let completed = "";

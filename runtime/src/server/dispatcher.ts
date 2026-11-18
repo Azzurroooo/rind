@@ -36,28 +36,16 @@ import {
 } from "./protocol.js";
 import type { RuntimeWorker } from "./worker.js";
 
-export function protocolCapabilities(
-  backgroundEnabledFlag: boolean,
-  goalEnabled: boolean,
-): string[] {
+export function protocolCapabilities(goalEnabled: boolean): string[] {
   const capabilities = [...CAPABILITIES];
-  if (backgroundEnabledFlag) {
-    capabilities.push("rind/backgrounds");
-  }
   if (goalEnabled) {
     capabilities.push("rind/goals");
   }
   return capabilities;
 }
 
-export function protocolMethods(
-  backgroundEnabledFlag: boolean,
-  goalEnabled: boolean,
-): string[] {
+export function protocolMethods(goalEnabled: boolean): string[] {
   const methods: string[] = [...CORE_METHODS];
-  if (backgroundEnabledFlag) {
-    methods.push(RuntimeMethod.RIND_BACKGROUND_LIST, RuntimeMethod.RIND_BACKGROUND_OUTPUT);
-  }
   if (goalEnabled) {
     methods.push(
       RuntimeMethod.RIND_GOAL_GET,
@@ -78,60 +66,6 @@ export function slashCommandInfos(
     usage: info.usage,
     aliases: [...info.aliases],
   }));
-}
-
-export type BackgroundListFn = (
-  sessionId: string,
-) => Promise<Array<Record<string, unknown>>> | Array<Record<string, unknown>>;
-
-export type BackgroundOutputFn = (
-  bgId: string,
-  options: { maxOutputChars: number; _sessionId: string },
-) => Promise<Record<string, unknown>> | Record<string, unknown>;
-
-export function backgroundEnabled(
-  backgroundList: BackgroundListFn | null | undefined,
-  backgroundOutput: BackgroundOutputFn | null | undefined,
-): boolean {
-  return Boolean(backgroundList && backgroundOutput);
-}
-
-export async function backgroundListResponse(
-  backgroundList: BackgroundListFn,
-  sessionId: string,
-): Promise<Record<string, unknown>> {
-  const tasks = await backgroundList(sessionId);
-  if (!Array.isArray(tasks)) {
-    throw new TypeError("Background list must be a list.");
-  }
-  return { tasks };
-}
-
-export async function backgroundOutputResponse(
-  backgroundOutput: BackgroundOutputFn,
-  sessionId: string,
-  params: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const bgId = params.bg_id;
-  if (typeof bgId !== "string" || !bgId.trim()) {
-    throw new Error("rind/background/output requires bg_id.");
-  }
-  const maxOutputChars = params.max_output_chars ?? 20_000;
-  if (
-    typeof maxOutputChars === "boolean" ||
-    typeof maxOutputChars !== "number" ||
-    !Number.isInteger(maxOutputChars)
-  ) {
-    throw new Error("rind/background/output max_output_chars must be an integer.");
-  }
-  const task = await backgroundOutput(bgId.trim(), {
-    maxOutputChars,
-    _sessionId: sessionId,
-  });
-  if (!task || typeof task !== "object" || Array.isArray(task)) {
-    throw new TypeError("Background output must be an object.");
-  }
-  return { task };
 }
 
 export interface TransportWriter {
@@ -246,8 +180,6 @@ export class RuntimeDispatcher {
   private readonly worker: RuntimeWorker;
   private readonly allowSessionConfiguration: boolean;
   private readonly debug: boolean;
-  private readonly backgroundList: BackgroundListFn | null;
-  private readonly backgroundOutput: BackgroundOutputFn | null;
   private readonly goalEnabled: boolean;
   readonly _writer: EventWriter;
   private readonly slashRouter: SlashCommandRouter;
@@ -265,8 +197,6 @@ export class RuntimeDispatcher {
     worker: RuntimeWorker,
     options: {
       debug?: boolean;
-      backgroundList?: BackgroundListFn | null;
-      backgroundOutput?: BackgroundOutputFn | null;
       goalEnabled?: boolean;
       writer: TransportWriter;
       allowSessionConfiguration?: boolean;
@@ -275,8 +205,6 @@ export class RuntimeDispatcher {
     this.worker = worker;
     this.allowSessionConfiguration = options.allowSessionConfiguration ?? false;
     this.debug = options.debug ?? false;
-    this.backgroundList = options.backgroundList ?? null;
-    this.backgroundOutput = options.backgroundOutput ?? null;
     this.goalEnabled = options.goalEnabled ?? true;
     this._writer = new EventWriter(options.writer);
     this.slashRouter = new SlashCommandRouter(buildCommandInfos());
@@ -519,13 +447,6 @@ export class RuntimeDispatcher {
         return;
       }
       if (
-        method === RuntimeMethod.RIND_BACKGROUND_LIST ||
-        method === RuntimeMethod.RIND_BACKGROUND_OUTPUT
-      ) {
-        await this.backgroundRequest(request);
-        return;
-      }
-      if (
         method === RuntimeMethod.RIND_TASK_LIST ||
         method === RuntimeMethod.RIND_TASK_READ ||
         method === RuntimeMethod.RIND_TASK_WAIT ||
@@ -751,17 +672,11 @@ export class RuntimeDispatcher {
   }
 
   private capabilities(): string[] {
-    return protocolCapabilities(
-      backgroundEnabled(this.backgroundList, this.backgroundOutput),
-      this.goalEnabled,
-    );
+    return protocolCapabilities(this.goalEnabled);
   }
 
   private methods(): string[] {
-    const methods = protocolMethods(
-      backgroundEnabled(this.backgroundList, this.backgroundOutput),
-      this.goalEnabled,
-    );
+    const methods = protocolMethods(this.goalEnabled);
     if (this.allowSessionConfiguration) {
       methods.push(RuntimeMethod.SESSION_OPEN);
     }
@@ -1930,79 +1845,6 @@ export class RuntimeDispatcher {
       ...data,
       meta: payload.meta ?? {},
     });
-  }
-
-  private async backgroundRequest(request: Record<string, unknown>): Promise<void> {
-    const sessionId = await this.requiredSessionId(request);
-    if (sessionId === null) return;
-    if (request.method === RuntimeMethod.RIND_BACKGROUND_LIST) {
-      await this.listBackgroundsForSession(request, sessionId);
-      return;
-    }
-    await this.backgroundOutputForSession(request, sessionId);
-  }
-
-  private async listBackgroundsForSession(
-    request: Record<string, unknown>,
-    sessionId: string,
-  ): Promise<void> {
-    if (!this.backgroundList) {
-      await this.respondError(
-        request,
-        "Background monitoring is unavailable.",
-        "UnsupportedOperation",
-      );
-      return;
-    }
-    try {
-      await this.respond(
-        request,
-        await backgroundListResponse(this.backgroundList, sessionId),
-      );
-    } catch (err) {
-      const e = err instanceof Error ? err : new Error(String(err));
-      await this.respondError(request, e.message, e.name || "Error");
-    }
-  }
-
-  private async backgroundOutputForSession(
-    request: Record<string, unknown>,
-    sessionId: string,
-  ): Promise<void> {
-    if (!this.backgroundOutput) {
-      await this.respondError(
-        request,
-        "Background monitoring is unavailable.",
-        "UnsupportedOperation",
-      );
-      return;
-    }
-    const params =
-      request.params && typeof request.params === "object" && !Array.isArray(request.params)
-        ? (request.params as Record<string, unknown>)
-        : {};
-    try {
-      const response = await backgroundOutputResponse(
-        this.backgroundOutput,
-        sessionId,
-        params,
-      );
-      await this.respond(request, response);
-    } catch (err) {
-      if (err instanceof Error && err.name === "LookupError") {
-        await this.respondError(request, err.message, "NotFound");
-        return;
-      }
-      if (err instanceof TypeError) {
-        await this.respondError(request, err.message, "TypeError");
-        return;
-      }
-      await this.respondError(
-        request,
-        err instanceof Error ? err.message : String(err),
-        "InvalidRequest",
-      );
-    }
   }
 
   private async requiredSessionId(

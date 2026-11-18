@@ -20,7 +20,7 @@ stateDiagram-v2
 
 协调器优先处理待交付任务通知。若仍有 on_exit 后台任务等待完成，就不靠重复 Goal 检查点忙转；没有待处理通知、没有等待任务且 Goal 仍 active 时，写入内部 goal_checkpoint 并通过普通 run_turn 执行。失败和中断抑制继续，手动 compact 不应重启已经停止的目标。
 
-当前公开 Goal 模型只有 active、paused、blocked、complete，没有 token_budget 字段或可设置的 budget_exhausted 状态。协调器中存在该名称的防御性判断，不能据此在文档宣称已实现 Goal 预算产品功能。
+公开 Goal 模型只有 active、paused、blocked、complete，没有 token_budget 字段或 budget_exhausted 状态。
 
 ## Goal、Plan 和后台任务如何配合
 

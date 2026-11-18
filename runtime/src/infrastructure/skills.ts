@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DESCRIPTION_MAX_CHARS,
   SKILL_NAME_PATTERN,
   skillToCatalogEntry,
   type LoadedSkill,
@@ -403,17 +402,6 @@ export class SkillRepository {
     return Array.from(this.scan(imports, { includeDisabled: false }).effective().values()).sort((a, b) =>
       a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
     );
-  }
-
-  loadSkill(name: string, imports: Readonly<Record<string, boolean>> = {}): LoadedSkill | null {
-    const clean = String(name || "").trim().toLowerCase();
-    const metadata = this.scan(imports, { includeDisabled: false }).effective().get(clean);
-    if (!metadata) {
-      return null;
-    }
-    const raw = fs.readFileSync(metadata.location, "utf8");
-    const [, body] = splitFrontmatter(raw);
-    return { metadata, body };
   }
 }
 

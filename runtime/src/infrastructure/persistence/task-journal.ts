@@ -162,16 +162,7 @@ export class TaskOutput {
     }
   }
 
-  async flush(): Promise<void> {
-    // synchronous writes in append
-  }
-
-  async close(): Promise<void> {
-    // no-op
-  }
-
   async read(cursor: string, maxChars: number): Promise<Record<string, unknown>> {
-    await this.flush();
     return readOutputPage(this.recordsPath, this.taskId, cursor, maxChars);
   }
 }

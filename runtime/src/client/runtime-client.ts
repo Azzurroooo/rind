@@ -46,16 +46,10 @@ export function resolveRuntimeLaunch({
   cliArgs?: readonly string[];
 } = {}): { command: string; args: string[] } {
   const executable = resolveRuntimeExecutable(repoRoot, runtimePath);
-  const traceFlag = isTraceLlmEnvSet() ? ["--trace-llm"] : [];
   return {
     command: executable.command,
-    args: [...executable.args, "app-server", "--stdio", ...traceFlag, ...cliArgs],
+    args: [...executable.args, "app-server", "--stdio", ...cliArgs],
   };
-}
-
-const TRACE_TRUTHY = new Set(["1", "true", "yes", "on"]);
-export function isTraceLlmEnvSet(): boolean {
-  return TRACE_TRUTHY.has(String(process.env.RIND_TRACE_LLM || "").trim().toLowerCase());
 }
 
 export function runHelpVersion({

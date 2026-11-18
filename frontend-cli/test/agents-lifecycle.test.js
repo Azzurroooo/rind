@@ -27,8 +27,6 @@ test("resuming a plain conversation from another folder opens it in the folder i
   assert.deepEqual(await plainSession(["--session", "20261006_abc", "--cwd", "/x"], home), { args: ["--session", "20261006_abc", "--cwd", "/x"], shared: true }, "an explicit folder is kept");
   assert.deepEqual(await plainSession(["--session", "../escape"], home), { args: ["--session", "../escape"], shared: true });
   assert.deepEqual(await prepareManagement(["--session", "20261006_abc"], { home }, { interactive: false }), { args: ["--cwd", "/work/notes", "--session", "20261006_abc"], shared: true }, "non-TTY sessions also share the single runtime");
-  await assert.rejects(plainSession(["--trace-llm"], home), /RIND_TRACE_LLM=1/);
-  await assert.rejects(prepareManagement(["--trace-llm"], { home }, { interactive: false }), /RIND_TRACE_LLM=1/);
   await assert.rejects(plainSession(["--session-dir", path.join(home, "other-sessions")], home), /RIND_HOME\/sessions/);
   await assert.rejects(prepareManagement(["--session-dir", path.join(home, "other-sessions")], { home }, { interactive: false }), /RIND_HOME\/sessions/);
   assert.deepEqual(await plainSession(["--session-dir", path.join(home, "sessions")], home), { args: ["--session-dir", path.join(home, "sessions")], shared: true });

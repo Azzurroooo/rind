@@ -11,15 +11,15 @@ export const taskId = (task) => String(task?.task_id || task?.bg_id || "").trim(
 export const isYieldedRunningTask = (task) => Boolean(task) && task.handoff === true && ACTIVE_STATES.has(String(task.status));
 
 // Normalize by identity before filtering: a terminal update replaces its running row.
-export function listedTasks(rows, legacy = false) {
+export function listedTasks(rows) {
   return [...new Map((Array.isArray(rows) ? rows : []).filter(taskId).map((task) => [taskId(task), task])).values()]
-    .filter((task) => legacy ? ACTIVE_STATES.has(String(task.status)) : isYieldedRunningTask(task))
+    .filter(isYieldedRunningTask)
     .sort((a, b) => taskId(a).localeCompare(taskId(b)));
 }
 
 // Keep previous data during revalidation, and serialize polling instead of allowing
 // overlapping intervals. A session generation owns every async response.
-export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = true, legacy = false, renderEmpty }) {
+export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = true, renderEmpty }) {
   const [tasks, setTasks] = useState([]);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -41,12 +41,11 @@ export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = t
     pendingReads.current.add(id);
     if (!silent) setOutputs((rows) => ({ ...rows, [id]: { ...rows[id], loading: true, error: "" } }));
     try {
-      const result = await requestRef.current(legacy ? methods.backgroundOutput : methods.taskRead, {
-        session_id: sessionId, ...(legacy ? { bg_id: id } : { task_id: id }),
+      const value = await requestRef.current(methods.taskRead, {
+        session_id: sessionId, task_id: id,
         max_output_chars: OUTPUT_CHARS, ...(cursor ? { cursor } : {}),
       });
       if (current !== generation.current || reads.current[id] !== sequence) return;
-      const value = legacy ? result?.task : result;
       cursors.current[id] = cursor;
       setOutputs((rows) => ({ ...rows, [id]: { ...value, loading: false } }));
     } catch (cause) {
@@ -61,9 +60,8 @@ export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = t
     const current = ++generation.current;
     pendingReads.current.clear();
     setOutputs((rows) => Object.fromEntries(Object.entries(rows).map(([id, output]) => [id, { ...output, loading: false }])));
-    const nextScope = sessionId + ":" + legacy;
-    if (scope.current !== nextScope) {
-      scope.current = nextScope;
+    if (scope.current !== sessionId) {
+      scope.current = sessionId;
       selected.current = "";
       cursors.current = {}; reads.current = {}; pendingReads.current = new Set();
       setTasks([]); setError(""); setLoaded(false); setExpanded(""); setOutputs({});
@@ -76,9 +74,9 @@ export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = t
       clearTimeout(timer);
       refreshing = true;
       try {
-        const result = await requestRef.current(legacy ? methods.backgroundList : methods.taskList, { session_id: sessionId });
+        const result = await requestRef.current(methods.taskList, { session_id: sessionId });
         if (current !== generation.current) return;
-        const listed = listedTasks(result?.tasks, legacy);
+        const listed = listedTasks(result?.tasks);
         const activeIds = new Set(listed.map(taskId));
         setTasks(listed); setLoaded(true); setError("");
         setOutputs((rows) => {
@@ -113,7 +111,7 @@ export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = t
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [sessionId, enabled, legacy]);
+  }, [sessionId, enabled]);
 
   function toggle(id) {
     const next = selected.current === id ? "" : id;
@@ -158,7 +156,7 @@ export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = t
             <button type="button" disabled={output?.loading} onClick={() => void readOutput(id)}><RefreshCw size={13} aria-hidden="true" />{cursors.current[id] ? "Latest output" : "Refresh"}</button>
             {output?.start_cursor && <button type="button" disabled={output?.loading} onClick={() => void readOutput(id, output.start_cursor)}>Read from start</button>}
             {output?.meta?.truncated && output.next_cursor && <button type="button" disabled={output?.loading} onClick={() => void readOutput(id, output.next_cursor)}>Next output</button>}
-            {!legacy && <button type="button" className="danger-text" onClick={() => void stop(id)}>Stop task</button>}
+            <button type="button" className="danger-text" onClick={() => void stop(id)}>Stop task</button>
           </div>
         </div>}
       </li>;

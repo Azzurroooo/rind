@@ -11,7 +11,6 @@ export function ActivityTab({
   sessionId,
   request,
   taskService,
-  background,
   waitingCount,
   goal,
   goalDisabled,
@@ -19,12 +18,11 @@ export function ActivityTab({
   enabled,
 }) {
   const hasContent = Boolean(planSteps(plan).length || goal?.objective);
-  const watchTasks = taskService || background;
   const renderEmpty = hasContent ? undefined : ({ loading = false } = {}) => <ActivityEmpty hasSession={Boolean(sessionId)} loading={loading} />;
   return (
     <div className="inspector-body activity-tab">
       <PlanSection plan={plan} />
-      {watchTasks ? <RunningTasks key={sessionId} sessionId={sessionId} request={request} waitingCount={waitingCount} enabled={enabled} legacy={!taskService} renderEmpty={renderEmpty} /> : renderEmpty?.()}
+      {taskService ? <RunningTasks key={sessionId} sessionId={sessionId} request={request} waitingCount={waitingCount} enabled={enabled} renderEmpty={renderEmpty} /> : renderEmpty?.()}
       {goal?.objective && <section className="inspector-section goal-section" aria-label="Goal">
         <div className="inspector-section-head">
           <h3 className="inspector-section-title"><Goal size={14} aria-hidden="true" /> Goal</h3>

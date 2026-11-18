@@ -800,7 +800,6 @@ export class ProcessSupervisor {
       : record.task_id.replace(/^task_/, "fg_");
     let spilledPath: string | null = null;
     if (record.output) {
-      await record.output.flush();
       try {
         unlinkSync(record.output.recordsPath);
       } catch {
@@ -1043,9 +1042,6 @@ export class ProcessSupervisor {
     maxChars = 20000,
     cursor?: string | null,
   ): Promise<ToolExecutionResult> {
-    if (record.output) {
-      await record.output.flush();
-    }
     const [data, meta] = taskPayload(record, reason, maxChars);
     if (cursor !== null && cursor !== undefined) {
       if (!record.output) {
@@ -1076,9 +1072,6 @@ export class ProcessSupervisor {
     const runSave = async (): Promise<void> => {
       if (create) {
         await this.ensureOutput(record);
-      }
-      if (record.output) {
-        await record.output.flush();
       }
       if (!this.journal) {
         if (this.observer) {
@@ -1321,9 +1314,6 @@ export class ProcessSupervisor {
       await this.settleReaders(record);
       if (record.output_init) {
         await record.output_init;
-      }
-      if (record.output) {
-        await record.output.close();
       }
       record.status =
         failureStatus ||
@@ -1726,26 +1716,12 @@ export class ShellTools {
     return JSON.stringify(parsed);
   }
 
-  async listBackgrounds(sessionId = "default"): Promise<Record<string, unknown>[]> {
-    const raw = await this.taskControl("list", null, null, null, 20000, null, {
-      _session_id: sessionId,
-    });
-    const payload = JSON.parse(raw) as { data: { tasks: Record<string, unknown>[] } };
-    return payload.data.tasks.map(task => ({ ...task, bg_id: task.task_id }));
-  }
-
   async monitorTasks(
     sessionId: string,
     pageToken?: string | null,
     preloadedRecords?: Record<string, Record<string, unknown>>,
   ): Promise<Record<string, unknown>> {
     return await this.supervisor.monitorTasks(sessionId, pageToken, preloadedRecords);
-  }
-
-  async maintainTasks(sessionId: string): Promise<void> {
-    if (this.supervisor.journal) {
-      await this.supervisor.journal.maintain(sessionId);
-    }
   }
 
   async maintainAndLoadRelevantTasks(
@@ -1755,26 +1731,6 @@ export class ShellTools {
       return {};
     }
     return await this.supervisor.journal.maintainAndRelevant(sessionId);
-  }
-
-  async snapshotBackground(
-    bgId: string,
-    maxOutputChars = 20000,
-    sessionId = "default",
-  ): Promise<Record<string, unknown>> {
-    const raw = await this.taskControl("read", bgId, null, null, maxOutputChars, null, {
-      _session_id: sessionId,
-    });
-    const payload = JSON.parse(raw) as {
-      ok: boolean;
-      error?: string;
-      data?: Record<string, unknown>;
-      meta?: Record<string, unknown>;
-    };
-    if (!payload.ok) {
-      throw new Error(payload.error || `Task ${bgId} not found`);
-    }
-    return { ...(payload.data || {}), ...(payload.meta || {}), bg_id: bgId };
   }
 }
 

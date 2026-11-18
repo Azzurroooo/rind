@@ -16,7 +16,6 @@ import {
   loadSettings,
   prepareImageMessages,
   processImage,
-  processImageAsync,
   readFile,
   renderResumePreview,
 } from "../dist/index.js";
@@ -275,7 +274,7 @@ test("processImage detects animated GIF first frame, corrects EXIF orientation, 
   assert.match(compressed.hint, /Reduced to \d+x\d+ to fit the image limit\./);
 });
 
-test("processImage and processImageAsync reject invalid, unsupported, oversized, and cancelled inputs", async t => {
+test("processImage rejects invalid, unsupported, oversized, and cancelled inputs", async t => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "rind-images-err-"));
   t.after(async () => {
     await rm(tmp, { recursive: true, force: true });
@@ -324,17 +323,12 @@ test("processImage and processImageAsync reject invalid, unsupported, oversized,
     err => err instanceof ProviderError && err.code === "ImageTooLarge" && /40 million/.test(err.message),
   );
 
-  // Worker-thread processImageAsync + CancellationToken
+  // CancellationToken
   const goodPath = path.join(tmp, "good.png");
   await writeFile(goodPath, encodePngBytes(32, 24));
-  const asyncDecoded = await processImageAsync(goodPath);
-  assert.equal(asyncDecoded.width, 32);
-  assert.equal(asyncDecoded.height, 24);
-
   const cts = new CancellationTokenSource();
   cts.cancel("stop");
   assert.throws(() => processImage(goodPath, cts.token), err => err instanceof CancelledError);
-  await assert.rejects(() => processImageAsync(goodPath, cts.token), err => err instanceof CancelledError);
 });
 
 test("captureImage reuses snapshots, verifies SHA-256 integrity, and wires read_file attachments", async t => {

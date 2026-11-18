@@ -39,6 +39,6 @@ The wizard writes .rind/gateway.yaml into the chosen workspace; channel SDKs, pl
 
 The `runtime/src/gateway/` module described here is the messaging channel command (`rind gateway`), and it is different from Desktop's internal HTTP/WebSocket Gateway. The former turns chat messages into session input, while the latter exposes the same graphical Surface to remote devices.
 
-Source: [routing](../../../runtime/src/gateway/router.ts), [pump](../../../runtime/src/gateway/pump.ts), [security gate](../../../runtime/src/gateway/security.ts), [transports](../../../runtime/src/gateway/transports.ts). Verification: [routing](../../../runtime/src/gateway/router.ts), [security](../../../runtime/src/gateway/security.ts), [pump](../../../runtime/src/gateway/fake-worker.ts), [stdio shutdown](../../../runtime/src/gateway/transports.ts).
+Source: [routing](../../../runtime/src/gateway/router.ts), [pump](../../../runtime/src/gateway/pump.ts), [security gate](../../../runtime/src/gateway/security.ts), [transports](../../../runtime/src/gateway/transports.ts). Verification: [routing](../../../runtime/src/gateway/router.ts), [security](../../../runtime/src/gateway/security.ts), [pump](../../../runtime/test/gateway-core.test.js), [stdio shutdown](../../../runtime/src/gateway/transports.ts).
 
 [Back to the series map](../README.md)

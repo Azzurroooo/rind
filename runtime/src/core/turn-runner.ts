@@ -1373,13 +1373,6 @@ export class AgentRuntime {
     this.followUpQueue.length = 0;
   }
 
-  inputQueueCounts(): { steering: number; follow_up: number } {
-    return {
-      steering: this.steeringQueue.length,
-      follow_up: this.followUpQueue.length,
-    };
-  }
-
   async getGoal(): Promise<Record<string, unknown> | null> {
     await this.requireGoalEnabled();
     const goal = await this.sessionStore.getGoal();
@@ -1416,55 +1409,6 @@ export class AgentRuntime {
     if (!this.goalEnabled) {
       throw new Error("Goal support is unavailable.");
     }
-  }
-
-  async switchSession(sessionId: string): Promise<Record<string, unknown>> {
-    return await this.rebindSession(
-      () => this.sessionStore.switchSession(sessionId),
-      "Cannot switch sessions while a turn is active.",
-      "Failed to switch session",
-    );
-  }
-
-  async createSession(): Promise<Record<string, unknown>> {
-    return await this.rebindSession(
-      () => this.sessionStore.createSession(),
-      "Cannot create a session while a turn is active.",
-      "Failed to create session",
-    );
-  }
-
-  private async rebindSession(
-    rebind: () => Promise<Record<string, unknown>>,
-    busyMessage: string,
-    persistenceLabel: string,
-  ): Promise<Record<string, unknown>> {
-    await this.initialize();
-    if (this.acceptingInputs || this._activeTurnId) {
-      throw new Error(busyMessage);
-    }
-    return await this.turnLock.runExclusive(async () => {
-      if (this.acceptingInputs || this._activeTurnId) {
-        throw new Error(busyMessage);
-      }
-      this.discardPendingInputs();
-      try {
-        const result = await rebind();
-        return result && typeof result === "object"
-          ? { ...result }
-          : {
-              session_id: this.sessionStore.sessionId,
-              model: this.sessionStore.model,
-            };
-      } catch (exc) {
-        if (exc instanceof CancelledError) throw exc;
-        const err = exc as Error;
-        throw new PersistenceError(`${persistenceLabel}: ${err.message || String(exc)}`, {
-          code: err.name || "Error",
-          cause: exc,
-        });
-      }
-    });
   }
 
   async compactContext(

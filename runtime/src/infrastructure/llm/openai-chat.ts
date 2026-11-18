@@ -259,8 +259,6 @@ export class OpenAIChatCompletionsClient implements ChatClient {
       throw providerError(exc, "stream_interrupted", cancellationToken);
     }
   }
-
-  async close(): Promise<void> {}
 }
 
 async function sleepBeforeRetry(attempt: number, cancellationToken?: CancellationToken | null, headers?: Headers): Promise<void> {

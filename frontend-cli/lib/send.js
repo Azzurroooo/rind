@@ -46,7 +46,7 @@ export function parseSendArgs(args) {
 const DELIVERED = { window: "sent to rind", queued: "queued for the running turn", ipc: "sent to rind" };
 
 // The shared Runtime knows every interactive window. A window with its own
-// private worker (--trace-llm, --session-dir), or one on a Runtime from before
+// private worker (--session-dir), or one on a Runtime from before
 // this routing, still listens on its own endpoint.
 async function deliver(session, input, connect) {
   let refused;

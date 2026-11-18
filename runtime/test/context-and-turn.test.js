@@ -55,7 +55,6 @@ class ScriptedChatClient {
     yield { kind: "usage", usage: { input_tokens: 100, output_tokens: 25, cached_tokens: 0, reasoning_tokens: 0 } };
     yield { kind: "completed", stop_reason: "stop" };
   }
-  async close() {}
 }
 
 test("AgentRuntime and TurnRunner execute tool roundtrips, steering, and follow-up queues", async t => {

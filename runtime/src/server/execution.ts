@@ -64,7 +64,6 @@ export class ExecutionCoordinator {
   private readonly shellTools: ShellTools;
   private readonly webSessions: WebSessions;
   private readonly repository: SessionService;
-  private readonly debug: boolean;
   private readonly enableGoal: boolean;
   private readonly enableUserQuestion: boolean;
   readonly sessionDir: string | null;
@@ -95,7 +94,6 @@ export class ExecutionCoordinator {
     shellTools: ShellTools;
     webSessions: WebSessions;
     repository: SessionService;
-    debug: boolean;
     enableGoal: boolean;
     enableUserQuestion: boolean;
     sessionDir: string | null;
@@ -106,7 +104,6 @@ export class ExecutionCoordinator {
     this.shellTools = options.shellTools;
     this.webSessions = options.webSessions;
     this.repository = options.repository;
-    this.debug = options.debug;
     this.enableGoal = options.enableGoal;
     this.enableUserQuestion = options.enableUserQuestion;
     this.sessionDir = options.sessionDir;
@@ -278,7 +275,7 @@ export class ExecutionCoordinator {
       return null;
     }
     const goal = this.enableGoal ? await this.repository.getGoal(sessionId) : null;
-    if (goal && ["paused", "blocked", "budget_exhausted"].includes(String(goal.status || ""))) {
+    if (goal && (goal.status === "paused" || goal.status === "blocked")) {
       return null;
     }
     const ordered = [...tasks].sort((a, b) =>
@@ -408,7 +405,7 @@ export class ExecutionCoordinator {
           r => r.notify === "on_exit" && !TERMINAL_STATES.has(String(r.status || "")),
         );
         const goal = this.enableGoal ? await this.repository.getGoal(sessionId) : null;
-        if (goal && ["paused", "blocked", "budget_exhausted"].includes(String(goal.status || ""))) {
+        if (goal && (goal.status === "paused" || goal.status === "blocked")) {
           if (scope) {
             scope.error = `Goal does not allow continuation (${goal.status}).`;
           }
@@ -802,7 +799,7 @@ export class ExecutionCoordinator {
             ) {
               return;
             }
-            if (goal && ["paused", "blocked", "budget_exhausted"].includes(String(goal.status || ""))) {
+            if (goal && (goal.status === "paused" || goal.status === "blocked")) {
               return;
             }
             const sessionStore = execution.container.session_store;
@@ -1167,40 +1164,34 @@ export class ExecutionCoordinator {
     const chatClient = await this.chatClientFor(settings, selection);
     const definition = this.definition(selection);
 
-    let container: AgentContainer;
-    try {
-      container = buildAgentContainer({
-        settings: {
-          ...settings,
-          provider: selection.provider_id,
-          model: selection.model_id,
-          reasoning_effort: selection.reasoning_effort,
-        },
-        chatClient,
-        imageInput: definition ? definition.image_input : null,
-        contextWindow: definition ? definition.context_window : null,
-        sessionDir: this.sessionDir,
-        sessionId: clean,
-        sessionStore: this.repository.draftStore(clean),
-        enableGoal: this.enableGoal,
-        enableUserQuestion: questionEnabled,
-        workspaceRoot: root,
-        projectId: typeof metadata.project_id === "string" ? metadata.project_id : null,
-        ownerAgentId: typeof metadata.owner_agent_id === "string" ? metadata.owner_agent_id : null,
-        sessionType: typeof metadata.session_type === "string" ? metadata.session_type : null,
-        parentSessionId:
-          typeof metadata.parent_session_id === "string" ? metadata.parent_session_id : null,
-        sharedResources: this.sharedResources,
-        shellTools: this.shellTools,
-        webSessions: this.webSessions,
-        taskNotifications: this.taskNotifications,
-        externalTool,
-      });
-      await container.runtime.initialize();
-    } catch (err) {
-      await chatClient.close();
-      throw err;
-    }
+    const container = buildAgentContainer({
+      settings: {
+        ...settings,
+        provider: selection.provider_id,
+        model: selection.model_id,
+        reasoning_effort: selection.reasoning_effort,
+      },
+      chatClient,
+      imageInput: definition ? definition.image_input : null,
+      contextWindow: definition ? definition.context_window : null,
+      sessionDir: this.sessionDir,
+      sessionId: clean,
+      sessionStore: this.repository.draftStore(clean),
+      enableGoal: this.enableGoal,
+      enableUserQuestion: questionEnabled,
+      workspaceRoot: root,
+      projectId: typeof metadata.project_id === "string" ? metadata.project_id : null,
+      ownerAgentId: typeof metadata.owner_agent_id === "string" ? metadata.owner_agent_id : null,
+      sessionType: typeof metadata.session_type === "string" ? metadata.session_type : null,
+      parentSessionId:
+        typeof metadata.parent_session_id === "string" ? metadata.parent_session_id : null,
+      sharedResources: this.sharedResources,
+      shellTools: this.shellTools,
+      webSessions: this.webSessions,
+      taskNotifications: this.taskNotifications,
+      externalTool,
+    });
+    await container.runtime.initialize();
 
     if (this.closed || this.closedSessions.has(clean)) {
       await closeContainer(container);
@@ -1268,7 +1259,6 @@ export class ExecutionCoordinator {
     const definition = this.definition(selection);
     const settings = execution.container.settings || loadSettings();
     const replacement = await this.chatClientFor(settings, selection);
-    const previous = execution.chatClient;
     execution.container.turn_runner.replaceChatClient(replacement, {
       imageInput: definition ? definition.image_input : null,
     });
@@ -1277,9 +1267,6 @@ export class ExecutionCoordinator {
       : null;
     execution.chatClient = replacement;
     execution.selection = selection;
-    if (previous) {
-      await previous.close();
-    }
   }
 
   private async releaseIfIdle(sessionId: string, execution: ActiveExecution): Promise<void> {
@@ -1391,14 +1378,10 @@ async function closeContainer(container: AgentContainer, options?: { flush?: boo
   if (options?.flush !== false) {
     await container.session_store.flushContextBreakdown().catch(() => {});
   }
-  await container.chat_client.close();
 }
 
 async function closeExecution(execution: ActiveExecution, options?: { flush?: boolean }): Promise<void> {
-  if (options?.flush !== false) {
-    await execution.container.session_store.flushContextBreakdown().catch(() => {});
-  }
-  await (execution.chatClient ?? execution.container.chat_client).close();
+  await closeContainer(execution.container, options);
 }
 
 function newLiveTurn(turnId: string): Record<string, unknown> {

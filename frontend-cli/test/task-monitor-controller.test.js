@@ -127,7 +127,7 @@ test("task monitor ignores malformed events and handles monitor keys", async () 
     inputActive: false,
   };
   const controller = createTaskMonitorController({
-    request: async (method) => method === "rind/background/list" ? { tasks: [] } : {},
+    request: async (method) => method === "rind/task/list" ? { tasks: [] } : {},
     terminalUi: true,
     state,
   });

@@ -24,7 +24,6 @@ function printHelp(): void {
     "  -c, --resume-latest     Resume most recent saved session",
     "  --session-dir <dir>     Session storage root directory",
     "  --no-user-question      Disable the interactive user-question tool",
-    "  --trace-llm             Record every LLM request/response under <session>/_llm_trace/ (debug).",
   ].join("\n");
   process.stdout.write(`${text}\n`);
 }

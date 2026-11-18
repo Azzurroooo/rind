@@ -556,11 +556,6 @@ export function createSharedRuntimeClient(options: SharedRuntimeOptions): Shared
     const i = args.indexOf(flag);
     return i >= 0 ? args[i + 1] : undefined;
   };
-  if (args.includes("--trace-llm")) {
-    throw new Error(
-      "Shared Runtime tracing is host-wide. Set RIND_TRACE_LLM=1 before starting the shared host instead of --trace-llm.",
-    );
-  }
   const sessionDir = arg("--session-dir");
   if (
     sessionDir &&

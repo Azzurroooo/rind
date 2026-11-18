@@ -61,8 +61,6 @@ export const RuntimeMethod = {
   SESSION_CREATE: runtimeMethods.sessionCreate,
   RIND_COMMAND_EXECUTE: runtimeMethods.commandExecute,
   RIND_USER_QUESTION_RESPOND: runtimeMethods.userQuestionRespond,
-  RIND_BACKGROUND_LIST: runtimeMethods.backgroundList,
-  RIND_BACKGROUND_OUTPUT: runtimeMethods.backgroundOutput,
   RIND_TASK_LIST: runtimeMethods.taskList,
   RIND_TASK_READ: runtimeMethods.taskRead,
   RIND_TASK_WAIT: runtimeMethods.taskWait,
@@ -103,8 +101,6 @@ export const SESSION_SCOPED_METHODS: ReadonlySet<string> = new Set([
   RuntimeMethod.RIND_SESSION_COMPACT,
   RuntimeMethod.RIND_COMMAND_EXECUTE,
   RuntimeMethod.RIND_USER_QUESTION_RESPOND,
-  RuntimeMethod.RIND_BACKGROUND_LIST,
-  RuntimeMethod.RIND_BACKGROUND_OUTPUT,
   RuntimeMethod.RIND_TASK_LIST,
   RuntimeMethod.RIND_TASK_READ,
   RuntimeMethod.RIND_TASK_WAIT,
@@ -292,13 +288,11 @@ const MIME_TYPES: Readonly<Record<string, string>> = {
 };
 
 export class FileMethodError extends Error {
-  readonly error_type: string;
   readonly errorType: string;
 
   constructor(message: string, errorType: string) {
     super(message);
     this.name = "FileMethodError";
-    this.error_type = errorType;
     this.errorType = errorType;
   }
 }

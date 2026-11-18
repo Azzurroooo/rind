@@ -33,21 +33,19 @@ $AcceptanceRoot = Join-Path $env:TEMP ("rind-acceptance-" + [guid]::NewGuid().To
 $AcceptanceWorkspace = Join-Path $AcceptanceRoot "workspace"
 $env:RIND_HOME = Join-Path $AcceptanceRoot "home"
 New-Item -ItemType Directory -Path $AcceptanceWorkspace, $env:RIND_HOME | Out-Null
-$env:RIND_TRACE_LLM = "1"
 function rind { & node (Join-Path $RindRepo "frontend-cli/bin/rind.js") @args }
 Set-Location $AcceptanceWorkspace
 ```
 
-将用户已授权使用的模型配置放入测试 `RIND_HOME/settings.json`，或使用对应 provider 的环境凭据；不要输出密钥。第二终端复用第一终端记录的 `$RindRepo`、`$AcceptanceRoot` 和工作区路径，设置相同的 `RIND_HOME`、trace、配置和 `rind` 函数，不要重新生成测试根目录。Unix 使用等效的临时目录、环境变量和 Node 入口。
+将用户已授权使用的模型配置放入测试 `RIND_HOME/settings.json`，或使用对应 provider 的环境凭据；不要输出密钥。第二终端复用第一终端记录的 `$RindRepo`、`$AcceptanceRoot` 和工作区路径，设置相同的 `RIND_HOME`、配置和 `rind` 函数，不要重新生成测试根目录。Unix 使用等效的临时目录、环境变量和 Node 入口。
 
 记录下列证据位置：
 
 - `$env:RIND_HOME/sessions/<id>/meta.json`：会话、轮次、goal、usage。
 - 同目录的 `messages.jsonl`、`tool_calls.jsonl`、`compactions.jsonl`：历史、工具和压缩记录。
-- 同目录 `_llm_trace/*.jsonl`：支持 trace 的 provider 的实际请求和响应；不支持时记录替代请求证据，拿不到证据则不宣称完成注入核验。
 - CLI 输出、退出码、文件内容及必要的终端截图。
 
-负向用例前后比较模型请求数量和文件状态；未触发模型的空会话本来就不应有 trace 目录。token 使用逐次请求的最终 usage 求和，不重复累加流式 usage；缺失时写“未知”，不能写 0。`meta.json` 的最新 usage 不是全流程总量。
+负向用例前后比较模型请求数量和文件状态。token 使用逐次请求的最终 usage 求和，不重复累加流式 usage；缺失时写“未知”，不能写 0。`meta.json` 的最新 usage 不是全流程总量。
 
 ## 结果模板
 

@@ -4,14 +4,14 @@ import { runtimeMethods } from "../../runtime/dist/protocol/runtime-protocol.js"
 const ACTIVE = new Set(["starting", "running", "cancelling"]);
 const TERMINAL = new Set(["completed", "failed", "cancelled", "timed_out", "lost"]);
 
-function summary(task, previous = {}, legacy = false) {
+function summary(task, previous = {}) {
   if (TERMINAL.has(previous.status) && !TERMINAL.has(task.status)) return previous;
   const { stdout, stderr, output, meta, ...fields } = task;
   return {
     ...previous,
     ...fields,
     bg_id: task.task_id || task.bg_id,
-    handoff: legacy || Boolean(previous.handoff || task.handoff),
+    handoff: Boolean(previous.handoff || task.handoff || (!task.task_id && task.bg_id)),
   };
 }
 
@@ -42,8 +42,6 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   const tasks = new Map();
   let monitor = null;
   let monitorInputWasActive = false;
-  let refreshTimer = null;
-  let monitorTimer = null;
   let listInFlight = null;
   let listUpdates = null;
   let readInFlight = false;
@@ -54,9 +52,8 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   let listError = "";
   let orderedItems = null;
 
-  const supportsTasks = () => state.sessionInfo?.capabilities?.includes("rind/tasks") === true;
   const items = () => orderedItems ??= [...tasks.values()]
-    .filter((task) => ACTIVE.has(task.status) && (task.handoff || supportsTasks()))
+    .filter((task) => ACTIVE.has(task.status))
     .sort((a, b) => Number(Boolean(a.handoff)) - Number(Boolean(b.handoff))
       || (Number(b.started_at) || 0) - (Number(a.started_at) || 0)
       || String(a.bg_id).localeCompare(String(b.bg_id)));
@@ -89,11 +86,11 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     if (!skipRedraw) redraw();
   }
 
-  function upsert(task, legacy = false, { allowAutoExit = true, skipRedraw = false } = {}) {
+  function upsert(task, { allowAutoExit = true, skipRedraw = false } = {}) {
     const id = String(task?.task_id || task?.bg_id || "").trim();
     if (!id) return;
     const oldItems = monitor ? items() : [];
-    const next = summary(task, tasks.get(id), legacy);
+    const next = summary(task, tasks.get(id));
     if (TERMINAL.has(next.status) || !ACTIVE.has(next.status)) {
       tasks.delete(id);
     } else {
@@ -140,7 +137,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
       !monitor.previewOffset &&
       ACTIVE.has(task.status),
     );
-    upsert(task, false, { skipRedraw: willUpdateSelectedOutput });
+    upsert(task, { skipRedraw: willUpdateSelectedOutput });
     const current = tasks.get(task.task_id);
     if (monitor && monitor.selectedId === task.task_id && current) {
       if (event.type === "task_output") {
@@ -158,7 +155,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   }
 
   async function controlSelected(action) {
-    if (!supportsTasks() || !monitor) return;
+    if (!monitor) return;
     const task = selected();
     if (!task) return;
     if (action === "release" && task.handoff) return;
@@ -198,7 +195,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
       try {
         do {
           const response = await request(
-            supportsTasks() ? runtimeMethods.taskList : runtimeMethods.backgroundList,
+            runtimeMethods.taskList,
             token ? { page_token: token } : {},
           );
           if (generation !== currentGeneration) return;
@@ -210,7 +207,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
             listedIds.add(id);
             const originId = task?.origin_tool_call_id ? `call:${task.origin_tool_call_id}` : "";
             if (!updates.has(id) && !(originId && updates.has(originId))) {
-              const next = summary(task, tasks.get(id), !supportsTasks());
+              const next = summary(task, tasks.get(id));
               if (TERMINAL.has(next.status) || !ACTIVE.has(next.status)) {
                 changed = tasks.delete(id) || changed;
               } else {
@@ -224,7 +221,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
             reconcileMonitor(oldItems, { allowAutoExit: false });
             updateCount();
           }
-          token = supportsTasks() ? response?.next_page_token || null : null;
+          token = response?.next_page_token || null;
           if (token && seen.has(token)) throw new Error("Repeated task page token");
           if (token) seen.add(token);
         } while (token);
@@ -266,13 +263,6 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
       state.sessionInfo = { ...state.sessionInfo, background_count: count };
       redraw();
     }
-    if (count && !supportsTasks() && !refreshTimer && !state.runtimeClosing) {
-      refreshTimer = setInterval(() => { void refresh(); }, 1000);
-      refreshTimer.unref?.();
-    } else if (!count && refreshTimer) {
-      clearInterval(refreshTimer);
-      refreshTimer = null;
-    }
   }
 
   function clear() {
@@ -289,8 +279,6 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
       monitor.selectedId = null;
       monitor.previewOffset = 0;
     }
-    if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = null;
     updateCount();
   }
 
@@ -301,12 +289,12 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     const parsed = parseObject(event?.result);
     const data = parsed.data && typeof parsed.data === "object" ? parsed.data : parsed;
     if (!data?.task_id && !data?.bg_id) return;
-    if (supportsTasks() && data.task_id) {
+    if (data.task_id) {
       recordTask({ ...event, type: "task_updated", task: data });
       return;
     }
-    upsert(data, !supportsTasks());
-    if (monitor?.selectedId === (data.task_id || data.bg_id)) void readPreview();
+    upsert(data);
+    if (monitor?.selectedId === data.bg_id) void readPreview();
   }
 
   function enterMonitor() {
@@ -326,18 +314,12 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
         return;
       }
       monitor.selectedId ??= currentItems[0]?.bg_id || null;
-      if (!supportsTasks() && !monitorTimer) {
-        monitorTimer = setInterval(() => { void readPreview(); }, 500);
-        monitorTimer.unref?.();
-      }
       void readPreview();
       redraw();
     });
   }
 
   function exitMonitor() {
-    if (monitorTimer) clearInterval(monitorTimer);
-    monitorTimer = null;
     selectionVersion += 1;
     preview = null;
     monitor = null;
@@ -353,11 +335,10 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     const version = selectionVersion;
     readInFlight = true;
     try {
-      const response = await request(
-        supportsTasks() ? runtimeMethods.taskRead : runtimeMethods.backgroundOutput,
-        { [supportsTasks() ? "task_id" : "bg_id"]: id, max_output_chars: 20000 },
+      const task = await request(
+        runtimeMethods.taskRead,
+        { task_id: id, max_output_chars: 20000 },
       );
-      const task = supportsTasks() ? response : response?.task;
       if (
         generation === currentGeneration &&
         monitor &&
@@ -366,7 +347,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
         task &&
         typeof task === "object"
       ) {
-        upsert(task, !supportsTasks(), { skipRedraw: ACTIVE.has(task.status) });
+        upsert(task, { skipRedraw: ACTIVE.has(task.status) });
         if (monitor && monitor.selectedId === id && tasks.has(id)) {
           preview = makePreview(id, task.stdout || task.output, task.stderr, {
             limited: Boolean(task.meta?.truncated || task.meta?.output_incomplete || task.truncated),
@@ -442,10 +423,6 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   function stop() {
     generation += 1;
     selectionVersion += 1;
-    if (refreshTimer) clearInterval(refreshTimer);
-    if (monitorTimer) clearInterval(monitorTimer);
-    refreshTimer = null;
-    monitorTimer = null;
     monitor = null;
     preview = null;
     tasks.clear();

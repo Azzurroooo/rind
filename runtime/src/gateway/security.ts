@@ -48,7 +48,6 @@ export class Verdict {
 
 export const ALLOW = new Verdict(true);
 export const DENY = new Verdict(false);
-export const DENY_PAIRING = new Verdict(false, { pairing: true });
 
 export interface PendingPairingEntry {
   channel: string;

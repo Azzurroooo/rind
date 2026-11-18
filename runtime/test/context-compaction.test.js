@@ -116,8 +116,6 @@ class ScriptedCompactChatClient {
     };
     yield { kind: "completed", stop_reason: "stop" };
   }
-
-  async close() {}
 }
 
 function makeRegistry(specs = []) {

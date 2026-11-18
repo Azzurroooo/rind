@@ -34,10 +34,6 @@ export function setProbeHooks(hooks: ProbeHooks | null): void {
   activeHooks = hooks;
 }
 
-export function getProbeHooks(): ProbeHooks | null {
-  return activeHooks;
-}
-
 export async function probeGetJson(
   url: string,
   headers?: Record<string, string>,

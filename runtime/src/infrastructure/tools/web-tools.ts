@@ -91,10 +91,6 @@ export class WebSessions {
     return this.closed;
   }
 
-  get activeCount(): number {
-    return this.active;
-  }
-
   get idleCount(): number {
     return this.idle.length;
   }

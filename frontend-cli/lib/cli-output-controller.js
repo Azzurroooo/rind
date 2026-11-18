@@ -85,7 +85,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   function waitingForBackground() {
     if (state.runtime.status !== "ready" || state.turn.active || state.display.activeCompact
       || state.turn.interruptRequested
-      || ["paused", "blocked", "budget_exhausted"].includes(state.session.info.goal?.status)) return null;
+      || ["paused", "blocked"].includes(state.session.info.goal?.status)) return null;
     return state.display.backgroundWait;
   }
 

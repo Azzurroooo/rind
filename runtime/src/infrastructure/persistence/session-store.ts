@@ -2457,35 +2457,6 @@ export class JsonlSessionStore {
   async getLatestCompaction(): Promise<Record<string, unknown> | null> {
     return this._latestCompactionSync();
   }
-
-  async getStats(): Promise<Record<string, any>> {
-    const meta = await this.getMetadata();
-    const messages = await this.loadMessages();
-    const toolRecords = await this.getToolRecords();
-    const compactions = this._loadCompactionsSync();
-    let messagesBytes = 0;
-    try {
-      if (this._sessionPaths.messages && fs.existsSync(this._sessionPaths.messages)) {
-        messagesBytes = fs.statSync(this._sessionPaths.messages).size;
-      }
-    } catch {
-      messagesBytes = 0;
-    }
-    return {
-      session_id: this._sessionId || "draft",
-      session_dir: this.sessionBasePath || this.sessionRoot,
-      message_count: messages.length,
-      user_messages: messages.filter((m) => m.role === "user").length,
-      assistant_messages: messages.filter((m) => m.role === "assistant").length,
-      tool_messages: messages.filter((m) => m.role === "tool").length,
-      tool_call_records: toolRecords.length,
-      compaction_count: compactions.length,
-      messages_bytes: messagesBytes,
-      latest_context_breakdown: meta.latest_context_breakdown ?? null,
-      latest_sampling_usage: meta.latest_sampling_usage ?? null,
-      latest_assistant_sampling_usage: meta.latest_assistant_sampling_usage ?? null,
-    };
-  }
 }
 
 function isContextRecord(message: Record<string, unknown>): boolean {
